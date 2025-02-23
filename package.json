@@ -1,0 +1,24 @@
+{
+	"name": "inpulse-whatsapp",
+	"version": "0.0.1",
+	"description": "Service that integrate inPulse with Whatsapp.",
+	"main": "dist/main.js",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"author": "Renan G. Dutra",
+	"license": "ISC",
+	"dependencies": {
+		"@prisma/client": "^6.4.1",
+		"dotenv": "^16.4.7",
+		"express": "^4.21.2",
+		"multer": "^1.4.5-lts.1",
+		"whatsapp-web.js": "^1.26.0"
+	},
+	"devDependencies": {
+		"@types/express": "^5.0.0",
+		"@types/multer": "^1.4.12",
+		"prisma": "^6.4.1"
+	}
+}
+
