@@ -1,0 +1,115 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Models
+model WppInstance {
+  // Columns
+  id           Int       @id @default(autoincrement())
+  phone        String
+  instanceName String
+  isActive     Boolean
+  WppChat      WppChat[]
+
+  // Constraints
+  @@unique([phone, instanceName])
+  @@index([isActive])
+  @@map("instances")
+}
+
+model WppContact {
+  // Columns
+  id           Int    @id @default(autoincrement())
+  name         String
+  phone        String
+  customerId   Int
+  instanceName String
+
+  // Constraints
+  @@unique([instanceName, phone])
+  @@index([customerId, instanceName])
+  @@map("contacts")
+}
+
+model WppMessage {
+  // Columns
+  id               String           @id
+  quotedId         String?
+  chatId           Int
+  from             String
+  to               String
+  body             String
+  timestamp        BigInt
+  status           WppMessageStatus
+  fileType         String?
+  fileName         String?
+  fileOriginalName String?
+
+  // Constraints
+  @@index([from, to])
+  @@map("messages")
+}
+
+model WppChat {
+  // Columns
+  id            Int             @id @default(autoincrement())
+  instanceName  String
+  isFinished    Boolean
+  userId        Int
+  botId         Int?
+  resultId      Int?
+  type          WppChatType
+  priority      WppChatPriority
+  avatarUrl     String?
+  WppInstance   WppInstance?    @relation(fields: [wppInstanceId], references: [id])
+  wppInstanceId Int?
+
+  // Constraints
+  @@index([userId])
+  @@map("chats")
+}
+
+model WppSector {
+  // Columns
+  id           Int    @id @default(autoincrement())
+  name         String
+  instanceName String
+
+  // Constraints
+  @@unique([instanceName, name])
+  @@map("sectors")
+}
+
+// Enums
+enum WppMessageStatus {
+  PENDING
+  SENT
+  RECEIVED
+  READ
+  DOWNLOADED
+  ERROR
+
+  @@map("message_status")
+}
+
+enum WppChatType {
+  RECEPTIVE
+  ACTIVE
+
+  @@map("chat_type")
+}
+
+enum WppChatPriority {
+  LOW
+  NORMAL
+  HIGH
+  VERY_HIGH
+  URGENCY
+
+  @@map("chat_priority")
+}
