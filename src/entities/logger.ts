@@ -1,6 +1,6 @@
 class Logger {
 	private static logWithDate(message: string): void {
-		const date = new Date().toLocaleDateString();
+		const date = new Date().toLocaleString();
 
 		console.log(`${date}: ${message}`);
 	}
