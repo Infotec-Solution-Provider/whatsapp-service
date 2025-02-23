@@ -8,8 +8,8 @@ const PUPPETEER_ARGS = {
 		"--disable-accelerated-2d-canvas",
 		"--no-first-run",
 		"--no-zygote",
-		"--disable-gpu",
-	],
+		"--disable-gpu"
+	]
 };
 
 export default PUPPETEER_ARGS;

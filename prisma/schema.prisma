@@ -10,11 +10,13 @@ datasource db {
 // Models
 model WppInstance {
   // Columns
-  id           Int       @id @default(autoincrement())
+  id           Int             @id @default(autoincrement())
   phone        String
   instanceName String
+  type         WppInstanceType
   isActive     Boolean
-  WppChat      WppChat[]
+  WABAPhoneId  String?
+  WABAToken    String?
 
   // Constraints
   @@unique([phone, instanceName])
@@ -57,17 +59,15 @@ model WppMessage {
 
 model WppChat {
   // Columns
-  id            Int             @id @default(autoincrement())
-  instanceName  String
-  isFinished    Boolean
-  userId        Int
-  botId         Int?
-  resultId      Int?
-  type          WppChatType
-  priority      WppChatPriority
-  avatarUrl     String?
-  WppInstance   WppInstance?    @relation(fields: [wppInstanceId], references: [id])
-  wppInstanceId Int?
+  id           Int             @id @default(autoincrement())
+  instanceName String
+  isFinished   Boolean
+  userId       Int
+  botId        Int?
+  resultId     Int?
+  type         WppChatType
+  priority     WppChatPriority
+  avatarUrl    String?
 
   // Constraints
   @@index([userId])
@@ -95,6 +95,11 @@ enum WppMessageStatus {
   ERROR
 
   @@map("message_status")
+}
+
+enum WppInstanceType {
+  WABA
+  WWEBJS
 }
 
 enum WppChatType {

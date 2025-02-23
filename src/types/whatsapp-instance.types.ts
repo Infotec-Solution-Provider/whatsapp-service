@@ -1,9 +1,4 @@
-export interface WppClientConstructorProps {
-	phone: string;
-	instanceName: string;
-}
-
-export interface WppClientSendMessageOptions {
+export interface SendMessageOptions {
 	instanceName: string;
 	from: string;
 	to: string;
@@ -11,4 +6,9 @@ export interface WppClientSendMessageOptions {
 	isAudio: boolean;
 	quotedId?: string;
 	file?: Express.Multer.File | string;
+}
+
+export interface WhatsappInstanceProps {
+	phone: string;
+	instanceName: string;
 }

@@ -1,19 +1,23 @@
 import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
 import PUPPETEER_ARGS from "./puppeteer-args";
-import Logger from "../Logger.entity";
-import { WppClientConstructorProps, WppClientSendMessageOptions } from "./types";
+import Logger from "../logger";
+import type WhatsappInstance from "../whatsapp-instance";
+import type {
+	SendMessageOptions,
+	WhatsappInstanceProps
+} from "../../types/whatsapp-instance.types";
 
-class WppClient {
+class WwebjsInstance implements WhatsappInstance {
 	public readonly phone: string;
 	public readonly instanceName: string;
 	private client: Client;
 
-	constructor({ phone, instanceName }: WppClientConstructorProps) {
+	constructor({ phone, instanceName }: WhatsappInstanceProps) {
 		const clientId = `${instanceName}_${phone}`;
 
 		this.client = new Client({
 			authStrategy: new LocalAuth({ clientId }),
-			puppeteer: { ...PUPPETEER_ARGS },
+			puppeteer: { ...PUPPETEER_ARGS }
 		});
 
 		this.phone = phone;
@@ -67,13 +71,13 @@ class WppClient {
 			.catch(() => null);
 	}
 
-	public async isPhoneValid(phone: string) {
+	public async isValidWhatsapp(phone: string) {
 		return await this.client.isRegisteredUser(phone + "@c.us");
 	}
 
-	public async sendMessage({}: WppClientSendMessageOptions) {
+	public async sendMessage({}: SendMessageOptions) {
 		throw new Error("Method not implemented.");
 	}
 }
 
-export default WppClient;
+export default WwebjsInstance;
