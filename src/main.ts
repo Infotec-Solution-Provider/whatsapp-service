@@ -30,7 +30,4 @@ const serverPort = Number(process.env["SERVER_LISTEN_PORT"]) || 5000;
 
 server.listen(serverPort, () => {
 	Logger.info("Server listening on port " + serverPort);
-	if (process.env["SERVER_HTTPS"] === "true") {
-		Logger.info("Server is running on HTTPS mode!");
-	}
 });
