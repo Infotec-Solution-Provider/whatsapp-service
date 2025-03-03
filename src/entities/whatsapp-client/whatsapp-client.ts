@@ -1,11 +1,11 @@
-import { SendMessageOptions } from "../types/whatsapp-instance.types";
+import { SendMessageOptions } from "../../types/whatsapp-instance.types";
 
 // noinspection JSUnusedGlobalSymbols
 /**
  * Abstract class representing a WhatsApp instance.
  * This class defines the structure for interacting with WhatsApp,
  */
-abstract class WhatsappInstance {
+abstract class WhatsappClient {
 	/**
 	 * The phone number associated with the WhatsApp instance.
 	 * @type {string}
@@ -52,4 +52,4 @@ abstract class WhatsappInstance {
 	public abstract sendMessage(props: SendMessageOptions): Promise<void>;
 }
 
-export default WhatsappInstance;
+export default WhatsappClient;

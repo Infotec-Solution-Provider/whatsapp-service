@@ -1,13 +1,12 @@
 import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
 import PUPPETEER_ARGS from "./puppeteer-args";
-import Logger from "../logger";
-import type WhatsappInstance from "../whatsapp-instance";
-import type {
-	SendMessageOptions,
-	WhatsappInstanceProps
-} from "../../types/whatsapp-instance.types";
+import Logger from "../../logger";
+import type WhatsappClient from "../whatsapp-client";
+import type { SendMessageOptions, WhatsappInstanceProps } from "../../../types/whatsapp-instance.types";
+import SocketIoService from "../../../services/socket-io.service";
+import { SocketEventType } from "../../../types/socket-io.types";
 
-class WwebjsInstance implements WhatsappInstance {
+class WebWhatsappClient implements WhatsappClient {
 	public readonly phone: string;
 	public readonly instanceName: string;
 	private client: Client;
@@ -40,8 +39,8 @@ class WwebjsInstance implements WhatsappInstance {
 		this.client.on("message_revoke_everyone", this.handleMessageRevoked);
 	}
 
-	private handleQrCode(qrCode: string) {
-		console.log("QR Code:", qrCode);
+	private handleQrCode(qr: string) {
+		SocketIoService.emit(this.instanceName, "supervisor", SocketEventType.QR_CODE, { qr });
 	}
 
 	private handleMessage(message: WAWebJS.Message) {
@@ -80,4 +79,4 @@ class WwebjsInstance implements WhatsappInstance {
 	}
 }
 
-export default WwebjsInstance;
+export default WebWhatsappClient;
