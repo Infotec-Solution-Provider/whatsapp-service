@@ -1,5 +1,8 @@
 import WhatsappClient from "../whatsapp-client";
-import type { SendMessageOptions, WhatsappInstanceProps } from "../../../types/whatsapp-instance.types";
+import type {
+	SendMessageOptions,
+	WhatsappInstanceProps
+} from "../../../types/whatsapp-instance.types";
 
 class MetaWhatsappClient implements WhatsappClient {
 	public readonly phone: string;

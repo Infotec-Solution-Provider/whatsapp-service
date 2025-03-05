@@ -24,10 +24,14 @@ class WhatsappService {
 
 			switch (type) {
 				case WppInstanceType.WWEBJS:
-					builtInstances.push(new WebWhatsappClient({ instanceName, phone }));
+					builtInstances.push(
+						new WebWhatsappClient({ instanceName, phone })
+					);
 					break;
 				case WppInstanceType.WABA:
-					builtInstances.push(new MetaWhatsappClient({ instanceName, phone }));
+					builtInstances.push(
+						new MetaWhatsappClient({ instanceName, phone })
+					);
 					break;
 			}
 		}
