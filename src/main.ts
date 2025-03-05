@@ -1,28 +1,14 @@
 import "dotenv/config";
 import express from "express";
 import Logger from "./entities/logger";
-import WhatsappService from "./services/whatsapp.service";
 import server from "./server";
+import toolsController from "./controllers/tools.controller";
 
 const app = express();
 
 app.use(express.json());
 
-app.get("/", (_, res) => {
-	res.status(200).json({ message: "Api is running!" });
-});
-
-app.get("/api/:instanceName/whatsapp/:phone", (req, res) => {
-	const instanceName = req.params["instanceName"];
-	const phone = req.params["phone"];
-	const whatsappInstance = WhatsappService.getInstance(instanceName, phone);
-
-	if (!whatsappInstance) {
-		res.status(404).json({ message: "No whatsapp instance found" });
-	} else {
-		res.status(200).json({ message: "Found whatsapp instance", instance: whatsappInstance.phone });
-	}
-});
+app.use(toolsController.router);
 
 server.on("request", app);
 
