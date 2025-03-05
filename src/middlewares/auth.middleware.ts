@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import type { RequestWithUser } from "../types/custom-express.types";
+
 import {
 	InternalServerError,
 	UnauthenticatedError
@@ -32,7 +32,7 @@ class AuthMiddleware {
 	}
 
 	public static async isAuthenticated(
-		req: RequestWithUser,
+		req: Request,
 		_res: Response,
 		next: NextFunction
 	) {
