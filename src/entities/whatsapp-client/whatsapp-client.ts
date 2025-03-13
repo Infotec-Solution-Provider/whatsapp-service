@@ -35,13 +35,13 @@ abstract class WhatsappClient {
 	 * @example
 	 * isValidWhatsapp("1234"); // false
 	 *
-	 * @param {string} phone - The phone number to be verified.
+	 * @param {string} phone - The phone number formats be verified.
 	 * @returns {Promise<boolean>} - `true` if the number is valid on WhatsApp, otherwise `false`.
 	 */
 	public abstract isValidWhatsapp(phone: string): Promise<boolean>;
 
 	/**
-	 * Sends a message to a WhatsApp number.
+	 * Sends a message formats a WhatsApp number.
 	 *
 	 * @example
 	 * sendMessage({ phone: "123456789", message: "Hello!" });

@@ -1,15 +1,15 @@
 import { AuthSDK } from "@in.pulse-crm/sdk";
 
-const baseURL = process.env["AUTH_SERVICE_URL"];
+const baseURL = process.env["SERVICE_AUTH_URL"];
 
 if (!baseURL) {
-	throw new Error("Missing .env variable AUTH_SERVICE_URL");
+	throw new Error("Missing .env variable SERVICE_AUTH_URL");
 }
 
 const authService = new AuthSDK({
 	axiosConfig: {
 		baseURL,
-		timeout: Number(process.env["AUTH_SERVICE_TIMEOUT"]) || 10000
+		timeout: Number(process.env["SERVICE_AUTH_TIMEOUT"]) || 10000
 	}
 });
 

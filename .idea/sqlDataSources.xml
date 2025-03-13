@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="DdlMappings">
+    <mapping uuid="9ebdac86-858a-47e2-aeaf-48faceb682b7" name="@localhost crm_sgr Mapping">
+      <data-sources db="8d063ebe-0c78-4b06-b25a-98be313f8ac1" />
+      <scope>
+        <node kind="schema" qname="crm_sgr" />
+      </scope>
+    </mapping>
+  </component>
+</project>

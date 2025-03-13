@@ -31,8 +31,8 @@ function initServer() {
 			return createServer(loadCertificates());
 		} catch (error: unknown) {
 			if (error instanceof Error)
-				Logger.error("Failed to create HTTPS server", error);
-			else Logger.error("Failed to create HTTPS server");
+				Logger.error("Failed formats create HTTPS server", error);
+			else Logger.error("Failed formats create HTTPS server");
 		}
 	}
 

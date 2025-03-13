@@ -1,26 +1,31 @@
 import { Server } from "socket.io";
+import httpServer from "../server";
+
 import {
 	ChatFinishedEventProps,
 	QrCodeEventProps,
 	SocketEventType,
 	SocketEventValue
 } from "../types/socket-io.types";
+import Logger from "../entities/logger";
 
 class SocketIoService {
 	private readonly server: Server;
 
 	constructor() {
-		const listenPort = Number(process.env["SOCKET_LISTEN_PORT"]) || 5001;
-
-		this.server = new Server(listenPort, {
+		this.server = new Server(httpServer, {
 			cors: {
-				origin: process.env["SOCKET_ALLOWED_ORIGIN"] || "http://localhost:3000"
+				origin:
+					process.env["SOCKET_ALLOWED_ORIGIN"] ||
+					"http://localhost:3000"
 			}
 		});
 
 		this.server.on("connection", (socket) => {
-			console.log("Received a new connection:", socket.conn.remoteAddress);
+			Logger.debug("New connection:", socket.conn.remoteAddress);
 		});
+
+		this.server.listen(3000)
 	}
 
 	public emit(
@@ -37,7 +42,12 @@ class SocketIoService {
 		value: QrCodeEventProps
 	): boolean;
 
-	public emit(instanceName: string, room: string, event: SocketEventType, value: SocketEventValue) {
+	public emit(
+		instanceName: string,
+		room: string,
+		event: SocketEventType,
+		value: SocketEventValue
+	) {
 		return this.server.to(`${instanceName}:${room}`).emit(event, value);
 	}
 }

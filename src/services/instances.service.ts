@@ -1,15 +1,15 @@
 import { InstanceSDK } from "@in.pulse-crm/sdk";
 
-const baseURL = process.env["INSTANCE_SERVICE_URL"];
+const baseURL = process.env["SERVICE_INSTANCES_URL"];
 
 if (!baseURL) {
-	throw new Error("Missing .env variable INSTANCE_SERVICE_URL");
+	throw new Error("Missing .env variable SERVICE_INSTANCES_URL");
 }
 
 const instanceService = new InstanceSDK({
 	axiosConfig: {
 		baseURL,
-		timeout: Number(process.env["INSTANCE_SERVICE_TIMEOUT"]) || 10000
+		timeout: Number(process.env["SERVICE_INSTANCES_TIMEOUT"]) || 10000
 	}
 });
 

@@ -26,33 +26,38 @@ class WebWhatsappClient implements WhatsappClient {
 		this.instanceName = instanceName;
 
 		// Log events
-		this.client.on("change_state", (s) =>
-			Logger.info(`[${clientId}] State changed: ${s}`)
-		);
-		this.client.on("disconnected", (r) =>
-			Logger.info(`[${clientId}] Disconnected: ${r}`)
-		);
-		this.client.on("auth_failure", (m) =>
-			Logger.info(`[${clientId}] Auth failure: ${m}`)
-		);
-		this.client.on("ready", () => Logger.info(`[${clientId}] Ready!`));
-		this.client.on("authenticated", () =>
-			Logger.info(`[${clientId}] Authenticated!`)
-		);
-		this.client.on("loading_screen", (p, m) =>
-			Logger.info(`[${clientId}] Loading: ${p}% | ${m}`)
-		);
+		this.client.on("change_state", (s) => {
+			Logger.info(`[${clientId}] State changed: ${s}`);
+		});
+		this.client.on("disconnected", (r) => {
+			Logger.info(`[${clientId}] Disconnected: ${r}`);
+		});
+		this.client.on("auth_failure", (m) => {
+			Logger.info(`[${clientId}] Auth failure: ${m}`);
+		});
+		this.client.on("ready", () => {
+			Logger.info(`[${clientId}] Ready!`);
+		});
+		this.client.on("authenticated", () => {
+			Logger.info(`[${clientId}] Authenticated!`);
+		});
+		this.client.on("loading_screen", (p, m) => {
+			Logger.info(`[${clientId}] Loading: ${p}% | ${m}`);
+		});
 
 		// Handled events
-		this.client.on("qr", this.handleQrCode);
+		this.client.on("qr", this.handleQr);
 		this.client.on("message_create", this.handleMessage);
 		this.client.on("message_edit", this.handleMessageEdit);
-		this.client.on("message_ack", this.handleMessageStatus);
+		this.client.on("message_ack", this.handleMessageAck);
 		this.client.on("message_reaction", this.handleMessageReaction);
-		this.client.on("message_revoke_everyone", this.handleMessageRevoked);
+		this.client.on(
+			"message_revoke_everyone",
+			this.handleMessageRevokedEveryone
+		);
 	}
 
-	private handleQrCode(qr: string) {
+	private handleQr(qr: string) {
 		SocketIoService.emit(
 			this.instanceName,
 			"supervisor",
@@ -62,33 +67,23 @@ class WebWhatsappClient implements WhatsappClient {
 	}
 
 	private handleMessage(message: WAWebJS.Message) {
-		console.log("Message:", message.id._serialized);
+		Logger.debug("Message:", message.id._serialized);
 	}
 
 	private handleMessageEdit(message: WAWebJS.Message) {
-		console.log("Message edit:", message.id._serialized);
+		Logger.debug("Message edit:", message.id._serialized);
 	}
 
-	private handleMessageStatus(
-		message: WAWebJS.Message,
-		ack: WAWebJS.MessageAck
-	) {
-		console.log("Message ack:", message.id._serialized, ack);
+	private handleMessageAck({ id }: WAWebJS.Message, ack: WAWebJS.MessageAck) {
+		Logger.debug("Message ack:", { id, ack });
 	}
 
-	private handleMessageReaction(
-		oldMessage: WAWebJS.Message,
-		newMessage: WAWebJS.Message
-	) {
-		console.log(
-			"Message revoked:",
-			oldMessage.id._serialized,
-			newMessage.id._serialized
-		);
+	private handleMessageReaction(reaction: WAWebJS.Reaction) {
+		Logger.debug("Message reaction:", reaction);
 	}
 
-	private handleMessageRevoked(message: WAWebJS.Message) {
-		console.log("Message revoked:", message.id._serialized);
+	private handleMessageRevokedEveryone({ id }: WAWebJS.Message) {
+		Logger.debug("Message revoked:", id);
 	}
 
 	public async getProfilePictureUrl(phone: string) {
