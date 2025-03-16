@@ -1,15 +1,26 @@
 import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
-import PUPPETEER_ARGS from "./puppeteer-args";
-import Logger from "../../logger";
-import type WhatsappClient from "../whatsapp-client";
 import type {
 	SendMessageOptions,
 	WhatsappInstanceProps
-} from "../../../types/whatsapp-instance.types";
-import SocketIoService from "../../../services/socket-io.service";
-import { SocketEventType } from "../../../types/socket-io.types";
+} from "../types/whatsapp-instance.types";
+import { Logger } from "@in.pulse-crm/utils";
+import WhatsappClient from "../contracts/whatsapp-client";
 
-class WebWhatsappClient implements WhatsappClient {
+const PUPPETEER_ARGS = {
+	headless: true,
+	executablePath: process.env["WPP_BROWSER_PATH"]!,
+	args: [
+		"--no-sandbox",
+		"--disable-setuid-sandbox",
+		"--disable-dev-shm-usage",
+		"--disable-accelerated-2d-canvas",
+		"--no-first-run",
+		"--no-zygote",
+		"--disable-gpu"
+	]
+};
+
+class WWEBJSWhatsappClient implements WhatsappClient {
 	public readonly phone: string;
 	public readonly instanceName: string;
 	private client: Client;
@@ -58,12 +69,7 @@ class WebWhatsappClient implements WhatsappClient {
 	}
 
 	private handleQr(qr: string) {
-		SocketIoService.emit(
-			this.instanceName,
-			"supervisor",
-			SocketEventType.QR_CODE,
-			{ qr }
-		);
+		Logger.debug(`QR generated for ${this.instanceName}:${this.phone}`, qr);
 	}
 
 	private handleMessage(message: WAWebJS.Message) {
@@ -102,4 +108,4 @@ class WebWhatsappClient implements WhatsappClient {
 	}
 }
 
-export default WebWhatsappClient;
+export default WWEBJSWhatsappClient;

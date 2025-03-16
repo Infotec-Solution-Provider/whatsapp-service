@@ -1,4 +1,4 @@
-import { SendMessageOptions } from "../../types/whatsapp-instance.types";
+import { SendMessageOptions } from "../types/whatsapp-instance.types";
 
 // noinspection JSUnusedGlobalSymbols
 /**
