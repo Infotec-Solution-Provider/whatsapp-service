@@ -1,6 +1,5 @@
 import { SendMessageOptions } from "../types/whatsapp-instance.types";
 
-// noinspection JSUnusedGlobalSymbols
 /**
  * Abstract class representing a WhatsApp instance.
  * This class defines the structure for interacting with WhatsApp,
