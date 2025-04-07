@@ -1,9 +1,8 @@
+import WABAWhatsappClient from "../classes/whatsapp-client/waba-whatsapp-client";
+import WhatsappClient from "../classes/whatsapp-client/whatsapp-client";
+import WWEBJSWhatsappClient from "../classes/whatsapp-client/wwebjs-whatsapp-client";
 import prismaService from "./prisma.service";
 import { WppInstanceType } from "@prisma/client";
-import WWEBJSWhatsappClient from "../entities/wwebjs-whatsapp-client";
-import WhatsappClient from "../contracts/whatsapp-client";
-import WABAWhatsappClient from "../entities/waba-whatsapp-client";
-
 
 class WhatsappService {
 	private readonly instances = new Map<string, WhatsappClient>();

@@ -3,104 +3,93 @@ generator client {
 }
 
 datasource db {
-    provider = "postgresql"
+    provider = "mysql"
     url      = env("DATABASE_URL")
 }
 
-// Models
 model WppInstance {
-    // Columns
-    id           Int             @id @default(autoincrement())
+    name         String
     phone        String
-    instanceName String
+    instanceName String          @map("instance_name")
     type         WppInstanceType
-    isActive     Boolean
-    WABAPhoneId  String?
-    WABAToken    String?
+    isActive     Boolean         @map("is_active")
+    WABAPhoneId  String?         @map("WABA_phone_id")
+    WABAToken    String?         @map("WABA_token")
 
-    // Constraints
-    @@unique([phone, instanceName])
+    @@unique([instanceName, name])
     @@index([isActive])
     @@map("instances")
 }
 
 model WppContact {
-    // Columns
-    id           Int    @id @default(autoincrement())
     name         String
     phone        String
-    customerId   Int
-    instanceName String
+    customerId   Int     @map("customer_id")
+    instanceName String  @map("instance_name")
+    isBlocked    Boolean @map("is_blocked")
+    onlyAdmin    Boolean @map("only_admin")
 
-    // Constraints
     @@unique([instanceName, phone])
     @@index([customerId, instanceName])
     @@map("contacts")
 }
 
 model WppMessage {
-    // Columns
-    id               String           @id
-    quotedId         String?
-    chatId           Int
-    from             String
-    to               String
-    body             String
-    timestamp        BigInt
-    status           WppMessageStatus
-    fileType         String?
-    fileName         String?
-    fileOriginalName String?
+    id        String           @id
+    from      String
+    to        String
+    type      String
+    quotedId  String?          @map("quoted_id")
+    chatId    Int?             @map("chat_id")
+    body      String
+    timestamp BigInt
+    status    WppMessageStatus
+    fileId    Int?             @map("file_id")
+    fileName  String?          @map("file_name")
+    fileType  String?          @map("file_type")
+    fileSize  String?          @map("file_size")
 
-    // Constraints
-    @@index([from, to])
+    @@index([from, to, chatId])
     @@map("messages")
 }
 
 model WppChat {
-    // Columns
     id           Int             @id @default(autoincrement())
-    instanceName String
-    isFinished   Boolean
-    userId       Int
-    botId        Int?
-    resultId     Int?
+    instanceName String          @map("instance_name")
+    isFinished   Boolean         @map("is_finished")
+    userId       Int             @map("user_id")
+    botId        Int?            @map("bot_id")
+    resultId     Int?            @map("result_id")
     type         WppChatType
     priority     WppChatPriority
-    avatarUrl    String?
+    avatarUrl    String?         @map("avatar_url")
 
-    // Constraints
     @@index([userId])
     @@map("chats")
 }
 
 model WppSector {
-    // Columns
     id            Int             @id @default(autoincrement())
     name          String
-    instanceName  String
+    instanceName  String          @map("instance_name")
+
     WppSectorUser WppSectorUser[]
 
-    // Constraints
     @@unique([instanceName, name])
     @@map("sectors")
 }
 
 model WppSectorUser {
-    // Columns
-    instanceName String
-    userId       Int
-    sectorId     Int
+    instanceName String 		@map("instance_name")
+    userId       Int            @map("user_id")
+    sectorId     Int            @map("sector_id")
 
-    // Relations
     sector WppSector @relation(fields: [sectorId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
-    // Constraints
     @@unique([instanceName, userId])
     @@map("sectors_users")
 }
 
-// Enums
 enum WppMessageStatus {
     PENDING
     SENT

@@ -1,10 +1,7 @@
 import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
-import type {
-	SendMessageOptions,
-	WhatsappInstanceProps
-} from "../types/whatsapp-instance.types";
+import WhatsappClient from "./whatsapp-client";
+import { SendMessageOptions, WhatsappInstanceProps } from "../../types/whatsapp-instance.types";
 import { Logger } from "@in.pulse-crm/utils";
-import WhatsappClient from "../contracts/whatsapp-client";
 
 const PUPPETEER_ARGS = {
 	headless: true,

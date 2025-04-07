@@ -1,6 +1,5 @@
-import WhatsappClient from "../contracts/whatsapp-client";
-import { SendMessageOptions, WhatsappInstanceProps } from "../types/whatsapp-instance.types";
-
+import { SendMessageOptions, WhatsappInstanceProps } from "../../types/whatsapp-instance.types";
+import WhatsappClient from "./whatsapp-client";
 
 class WABAWhatsappClient implements WhatsappClient {
 	public readonly phone: string;
