@@ -1,8 +1,8 @@
+import { WppInstanceType } from "@prisma/client";
 import WABAWhatsappClient from "../classes/whatsapp-client/waba-whatsapp-client";
 import WhatsappClient from "../classes/whatsapp-client/whatsapp-client";
 import WWEBJSWhatsappClient from "../classes/whatsapp-client/wwebjs-whatsapp-client";
 import prismaService from "./prisma.service";
-import { WppInstanceType } from "@prisma/client";
 
 class WhatsappService {
 	private readonly instances = new Map<string, WhatsappClient>();
@@ -10,12 +10,12 @@ class WhatsappService {
 	constructor() {
 		this.buildInstances().then((arr) => {
 			arr.forEach((i) => {
-				this.instances.set(this.toHashed(i.instanceName, i.phone), i);
+				this.instances.set(this.toHashed(i.instance, i.phone), i);
 			});
 		});
 	}
 
-	private async buildInstances() {
+	public async buildInstances() {
 		const instances = await prismaService.wppInstance.findMany();
 		const builtInstances: WhatsappClient[] = [];
 
@@ -25,12 +25,12 @@ class WhatsappService {
 			switch (type) {
 				case WppInstanceType.WWEBJS:
 					builtInstances.push(
-						new WWEBJSWhatsappClient({ instanceName, phone })
+						new WWEBJSWhatsappClient(instanceName, phone)
 					);
 					break;
 				case WppInstanceType.WABA:
 					builtInstances.push(
-						new WABAWhatsappClient({ instanceName, phone })
+						new WABAWhatsappClient(instanceName, phone)
 					);
 					break;
 			}

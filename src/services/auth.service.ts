@@ -1,16 +1,6 @@
-import { AuthSDK } from "@in.pulse-crm/sdk";
+import "dotenv/config";
+import { AuthClient } from "@in.pulse-crm/sdk";
 
-const baseURL = process.env["SERVICE_AUTH_URL"];
+const INSTANCES_SERVICE_URL = process.env["AUTH_API_URL"] || "http://localhost:8001";
 
-if (!baseURL) {
-	throw new Error("Missing .env variable SERVICE_AUTH_URL");
-}
-
-const authService = new AuthSDK({
-	axiosConfig: {
-		baseURL,
-		timeout: Number(process.env["SERVICE_AUTH_TIMEOUT"]) || 10000
-	}
-});
-
-export default authService;
+export default new AuthClient(INSTANCES_SERVICE_URL);

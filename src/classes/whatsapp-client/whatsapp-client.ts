@@ -5,6 +5,7 @@ import { SendMessageOptions } from "../../types/whatsapp-instance.types";
  * This class defines the structure for interacting with WhatsApp,
  */
 abstract class WhatsappClient {
+
 	/**
 	 * The phone number associated with the WhatsApp instance.
 	 * @type {string}
@@ -15,7 +16,7 @@ abstract class WhatsappClient {
 	 * The name of the WhatsApp instance.
 	 * @type {string}
 	 */
-	public abstract readonly instanceName: string;
+	public abstract readonly instance: string;
 
 	/**
 	 * Fetches the WhatsApp profile picture URL by phone number.

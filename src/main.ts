@@ -4,15 +4,10 @@ import express from "express";
 import cors from "cors";
 import { handleRequestError } from "@rgranatodutra/http-errors";
 import { Logger } from "@in.pulse-crm/utils";
+import whatsappService from "./services/whatsapp.service";
 
+whatsappService.buildInstances();
 const app = express();
-//const ROUTE_PREFIX = "/api/:instance";
-
-declare module "express-serve-static-core" {
-	interface Request {
-		instance?: string;
-	}
-}
 
 app.use(express.json());
 app.use(cors());

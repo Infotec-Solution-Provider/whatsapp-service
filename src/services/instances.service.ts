@@ -1,16 +1,6 @@
-import { InstanceSDK } from "@in.pulse-crm/sdk";
+import "dotenv/config";
+import { InstancesClient } from "@in.pulse-crm/sdk";
 
-const baseURL = process.env["SERVICE_INSTANCES_URL"];
+const INSTANCES_SERVICE_URL = process.env["INSTANCES_API_URL"] || "http://localhost:8000";
 
-if (!baseURL) {
-	throw new Error("Missing .env variable SERVICE_INSTANCES_URL");
-}
-
-const instanceService = new InstanceSDK({
-	axiosConfig: {
-		baseURL,
-		timeout: Number(process.env["SERVICE_INSTANCES_TIMEOUT"]) || 10000
-	}
-});
-
-export default instanceService;
+export default new InstancesClient(INSTANCES_SERVICE_URL);
