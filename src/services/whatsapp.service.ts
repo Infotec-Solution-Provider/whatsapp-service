@@ -25,7 +25,7 @@ class WhatsappService {
 			switch (type) {
 				case WppInstanceType.WWEBJS:
 					builtInstances.push(
-						new WWEBJSWhatsappClient(instanceName, phone)
+						new WWEBJSWhatsappClient(instance.id, instanceName, phone)
 					);
 					break;
 				case WppInstanceType.WABA:
