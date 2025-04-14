@@ -1,0 +1,40 @@
+import prismaService from "../../../services/prisma.service";
+import Step, { FinalStep, StepContext } from "./step";
+
+interface SendToAdminStepOptions {
+	instance: string;
+	stepId: number;
+	sectorId: number;
+}
+
+export default class SendToAdminStep implements Step {
+	private readonly instance: string;
+	private readonly sectorId: number;
+	public readonly id: number;
+
+	constructor({ instance, stepId, sectorId }: SendToAdminStepOptions) {
+		this.id = stepId;
+		this.instance = instance;
+		this.sectorId = sectorId;
+	}
+
+	public async run(ctx: StepContext): Promise<FinalStep> {
+		ctx.logger.log("Enviando mensagem para o administrador...");
+		const chat = await prismaService.wppChat.create({
+			data: {
+				instanceName: this.instance,
+				type: "RECEPTIVE",
+				userId: -1,
+				sectorId: this.sectorId,
+				phone: ctx.contact.phone
+			}
+		});
+
+		ctx.logger.log("Chat criado.", chat);
+
+		return {
+			isFinal: true,
+			chat
+		};
+	}
+}
