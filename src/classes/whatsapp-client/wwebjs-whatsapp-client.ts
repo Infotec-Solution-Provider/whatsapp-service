@@ -24,7 +24,7 @@ const PUPPETEER_ARGS = {
 };
 
 const IGNORED_MESSAGE_TYPES =
-	process.env["WHATSAPP_IGNORED_MESSAGE_TYPES"]?.split(",") || [];
+	process.env["WWEBJS_IGNORED_MESSAGE_TYPES"]?.split(",") || [];
 
 class WWEBJSWhatsappClient implements WhatsappClient {
 	private client: Client;
