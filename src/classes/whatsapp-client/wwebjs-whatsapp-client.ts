@@ -20,7 +20,7 @@ const PUPPETEER_ARGS = {
 		"--no-first-run",
 		"--no-zygote",
 		"--disable-gpu"
-	]
+	],
 };
 
 const IGNORED_MESSAGE_TYPES =
@@ -28,95 +28,95 @@ const IGNORED_MESSAGE_TYPES =
 
 class WWEBJSWhatsappClient implements WhatsappClient {
 	private client: Client;
-	private clientId: string;
+	private lastQrTimestamp: number = Date.now();
 
 	constructor(
-		private readonly wppInstanceId: number,
+		public readonly id: number,
 		public readonly instance: string,
-		public readonly phone: string
+		public readonly name: string
 	) {
-		const clientId = `${instance}_${phone}`;
-		this.clientId = clientId;
-
+		console.log(process.env["WWEBJS_BROWSER_PATH"]);
 		this.client = new Client({
-			authStrategy: new LocalAuth({ clientId }),
+			authStrategy: new LocalAuth({ clientId: id.toString() }),
 			puppeteer: {
 				...PUPPETEER_ARGS,
-				browserURL: process.env["WPP_BROWSER_PATH"]!
+				browserURL: process.env["WWEBJS_BROWSER_PATH"]!,
 			}
 		});
 
 		// Log events
-		this.buildEvents(clientId);
+		this.buildEvents(instance, id);
 
-		this.client
-			.initialize()
-			.then(() => {
-				Logger.info(`[${clientId}] Client initialized!`);
-			})
-			.catch((err) => {
-				Logger.error(
-					`Error initializing client: ${sanitizeErrorMessage(err)}`
-				);
-				console.log("Error class name", err.constructor.name);
-			});
+		this.client.initialize().catch((err) => {
+			Logger.error(
+				`Error initializing client: ${sanitizeErrorMessage(err)}`
+			);
+			console.log("Error class name", err.constructor.name);
+		});
 	}
 
-	private buildEvents(clientId: string) {
+	private buildEvents(instance: string, id: number) {
+		const instanceAndId = `${instance}:${id}`;
+
 		this.client.on("change_state", (s) => {
-			Logger.info(`[${clientId}] State changed: ${s}`);
+			Logger.info(`[${instanceAndId}] State changed: ${s}`);
 		});
 		this.client.on("disconnected", (r) => {
-			Logger.info(`[${clientId}] Disconnected: ${r}`);
+			Logger.info(`[${instanceAndId}] Disconnected: ${r}`);
 		});
 		this.client.on("auth_failure", (m) => {
-			Logger.info(`[${clientId}] Auth failure: ${m}`);
+			Logger.info(`[${instanceAndId}] Auth failure: ${m}`);
+		});
+		this.client.on("authenticated", (m) => {
+			Logger.info(
+				`[${instanceAndId}] Auth success: ${this.client.info.pushname} - ${this.client.info.wid.user}`
+			);
+			this.handleAuth();
 		});
 		this.client.on("ready", () => {
-			Logger.info(`[${clientId}] Ready!`);
+			Logger.info(`[${instanceAndId}] Ready!`);
 		});
-
 		this.client.on("loading_screen", (p, m) => {
-			Logger.info(`[${clientId}] Loading: ${p}% | ${m}`);
+			Logger.info(`[${instanceAndId}] Loading: ${p}% | ${m}`);
 		});
 
 		// Handled events
-		this.client.on("qr", (qr) => this.handleQr(qr));
-		this.client.on("authenticated", () => this.handleAuth());
-
-		this.client.on("message_create", (message) =>
-			this.handleMessage(message)
+		this.client.on("qr", this.handleQr.bind(this));
+		this.client.on("authenticated", this.handleAuth.bind(this));
+		this.client.on("message_create", (message) => {
+			this.handleMessage(message);
+		});
+		this.client.on("message_edit", this.handleMessageEdit.bind(this));
+		this.client.on("message_ack", this.handleMessageAck.bind(this));
+		this.client.on(
+			"message_reaction",
+			this.handleMessageReaction.bind(this)
 		);
-		this.client.on("message_edit", (message) =>
-			this.handleMessageEdit(message)
-		);
-		this.client.on("message_ack", (message, ack) =>
-			this.handleMessageAck(message, ack)
-		);
-		this.client.on("message_reaction", (reaction) =>
-			this.handleMessageReaction(reaction)
-		);
-		this.client.on("message_revoke_everyone", (message) =>
-			this.handleMessageRevokedEveryone(message)
+		this.client.on(
+			"message_revoke_everyone",
+			this.handleMessageRevoked.bind(this)
 		);
 	}
 
 	private handleQr(qr: string) {
-		Logger.debug(`QR generated for ${this.clientId}`);
+		const now = Date.now();
+		console.log(`Qr generated with delay: ${now - this.lastQrTimestamp}`);
+		this.lastQrTimestamp = now;
+		Logger.debug(`QR generated for ${this.instance} - ${this.name}`);
 		const room: SocketServerAdminRoom = `${this.instance}:${1}:admin`;
 
 		socketService.emit(SocketEventType.WwebjsQr, room, {
 			qr,
-			phone: this.phone
+			phone: this.name
 		});
 	}
 
 	private handleAuth() {
-		Logger.debug(`Authenticated for ${this.clientId}`);
+		Logger.debug(`Authenticated for ${this.instance} - ${this.name}`);
 		const room: SocketServerAdminRoom = `${this.instance}:${1}:admin`;
 
 		socketService.emit(SocketEventType.WwebjsAuth, room, {
-			phone: this.phone,
+			phone: this.name,
 			success: true
 		});
 	}
@@ -130,6 +130,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		);
 
 		try {
+			console.log("foi", msg.id._serialized);
 			if (msg.fromMe) {
 				return process.log("Message ignored: it is from me.");
 			}
@@ -158,9 +159,8 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 			messagesDistributionService.processMessage(
 				this.instance,
-				this.wppInstanceId,
-				savedMsg,
-				msg.author
+				this.id,
+				savedMsg
 			);
 			process.log(`Message sent to distribution service!`);
 			process.success(savedMsg);
@@ -182,7 +182,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 	private handleMessageReaction(_reaction: WAWebJS.Reaction) {}
 
-	private handleMessageRevokedEveryone({ id }: WAWebJS.Message) {
+	private handleMessageRevoked({ id }: WAWebJS.Message) {
 		Logger.info("Message revoked! " + id._serialized);
 	}
 

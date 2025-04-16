@@ -10,7 +10,7 @@ abstract class WhatsappClient {
 	 * The phone number associated with the WhatsApp instance.
 	 * @type {string}
 	 */
-	public abstract readonly phone: string;
+	public abstract readonly name: string;
 
 	/**
 	 * The name of the WhatsApp instance.
