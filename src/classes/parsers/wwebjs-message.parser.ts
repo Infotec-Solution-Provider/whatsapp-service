@@ -2,29 +2,21 @@ import WAWebJS from "whatsapp-web.js";
 import OpusAudioConverter from "../opus-audio-converter";
 import filesService from "../../services/files.service";
 import { FileDirType } from "@in.pulse-crm/sdk";
-import { WppMessage } from "@prisma/client";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import CreateMessageDto from "../../dtos/create-message.dto";
+import prismaService from "../../services/prisma.service";
 
 class WWEBJSMessageParser {
-	public static async parse(
-		instance: string,
-		message: WAWebJS.Message
-	): Promise<WppMessage> {
-		const parsedMessage: WppMessage = {
-			instanceName: instance,
-			id: message.id._serialized,
+	public static async parse(instance: string, message: WAWebJS.Message) {
+		const parsedMessage: CreateMessageDto = {
+			instance,
+			wwebjsId: message.id._serialized,
 			from: message.from.split("@")[0]!,
 			to: message.to,
 			body: message.body,
 			type: message.type,
 			timestamp: String(message.timestamp * 1000),
-			status: "PENDING",
-			chatId: null,
-			fileId: null,
-			fileName: null,
-			fileType: null,
-			fileSize: null,
-			quotedId: null
+			status: "PENDING"
 		};
 
 		if (message.hasMedia) {
@@ -40,20 +32,25 @@ class WWEBJSMessageParser {
 		}
 
 		if (message.hasQuotedMsg) {
-			const quotedId =
-				await WWEBJSMessageParser.processQuotedMessage(message);
+			const quotedId = await WWEBJSMessageParser.getQuotedId(message);
 			parsedMessage.quotedId = quotedId;
 		}
 
 		return parsedMessage;
 	}
 
-	private static async processQuotedMessage(message: WAWebJS.Message) {
-		const quotedMsg = await message.getQuotedMessage();
-		if (!quotedMsg) {
+	private static async getQuotedId(message: WAWebJS.Message) {
+		const wwebjsQuotedMsg = await message.getQuotedMessage();
+
+		if (!wwebjsQuotedMsg) {
 			return null;
 		}
-		return quotedMsg.id._serialized;
+
+		const quotedMsg = await prismaService.wppMessage.findUnique({
+			where: { wwebjsId: wwebjsQuotedMsg.id._serialized }
+		});
+
+		return quotedMsg?.id || null;
 	}
 
 	private static async processMediaFile(
