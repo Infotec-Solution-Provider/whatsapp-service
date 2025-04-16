@@ -41,21 +41,20 @@ class MessagesDistributionService {
 
 	public async processMessage(
 		instance: string,
-		wppInstanceId: number,
-		msg: WppMessage,
-		author?: string | null
+		clientId: number,
+		msg: WppMessage
 	) {
 		const logger = new ProcessingLogger(
 			instance,
 			"message-distribution",
-			msg.id,
+			`WppMessage-${msg.id}`,
 			msg
 		);
 
 		try {
 			const sectors = await prismaService.wppSector.findMany({
 				where: {
-					wppInstanceId: wppInstanceId
+					wppInstanceId: clientId
 				}
 			});
 			let sector: WppSector | null = null;
@@ -71,12 +70,11 @@ class MessagesDistributionService {
 			}
 
 			sector = sectors[0]!;
-			author = author || Formatter.phone(msg.from);
 
 			logger.log("Buscando contato para a mensagem.");
 			const contact = await contactsService.getOrCreateContact(
 				instance,
-				author,
+				Formatter.phone(msg.from),
 				msg.from
 			);
 			logger.log("Contato encontrado!", contact);
@@ -96,17 +94,17 @@ class MessagesDistributionService {
 				return;
 			}
 
+			logger.log("Nenhum chat encontrado para o contato.");
 			logger.log("Obtendo fluxo de mensagens para a instância e setor.");
 			const flow = await this.getFlow(instance, sector.id);
 			logger.log("Fluxo recuperado.", flow);
-
-			logger.log("Contato recuperado ou criado.", contact);
 
 			const newChat = await flow.getChat(logger, msg, contact);
 			logger.log("Chat criado com sucesso!", newChat);
 
 			await this.insertAndNotify(logger, newChat, msg, true);
 		} catch (err) {
+			console.error(err);
 			logger.log(`Erro ao processar mensagem!`);
 			logger.failed(err);
 		}
@@ -114,18 +112,19 @@ class MessagesDistributionService {
 
 	private async notifyChatStarted(logger: ProcessingLogger, chat: WppChat) {
 		try {
-			const instance = chat.instanceName;
 			const data = { chatId: chat.id };
-			const monitorRoom: SocketServerMonitorRoom = `${instance}:${chat.sectorId}:monitor`;
+			const monitorRoom: SocketServerMonitorRoom = `${chat.instance}:${chat.sectorId!}:monitor`;
+
 			await socketService.emit(
 				SocketEventType.WppChatStarted,
 				monitorRoom,
 				data
 			);
+
 			logger.log(`Chat enviado para o socket: /${monitorRoom}/ room!`);
 
 			if (chat.walletId) {
-				const walletRoom: SocketServerWalletRoom = `${instance}:wallet:${chat.walletId}`;
+				const walletRoom: SocketServerWalletRoom = `${chat.instance}:wallet:${chat.walletId}`;
 				await socketService.emit(
 					SocketEventType.WppChatStarted,
 					walletRoom,
@@ -135,7 +134,7 @@ class MessagesDistributionService {
 			}
 
 			if (chat.userId === -1) {
-				const adminRoom: SocketServerAdminRoom = `${instance}:${chat.sectorId}:admin`;
+				const adminRoom: SocketServerAdminRoom = `${chat.instance}:${chat.sectorId!}:admin`;
 				await socketService.emit(
 					SocketEventType.WppChatStarted,
 					adminRoom,
@@ -145,7 +144,7 @@ class MessagesDistributionService {
 			}
 
 			if (chat.userId) {
-				const userRoom: SocketServerRoom = `${instance}:user:${chat.userId}`;
+				const userRoom: SocketServerRoom = `${chat.instance}:user:${chat.userId}`;
 				await socketService.emit(
 					SocketEventType.WppChatStarted,
 					userRoom,
@@ -162,7 +161,7 @@ class MessagesDistributionService {
 
 	private async notifyMessage(logger: ProcessingLogger, message: WppMessage) {
 		try {
-			const instance = message.instanceName;
+			const instance = message.instance;
 			const room: SocketServerChatRoom = `${instance}:chat:${message.from}`;
 			const data = { messageId: message.id };
 
@@ -186,7 +185,8 @@ class MessagesDistributionService {
 					id: message.id
 				},
 				data: {
-					chatId: chat.id
+					chatId: chat.id,
+					status: "RECEIVED"
 				}
 			});
 

@@ -1,50 +1,41 @@
-import { WppInstanceType } from "@prisma/client";
+import { WppClientType } from "@prisma/client";
 import WABAWhatsappClient from "../classes/whatsapp-client/waba-whatsapp-client";
 import WhatsappClient from "../classes/whatsapp-client/whatsapp-client";
 import WWEBJSWhatsappClient from "../classes/whatsapp-client/wwebjs-whatsapp-client";
 import prismaService from "./prisma.service";
 
 class WhatsappService {
-	private readonly instances = new Map<string, WhatsappClient>();
+	private readonly clients = new Map<number, WhatsappClient>();
 
-	constructor() {
-		this.buildInstances().then((arr) => {
-			arr.forEach((i) => {
-				this.instances.set(this.toHashed(i.instance, i.phone), i);
-			});
-		});
-	}
+	public async buildClients() {
+		const clients = await prismaService.wppClient.findMany();
 
-	public async buildInstances() {
-		const instances = await prismaService.wppInstance.findMany();
-		const builtInstances: WhatsappClient[] = [];
-
-		for (const instance of instances) {
-			const { type, instanceName, phone } = instance;
-
-			switch (type) {
-				case WppInstanceType.WWEBJS:
-					builtInstances.push(
-						new WWEBJSWhatsappClient(instance.id, instanceName, phone)
+		for (const client of clients) {
+			switch (client.type) {
+				case WppClientType.WWEBJS:
+					console.log("WWEBJS creating");
+					const WWEBJSClient = new WWEBJSWhatsappClient(
+						client.id,
+						client.instance,
+						client.name
 					);
+					this.clients.set(client.id, WWEBJSClient);
 					break;
-				case WppInstanceType.WABA:
-					builtInstances.push(
-						new WABAWhatsappClient(instanceName, phone)
+				case WppClientType.WABA:
+					const WABAClient = new WABAWhatsappClient(
+						client.instance,
+						client.name
 					);
+					this.clients.set(client.id, WABAClient);
+					break;
+				default:
 					break;
 			}
 		}
-
-		return builtInstances;
 	}
 
-	private toHashed(instanceName: string, phone: string) {
-		return `${instanceName}_${phone}`;
-	}
-
-	public getInstance(instanceName: string, phone: string) {
-		return this.instances.get(this.toHashed(instanceName, phone));
+	public getClient(id: number) {
+		return this.clients.get(id);
 	}
 }
 

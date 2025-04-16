@@ -8,7 +8,7 @@ class ContactsService {
 	) {
 		const contact = await prismaService.wppContact.findFirst({
 			where: {
-				instanceName: instance,
+				instance,
 				name,
 				phone
 			}
@@ -20,7 +20,7 @@ class ContactsService {
 
 		return await prismaService.wppContact.create({
 			data: {
-				instanceName: instance,
+				instance,
 				name,
 				phone
 			}
