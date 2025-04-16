@@ -101,24 +101,19 @@ export default class CheckLoaltyStep implements Step {
 	}
 
 	private async isUserInSameSector(userId: number): Promise<boolean> {
-		const userSector = await prismaService.wppSectorUser.findUnique({
-			where: {
-				instanceName_userId: {
-					instanceName: this.instance,
-					userId: userId
-				}
-			}
+		const result = await prismaService.wppSectorUser.findUnique({
+			where: { userId }
 		});
-		return userSector?.sectorId === this.sectorId;
+		return result?.sectorId === this.sectorId;
 	}
 
 	private async createChat(ctx: StepContext, userId: number) {
 		return prismaService.wppChat.create({
 			data: {
-				instanceName: this.instance,
+				instance: this.instance,
 				type: "RECEPTIVE",
 				userId: userId,
-				phone: ctx.contact.phone,
+				contactId: ctx.contact.id,
 				sectorId: this.sectorId
 			}
 		});

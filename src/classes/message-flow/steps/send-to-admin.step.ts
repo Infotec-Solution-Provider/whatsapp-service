@@ -22,11 +22,11 @@ export default class SendToAdminStep implements Step {
 		ctx.logger.log("Enviando mensagem para o administrador...");
 		const chat = await prismaService.wppChat.create({
 			data: {
-				instanceName: this.instance,
+				instance: this.instance,
 				type: "RECEPTIVE",
 				userId: -1,
 				sectorId: this.sectorId,
-				phone: ctx.contact.phone
+				contactId: ctx.contact.id
 			}
 		});
 

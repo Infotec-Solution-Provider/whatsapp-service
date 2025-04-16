@@ -46,7 +46,7 @@ export default class CheckAvailableUsersStep implements Step {
 			where: {
 				userId: { in: userIds },
 				isFinished: false,
-				instanceName: this.instance
+				instance: this.instance
 			},
 			_count: { id: true },
 			orderBy: { _count: { id: "asc" } }
@@ -69,11 +69,11 @@ export default class CheckAvailableUsersStep implements Step {
 	private async assignChatToUser(ctx: StepContext, userId: number) {
 		return prismaService.wppChat.create({
 			data: {
-				instanceName: this.instance,
+				instance: this.instance,
 				userId,
 				sectorId: this.sectorId,
 				type: "RECEPTIVE",
-				phone: ctx.contact.phone
+				contactId: ctx.contact.id,
 			}
 		});
 	}

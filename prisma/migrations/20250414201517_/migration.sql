@@ -37,12 +37,12 @@ CREATE TABLE `messages` (
     `quoted_id` VARCHAR(191) NULL,
     `chat_id` INTEGER NULL,
     `body` VARCHAR(191) NOT NULL,
-    `timestamp` BIGINT NOT NULL,
+    `timestamp` VARCHAR(191) NOT NULL,
     `status` ENUM('PENDING', 'SENT', 'RECEIVED', 'READ', 'DOWNLOADED', 'ERROR') NOT NULL,
     `file_id` INTEGER NULL,
     `file_name` VARCHAR(191) NULL,
     `file_type` VARCHAR(191) NULL,
-    `file_size` BIGINT NULL,
+    `file_size` VARCHAR(191) NULL,
 
     INDEX `messages_from_to_chat_id_idx`(`from`, `to`, `chat_id`),
     PRIMARY KEY (`id`)
@@ -128,9 +128,13 @@ CREATE TABLE `wallets` (
 CREATE TABLE `wallets_users` (
     `wallet_id` INTEGER NOT NULL,
     `user_id` INTEGER NOT NULL,
+    `wppWalletId` INTEGER NULL,
 
     UNIQUE INDEX `wallets_users_wallet_id_user_id_key`(`wallet_id`, `user_id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- AddForeignKey
+ALTER TABLE `messages` ADD CONSTRAINT `messages_chat_id_fkey` FOREIGN KEY (`chat_id`) REFERENCES `chats`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `chats` ADD CONSTRAINT `chats_instance_name_phone_fkey` FOREIGN KEY (`instance_name`, `phone`) REFERENCES `contacts`(`instance_name`, `phone`) ON DELETE NO ACTION ON UPDATE CASCADE;
@@ -149,3 +153,6 @@ ALTER TABLE `sectors_users` ADD CONSTRAINT `sectors_users_sector_id_fkey` FOREIG
 
 -- AddForeignKey
 ALTER TABLE `message_flows_steps` ADD CONSTRAINT `message_flows_steps_message_flow_id_fkey` FOREIGN KEY (`message_flow_id`) REFERENCES `message_flows`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `wallets_users` ADD CONSTRAINT `wallets_users_wppWalletId_fkey` FOREIGN KEY (`wppWalletId`) REFERENCES `wallets`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;

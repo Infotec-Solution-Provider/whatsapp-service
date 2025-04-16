@@ -25,7 +25,12 @@ export default class MessageFlowFactory {
 		if (!StepConstructor) {
 			throw new Error(`Step type ${type} is not supported.`);
 		}
-		return new StepConstructor({ instance, sectorId, stepId, nextStepId: nextStepId ?? -1 });
+		return new StepConstructor({
+			instance,
+			sectorId,
+			stepId,
+			nextStepId: nextStepId ?? -1
+		});
 	}
 
 	public static createDefaultMessageFlow(
@@ -61,9 +66,9 @@ export default class MessageFlowFactory {
 	): Promise<MessageFlow> {
 		const flow = await prismaService.wppMessageFlow.findUnique({
 			where: {
-				instanceName_sectorId: {
-					instanceName: instance,
-					sectorId: sectorId
+				instance_sectorId: {
+					instance,
+					sectorId
 				}
 			},
 			include: {
@@ -79,7 +84,8 @@ export default class MessageFlowFactory {
 		let currentStepId = 1;
 
 		for (const step of flow.WppMessageFlowStep) {
-			const nextStepId = step.type === "SEND_TO_ADMIN" ? undefined : currentStepId + 1;
+			const nextStepId =
+				step.type === "SEND_TO_ADMIN" ? undefined : currentStepId + 1;
 			const stepInstance = this.createStep(
 				step.type as keyof typeof stepConstructors,
 				instance,

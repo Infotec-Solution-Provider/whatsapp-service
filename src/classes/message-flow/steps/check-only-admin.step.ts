@@ -29,16 +29,16 @@ export default class CheckOnlyAdminStep implements Step {
 	public async run(ctx: StepContext): Promise<NextStep | FinalStep> {
 		ctx.logger.log("Verificando se o contato é apenas administrador...");
 
-		if (ctx.contact.onlyAdmin) {
+		if (ctx.contact.isOnlyAdmin) {
 			ctx.logger.log("O contato é apenas administrador.");
 
 			const chat = await prismaService.wppChat.create({
 				data: {
-					instanceName: this.instance,
+					instance: this.instance,
 					type: "RECEPTIVE",
 					userId: -1,
 					sectorId: this.sectorId,
-					phone: ctx.contact.phone
+					contactId: ctx.contact.id
 				}
 			});
 			ctx.logger.log("Chat criado.", chat);
