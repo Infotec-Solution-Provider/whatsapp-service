@@ -1,4 +1,4 @@
-import { Logger } from "@in.pulse-crm/utils";
+import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import "dotenv/config";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -47,7 +47,8 @@ export default class ProcessingLogger {
 				logEntries: this.logEntries,
 				input: this.input,
 				output: this.output,
-				error: this.error
+				error: this.error,
+				errorMessage: sanitizeErrorMessage(this.error)
 			};
 
 			const logDir = this.error
