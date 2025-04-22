@@ -1,4 +1,9 @@
-import { WppChat, WppMessage, WppSector } from "@prisma/client";
+import {
+	WppChat,
+	WppMessage,
+	WppMessageStatus,
+	WppSector
+} from "@prisma/client";
 import MessageFlow from "../classes/message-flow/message-flow";
 import MessageFlowFactory from "../classes/message-flow/message-flow.factory";
 import prismaService from "./prisma.service";
@@ -164,7 +169,7 @@ class MessagesDistributionService {
 		try {
 			const instance = message.instance;
 			const room: SocketServerChatRoom = `${instance}:chat:${message.chatId}`;
-			const data: WppMessageEventData= { message };
+			const data: WppMessageEventData = { message };
 
 			await socketService.emit(SocketEventType.WppMessage, room, data);
 			logger.log(`Mensagem enviada para o socket: /${room}/ room!`);
@@ -213,6 +218,27 @@ class MessagesDistributionService {
 		}
 		await this.notifyMessage(logger, insertedMsg);
 		logger.success(insertedMsg);
+	}
+
+	public async handleMessageStatus(
+		type: "wwebjs" | "waba",
+		id: string,
+		status: WppMessageStatus
+	) {
+		const search = type === "wwebjs" ? { wwebjsId: id } : { wabaId: id };
+
+		const message = await prismaService.wppMessage.update({
+			where: search,
+			data: {
+				status
+			}
+		});
+
+		const chatRoom: SocketServerChatRoom = `${message.instance}:chat:${message.chatId}`;
+		socketService.emit(SocketEventType.WppMessageStatus, chatRoom, {
+			messageId: message.id,
+			status
+		});
 	}
 }
 

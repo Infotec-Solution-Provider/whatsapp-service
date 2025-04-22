@@ -17,8 +17,8 @@ export default async function isAuthenticated(
 	}
 
 	try {
-		const { data } = await authService.fetchSessionData(authToken);
-		req.session = data;
+		const session = await authService.fetchSessionData(authToken);
+		req.session = session;
 
 		next();
 	} catch (err) {

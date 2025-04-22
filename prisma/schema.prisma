@@ -173,6 +173,7 @@ enum WppMessageStatus {
     READ
     DOWNLOADED
     ERROR
+	REVOKED
 
     @@map("message_status")
 }
