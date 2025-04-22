@@ -79,6 +79,8 @@ model WppChat {
     priority   WppChatPriority @default(NORMAL)
     avatarUrl  String?         @map("avatar_url")
     isFinished Boolean         @default(false) @map("is_finished")
+	startedAt  DateTime?      @map("started_at")
+	finishedAt DateTime?      @map("finished_at")
 
     contact WppContact? @relation(fields: [contactId], references: [id], onDelete: SetNull, onUpdate: Cascade)
     wallet  WppWallet?  @relation(fields: [walletId], references: [id], onDelete: SetNull, onUpdate: Cascade)
