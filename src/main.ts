@@ -7,6 +7,7 @@ import { Logger, logRoutes } from "@in.pulse-crm/utils";
 import whatsappService from "./services/whatsapp.service";
 import chatsController from "./controllers/chats.controller";
 import messagesController from "./controllers/messages.controller";
+import walletsController from "./controllers/wallets.controller";
 
 whatsappService.buildClients();
 const app = express();
@@ -16,6 +17,7 @@ app.use(cors());
 
 app.use(chatsController.router);
 app.use(messagesController.router);
+app.use(walletsController.router);
 
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 	console.error(err);
@@ -25,7 +27,11 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 // @ts-ignore
 app.use(handleRequestError);
 
-logRoutes("", [chatsController.router, messagesController.router]);
+logRoutes("", [
+	chatsController.router,
+	messagesController.router,
+	walletsController.router
+]);
 
 const serverPort = Number(process.env["LISTEN_PORT"]) || 5000;
 

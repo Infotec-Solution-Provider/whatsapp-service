@@ -4,7 +4,7 @@ import { BadRequestError } from "@rgranatodutra/http-errors";
 
 class MessagesController {
 	constructor(public readonly router: Router) {
-		this.router.get("/messages/:id", this.getMessageById);
+		this.router.get("/api/whatsapp/messages/:id", this.getMessageById);
 	}
 
 	private async getMessageById(req: Request, res: Response) {
