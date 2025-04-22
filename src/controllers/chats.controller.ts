@@ -1,6 +1,7 @@
 import { Request, Response, Router } from "express";
 import chatsService from "../services/chats.service";
 import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
+import isAuthenticated from "../middlewares/is-authenticated.middleware";
 
 // Routes TODO:
 // /api/whatsapp/chats
@@ -8,12 +9,27 @@ import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
 
 class ChatsController {
 	constructor(public readonly router: Router) {
-		this.router.get("/chats", this.getChats);
-		this.router.get("/chats/:id", this.getChatById);
+		this.router.get(
+			"/api/whatsapp/session/chats",
+			isAuthenticated,
+			this.getChatsBySession
+		);
+		this.router.get(
+			"/api/whatsapp/chats/:id",
+			isAuthenticated,
+			this.getChatById
+		);
 	}
 
-	private async getChats(req: Request, res: Response) {
-		const data = await chatsService.getUserChats(req.session);
+	private async getChatsBySession(req: Request, res: Response) {
+		const includeMessages = Boolean(req.query["messages"] === "true");
+		const includeContact = Boolean(req.query["contact"] === "true");
+
+		const data = await chatsService.getUserChatsBySession(
+			req.session,
+			includeMessages,
+			includeContact
+		);
 
 		res.status(200).send({
 			message: "Chats retrieved successfully!",

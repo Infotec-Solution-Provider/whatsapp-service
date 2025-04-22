@@ -1,6 +1,6 @@
 import "dotenv/config";
 import "express-async-errors";
-import express from "express";
+import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
 import { handleRequestError } from "@rgranatodutra/http-errors";
 import { Logger, logRoutes } from "@in.pulse-crm/utils";
@@ -16,6 +16,11 @@ app.use(cors());
 
 app.use(chatsController.router);
 app.use(messagesController.router);
+
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+	console.error(err);
+	next(err);
+});
 
 // @ts-ignore
 app.use(handleRequestError);

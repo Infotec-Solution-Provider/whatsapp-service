@@ -14,7 +14,7 @@ class MessagesController {
 			throw new BadRequestError("Message ID is required!");
 		}
 
-		const data = await messagesService.getMessageById(req.session, id);
+		const data = await messagesService.getMessageById(req.session, +id);
 
 		if (!data) {
 			throw new BadRequestError("Message not found!");

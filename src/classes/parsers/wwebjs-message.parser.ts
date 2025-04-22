@@ -12,7 +12,7 @@ class WWEBJSMessageParser {
 			instance,
 			wwebjsId: message.id._serialized,
 			from: message.from.split("@")[0]!,
-			to: message.to,
+			to: "me:" + message.to.split("@")[0]!,
 			body: message.body,
 			type: message.type,
 			timestamp: String(message.timestamp * 1000),

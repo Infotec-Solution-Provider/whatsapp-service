@@ -12,7 +12,8 @@ import {
 	SocketServerChatRoom,
 	SocketServerMonitorRoom,
 	SocketServerRoom,
-	SocketServerWalletRoom
+	SocketServerWalletRoom,
+	WppMessageEventData
 } from "@in.pulse-crm/sdk";
 import chatsService from "./chats.service";
 
@@ -162,8 +163,8 @@ class MessagesDistributionService {
 	private async notifyMessage(logger: ProcessingLogger, message: WppMessage) {
 		try {
 			const instance = message.instance;
-			const room: SocketServerChatRoom = `${instance}:chat:${message.from}`;
-			const data = { messageId: message.id };
+			const room: SocketServerChatRoom = `${instance}:chat:${message.chatId}`;
+			const data: WppMessageEventData= { message };
 
 			await socketService.emit(SocketEventType.WppMessage, room, data);
 			logger.log(`Mensagem enviada para o socket: /${room}/ room!`);
@@ -185,6 +186,7 @@ class MessagesDistributionService {
 					id: message.id
 				},
 				data: {
+					contactId: chat.contactId,
 					chatId: chat.id,
 					status: "RECEIVED"
 				}
@@ -209,7 +211,7 @@ class MessagesDistributionService {
 		if (isChatNew) {
 			await this.notifyChatStarted(logger, chat);
 		}
-		await this.notifyMessage(logger, msg);
+		await this.notifyMessage(logger, insertedMsg);
 		logger.success(insertedMsg);
 	}
 }

@@ -9,6 +9,7 @@ import MessageParser from "../parsers/wwebjs-message.parser";
 import messagesService from "../../services/messages.service";
 import ProcessingLogger from "../processing-logger";
 import messagesDistributionService from "../../services/messages-distribution.service";
+import prismaService from "../../services/prisma.service";
 
 const PUPPETEER_ARGS = {
 	headless: true,
@@ -20,7 +21,7 @@ const PUPPETEER_ARGS = {
 		"--no-first-run",
 		"--no-zygote",
 		"--disable-gpu"
-	],
+	]
 };
 
 const IGNORED_MESSAGE_TYPES =
@@ -37,10 +38,12 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 	) {
 		console.log(process.env["WWEBJS_BROWSER_PATH"]);
 		this.client = new Client({
-			authStrategy: new LocalAuth({ clientId: id.toString() }),
+			authStrategy: new LocalAuth({
+				clientId: `${this.instance}_${this.name}`
+			}),
 			puppeteer: {
 				...PUPPETEER_ARGS,
-				browserURL: process.env["WWEBJS_BROWSER_PATH"]!,
+				browserURL: process.env["WWEBJS_BROWSER_PATH"]!
 			}
 		});
 
@@ -67,15 +70,6 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		this.client.on("auth_failure", (m) => {
 			Logger.info(`[${instanceAndId}] Auth failure: ${m}`);
 		});
-		this.client.on("authenticated", (m) => {
-			Logger.info(
-				`[${instanceAndId}] Auth success: ${this.client.info.pushname} - ${this.client.info.wid.user}`
-			);
-			this.handleAuth();
-		});
-		this.client.on("ready", () => {
-			Logger.info(`[${instanceAndId}] Ready!`);
-		});
 		this.client.on("loading_screen", (p, m) => {
 			Logger.info(`[${instanceAndId}] Loading: ${p}% | ${m}`);
 		});
@@ -83,9 +77,8 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		// Handled events
 		this.client.on("qr", this.handleQr.bind(this));
 		this.client.on("authenticated", this.handleAuth.bind(this));
-		this.client.on("message_create", (message) => {
-			this.handleMessage(message);
-		});
+		this.client.on("ready", this.handleReady.bind(this));
+		this.client.on("message_create", this.handleMessage.bind(this));
 		this.client.on("message_edit", this.handleMessageEdit.bind(this));
 		this.client.on("message_ack", this.handleMessageAck.bind(this));
 		this.client.on(
@@ -121,6 +114,19 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		});
 	}
 
+	private async handleReady() {
+		Logger.info(`[${this.instance} - ${this.name}] Ready!`);
+
+		await prismaService.wppClient.update({
+			where: {
+				id: this.id
+			},
+			data: {
+				phone: this.client.info.wid.user
+			}
+		});
+	}
+
 	private async handleMessage(msg: WAWebJS.Message) {
 		const process = new ProcessingLogger(
 			this.instance,
@@ -130,7 +136,6 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		);
 
 		try {
-			console.log("foi", msg.id._serialized);
 			if (msg.fromMe) {
 				return process.log("Message ignored: it is from me.");
 			}
