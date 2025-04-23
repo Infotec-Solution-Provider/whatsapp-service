@@ -1,21 +1,19 @@
 import prismaService from "./prisma.service";
 
 class WalletsService {
-	public async createWallet(instance: string, userId: number, name: string) {
+	public async createWallet(instance: string, name: string) {
 		return await prismaService.wppWallet.create({
 			data: {
 				instance: instance,
 				name: name,
-				WppWalletUser: {
-					create: {
-						userId: userId
-					}
-				}
 			}
 		})
 	}
 
 	public async deleteWallet(walletId: number) {
+		await prismaService.wppWalletUser.deleteMany({
+			where: { walletId: walletId }
+		})
 		return await prismaService.wppWallet.delete({
 			where: { id: walletId }
 		})
@@ -29,39 +27,19 @@ class WalletsService {
 	}
 
 	public async addUserToWallet(walletId: number, userId: number) {
-		return await prismaService.wppWallet.update({
-			where: { id: walletId },
-			data: {
-				WppWalletUser: {
-					connectOrCreate: {
-						where: {
-							walletId_userId: {
-								walletId: walletId,
-								userId: userId
-							}
-						},
-						create: { userId }
-					}
-				}
-			},
-			include: { WppWalletUser: true }
+		await prismaService.wppWalletUser.upsert({
+			where: { walletId_userId: { walletId, userId } },
+			create: { walletId, userId },
+			update: {}
 		});
+		return this.getWalletById(walletId);
 	}
 
 	public async removeUserFromWallet(walletId: number, userId: number) {
-		return await prismaService.wppWallet.update({
-			where: { id: walletId },
-			data: {
-				WppWalletUser: {
-					delete: {
-						walletId_userId: {
-							walletId: walletId,
-							userId: userId
-						}
-					}
-				}
-			},
-			include: { WppWalletUser: true }
+		return await prismaService.wppWalletUser.delete({
+			where: {
+				walletId_userId: { walletId, userId }
+			}
 		});
 	}
 
@@ -81,33 +59,7 @@ class WalletsService {
 		}));
 	}
 
-	public async getWalletUsers(walletId: number) {
-		const wallet = await prismaService.wppWallet.findUnique({
-			where: { id: walletId },
-			include: {
-				WppWalletUser: {
-					select: { userId: true }
-				}
-			}
-		});
-		if (!wallet) throw new Error('Carteira não encontrada');
-		return wallet.WppWalletUser.map(relation => relation.userId);
-	}
-
-	public async getUserWallets(instance: string, userId: number) {
-		return await prismaService.wppWallet.findMany({
-			where: {
-				instance,
-				WppWalletUser: {
-					some: {
-						userId,
-					}
-				}
-			}
-		});
-	}
-
-	public async findWalletById(walletId: number) {
+	public async getWalletById(walletId: number) {
 		const wallet = await prismaService.wppWallet.findUnique({
 			where: { id: walletId },
 			include: {
@@ -127,7 +79,20 @@ class WalletsService {
 		};
 	}
 
-	public async findUserInWallet(walletId: number, userId: number) {
+	public async getWalletUsers(walletId: number) {
+		const wallet = await prismaService.wppWallet.findUnique({
+			where: { id: walletId },
+			include: {
+				WppWalletUser: {
+					select: { userId: true }
+				}
+			}
+		});
+		if (!wallet) throw new Error('Carteira não encontrada');
+		return wallet.WppWalletUser.map(relation => relation.userId);
+	}
+
+	public async getUserInWallet(walletId: number, userId: number) {
 		return await prismaService.wppWalletUser.findUnique({
 			where: {
 				walletId_userId: {
@@ -135,6 +100,19 @@ class WalletsService {
 					userId,
 				},
 			},
+		});
+	}
+
+	public async getUserWallets(instance: string, userId: number) {
+		return await prismaService.wppWallet.findMany({
+			where: {
+				instance,
+				WppWalletUser: {
+					some: {
+						userId,
+					}
+				}
+			}
 		});
 	}
 }

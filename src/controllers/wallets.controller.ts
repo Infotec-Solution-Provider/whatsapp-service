@@ -9,10 +9,10 @@ class WalletsController {
 		this.router.post("/api/wallets/:walletId/users", this.addUserToWallet);
 		this.router.delete("/api/wallets/:walletId/users/:userId", this.removeUserFromWallet);
 		this.router.get("/api/wallets", this.getWallets);
-		this.router.get("/api/wallets/:id", this.findWalletById);
+		this.router.get("/api/wallets/:id", this.getWalletById);
 		this.router.get("/api/wallets/:id/users", this.getWalletUsers);
-		this.router.get("/api/users/:userId/wallets", this.getUserWallets);
-		this.router.get("/api/wallets/:walletId/users/:userId", this.findUserInWallet);
+		this.router.get("/api/wallets/:walletId/users/:userId", this.getUserInWallet);
+		this.router.get("/api/wallets", this.getUserWallets);
 	}
 
 	private handleError(res: Response, error: unknown, defaultMessage: string) {
@@ -24,14 +24,14 @@ class WalletsController {
 	}
 
 	private async createWallet(req: Request, res: Response) {
-		const { instance, userId, name } = req.body;
-		if (!instance || !userId || !name) {
-			res.status(400).json({ message: "Missing required fields: instance, userId, name" });
+		const { instance, name } = req.body;
+		if (!instance || !name) {
+			res.status(400).json({ message: "Missing required fields: instance, name" });
 			return;
 		}
 
 		try {
-			const wallet = await walletsService.createWallet(instance, Number(userId), name);
+			const wallet = await walletsService.createWallet(instance, name);
 			res.status(201).json({ message: "Wallet created successfully", data: wallet });
 		} catch (error) {
 			this.handleError(res, error, "Error creating wallet");
@@ -99,10 +99,10 @@ class WalletsController {
 		}
 	}
 
-	private findWalletById = async (req: Request, res: Response) => {
+	private getWalletById = async (req: Request, res: Response) => {
 		const { id } = req.params;
 		try {
-			const wallet = await walletsService.findWalletById(Number(id));
+			const wallet = await walletsService.getWalletById(Number(id));
 			if (!wallet) {
 				res.status(404).json({ message: "Wallet not found" });
 				return;
@@ -123,30 +123,10 @@ class WalletsController {
 		}
 	}
 
-	private getUserWallets = async (req: Request, res: Response) => {
-		const { userId } = req.params;
-		const { instance } = req.query;
-
-		if (!instance) {
-			res.status(400).json({ message: "Missing instance query parameter" });
-			return;
-		}
-
-		try {
-			const wallets = await walletsService.getUserWallets(
-				instance as string,
-				Number(userId)
-			);
-			res.status(200).json({ data: wallets });
-		} catch (error) {
-			this.handleError(res, error, "Error fetching user wallets");
-		}
-	}
-
-	private findUserInWallet = async (req: Request, res: Response) => {
+	private getUserInWallet = async (req: Request, res: Response) => {
 		const { walletId, userId } = req.params;
 		try {
-			const relation = await walletsService.findUserInWallet(
+			const relation = await walletsService.getUserInWallet(
 				Number(walletId),
 				Number(userId)
 			);
@@ -160,6 +140,25 @@ class WalletsController {
 		} catch (error) {
 			this.handleError(res, error, "Error finding user in wallet");
 		}
+	}
+
+	private async getUserWallets(req: Request, res: Response) {
+		const userId = req.query["userId"] as string;
+		const instance = req.query["instance"] as string;
+
+		if (!userId || !instance) {
+			res.status(400).json({
+				message: "Query params 'userId' and 'instance' are required"
+			});
+			return;
+		}
+
+		const wallets = await walletsService.getUserWallets(instance, Number(userId));
+
+		res.status(200).json({
+			message: "Wallets retrieved successfully!",
+			data: wallets
+		});
 	}
 }
 
