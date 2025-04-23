@@ -232,7 +232,7 @@ class MessagesDistributionService {
 			const search =
 				type === "wwebjs" ? { wwebjsId: id } : { wabaId: id };
 
-			if(!("wwebjsId" in search) || !("wabaId" in search)) {
+			if (!("wwebjsId" in search) || !("wabaId" in search)) {
 				return;
 			}
 

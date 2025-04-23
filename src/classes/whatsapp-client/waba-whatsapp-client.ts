@@ -5,7 +5,8 @@ import WhatsappClient from "./whatsapp-client";
 class WABAWhatsappClient implements WhatsappClient {
 	constructor(
 		public readonly instance: string,
-		public readonly name: string
+		public readonly name: string,
+		public readonly phone: string,
 	) {}
 
 	public async getProfilePictureUrl(_: string): Promise<string | null> {

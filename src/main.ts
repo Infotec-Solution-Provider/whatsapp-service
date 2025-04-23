@@ -19,7 +19,7 @@ app.use(chatsController.router);
 app.use(messagesController.router);
 app.use(walletsController.router);
 
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+app.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
 	console.error(err);
 	next(err);
 });
