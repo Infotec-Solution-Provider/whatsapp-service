@@ -40,8 +40,13 @@ class WalletsController {
 
 	private deleteWallet = async (req: Request, res: Response) => {
 		const { id } = req.params;
+
 		try {
-			await walletsService.deleteWallet(Number(id));
+			const wallet = await walletsService.findWalletById(Number(id))
+			if (!wallet) {
+				res.status(404).json({ message: "Wallet not found" });
+				return;
+			}
 			res.status(200).json({ message: "Wallet deleted successfully" });
 		} catch (error) {
 			this.handleError(res, error, "Error deleting wallet");
@@ -52,43 +57,66 @@ class WalletsController {
 		const { id } = req.params;
 		const { newName } = req.body;
 		if (!newName) {
-			res.status(400).json({ message: "Missing newName in request body" });
+			res.status(400).json({ message: "Missing new name in request body" });
 			return;
 		}
 
 		try {
+			const existingWallet = await walletsService.findWalletById(Number(id));
+			if (!existingWallet) {
+				res.status(404).json({ message: "Wallet not found" });
+				return;
+			}
 			const wallet = await walletsService.updateWalletName(Number(id), newName);
 			res.status(200).json({ message: "Wallet name updated", data: wallet });
 		} catch (error) {
 			this.handleError(res, error, "Error updating wallet name");
 		}
-	}
+	};
 
 	private addUserToWallet = async (req: Request, res: Response) => {
 		const { walletId } = req.params;
 		const { userId } = req.body;
 		if (!userId) {
-			res.status(400).json({ message: "Missing userId in request body" });
+			res.status(400).json({ message: "Missing user ID in request body" });
 			return;
 		}
 
 		try {
+			const existingWallet = await walletsService.findWalletById(Number(walletId));
+			if (!existingWallet) {
+				res.status(404).json({ message: "Wallet not found" });
+				return;
+			}
+
 			const wallet = await walletsService.addUserToWallet(Number(walletId), Number(userId));
 			res.status(200).json({ message: "User added to wallet", data: wallet });
 		} catch (error) {
 			this.handleError(res, error, "Error adding user to wallet");
 		}
-	}
+	};
 
 	private removeUserFromWallet = async (req: Request, res: Response) => {
 		const { walletId, userId } = req.params;
 		try {
-			const wallet = await walletsService.removeUserFromWallet(Number(walletId), Number(userId));
+			const existingWallet = await walletsService.findWalletById(Number(walletId));
+			if (!existingWallet) {
+				res.status(404).json({ message: "Wallet not found" });
+				return;
+			}
+
+			const existingUser = await walletsService.findUserInWallet(Number(walletId), Number(userId))
+			if (!existingUser) {
+				res.status(404).json({ message: "User not found in wallet" });
+				return;
+			}
+
+			const wallet = await walletsService.removeUserFromWallet(Number(walletId), Number(userId))
 			res.status(200).json({ message: "User removed from wallet", data: wallet });
 		} catch (error) {
 			this.handleError(res, error, "Error removing user from wallet");
 		}
-	}
+	};
 
 	private getWallets = async (_req: Request, res: Response) => {
 		try {
@@ -116,13 +144,20 @@ class WalletsController {
 	private getWalletUsers = async (req: Request, res: Response) => {
 		const { id } = req.params;
 		try {
+			const existingWallet = await walletsService.findWalletById(Number(id));
+			if (!existingWallet) {
+				res.status(404).json({ message: "Wallet not found" });
+				return;
+			}
+
 			const userIds = await walletsService.getWalletUsers(Number(id));
 			res.status(200).json({ data: userIds });
 		} catch (error) {
 			this.handleError(res, error, "Error fetching wallet users");
 		}
-	}
+	};
 
+<<<<<<< HEAD
 	private getUserInWallet = async (req: Request, res: Response) => {
 		const { walletId, userId } = req.params;
 		try {
@@ -132,11 +167,40 @@ class WalletsController {
 			);
 
 			if (!relation) {
+=======
+	private getUserWallets = async (req: Request, res: Response) => {
+		const { userId } = req.params;
+		const { instance } = req.query;
+
+		if (!instance) {
+			res.status(400).json({ message: "Missing instance query parameter" });
+			return;
+		}
+
+		try {
+			const wallets = await walletsService.getUserWallets(String(instance), Number(userId))
+			res.status(200).json({ data: wallets });
+		} catch (error) {
+			this.handleError(res, error, "Error fetching user wallets");
+		}
+	}
+
+	private findUserInWallet = async (req: Request, res: Response) => {
+		const { walletId, userId } = req.params;
+		try {
+			const existingWallet = await walletsService.findWalletById(Number(walletId));
+			if (!existingWallet) {
+				res.status(404).json({ message: "Wallet not found" });
+				return;
+			}
+			const user = await walletsService.findUserInWallet(Number(walletId), Number(userId))
+			if (!user) {
+>>>>>>> 622e6d66d37b78ee1bb9d7bca2b3bac0eeb220dc
 				res.status(404).json({ message: "User not found in wallet" });
 				return;
 			}
 
-			res.status(200).json({ data: relation });
+			res.status(200).json({ data: user });
 		} catch (error) {
 			this.handleError(res, error, "Error finding user in wallet");
 		}
