@@ -79,8 +79,9 @@ model WppChat {
     priority   WppChatPriority @default(NORMAL)
     avatarUrl  String?         @map("avatar_url")
     isFinished Boolean         @default(false) @map("is_finished")
-	startedAt  DateTime?      @map("started_at")
-	finishedAt DateTime?      @map("finished_at")
+    startedAt  DateTime?       @map("started_at")
+    finishedAt DateTime?       @map("finished_at")
+    wppTags    WppTag[]
 
     contact WppContact? @relation(fields: [contactId], references: [id], onDelete: SetNull, onUpdate: Cascade)
     wallet  WppWallet?  @relation(fields: [walletId], references: [id], onDelete: SetNull, onUpdate: Cascade)
@@ -90,6 +91,18 @@ model WppChat {
 
     @@index([userId])
     @@map("chats")
+}
+
+model WppTag {
+    id        Int    @id @default(autoincrement())
+    instance  String @map("instance")
+    name      String
+    color     String @map("bg_color")
+    wppChatId Int?
+    wppChats WppChat[]
+
+    @@unique([name])
+    @@map("tags")
 }
 
 model WppSector {
@@ -173,7 +186,7 @@ enum WppMessageStatus {
     READ
     DOWNLOADED
     ERROR
-	REVOKED
+    REVOKED
 
     @@map("message_status")
 }
