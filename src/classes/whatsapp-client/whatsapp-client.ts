@@ -1,3 +1,4 @@
+import CreateMessageDto from "../../dtos/create-message.dto";
 import { SendMessageOptions } from "../../types/whatsapp-instance.types";
 
 /**
@@ -5,18 +6,23 @@ import { SendMessageOptions } from "../../types/whatsapp-instance.types";
  * This class defines the structure for interacting with WhatsApp,
  */
 abstract class WhatsappClient {
-
 	/**
 	 * The phone number associated with the WhatsApp instance.
-	 * @type {string}
 	 */
 	public abstract readonly name: string;
 
 	/**
 	 * The name of the WhatsApp instance.
-	 * @type {string}
 	 */
 	public abstract readonly instance: string;
+
+	/**
+	 * Represents the phone number associated with the WhatsApp client.
+	 * This is an abstract property that must be implemented by subclasses.
+	 *
+	 * @readonly
+	 */
+	public abstract readonly phone: string;
 
 	/**
 	 * Fetches the WhatsApp profile picture URL by phone number.
@@ -24,8 +30,8 @@ abstract class WhatsappClient {
 	 * @example
 	 * getProfilePictureUrl("123456789"); // "https://...url"
 	 *
-	 * @param {string} phone - The phone number of the WhatsApp user.
-	 * @returns {Promise<string | null>} - The profile picture URL or `null` if not available.
+	 * @param phone - The phone number of the WhatsApp user.
+	 * @returns - The profile picture URL or `null` if not available.
 	 */
 	public abstract getProfilePictureUrl(phone: string): Promise<string | null>;
 
@@ -35,8 +41,8 @@ abstract class WhatsappClient {
 	 * @example
 	 * isValidWhatsapp("1234"); // false
 	 *
-	 * @param {string} phone - The phone number formats be verified.
-	 * @returns {Promise<boolean>} - `true` if the number is valid on WhatsApp, otherwise `false`.
+	 * @param phone - The phone number formats be verified.
+	 * @returns - `true` if the number is valid on WhatsApp, otherwise `false`.
 	 */
 	public abstract isValidWhatsapp(phone: string): Promise<boolean>;
 
@@ -46,10 +52,12 @@ abstract class WhatsappClient {
 	 * @example
 	 * sendMessage({ phone: "123456789", message: "Hello!" });
 	 *
-	 * @param {SendMessageOptions} props - An object containing message details.
-	 * @returns {Promise<void>} - A promise resolved when the message is sent.
+	 * @param props - An object containing message details.
+	 * @returns - A promise resolved when the message is sent.
 	 */
-	public abstract sendMessage(props: SendMessageOptions): Promise<void>;
+	public abstract sendMessage(
+		props: SendMessageOptions
+	): Promise<CreateMessageDto>;
 }
 
 export default WhatsappClient;

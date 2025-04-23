@@ -1,8 +1,55 @@
 import { WppClientType } from "@prisma/client";
-import WABAWhatsappClient from "../classes/whatsapp-client/waba-whatsapp-client";
 import WhatsappClient from "../classes/whatsapp-client/whatsapp-client";
 import WWEBJSWhatsappClient from "../classes/whatsapp-client/wwebjs-whatsapp-client";
 import prismaService from "./prisma.service";
+import { FileDirType, SessionData } from "@in.pulse-crm/sdk";
+import { BadRequestError } from "@rgranatodutra/http-errors";
+import OpusAudioConverter from "../classes/opus-audio-converter";
+import {
+	SendFileOptions,
+	SendMessageOptions
+} from "../types/whatsapp-instance.types";
+import filesService from "./files.service";
+import CreateMessageDto from "../dtos/create-message.dto";
+import messagesService from "./messages.service";
+import messagesDistributionService from "./messages-distribution.service";
+import ProcessingLogger from "../classes/processing-logger";
+import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
+
+interface SendMessageData {
+	sendAsChatOwner?: boolean;
+	sendAsAudio?: boolean;
+	sendAsDocument?: boolean;
+	contactId: number;
+	quotedId?: number | null;
+	chatId?: number | null;
+	text?: string | null;
+	file?: Express.Multer.File;
+	fileId?: number;
+}
+
+function getMessageType(
+	fileType: string,
+	isAudio: boolean,
+	isDocument: boolean
+) {
+	if (isDocument) {
+		return "document";
+	}
+	if (isAudio) {
+		return "ptt";
+	}
+	if (fileType.startsWith("image/")) {
+		return "image";
+	}
+	if (fileType.startsWith("video/")) {
+		return "video";
+	}
+	if (fileType.startsWith("audio/")) {
+		return "audio";
+	}
+	return "document";
+}
 
 class WhatsappService {
 	private readonly clients = new Map<number, WhatsappClient>();
@@ -13,7 +60,6 @@ class WhatsappService {
 		for (const client of clients) {
 			switch (client.type) {
 				case WppClientType.WWEBJS:
-					console.log("WWEBJS creating");
 					const WWEBJSClient = new WWEBJSWhatsappClient(
 						client.id,
 						client.instance,
@@ -22,11 +68,7 @@ class WhatsappService {
 					this.clients.set(client.id, WWEBJSClient);
 					break;
 				case WppClientType.WABA:
-					const WABAClient = new WABAWhatsappClient(
-						client.instance,
-						client.name
-					);
-					this.clients.set(client.id, WABAClient);
+					throw new Error("WABA client not supported yet!");
 					break;
 				default:
 					break;
@@ -36,6 +78,184 @@ class WhatsappService {
 
 	public getClient(id: number) {
 		return this.clients.get(id);
+	}
+
+	public async getClientBySector(instance: string, sectorId: number) {
+		const dbClient = await prismaService.wppClient.findFirstOrThrow({
+			where: {
+				instance,
+				isActive: true,
+				WppSector: {
+					some: {
+						id: sectorId
+					}
+				}
+			}
+		});
+
+		const client = this.getClient(dbClient.id);
+
+		if (!client) {
+			throw new BadRequestError("Sector has no active whatsapp client!");
+		}
+
+		return client;
+	}
+
+	public async sendMessage(
+		session: SessionData,
+		to: string,
+		data: SendMessageData
+	) {
+		const { file, ...logData } = data;
+		const process = new ProcessingLogger(
+			session.instance,
+			"send-message",
+			`${to}-${Date.now()}`,
+			logData
+		);
+
+		process.log("Iniciando o envio da mensagem.");
+		try {
+			process.log("Obtendo client do whatsapp...");
+			const client = await this.getClientBySector(
+				session.instance,
+				session.sectorId
+			);
+			process.log(`Client obtido para o setor: ${session.sectorId}`);
+			let message = {
+				instance: session.instance,
+				status: "PENDING",
+				timestamp: Date.now().toString(),
+				from: `me:${client.phone}`,
+				to: `${to}`,
+				type: "chat",
+				body: data.text || ""
+			} as CreateMessageDto;
+
+			let options = { to, text: data.text } as SendMessageOptions;
+
+			data.contactId && (message.contactId = +data.contactId);
+			data.chatId && (message.chatId = +data.chatId);
+
+			if (data.quotedId) {
+				process.log(`Mensagem citada encontrada: ${data.quotedId}`);
+				const quotedMsg =
+					await prismaService.wppMessage.findUniqueOrThrow({
+						where: {
+							id: data.quotedId
+						}
+					});
+
+				options.quotedId = (quotedMsg.wwebjsId || quotedMsg.wabaId)!;
+				message.quotedId = quotedMsg.id;
+			}
+
+			if ("fileId" in data && !!data.fileId) {
+				process.log(`Processando arquivo com ID: ${data.fileId}`);
+
+				const fileData = await filesService.fetchFileMetadata(
+					data.fileId
+				);
+
+				process.log(`Arquivo encontrado: ${fileData.name}`);
+
+				options = {
+					...options,
+					fileUrl: filesService.getFileDownloadUrl(data.fileId),
+					sendAsAudio: !!data.sendAsAudio,
+					sendAsDocument: !!data.sendAsDocument,
+					fileName: fileData.name
+				} as SendFileOptions;
+
+				message.fileId = data.fileId;
+				message.fileName = fileData.name;
+				message.fileType = fileData.mime_type;
+				message.fileSize = String(fileData.size);
+				message.type = getMessageType(
+					fileData.mime_type,
+					!!data.sendAsAudio,
+					!!data.sendAsDocument
+				);
+				process.log("Arquivo processado com sucesso.", message);
+			}
+
+			if ("file" in data && !!data.file) {
+				process.log(
+					`Processando arquivo enviado diretamente: ${data.file.originalname}`
+				);
+
+				if (data.sendAsAudio) {
+					process.log(
+						"Mensagem de audio, convertendo arquivo para mp3."
+					);
+				}
+
+				const buffer = data.sendAsAudio
+					? await OpusAudioConverter.convert(data.file.buffer)
+					: data.file.buffer;
+
+				if (data.sendAsAudio) {
+					process.log("Mensagem convertida com sucesso.");
+				}
+
+				const savedFile = await filesService.uploadFile({
+					instance: session.instance,
+					fileName: data.file.originalname,
+					mimeType: data.file.mimetype,
+					buffer,
+					dirType: FileDirType.PUBLIC
+				});
+
+				process.log(`Arquivo salvo com sucesso!`, savedFile);
+
+				const fileUrl = filesService.getFileDownloadUrl(savedFile.id);
+
+				options = {
+					...options,
+					fileUrl,
+					sendAsAudio: data.sendAsAudio,
+					sendAsDocument: data.sendAsDocument
+				} as SendFileOptions;
+
+				message.fileId = savedFile.id;
+				message.fileName = savedFile.name;
+				message.fileType = savedFile.mime_type;
+				message.fileSize = String(savedFile.size);
+
+				message.type = getMessageType(
+					data.file.mimetype,
+					!!data.sendAsAudio,
+					!!data.sendAsDocument
+				);
+				process.log("Arquivo processado com sucesso.", message);
+			}
+
+			process.log("Salvando mensagem no banco de dados.", message);
+			const pendingMsg = await messagesService.insertMessage(message);
+			process.log("Enviando mensagem para o cliente.");
+
+			const sentMsg = await client.sendMessage(options);
+			process.log("Atualizando mensagem no banco de dados.", sentMsg);
+
+			message = { ...pendingMsg, ...sentMsg, status: "SENT" };
+			const savedMsg = await messagesService.updateMessage(
+				pendingMsg.id,
+				sentMsg
+			);
+			process.log("Mensagem salva no banco de dados.", savedMsg);
+
+			messagesDistributionService.notifyMessage(process, savedMsg);
+			process.success(savedMsg);
+
+			return savedMsg;
+		} catch (err) {
+			console.error(err);
+			process.failed(
+				"Erro ao enviar mensagem: " + sanitizeErrorMessage(err)
+			);
+			throw new BadRequestError("Erro ao enviar mensagem.", err);
+		}
 	}
 }
 

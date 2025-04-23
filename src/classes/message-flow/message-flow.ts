@@ -5,14 +5,43 @@ import { WppChat, WppContact, WppMessage } from "@prisma/client";
 export default class MessageFlow {
 	private steps: Map<number, Step> = new Map();
 
+	// Fluxos ativos por ContactId;
+	private activeFlows: Map<number, Promise<WppChat>> = new Map();
+
 	public async getChat(
 		logger: ProcessingLogger,
 		message: WppMessage,
 		contact: WppContact
 	): Promise<WppChat> {
 		logger.log("Iniciando o processamento da mensagem no fluxo de etapas.");
-		let currStepId = 1;
 
+		// Verifique se já existe um fluxo ativo para o contato
+		if (this.activeFlows.has(contact.id)) {
+			logger.log(
+				`Já existe um fluxo ativo para o contato ${contact.id}. Aguardando...`
+			);
+			return this.activeFlows.get(contact.id)!; // Retorna o fluxo ativo
+		}
+
+		// Crie um novo fluxo e armazene no mapa de controle
+		const flowPromise = this.processFlow(logger, message, contact);
+		this.activeFlows.set(contact.id, flowPromise);
+
+		try {
+			const chat = await flowPromise;
+			return chat;
+		} finally {
+			// Remova o fluxo do mapa após a conclusão
+			this.activeFlows.delete(contact.id);
+		}
+	}
+
+	private async processFlow(
+		logger: ProcessingLogger,
+		message: WppMessage,
+		contact: WppContact
+	): Promise<WppChat> {
+		let currStepId = 1;
 		const context: StepContext = { logger, contact, message };
 
 		while (true) {

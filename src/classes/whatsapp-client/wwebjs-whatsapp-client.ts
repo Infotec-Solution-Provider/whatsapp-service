@@ -3,6 +3,7 @@ import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
 import WhatsappClient from "./whatsapp-client";
 import { SendMessageOptions } from "../../types/whatsapp-instance.types";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { randomUUID } from "node:crypto";
 import socketService from "../../services/socket.service";
 import { SocketEventType, SocketServerAdminRoom } from "@in.pulse-crm/sdk";
 import MessageParser from "../parsers/wwebjs-message.parser";
@@ -36,7 +37,6 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		public readonly instance: string,
 		public readonly name: string
 	) {
-		console.log(process.env["WWEBJS_BROWSER_PATH"]);
 		this.client = new Client({
 			authStrategy: new LocalAuth({
 				clientId: `${this.instance}_${this.name}`
@@ -54,8 +54,11 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			Logger.error(
 				`Error initializing client: ${sanitizeErrorMessage(err)}`
 			);
-			console.log("Error class name", err.constructor.name);
 		});
+	}
+
+	get phone(): string {
+		return this.client.info.wid.user;
 	}
 
 	private buildEvents(instance: string, id: number) {
@@ -78,7 +81,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		this.client.on("qr", this.handleQr.bind(this));
 		this.client.on("authenticated", this.handleAuth.bind(this));
 		this.client.on("ready", this.handleReady.bind(this));
-		this.client.on("message_create", this.handleMessage.bind(this));
+		this.client.on("message", this.handleMessage.bind(this));
 		this.client.on("message_edit", this.handleMessageEdit.bind(this));
 		this.client.on("message_ack", this.handleMessageAck.bind(this));
 		this.client.on(
@@ -128,6 +131,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 	}
 
 	private async handleMessage(msg: WAWebJS.Message) {
+		Logger.debug("Message received: " + msg.id._serialized);
 		const process = new ProcessingLogger(
 			this.instance,
 			"wwebjs-message-receive",
@@ -156,7 +160,11 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				return process.log("Message ignored: it is not a contact.");
 			}
 
-			const parsedMsg = await MessageParser.parse(this.instance, msg);
+			const parsedMsg = await MessageParser.parse(
+				process,
+				this.instance,
+				msg
+			);
 			process.log(`Message is successfully parsed!`, parsedMsg);
 
 			const savedMsg = await messagesService.insertMessage(parsedMsg);
@@ -183,6 +191,12 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 	private handleMessageAck({ id }: WAWebJS.Message, ack: WAWebJS.MessageAck) {
 		Logger.info("Message ack: " + ack + " | " + id._serialized + "!");
+		const status = MessageParser.getMessageStatus(ack);
+		messagesDistributionService.processMessageStatus(
+			"wwebjs",
+			id._serialized,
+			status
+		);
 	}
 
 	private handleMessageReaction(_reaction: WAWebJS.Reaction) {}
@@ -202,8 +216,63 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		return await this.client.isRegisteredUser(phone + "@c.us");
 	}
 
-	public async sendMessage({}: SendMessageOptions) {
-		throw new Error("Method not implemented.");
+	public async sendMessage(options: SendMessageOptions) {
+		const id = randomUUID();
+		const process = new ProcessingLogger(
+			this.instance,
+			"wwebjs-send-message",
+			id,
+			options
+		);
+
+		process.log("Iniciando envio de mensagem.", options);
+
+		options.to = `${options.to}@c.us`;
+
+		const { to, quotedId, text } = options;
+		let content: string | WAWebJS.MessageMedia | null = null;
+		const params: WAWebJS.MessageSendOptions = {};
+
+		quotedId && (params.quotedMessageId = quotedId);
+
+		if ("fileUrl" in options) {
+			process.log("Preparando conteúdo da mensagem como mídia.");
+
+			options.sendAsAudio && (params.sendAudioAsVoice = true);
+			options.sendAsDocument && (params.sendMediaAsDocument = true);
+
+			text && (params.caption = text);
+			content = await WAWebJS.MessageMedia.fromUrl(options.fileUrl, {
+				unsafeMime: true,
+				filename: options.fileName
+			});
+		} else {
+			process.log("Preparando conteúdo da mensagem como texto.");
+			content = text!;
+		}
+
+		process.log("Conteúdo da mensagem pronto!");
+
+		try {
+			process.log("Enviando mensagem.", options);
+			const sentMsg = await this.client.sendMessage(to, content, params);
+			process.log("Mensagem enviada com sucesso.", sentMsg);
+
+			const parsedMsg = await MessageParser.parse(
+				process,
+				this.instance,
+				sentMsg,
+				true,
+				true
+			);
+
+			process.success(parsedMsg);
+			return parsedMsg;
+		} catch (err) {
+			process.log("Erro ao enviar mensagem.", err);
+			process.failed(err);
+			throw err;
+		}
 	}
 }
 

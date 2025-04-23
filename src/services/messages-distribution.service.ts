@@ -16,7 +16,7 @@ import {
 	SocketServerAdminRoom,
 	SocketServerChatRoom,
 	SocketServerMonitorRoom,
-	SocketServerRoom,
+	SocketServerUserRoom,
 	SocketServerWalletRoom,
 	WppMessageEventData
 } from "@in.pulse-crm/sdk";
@@ -116,7 +116,7 @@ class MessagesDistributionService {
 		}
 	}
 
-	private async notifyChatStarted(logger: ProcessingLogger, chat: WppChat) {
+	private async notifyChatStarted(process: ProcessingLogger, chat: WppChat) {
 		try {
 			const data = { chatId: chat.id };
 			const monitorRoom: SocketServerMonitorRoom = `${chat.instance}:${chat.sectorId!}:monitor`;
@@ -127,7 +127,7 @@ class MessagesDistributionService {
 				data
 			);
 
-			logger.log(`Chat enviado para o socket: /${monitorRoom}/ room!`);
+			process.log(`Chat enviado para o socket: /${monitorRoom}/ room!`);
 
 			if (chat.walletId) {
 				const walletRoom: SocketServerWalletRoom = `${chat.instance}:wallet:${chat.walletId}`;
@@ -136,7 +136,9 @@ class MessagesDistributionService {
 					walletRoom,
 					data
 				);
-				logger.log(`Chat enviado para o socket: /${walletRoom}/ room!`);
+				process.log(
+					`Chat enviado para o socket: /${walletRoom}/ room!`
+				);
 			}
 
 			if (chat.userId === -1) {
@@ -146,36 +148,37 @@ class MessagesDistributionService {
 					adminRoom,
 					data
 				);
-				logger.log(`Chat enviado para o socket: /${adminRoom}/ room!`);
+				process.log(`Chat enviado para o socket: /${adminRoom}/ room!`);
 			}
 
 			if (chat.userId) {
-				const userRoom: SocketServerRoom = `${chat.instance}:user:${chat.userId}`;
+				const userRoom: SocketServerUserRoom = `${chat.instance}:user:${chat.userId}`;
 				await socketService.emit(
 					SocketEventType.WppChatStarted,
 					userRoom,
 					data
 				);
-				logger.log(`Chat enviado para o socket: /${userRoom}/ room!`);
+				process.log(`Chat enviado para o socket: /${userRoom}/ room!`);
 			}
 		} catch (err) {
 			const msg = sanitizeErrorMessage(err);
-			logger.log(`Erro ao enviar o chat para o socket: ${msg}`);
+			process.log(`Erro ao enviar o chat para o socket: ${msg}`);
 			throw err;
 		}
 	}
 
-	private async notifyMessage(logger: ProcessingLogger, message: WppMessage) {
+	public async notifyMessage(process: ProcessingLogger, message: WppMessage) {
 		try {
+			process.log("Transmitindo mensagem via socket.");
 			const instance = message.instance;
 			const room: SocketServerChatRoom = `${instance}:chat:${message.chatId}`;
 			const data: WppMessageEventData = { message };
 
 			await socketService.emit(SocketEventType.WppMessage, room, data);
-			logger.log(`Mensagem enviada para o socket: /${room}/ room!`);
+			process.log(`Mensagem transmitida para a sala: /${room}/ room!`);
 		} catch (err) {
 			const msg = sanitizeErrorMessage(err);
-			logger.log(`Erro ao enviar a mensagem para o socket: ${msg}`);
+			process.log(`Falha ao transmitir mensagem: ${msg}`);
 			throw err;
 		}
 	}
@@ -220,25 +223,36 @@ class MessagesDistributionService {
 		logger.success(insertedMsg);
 	}
 
-	public async handleMessageStatus(
+	public async processMessageStatus(
 		type: "wwebjs" | "waba",
 		id: string,
 		status: WppMessageStatus
 	) {
-		const search = type === "wwebjs" ? { wwebjsId: id } : { wabaId: id };
+		try {
+			const search =
+				type === "wwebjs" ? { wwebjsId: id } : { wabaId: id };
 
-		const message = await prismaService.wppMessage.update({
-			where: search,
-			data: {
-				status
+			if(!("wwebjsId" in search) || !("wabaId" in search)) {
+				return;
 			}
-		});
 
-		const chatRoom: SocketServerChatRoom = `${message.instance}:chat:${message.chatId}`;
-		socketService.emit(SocketEventType.WppMessageStatus, chatRoom, {
-			messageId: message.id,
-			status
-		});
+			const message = await prismaService.wppMessage.update({
+				where: search,
+				data: {
+					status
+				}
+			});
+
+			const chatRoom: SocketServerChatRoom = `${message.instance}:chat:${message.chatId}`;
+			socketService.emit(SocketEventType.WppMessageStatus, chatRoom, {
+				messageId: message.id,
+				contactId: message.contactId!,
+				status
+			});
+		} catch (err) {
+			const msg = sanitizeErrorMessage(err);
+			console.error(`Erro ao processar status da mensagem: ${msg}`);
+		}
 	}
 }
 

@@ -32,6 +32,7 @@ class ChatsService {
 	) {
 		const foundChats = await prismaService.wppChat.findMany({
 			where: {
+				isFinished: false,
 				OR: [
 					{
 						userId: session.userId
@@ -149,10 +150,15 @@ class ChatsService {
 		});
 
 		if (chat?.contact?.customerId) {
-			const customer = await customersService.getCustomerById(
-				chat.contact.customerId
-			);
-			return { ...chat, customer };
+			try {
+				const customer = await customersService.getCustomerById(
+					chat.contact.customerId
+				);
+
+				return { ...chat, customer };
+			} catch (err) {
+				return chat;
+			}
 		}
 
 		return chat;

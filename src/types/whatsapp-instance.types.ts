@@ -1,13 +1,21 @@
-export interface SendMessageOptions {
-	instanceName: string;
-	from: string;
+interface BaseSendMessageOptions {
 	to: string;
-	text: string;
-	isAudio: boolean;
-	quotedId?: string;
-	file?: Express.Multer.File | string;
+	quotedId?: string | null;
 }
 
+export interface SendFileOptions extends BaseSendMessageOptions {
+	text?: string | null;
+	sendAsAudio?: boolean;
+	sendAsDocument?: boolean;
+	fileUrl: string;
+	fileName: string;
+}
+
+export interface SendTextOptions extends BaseSendMessageOptions {
+	text: string;
+}
+
+export type SendMessageOptions = SendTextOptions | SendFileOptions;
 export interface WhatsappInstanceProps {
 	phone: string;
 	instanceName: string;

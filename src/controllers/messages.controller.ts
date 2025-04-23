@@ -2,6 +2,8 @@ import { Request, Response, Router } from "express";
 import messagesService from "../services/messages.service";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
+import whatsappService from "../services/whatsapp.service";
+import upload from "../middlewares/multer.middleware";
 
 class MessagesController {
 	constructor(public readonly router: Router) {
@@ -14,6 +16,12 @@ class MessagesController {
 			"/api/whatsapp/messages/mark-as-read",
 			isAuthenticated,
 			this.readContactMessages
+		);
+		this.router.post(
+			"/api/whatsapp/messages",
+			upload.single("file"),
+			isAuthenticated,
+			this.sendMessage
 		);
 	}
 
@@ -51,6 +59,32 @@ class MessagesController {
 		res.status(200).send({
 			message: "Messages marked as read successfully!",
 			data: updatedData
+		});
+	}
+
+	private async sendMessage(req: Request, res: Response) {
+		const { to, ...data } = req.body;
+		const file = req.file;
+
+		if(file) {
+			data.file = file;
+		}
+
+		Object.keys(data).forEach(key => {
+			if(data[key] === undefined) {
+				delete data[key];
+			}
+		});
+
+		const message = await whatsappService.sendMessage(
+			req.session,
+			to,
+			data
+		);
+
+		res.status(201).send({
+			message: "Message sent successfully!",
+			data: message
 		});
 	}
 }

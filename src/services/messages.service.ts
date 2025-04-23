@@ -27,7 +27,7 @@ class MessagesService {
 	) {
 		await prismaService.wppMessage.updateMany({
 			where: {
-				timestamp: {
+				to: {
 					startsWith: "me:"
 				},
 				WppChat: {
