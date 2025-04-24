@@ -11,6 +11,7 @@ import walletsController from "./controllers/wallets.controller";
 import resultsController from "./controllers/results.controller";
 import contactsController from "./controllers/contacts.controller";
 import sectorsController from "./controllers/sectors.controller";
+import schedulesController from "./controllers/schedules.controller";
 
 whatsappService.buildClients();
 const app = express();
@@ -24,6 +25,7 @@ app.use(walletsController.router);
 app.use(resultsController.router);
 app.use(contactsController.router);
 app.use(sectorsController.router);
+app.use(schedulesController.router);
 
 app.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
 	console.error(err);
@@ -39,7 +41,8 @@ logRoutes("", [
 	walletsController.router,
 	resultsController.router,
 	contactsController.router,
-	sectorsController.router
+	sectorsController.router,
+	schedulesController.router
 ]);
 
 const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;
