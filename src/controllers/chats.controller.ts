@@ -20,6 +20,11 @@ class ChatsController {
 			isAuthenticated,
 			this.finishChatById
 		);
+		this.router.post(
+			"/api/whatsapp/chats",
+			isAuthenticated,
+			this.startChatByContactId
+		);
 	}
 
 	private async getChatsBySession(req: Request, res: Response) {
@@ -80,6 +85,26 @@ class ChatsController {
 
 		res.status(200).send({
 			message: "Chat finished successfully!"
+		});
+	}
+
+	private async startChatByContactId(req: Request, res: Response) {
+		const contactId = +req.body.contactId;
+		const session = req.session;
+
+		if (Number.isNaN(contactId)) {
+			throw new BadRequestError("Contact ID is required!");
+		}
+
+		const result = await chatsService.startChatByContactId(
+			session,
+			req.headers["authorization"] as string,
+			contactId
+		);
+
+		res.status(200).send({
+			message: "Chat started successfully!",
+			data: result
 		});
 	}
 }

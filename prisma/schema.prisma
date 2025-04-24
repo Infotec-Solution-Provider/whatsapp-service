@@ -30,6 +30,7 @@ model WppContact {
     phone       String
     customerId  Int?    @map("customer_id")
     instance    String  @map("instance")
+    isDeleted   Boolean @default(false) @map("is_deleted")
     isBlocked   Boolean @default(false) @map("is_blocked")
     isOnlyAdmin Boolean @default(false) @map("is_only_admin")
 

@@ -6,6 +6,7 @@ import instancesService from "./instances.service";
 import socketService from "./socket.service";
 import messagesDistributionService from "./messages-distribution.service";
 import usersService from "./users.service";
+import whatsappService from "./whatsapp.service";
 
 interface InpulseResult {
 	NOME: string;
@@ -193,7 +194,6 @@ class ChatsService {
 		const { instance, userId } = session;
 		usersService.setAuth(token);
 
-		console.log(session, id, resultId);
 		const user = await usersService.getUserById(userId);
 		const chat = await prismaService.wppChat.update({
 			where: { id },
@@ -210,6 +210,80 @@ class ChatsService {
 		await socketService.emit(event, `${instance}:chat:${chat.id}`, {
 			chatId: chat.id
 		});
+	}
+
+	public async startChatByContactId(
+		session: SessionData,
+		token: string,
+		contactId: number
+	) {
+		const contact = await prismaService.wppContact.findUnique({
+			where: { id: contactId }
+		});
+
+		if (!contact) {
+			throw new Error("Contato não encontrado!");
+		}
+
+		const existingChat = await prismaService.wppChat.findFirst({
+			where: {
+				instance: session.instance,
+				contactId,
+				isFinished: false
+			}
+		});
+
+		if (existingChat) {
+			throw new Error("Alguém já está atendendo esse contato!");
+		}
+
+		const profilePicture = await whatsappService.getProfilePictureUrl(
+			session.instance,
+			contact.phone
+		);
+		const newChat = await prismaService.wppChat.create({
+			data: {
+				instance: session.instance,
+				type: "ACTIVE",
+				avatarUrl: profilePicture,
+				userId: session.userId,
+				contactId,
+				sectorId: session.sectorId,
+				startedAt: new Date()
+			}
+		});
+
+		usersService.setAuth(token);
+		const user = await usersService.getUserById(session.userId);
+
+		const message = `Atendimento iniciado por ${user.NOME}.`;
+		await messagesDistributionService.addSystemMessage(
+			newChat,
+			message,
+			true
+		);
+
+		const newChatWithDetails = await prismaService.wppChat.findUnique({
+			where: { id: newChat.id },
+			include: {
+				contact: true,
+				messages: true
+			}
+		});
+		let customer: Customer | null = null;
+
+		if (contact.customerId) {
+			try {
+				customersService.setAuth(token);
+				customer = await customersService.getCustomerById(
+					contact.customerId
+				);
+			} catch (err) {
+				customer = null;
+			}
+		}
+
+		return { ...newChatWithDetails, customer };
 	}
 }
 

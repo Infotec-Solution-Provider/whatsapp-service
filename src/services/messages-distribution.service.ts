@@ -22,6 +22,7 @@ import {
 } from "@in.pulse-crm/sdk";
 import chatsService from "./chats.service";
 import messagesService from "./messages.service";
+import whatsappService from "./whatsapp.service";
 
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
@@ -107,6 +108,19 @@ class MessagesDistributionService {
 			logger.log("Fluxo recuperado.", flow);
 
 			const newChat = await flow.getChat(logger, msg, contact);
+			const avatarUrl = await whatsappService.getProfilePictureUrl(
+				instance,
+				msg.from
+			);
+			await prismaService.wppChat.update({
+				data: { avatarUrl },
+				where: { id: newChat.id }
+			});
+			await this.addSystemMessage(
+				newChat,
+				"Atendimento iniciado pelo cliente!",
+				true
+			);
 			logger.log("Chat criado com sucesso!", newChat);
 
 			await this.insertAndNotify(logger, newChat, msg, true);
@@ -233,13 +247,10 @@ class MessagesDistributionService {
 			const search =
 				type === "wwebjs" ? { wwebjsId: id } : { wabaId: id };
 
-			console.log(type, search, search);
-
 			if (!("wwebjsId" in search) && !("wabaId" in search)) {
 				return;
 			}
 
-			console.log("Foi1");
 			const message = await prismaService.wppMessage.update({
 				where: search,
 				data: {

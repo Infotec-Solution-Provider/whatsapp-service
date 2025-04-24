@@ -29,15 +29,15 @@ const IGNORED_MESSAGE_TYPES =
 	process.env["WWEBJS_IGNORED_MESSAGE_TYPES"]?.split(",") || [];
 
 class WWEBJSWhatsappClient implements WhatsappClient {
-	private client: Client;
-	private lastQrTimestamp: number = Date.now();
+	public wwebjs: Client;
+	public isReady: boolean = false;
 
 	constructor(
 		public readonly id: number,
 		public readonly instance: string,
 		public readonly name: string
 	) {
-		this.client = new Client({
+		this.wwebjs = new Client({
 			authStrategy: new LocalAuth({
 				clientId: `${this.instance}_${this.name}`
 			}),
@@ -50,7 +50,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		// Log events
 		this.buildEvents(instance, id);
 
-		this.client.initialize().catch((err) => {
+		this.wwebjs.initialize().catch((err) => {
 			Logger.error(
 				`Error initializing client: ${sanitizeErrorMessage(err)}`
 			);
@@ -58,45 +58,43 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 	}
 
 	get phone(): string {
-		return this.client.info.wid.user;
+		return this.wwebjs.info.wid.user;
 	}
 
 	private buildEvents(instance: string, id: number) {
 		const instanceAndId = `${instance}:${id}`;
 
-		this.client.on("change_state", (s) => {
+		this.wwebjs.on("change_state", (s) => {
 			Logger.info(`[${instanceAndId}] State changed: ${s}`);
 		});
-		this.client.on("disconnected", (r) => {
+		this.wwebjs.on("disconnected", (r) => {
 			Logger.info(`[${instanceAndId}] Disconnected: ${r}`);
 		});
-		this.client.on("auth_failure", (m) => {
+		this.wwebjs.on("auth_failure", (m) => {
 			Logger.info(`[${instanceAndId}] Auth failure: ${m}`);
 		});
-		this.client.on("loading_screen", (p, m) => {
+		this.wwebjs.on("loading_screen", (p, m) => {
 			Logger.info(`[${instanceAndId}] Loading: ${p}% | ${m}`);
 		});
 
 		// Handled events
-		this.client.on("qr", this.handleQr.bind(this));
-		this.client.on("authenticated", this.handleAuth.bind(this));
-		this.client.on("ready", this.handleReady.bind(this));
-		this.client.on("message", this.handleMessage.bind(this));
-		this.client.on("message_edit", this.handleMessageEdit.bind(this));
-		this.client.on("message_ack", this.handleMessageAck.bind(this));
-		this.client.on(
+		this.wwebjs.on("qr", this.handleQr.bind(this));
+		this.wwebjs.on("authenticated", this.handleAuth.bind(this));
+		this.wwebjs.on("ready", this.handleReady.bind(this));
+		this.wwebjs.on("message", this.handleMessage.bind(this));
+		this.wwebjs.on("message_edit", this.handleMessageEdit.bind(this));
+		this.wwebjs.on("message_ack", this.handleMessageAck.bind(this));
+		this.wwebjs.on(
 			"message_reaction",
 			this.handleMessageReaction.bind(this)
 		);
-		this.client.on(
+		this.wwebjs.on(
 			"message_revoke_everyone",
 			this.handleMessageRevoked.bind(this)
 		);
 	}
 
 	private handleQr(qr: string) {
-		const now = Date.now();
-		this.lastQrTimestamp = now;
 		Logger.debug(`QR generated for ${this.instance} - ${this.name}`);
 		const room: SocketServerAdminRoom = `${this.instance}:${1}:admin`;
 
@@ -118,13 +116,14 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 	private async handleReady() {
 		Logger.info(`[${this.instance} - ${this.name}] Ready!`);
+		this.isReady = true;
 
 		await prismaService.wppClient.update({
 			where: {
 				id: this.id
 			},
 			data: {
-				phone: this.client.info.wid.user
+				phone: this.wwebjs.info.wid.user
 			}
 		});
 	}
@@ -205,14 +204,20 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 	}
 
 	public async getProfilePictureUrl(phone: string) {
-		return await this.client
+		return await this.wwebjs
 			.getProfilePicUrl(phone + "@c.us")
 			.then((url) => url)
 			.catch(() => null);
 	}
 
 	public async isValidWhatsapp(phone: string) {
-		return await this.client.isRegisteredUser(phone + "@c.us");
+		return await this.wwebjs.isRegisteredUser(phone + "@c.us");
+	}
+
+	public async getValidWhatsapp(phone: string) {
+		const result = await this.wwebjs.getNumberId(phone);
+
+		return result ? result.user : null;
 	}
 
 	public async sendMessage(options: SendMessageOptions) {
@@ -254,7 +259,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 		try {
 			process.log("Enviando mensagem.", options);
-			const sentMsg = await this.client.sendMessage(to, content, params);
+			const sentMsg = await this.wwebjs.sendMessage(to, content, params);
 			process.log("Mensagem enviada com sucesso.", sentMsg);
 
 			const parsedMsg = await MessageParser.parse(

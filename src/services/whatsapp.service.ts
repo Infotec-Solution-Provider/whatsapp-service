@@ -267,6 +267,54 @@ class WhatsappService {
 
 		return result;
 	}
+
+	private unsafeGetWwebjsClient(
+		instance: string
+	): WWEBJSWhatsappClient | null {
+		const correctClient = this.getWwebjsClient(instance);
+
+		if (correctClient) {
+			return correctClient;
+		}
+
+		const clients = this.clients.values();
+		const wwebjsClient: WWEBJSWhatsappClient =
+			(Array.from(clients).find(
+				(client) =>
+					client instanceof WWEBJSWhatsappClient && client.isReady
+			) as WWEBJSWhatsappClient) || null;
+
+		return wwebjsClient;
+	}
+
+	private getWwebjsClient(instance: string): WWEBJSWhatsappClient | null {
+		const clients = this.clients.values();
+		const wwebjsClient: WWEBJSWhatsappClient =
+			(Array.from(clients).find(
+				(client) =>
+					client instanceof WWEBJSWhatsappClient &&
+					client.instance === instance &&
+					client.isReady
+			) as WWEBJSWhatsappClient) || null;
+
+		return wwebjsClient;
+	}
+
+	public async getValidWhatsappPhone(instance: string, phone: string) {
+		const wwebjs = this.unsafeGetWwebjsClient(instance);
+		const validPhone = wwebjs
+			? await wwebjs?.getValidWhatsapp(phone)
+			: null;
+
+		return validPhone;
+	}
+
+	public async getProfilePictureUrl(instance: string, phone: string) {
+		const wwebjs = this.unsafeGetWwebjsClient(instance);
+		const url = wwebjs ? await wwebjs?.getProfilePictureUrl(phone) : null;
+
+		return url;
+	}
 }
 
 export default new WhatsappService();
