@@ -42,6 +42,7 @@ class ChatsService {
 		const foundChats = await prismaService.wppChat.findMany({
 			where: {
 				isFinished: false,
+				instance: session.instance,
 				OR: [
 					{
 						userId: session.userId
