@@ -101,7 +101,6 @@ export default class CheckAvailableUsersStep implements Step {
 		}
 
 		const usersChats = await this.getUserChatsCount(sessions);
-		console.log("Chats dos Usuários:", usersChats);
 
 		if (usersChats.length === 0) {
 			ctx.logger.log("Nenhum usuário disponível encontrado.");

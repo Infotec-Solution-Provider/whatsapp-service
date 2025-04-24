@@ -1,8 +1,15 @@
 import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
 import prismaService from "./prisma.service";
-import { Customer, SessionData } from "@in.pulse-crm/sdk";
+import { Customer, SessionData, SocketEventType } from "@in.pulse-crm/sdk";
 import customersService from "./customers.service";
 import instancesService from "./instances.service";
+import socketService from "./socket.service";
+import messagesDistributionService from "./messages-distribution.service";
+import usersService from "./users.service";
+
+interface InpulseResult {
+	NOME: string;
+}
 
 interface ChatsFilters {
 	userId?: string;
@@ -10,6 +17,7 @@ interface ChatsFilters {
 }
 
 const FETCH_CUSTOMERS_QUERY = "SELECT * FROM clientes WHERE CODIGO IN (?)";
+const FETCH_RESULT_QUERY = "SELECT * FROM resultados WHERE CODIGO = ?";
 
 class ChatsService {
 	public async getChatForContact(
@@ -49,8 +57,11 @@ class ChatsService {
 				]
 			},
 			include: {
-				messages: includeMessages,
-				contact: includeContact
+				contact: {
+					include: {
+						WppMessage: true
+					}
+				}
 			}
 		});
 
@@ -58,11 +69,15 @@ class ChatsService {
 			const foundAdminChats = await prismaService.wppChat.findMany({
 				where: {
 					userId: -1,
-					sectorId: session.sectorId
+					sectorId: session.sectorId,
+					isFinished: false
 				},
 				include: {
-					messages: includeMessages,
-					contact: includeContact
+					contact: {
+						include: {
+							WppMessage: true
+						}
+					}
 				}
 			});
 
@@ -97,7 +112,7 @@ class ChatsService {
 			: [];
 
 		for (const foundChat of foundChats) {
-			const { messages: msgs, contact, ...chat } = foundChat;
+			const { contact, ...chat } = foundChat;
 
 			let customer: Customer | null = null;
 
@@ -109,8 +124,8 @@ class ChatsService {
 
 			chats.push({ ...chat, customer, contact: contact || null });
 
-			if (includeMessages) {
-				messages.push(...msgs);
+			if (includeMessages && contact) {
+				messages.push(...contact.WppMessage);
 			}
 		}
 
@@ -162,6 +177,39 @@ class ChatsService {
 		}
 
 		return chat;
+	}
+
+	public async finishChatById(
+		token: string,
+		session: SessionData,
+		id: number,
+		resultId: number
+	) {
+		const results = await instancesService.executeQuery<InpulseResult[]>(
+			session.instance,
+			FETCH_RESULT_QUERY,
+			[resultId]
+		);
+		const { instance, userId } = session;
+		usersService.setAuth(token);
+
+		console.log(session, id, resultId);
+		const user = await usersService.getUserById(userId);
+		const chat = await prismaService.wppChat.update({
+			where: { id },
+			data: {
+				isFinished: true,
+				finishedAt: new Date(),
+				finishedBy: userId,
+				resultId
+			}
+		});
+		const event = SocketEventType.WppChatFinished;
+		const finishMsg = `Atendimento finalizado por ${user.NOME}.\nResultado: ${results[0]?.NOME || "N/D"} `;
+		await messagesDistributionService.addSystemMessage(chat, finishMsg);
+		await socketService.emit(event, `${instance}:chat:${chat.id}`, {
+			chatId: chat.id
+		});
 	}
 }
 

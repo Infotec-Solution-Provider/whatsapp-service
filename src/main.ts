@@ -8,6 +8,7 @@ import whatsappService from "./services/whatsapp.service";
 import chatsController from "./controllers/chats.controller";
 import messagesController from "./controllers/messages.controller";
 import walletsController from "./controllers/wallets.controller";
+import resultsController from "./controllers/results.controller";
 
 whatsappService.buildClients();
 const app = express();
@@ -18,6 +19,7 @@ app.use(cors());
 app.use(chatsController.router);
 app.use(messagesController.router);
 app.use(walletsController.router);
+app.use(resultsController.router);
 
 app.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
 	console.error(err);
@@ -30,7 +32,8 @@ app.use(handleRequestError);
 logRoutes("", [
 	chatsController.router,
 	messagesController.router,
-	walletsController.router
+	walletsController.router,
+	resultsController.router
 ]);
 
 const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;

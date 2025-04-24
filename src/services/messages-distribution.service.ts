@@ -21,6 +21,7 @@ import {
 	WppMessageEventData
 } from "@in.pulse-crm/sdk";
 import chatsService from "./chats.service";
+import messagesService from "./messages.service";
 
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
@@ -232,10 +233,13 @@ class MessagesDistributionService {
 			const search =
 				type === "wwebjs" ? { wwebjsId: id } : { wabaId: id };
 
-			if (!("wwebjsId" in search) || !("wabaId" in search)) {
+			console.log(type, search, search);
+
+			if (!("wwebjsId" in search) && !("wabaId" in search)) {
 				return;
 			}
 
+			console.log("Foi1");
 			const message = await prismaService.wppMessage.update({
 				where: search,
 				data: {
@@ -252,6 +256,31 @@ class MessagesDistributionService {
 		} catch (err) {
 			const msg = sanitizeErrorMessage(err);
 			console.error(`Erro ao processar status da mensagem: ${msg}`);
+		}
+	}
+
+	public async addSystemMessage(
+		chat: WppChat,
+		text: string,
+		notify: boolean = true
+	) {
+		const message = await messagesService.insertMessage({
+			body: text,
+			from: "system",
+			to: "system",
+			instance: chat.instance,
+			status: "RECEIVED",
+			timestamp: Date.now().toString(),
+			type: "chat",
+			chatId: chat.id,
+			contactId: chat.contactId
+		});
+
+		if (notify) {
+			const chatRoom: SocketServerChatRoom = `${chat.instance}:chat:${chat.id}`;
+			socketService.emit(SocketEventType.WppMessage, chatRoom, {
+				message
+			});
 		}
 	}
 }

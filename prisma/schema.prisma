@@ -81,6 +81,8 @@ model WppChat {
     isFinished Boolean         @default(false) @map("is_finished")
     startedAt  DateTime?       @map("started_at")
     finishedAt DateTime?       @map("finished_at")
+    finishedBy Int?            @map("finished_by")
+    isSchedule Boolean         @default(false) @map("is_schedule")
     wppTags    WppTag[]
 
     contact WppContact? @relation(fields: [contactId], references: [id], onDelete: SetNull, onUpdate: Cascade)
@@ -94,12 +96,12 @@ model WppChat {
 }
 
 model WppTag {
-    id        Int    @id @default(autoincrement())
-    instance  String @map("instance")
+    id        Int       @id @default(autoincrement())
+    instance  String    @map("instance")
     name      String
-    color     String @map("bg_color")
+    color     String    @map("bg_color")
     wppChatId Int?
-    wppChats WppChat[]
+    wppChats  WppChat[]
 
     @@unique([name])
     @@map("tags")

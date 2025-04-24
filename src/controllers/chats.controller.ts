@@ -3,10 +3,6 @@ import chatsService from "../services/chats.service";
 import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 
-// Routes TODO:
-// /api/whatsapp/chats
-// /api/whatsapp/chats/:id
-
 class ChatsController {
 	constructor(public readonly router: Router) {
 		this.router.get(
@@ -18,6 +14,11 @@ class ChatsController {
 			"/api/whatsapp/chats/:id",
 			isAuthenticated,
 			this.getChatById
+		);
+		this.router.post(
+			"/api/whatsapp/chats/:id/finish",
+			isAuthenticated,
+			this.finishChatById
 		);
 	}
 
@@ -53,6 +54,32 @@ class ChatsController {
 		res.status(200).send({
 			message: "Chat retrieved successfully!",
 			data: chat
+		});
+	}
+
+	private async finishChatById(req: Request, res: Response) {
+		const { id } = req.params;
+		const resultId = req.body.resultId;
+
+		if (!id || isNaN(Number(id))) {
+			throw new BadRequestError("Chat ID is required!");
+		}
+
+		if (!resultId || isNaN(Number(resultId))) {
+			throw new BadRequestError("Result ID is required!");
+		}
+
+		const session = req.session;
+
+		await chatsService.finishChatById(
+			req.headers["authorization"] as string,
+			session,
+			Number(id),
+			+resultId
+		);
+
+		res.status(200).send({
+			message: "Chat finished successfully!"
 		});
 	}
 }

@@ -96,7 +96,6 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 	private handleQr(qr: string) {
 		const now = Date.now();
-		console.log(`Qr generated with delay: ${now - this.lastQrTimestamp}`);
 		this.lastQrTimestamp = now;
 		Logger.debug(`QR generated for ${this.instance} - ${this.name}`);
 		const room: SocketServerAdminRoom = `${this.instance}:${1}:admin`;

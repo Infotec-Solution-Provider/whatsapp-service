@@ -15,6 +15,7 @@ import messagesService from "./messages.service";
 import messagesDistributionService from "./messages-distribution.service";
 import ProcessingLogger from "../classes/processing-logger";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import instancesService from "./instances.service";
 
 interface SendMessageData {
 	sendAsChatOwner?: boolean;
@@ -256,6 +257,15 @@ class WhatsappService {
 			);
 			throw new BadRequestError("Erro ao enviar mensagem.", err);
 		}
+	}
+
+	public async getResults(instance: string) {
+		const query = "SELECT CODIGO AS id, NOME AS name FROM resultados";
+		const result = await instancesService.executeQuery<
+			{ id: number; name: string }[]
+		>(instance, query, []);
+
+		return result;
 	}
 }
 
