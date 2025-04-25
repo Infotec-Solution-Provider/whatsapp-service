@@ -62,7 +62,8 @@ class MessagesDistributionService {
 		try {
 			const sectors = await prismaService.wppSector.findMany({
 				where: {
-					wppInstanceId: clientId
+					wppInstanceId: clientId,
+					receiveChats: true
 				}
 			});
 			let sector: WppSector | null = null;
