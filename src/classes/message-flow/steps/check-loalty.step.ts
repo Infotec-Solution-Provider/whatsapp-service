@@ -1,6 +1,8 @@
 import instances from "../../../services/instances.service";
 import Step, { FinalStep, NextStep, StepContext } from "./step";
 import prismaService from "../../../services/prisma.service";
+import instancesService from "../../../services/instances.service";
+import { User } from "@in.pulse-crm/sdk";
 
 interface CustomerSchedules {
 	CODIGO: number;
@@ -73,6 +75,7 @@ export default class CheckLoaltyStep implements Step {
 		}
 
 		const isSameSector = await this.isUserInSameSector(
+			this.instance,
 			customerSchedule.OPERADOR
 		);
 		if (!isSameSector) {
@@ -100,11 +103,10 @@ export default class CheckLoaltyStep implements Step {
 		return result[0] || null;
 	}
 
-	private async isUserInSameSector(userId: number): Promise<boolean> {
-		const result = await prismaService.wppSectorUser.findUnique({
-			where: { userId }
-		});
-		return result?.sectorId === this.sectorId;
+	private async isUserInSameSector(instance: string, userId: number): Promise<boolean> {
+		const users = await instancesService.executeQuery<User[]>(instance, "SELECT * FROM users WHERE id = ?", [userId]);
+
+		return users.length > 0 && users[0]!.SETOR === this.sectorId;
 	}
 
 	private async createChat(ctx: StepContext, userId: number) {
