@@ -119,22 +119,10 @@ model WppSector {
 
     WppInstance   WppClient?      @relation(fields: [wppInstanceId], references: [id], onDelete: SetNull, onUpdate: Cascade)
     WppChat       WppChat[]
-    WppSectorUser WppSectorUser[]
     WppSchedule   WppSchedule[]
 
     @@unique([instance, name])
     @@map("sectors")
-}
-
-model WppSectorUser {
-    instance String @map("instance")
-    userId   Int    @map("user_id")
-    sectorId Int    @map("sector_id")
-
-    sector WppSector @relation(fields: [sectorId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-
-    @@unique([userId])
-    @@map("sectors_users")
 }
 
 model WppMessageFlow {
