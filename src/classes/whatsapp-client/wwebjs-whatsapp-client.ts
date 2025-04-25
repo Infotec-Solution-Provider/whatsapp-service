@@ -117,14 +117,29 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		}
 	}
 
-	private handleAuth() {
+	private async handleAuth() {
 		Logger.debug(`Authenticated for ${this.instance} - ${this.name}`);
-		const room: SocketServerAdminRoom = `${this.instance}:${1}:admin`;
 
-		socketService.emit(SocketEventType.WwebjsAuth, room, {
-			phone: this.name,
-			success: true
+		const client = await prismaService.wppClient.findUnique({
+			where: {
+				id: this.id
+			},
+			include: {
+				WppSector: true
+			}
 		});
+
+		if (client) {
+			Logger.debug(`QR generated for ${this.instance} - ${this.name}`);
+			client.WppSector.forEach((sector) => {
+				const room: SocketServerAdminRoom = `${this.instance}:${sector.id}:admin`;
+
+				socketService.emit(SocketEventType.WwebjsAuth, room, {
+					phone: this.name,
+					success: true
+				});
+			});
+		}
 	}
 
 	private async handleReady() {
