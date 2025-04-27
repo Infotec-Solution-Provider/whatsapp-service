@@ -96,6 +96,101 @@ model WppChat {
     @@index([userId])
     @@map("chats")
 }
+model InternalContact {
+  id         Int               @id @default(autoincrement())
+  name       String
+  phone      String            // pode ser userId ou operador
+  userId     Int?              @map("user_id")
+  instance   String            @map("instance")
+  isDeleted  Boolean           @default(false) @map("is_deleted")
+  isBlocked  Boolean           @default(false) @map("is_blocked")
+  isOnlyAdmin Boolean          @default(false) @map("is_only_admin")
+
+  // Relações
+  messages     InternalMessage[]
+  memberships  InternalChatMember[]
+  contactChats InternalChat[]     @relation("InternalChatContact")
+
+  @@unique([instance, phone])
+  @@index([userId, instance])
+  @@map("internalcontacts")
+}
+
+
+model InternalMessage {
+  id                 Int               @id @default(autoincrement())
+  instance           String            @map("instance")
+  from               String            // "me:<id>" ou "user:<id>"
+  to                 String            // para diretas, phone; para grupo, usa groupId tag
+  type               String
+  quotedId           Int?              @map("quoted_id")
+  internalchatId     Int?              @map("internalchat_id")
+  internalcontactId  Int?              @map("internalcontact_id")
+  body               String
+  timestamp          DateTime          @map("timestamp")
+  status             WppMessageStatus
+  fileId             Int?              @map("file_id")
+  fileName           String?           @map("file_name")
+  fileType           String?           @map("file_type")
+  fileSize           String?           @map("file_size")
+
+  // Relações
+  chat    InternalChat?    @relation(fields: [internalchatId],    references: [id])
+  contact InternalContact? @relation(fields: [internalcontactId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([from, to, internalchatId])
+  @@map("internalmessages")
+}
+
+model InternalChat {
+    id                  Int                   @id @default(autoincrement())
+    instance            String                @map("instance")
+    internalcontactId   Int?                  @map("internalcontact_id")
+    userId              Int?                  @map("user_id")
+    sectorId            Int?                  @map("sector_id")
+    avatarUrl           String?               @map("avatar_url")
+    isFinished          Boolean               @default(false) @map("is_finished")
+    startedAt           DateTime?             @map("started_at")
+    finishedAt          DateTime?             @map("finished_at")
+    finishedBy          Int?                  @map("finished_by")
+    isGroup             Boolean               @default(false) @map("is_group")
+
+    groupName           String?               @map("group_name")
+    groupDescription    String?               @map("group_description")
+    groupCreatedBy      Int?                  @map("group_created_by")
+    groupCreatedAt      DateTime?             @map("group_created_at")
+
+  	contact  InternalContact?  @relation("InternalChatContact", fields: [internalcontactId],    references: [id], onDelete: SetNull, onUpdate: Cascade)
+    sector       WppSector?                   @relation(fields: [sectorId],           references: [id], onDelete: SetNull, onUpdate: Cascade)
+    messages     InternalMessage[]
+    members      InternalChatMember[]
+    tags         InternalChatTag[]
+
+    @@index([userId])
+    @@map("internalchats")
+}
+model InternalChatMember {
+  internalchatId    Int
+  internalcontactId Int
+  joinedAt          DateTime @default(now()) @map("joined_at")
+  lastReadAt        DateTime?               @map("last_read_at")
+
+  chat    InternalChat    @relation(fields: [internalchatId],    references: [id], onDelete: Cascade)
+  contact InternalContact @relation(fields: [internalcontactId], references: [id], onDelete: Cascade)
+
+  @@id([internalchatId, internalcontactId])
+  @@map("internal_chat_members")
+}
+model InternalChatTag {
+  internalchatId Int
+  tagId          Int
+
+  chat InternalChat @relation(fields: [internalchatId], references: [id], onDelete: Cascade)
+  tag  WppTag       @relation(fields: [tagId],           references: [id], onDelete: Cascade)
+
+  @@id([internalchatId, tagId])
+  @@map("internal_chat_tags")
+}
 
 model WppTag {
     id        Int       @id @default(autoincrement())
@@ -107,6 +202,7 @@ model WppTag {
 
     @@unique([name])
     @@map("tags")
+    InternalChatTag InternalChatTag[]
 }
 
 model WppSector {
@@ -123,6 +219,7 @@ model WppSector {
 
     @@unique([instance, name])
     @@map("sectors")
+    InternalChat InternalChat[]
 }
 
 model WppMessageFlow {
