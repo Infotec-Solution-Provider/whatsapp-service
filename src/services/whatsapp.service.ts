@@ -29,7 +29,7 @@ interface SendMessageData {
 	fileId?: number;
 }
 
-function getMessageType(
+export function getMessageType(
 	fileType: string,
 	isAudio: boolean,
 	isDocument: boolean

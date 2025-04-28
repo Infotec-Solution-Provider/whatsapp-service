@@ -12,7 +12,7 @@ import resultsController from "./controllers/results.controller";
 import contactsController from "./controllers/contacts.controller";
 import sectorsController from "./controllers/sectors.controller";
 import schedulesController from "./controllers/schedules.controller";
-import internalchatsController from "./controllers/internalchats.controller";
+import internalchatsController from "./controllers/internal-chats.controller";
 
 whatsappService.buildClients();
 const app = express();

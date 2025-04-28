@@ -187,9 +187,14 @@ class MessagesDistributionService {
 		try {
 			process.log("Transmitindo mensagem via socket.");
 			const instance = message.instance;
+
+			if (message.chatId === null) {
+				process.log("Mensagem não possui chatId.");
+				return;
+			}
+
 			const room: SocketServerChatRoom = `${instance}:chat:${message.chatId}`;
 			const data: WppMessageEventData = { message };
-
 			await socketService.emit(SocketEventType.WppMessage, room, data);
 			process.log(`Mensagem transmitida para a sala: /${room}/ room!`);
 		} catch (err) {
@@ -258,6 +263,9 @@ class MessagesDistributionService {
 					status
 				}
 			});
+			if (message.chatId === null) {
+				return;
+			}
 
 			const chatRoom: SocketServerChatRoom = `${message.instance}:chat:${message.chatId}`;
 			socketService.emit(SocketEventType.WppMessageStatus, chatRoom, {
