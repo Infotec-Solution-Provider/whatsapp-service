@@ -187,7 +187,7 @@ class InternalChatsService {
 		try {
 			let message = {
 				instance: session.instance,
-				status: "PENDING",
+				status: "RECEIVED",
 				timestamp: Date.now().toString(),
 				from: `user:${session.userId}`,
 				type: "chat",
