@@ -1,9 +1,10 @@
 import { Request, Response, Router } from "express";
 import walletsService from "../services/wallets.service";
+import isAuthenticated from "../middlewares/is-authenticated.middleware";
 
 class WalletsController {
 	constructor(public readonly router: Router) {
-		this.router.post("/api/wallets", this.createWallet);
+		this.router.post("/api/wallets", isAuthenticated, this.createWallet);
 		this.router.delete("/api/wallets/:id", this.deleteWallet);
 		this.router.put("/api/wallets/:id/name", this.updateWalletName);
 		this.router.post("/api/wallets/:walletId/users", this.addUserToWallet);
@@ -24,14 +25,15 @@ class WalletsController {
 	}
 
 	private async createWallet(req: Request, res: Response) {
-		const { instance, name } = req.body;
-		if (!instance || !name) {
-			res.status(400).json({ message: "Missing required fields: instance, name" });
+		const name = req.body.data.instance
+
+		if (!name) {
+			res.status(400).json({ message: "Missing required fields: name" });
 			return;
 		}
 
 		try {
-			const wallet = await walletsService.createWallet(instance, name);
+			const wallet = await walletsService.createWallet(req.session.instance, name);
 			res.status(201).json({ message: "Wallet created successfully", data: wallet });
 		} catch (error) {
 			this.handleError(res, error, "Error creating wallet");
@@ -42,11 +44,12 @@ class WalletsController {
 		const { id } = req.params;
 
 		try {
-			const wallet = await walletsService.findWalletById(Number(id))
+			const wallet = await walletsService.getWalletById(Number(id))
 			if (!wallet) {
 				res.status(404).json({ message: "Wallet not found" });
 				return;
 			}
+			await walletsService.deleteWallet(Number(id))
 			res.status(200).json({ message: "Wallet deleted successfully" });
 		} catch (error) {
 			this.handleError(res, error, "Error deleting wallet");
@@ -62,7 +65,7 @@ class WalletsController {
 		}
 
 		try {
-			const existingWallet = await walletsService.findWalletById(Number(id));
+			const existingWallet = await walletsService.getWalletById(Number(id));
 			if (!existingWallet) {
 				res.status(404).json({ message: "Wallet not found" });
 				return;
@@ -83,7 +86,7 @@ class WalletsController {
 		}
 
 		try {
-			const existingWallet = await walletsService.findWalletById(Number(walletId));
+			const existingWallet = await walletsService.getWalletById(Number(walletId));
 			if (!existingWallet) {
 				res.status(404).json({ message: "Wallet not found" });
 				return;
@@ -99,13 +102,13 @@ class WalletsController {
 	private removeUserFromWallet = async (req: Request, res: Response) => {
 		const { walletId, userId } = req.params;
 		try {
-			const existingWallet = await walletsService.findWalletById(Number(walletId));
+			const existingWallet = await walletsService.getWalletById(Number(walletId));
 			if (!existingWallet) {
 				res.status(404).json({ message: "Wallet not found" });
 				return;
 			}
 
-			const existingUser = await walletsService.findUserInWallet(Number(walletId), Number(userId))
+			const existingUser = await walletsService.getUserInWallet(Number(walletId), Number(userId))
 			if (!existingUser) {
 				res.status(404).json({ message: "User not found in wallet" });
 				return;
@@ -144,7 +147,7 @@ class WalletsController {
 	private getWalletUsers = async (req: Request, res: Response) => {
 		const { id } = req.params;
 		try {
-			const existingWallet = await walletsService.findWalletById(Number(id));
+			const existingWallet = await walletsService.getWalletById(Number(id));
 			if (!existingWallet) {
 				res.status(404).json({ message: "Wallet not found" });
 				return;
@@ -157,7 +160,6 @@ class WalletsController {
 		}
 	};
 
-<<<<<<< HEAD
 	private getUserInWallet = async (req: Request, res: Response) => {
 		const { walletId, userId } = req.params;
 		try {
@@ -167,40 +169,11 @@ class WalletsController {
 			);
 
 			if (!relation) {
-=======
-	private getUserWallets = async (req: Request, res: Response) => {
-		const { userId } = req.params;
-		const { instance } = req.query;
-
-		if (!instance) {
-			res.status(400).json({ message: "Missing instance query parameter" });
-			return;
-		}
-
-		try {
-			const wallets = await walletsService.getUserWallets(String(instance), Number(userId))
-			res.status(200).json({ data: wallets });
-		} catch (error) {
-			this.handleError(res, error, "Error fetching user wallets");
-		}
-	}
-
-	private findUserInWallet = async (req: Request, res: Response) => {
-		const { walletId, userId } = req.params;
-		try {
-			const existingWallet = await walletsService.findWalletById(Number(walletId));
-			if (!existingWallet) {
-				res.status(404).json({ message: "Wallet not found" });
-				return;
-			}
-			const user = await walletsService.findUserInWallet(Number(walletId), Number(userId))
-			if (!user) {
->>>>>>> 622e6d66d37b78ee1bb9d7bca2b3bac0eeb220dc
 				res.status(404).json({ message: "User not found in wallet" });
 				return;
 			}
 
-			res.status(200).json({ data: user });
+			res.status(200).json({ data: userId });
 		} catch (error) {
 			this.handleError(res, error, "Error finding user in wallet");
 		}

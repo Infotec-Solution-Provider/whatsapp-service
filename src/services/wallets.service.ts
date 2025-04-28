@@ -36,11 +36,15 @@ class WalletsService {
 	}
 
 	public async removeUserFromWallet(walletId: number, userId: number) {
-		return await prismaService.wppWalletUser.delete({
+		await prismaService.wppWalletUser.delete({
 			where: {
-				walletId_userId: { walletId, userId }
+				walletId_userId: {
+					walletId,
+					userId
+				}
 			}
 		});
+		return this.getWalletById(walletId)
 	}
 
 	public async getWallets() {
@@ -75,7 +79,7 @@ class WalletsService {
 			id: wallet.id,
 			instance: wallet.instance,
 			name: wallet.name,
-			userIds: wallet.WppWalletUser.map((rel) => rel.userId),
+			userIds: wallet.WppWalletUser.map((rel) => rel.userId) || [],
 		};
 	}
 
