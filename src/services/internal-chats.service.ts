@@ -42,15 +42,19 @@ class InternalChatsService {
 				isGroup,
 				groupName,
 				creatorId: session.userId,
-				instance: session.instance
+				instance: session.instance,
+				participants: {
+					createMany: {
+						data: participantIds.map((id) => ({
+							userId: id,
+							joinedAt: new Date()
+						}))
+					}
+				}
+			},
+			include: {
+				participants: true
 			}
-		});
-		await prismaService.internalChatMember.createMany({
-			data: participantIds.map((id) => ({
-				userId: id,
-				internalChatId: internalChat.id
-			})),
-			skipDuplicates: true
 		});
 
 		participantIds.forEach(async (id) => {
@@ -67,12 +71,14 @@ class InternalChatsService {
 				}
 			);
 		});
+
+		return internalChat;
 	}
 
 	// Sobrescreve os participantes de um grupo interno
 	public async updateInternalChatParticipants(
 		groupId: number,
-		participantIds: number[]
+		{ name, participants }: { name: string; participants: number[] }
 	) {
 		const currentParticipants =
 			await prismaService.internalChatMember.findMany({
@@ -81,16 +87,17 @@ class InternalChatsService {
 				}
 			});
 
-		const idsToAdd = participantIds.filter(
+		const idsToAdd = participants.filter(
 			(p) => !currentParticipants.some((c) => c.userId === p)
 		);
 		const idsToRemove = currentParticipants.filter(
-			(p) => !participantIds.includes(p.userId)
+			(p) => !participants.includes(p.userId)
 		);
 
 		const group = await prismaService.internalChat.update({
 			where: { id: groupId },
 			data: {
+				groupName: name,
 				participants: {
 					createMany: {
 						data: idsToAdd.map((id) => ({
@@ -114,7 +121,6 @@ class InternalChatsService {
 
 	// Obtém todos os chats internos do usuário
 	public async getInternalChatsBySession(session: SessionData) {
-		console.log("Obtendo chats internos do usuário", session.userId);
 		const result = await prismaService.internalChat.findMany({
 			where: {
 				participants: {
@@ -138,8 +144,25 @@ class InternalChatsService {
 			});
 		});
 
-		console.log("Chats internos do usuário", { chats, messages });
 		return { chats, messages };
+	}
+
+	public async getInternalGroups(session: SessionData) {
+		const result = await prismaService.internalChat.findMany({
+			where: {
+				instance: session.instance,
+				isGroup: true,
+				isFinished: false
+			},
+			include: {
+				participants: true
+			},
+			orderBy: {
+				startedAt: "desc"
+			}
+		});
+
+		return result;
 	}
 
 	// Obtém todos os chats internos, podendo filtrar
