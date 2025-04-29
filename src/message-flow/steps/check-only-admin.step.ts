@@ -1,4 +1,4 @@
-import prismaService from "../../../services/prisma.service";
+import prismaService from "../../services/prisma.service";
 import Step, { FinalStep, NextStep, StepContext } from "./step";
 
 interface CheckOnlyAdminStepOptions {

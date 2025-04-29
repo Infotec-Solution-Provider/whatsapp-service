@@ -1,7 +1,7 @@
-import instances from "../../../services/instances.service";
+import instances from "../../services/instances.service";
 import Step, { FinalStep, NextStep, StepContext } from "./step";
-import prismaService from "../../../services/prisma.service";
-import instancesService from "../../../services/instances.service";
+import prismaService from "../../services/prisma.service";
+import instancesService from "../../services/instances.service";
 import { User } from "@in.pulse-crm/sdk";
 
 interface CustomerSchedules {

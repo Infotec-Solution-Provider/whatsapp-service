@@ -1,4 +1,4 @@
-import prismaService from "../../services/prisma.service";
+import prismaService from "../services/prisma.service";
 import MessageFlow from "./message-flow";
 import CheckAvailableUsersStep from "./steps/check-available-users.step";
 import CheckLoaltyStep from "./steps/check-loalty.step";

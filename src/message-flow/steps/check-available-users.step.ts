@@ -1,6 +1,6 @@
 import { UserOnlineSession } from "@in.pulse-crm/sdk";
-import authService from "../../../services/auth.service";
-import prismaService from "../../../services/prisma.service";
+import authService from "../../services/auth.service";
+import prismaService from "../../services/prisma.service";
 import Step, { FinalStep, NextStep, StepContext } from "./step";
 
 interface CheckAvailableUsersStepOptions {

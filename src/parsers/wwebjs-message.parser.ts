@@ -1,11 +1,11 @@
 import WAWebJS from "whatsapp-web.js";
-import filesService from "../../services/files.service";
 import { FileDirType } from "@in.pulse-crm/sdk";
-import CreateMessageDto from "../../dtos/create-message.dto";
-import prismaService from "../../services/prisma.service";
-import ProcessingLogger from "../processing-logger";
 import { WppMessageStatus } from "@prisma/client";
 import mime from "mime-types";
+import ProcessingLogger from "../utils/processing-logger";
+import CreateMessageDto from "../dtos/create-message.dto";
+import prismaService from "../services/prisma.service";
+import filesService from "../services/files.service";
 
 class WWEBJSMessageParser {
 	public static async parse(
@@ -98,7 +98,7 @@ class WWEBJSMessageParser {
 		let fileName = wwebjsFile.filename;
 		let mimeType = wwebjsFile.mimetype || "application/octet-stream";
 
-		if(!fileName) {
+		if (!fileName) {
 			const ext = mime.extension(mimeType);
 			fileName = `${message.type}.${ext}`;
 		}

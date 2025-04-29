@@ -1,4 +1,4 @@
-import ProcessingLogger from "../processing-logger";
+import ProcessingLogger from "../utils/processing-logger";
 import Step, { StepContext } from "./steps/step";
 import { WppChat, WppContact, WppMessage } from "@prisma/client";
 

@@ -1,16 +1,17 @@
 import "dotenv/config";
 import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
 import WhatsappClient from "./whatsapp-client";
-import { SendMessageOptions } from "../../types/whatsapp-instance.types";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { randomUUID } from "node:crypto";
-import socketService from "../../services/socket.service";
+
 import { SocketEventType, SocketServerAdminRoom } from "@in.pulse-crm/sdk";
 import MessageParser from "../parsers/wwebjs-message.parser";
-import messagesService from "../../services/messages.service";
-import ProcessingLogger from "../processing-logger";
-import messagesDistributionService from "../../services/messages-distribution.service";
-import prismaService from "../../services/prisma.service";
+import prismaService from "../services/prisma.service";
+import socketService from "../services/socket.service";
+import ProcessingLogger from "../utils/processing-logger";
+import messagesService from "../services/messages.service";
+import messagesDistributionService from "../services/messages-distribution.service";
+import { SendMessageOptions } from "../types/whatsapp-instance.types";
 
 const PUPPETEER_ARGS = {
 	headless: true,

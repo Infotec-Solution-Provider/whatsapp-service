@@ -4,12 +4,12 @@ import {
 	WppMessageStatus,
 	WppSector
 } from "@prisma/client";
-import MessageFlow from "../classes/message-flow/message-flow";
-import MessageFlowFactory from "../classes/message-flow/message-flow.factory";
+import MessageFlow from "../message-flow/message-flow";
+import MessageFlowFactory from "../message-flow/message-flow.factory";
 import prismaService from "./prisma.service";
 import contactsService from "./contacts.service";
 import { Formatter, sanitizeErrorMessage } from "@in.pulse-crm/utils";
-import ProcessingLogger from "../classes/processing-logger";
+import ProcessingLogger from "../utils/processing-logger";
 import socketService from "./socket.service";
 import {
 	SocketEventType,

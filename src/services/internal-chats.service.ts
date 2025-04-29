@@ -7,7 +7,7 @@ import {
 	SocketServerUserRoom
 } from "@in.pulse-crm/sdk";
 import socketService from "./socket.service";
-import ProcessingLogger from "../classes/processing-logger";
+import ProcessingLogger from "../utils/processing-logger";
 import filesService from "./files.service";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { BadRequestError } from "@rgranatodutra/http-errors";
