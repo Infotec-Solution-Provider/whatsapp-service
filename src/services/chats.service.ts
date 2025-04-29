@@ -261,11 +261,13 @@ class ChatsService {
 		const chats= await prismaService.wppChat.findUnique({
 			where: { id },
 		});
-		if (!chats || chats.userId !== userId) {
-			throw new Error("Você não pode transferir esse atendimento!");
+		if (!chats) {
 			throw new Error("Chat não encontrado!");
 		}
-		const user = await usersService.getUserById(chats?.userId);
+		if (!chats.userId) {
+			throw new Error("Chat não possui userId!");
+		}
+		const user = await usersService.getUserById(chats.userId);
 
 		const chat = await prismaService.wppChat.update({
 			where: { id },
