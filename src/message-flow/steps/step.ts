@@ -1,8 +1,7 @@
-import { WppChat, WppContact, WppMessage } from "@prisma/client";
+import { WppChatType, WppContact } from "@prisma/client";
 import ProcessingLogger from "../../utils/processing-logger";
 
 export interface StepContext {
-	message: WppMessage;
 	contact: WppContact;
 	logger: ProcessingLogger;
 }
@@ -14,12 +13,19 @@ export interface NextStep {
 
 export interface FinalStep {
 	isFinal: true;
-	chat: WppChat;
+	chatData: ChatPayload;
+}
+
+export interface ChatPayload {
+	instance: string;
+	type: WppChatType;
+	userId?: number | null;
+	walletId?: number | null;
+	sectorId: number;
+	contactId: number;
 }
 
 export default abstract class Step {
 	public abstract id: number;
-	public abstract run(
-		context: StepContext
-	): Promise<NextStep | FinalStep>;
+	public abstract run(context: StepContext): Promise<NextStep | FinalStep>;
 }

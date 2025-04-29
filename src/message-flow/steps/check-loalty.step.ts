@@ -82,13 +82,17 @@ export default class CheckLoaltyStep implements Step {
 			return this.nextStep(ctx, "O usuário não está no mesmo setor.");
 		}
 
-		const generatedChat = await this.createChat(
-			ctx,
-			customerSchedule.OPERADOR
-		);
-		ctx.logger.log("Chat criado com sucesso.", generatedChat);
+		const chatData = {
+			instance: this.instance,
+			type: "RECEPTIVE",
+			userId: customerSchedule.OPERADOR,
+			contactId: ctx.contact.id,
+			sectorId: this.sectorId
+		};
 
-		return { chat: generatedChat, isFinal: true };
+		ctx.logger.log("Chat criado com sucesso.", chatData);
+
+		return { chatData, isFinal: true };
 	}
 
 	private async fetchCustomerSchedule(
@@ -103,22 +107,17 @@ export default class CheckLoaltyStep implements Step {
 		return result[0] || null;
 	}
 
-	private async isUserInSameSector(instance: string, userId: number): Promise<boolean> {
-		const users = await instancesService.executeQuery<User[]>(instance, "SELECT * FROM users WHERE id = ?", [userId]);
+	private async isUserInSameSector(
+		instance: string,
+		userId: number
+	): Promise<boolean> {
+		const users = await instancesService.executeQuery<User[]>(
+			instance,
+			"SELECT * FROM users WHERE id = ?",
+			[userId]
+		);
 
 		return users.length > 0 && users[0]!.SETOR === this.sectorId;
-	}
-
-	private async createChat(ctx: StepContext, userId: number) {
-		return prismaService.wppChat.create({
-			data: {
-				instance: this.instance,
-				type: "RECEPTIVE",
-				userId: userId,
-				contactId: ctx.contact.id,
-				sectorId: this.sectorId
-			}
-		});
 	}
 
 	private nextStep(ctx: StepContext, logMessage: string): NextStep {

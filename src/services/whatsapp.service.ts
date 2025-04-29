@@ -387,10 +387,16 @@ class WhatsappService {
 	}
 
 	public async getProfilePictureUrl(instance: string, phone: string) {
-		const wwebjs = this.unsafeGetWwebjsClient(instance);
-		const url = wwebjs ? await wwebjs?.getProfilePictureUrl(phone) : null;
+		try {
+			const wwebjs = this.unsafeGetWwebjsClient(instance);
+			const url = wwebjs
+				? await wwebjs?.getProfilePictureUrl(phone)
+				: null;
 
-		return url;
+			return url;
+		} catch {
+			return null;
+		}
 	}
 }
 

@@ -22,14 +22,18 @@ const FETCH_RESULT_QUERY = "SELECT * FROM resultados WHERE CODIGO = ?";
 
 class ChatsService {
 	public async getChatForContact(
-		sectorId: number,
+		clientId: number,
 		contact: WppContact
 	): Promise<WppChat | null> {
 		return await prismaService.wppChat.findFirst({
 			where: {
 				contactId: contact.id,
-				sectorId: sectorId,
-				isFinished: false
+				isFinished: false,
+				sector: {
+					WppInstance: {
+						id: clientId
+					}
+				}
 			}
 		});
 	}
@@ -135,47 +139,49 @@ class ChatsService {
 	}
 	public async getChatsMonitor(session: SessionData) {
 		const foundChats = await prismaService.wppChat.findMany({
-		  where: {
-			instance: session.instance,
-			sectorId: session.sectorId,
-			isFinished: false
-		  },
-		  include: {
-			contact: true
-		  }
+			where: {
+				instance: session.instance,
+				sectorId: session.sectorId,
+				isFinished: false
+			},
+			include: {
+				contact: true
+			}
 		});
-	  
+
 		const customerIds = foundChats
-		  .filter(chat => typeof chat.contact?.customerId === "number")
-		  .map(chat => chat.contact!.customerId!);
-	  
+			.filter((chat) => typeof chat.contact?.customerId === "number")
+			.map((chat) => chat.contact!.customerId!);
+
 		const customers = customerIds.length
-		  ? await instancesService.executeQuery<Array<Customer>>(
-			  session.instance,
-			  FETCH_CUSTOMERS_QUERY,
-			  [customerIds]
-			)
-		  : [];
-	  
-		const monitorChats = foundChats.map(chat => {
-		  const customer = customers.find(c => c.CODIGO === chat.contact?.customerId);
-	  
-		  return {
-			id: chat.id.toString(),
-			erpCode: customer?.CODIGO?.toString() || "",
-			companyName: customer?.RAZAO || "",
-			contactName: chat.contact?.name || "",
-			whatsappNumber: chat.contact?.name || "",
-			sectorName: customer?.SETOR || "",
-			attendantName: chat.userId || "",
-			startDate: chat.startedAt?.toISOString() || "",
-			endDate: chat.finishedAt?.toISOString() || "",
-			result: chat.resultId || ""
-		  };
+			? await instancesService.executeQuery<Array<Customer>>(
+					session.instance,
+					FETCH_CUSTOMERS_QUERY,
+					[customerIds]
+				)
+			: [];
+
+		const monitorChats = foundChats.map((chat) => {
+			const customer = customers.find(
+				(c) => c.CODIGO === chat.contact?.customerId
+			);
+
+			return {
+				id: chat.id.toString(),
+				erpCode: customer?.CODIGO?.toString() || "",
+				companyName: customer?.RAZAO || "",
+				contactName: chat.contact?.name || "",
+				whatsappNumber: chat.contact?.name || "",
+				sectorName: customer?.SETOR || "",
+				attendantName: chat.userId || "",
+				startDate: chat.startedAt?.toISOString() || "",
+				endDate: chat.finishedAt?.toISOString() || "",
+				result: chat.resultId || ""
+			};
 		});
 		return monitorChats;
-	  }
-	  
+	}
+
 	public async getChats(filters: ChatsFilters) {
 		const whereClause: Prisma.WppChatWhereInput = {};
 
@@ -228,13 +234,11 @@ class ChatsService {
 		id: number,
 		userId: number
 	) {
-
 		const { instance } = session;
 		usersService.setAuth(token);
 
-
-		const chats= await prismaService.wppChat.findUnique({
-			where: { id },
+		const chats = await prismaService.wppChat.findUnique({
+			where: { id }
 		});
 		if (!chats) {
 			throw new Error("Chat não encontrado!");
@@ -247,7 +251,7 @@ class ChatsService {
 		const chat = await prismaService.wppChat.update({
 			where: { id },
 			data: {
-				userId,
+				userId
 			}
 		});
 		const event = SocketEventType.WppChatFinished;
@@ -257,6 +261,21 @@ class ChatsService {
 			chatId: chat.id
 		});
 	}
+
+/* 	public async botTransferAttendance(chat: WppChat, targetUserId: number) {
+		const chat = await prismaService.wppChat.update({
+			where: { id },
+			data: {
+				userId
+			}
+		});
+		const event = SocketEventType.WppChatFinished;
+		const transferMsg = `Atendimento tranferido por ${user.NOME}.`;
+		await messagesDistributionService.addSystemMessage(chat, transferMsg);
+		await socketService.emit(event, `${instance}:chat:${chat.id}`, {
+			chatId: chat.id
+		});
+	} */
 
 	public async finishChatById(
 		token: string,

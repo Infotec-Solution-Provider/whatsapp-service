@@ -64,21 +64,6 @@ export default class CheckAvailableUsersStep implements Step {
 	}
 
 	/**
-	 * Cria um novo chat para o usuário.
-	 */
-	private async assignChatToUser(ctx: StepContext, userId: number) {
-		return prismaService.wppChat.create({
-			data: {
-				instance: this.instance,
-				userId,
-				sectorId: this.sectorId,
-				type: "RECEPTIVE",
-				contactId: ctx.contact.id,
-			}
-		});
-	}
-
-	/**
 	 * Obtém as sessões online filtradas pelo setor.
 	 */
 	private async getSectorOnlineSessions(): Promise<UserOnlineSession[]> {
@@ -108,10 +93,20 @@ export default class CheckAvailableUsersStep implements Step {
 		}
 
 		const { userId } = usersChats[0]!;
-		const chat = await this.assignChatToUser(ctx, userId);
 
-		ctx.logger.log(`Usuário ${userId} será atribuído ao chat.`, chat);
+		const chatData = {
+			instance: this.instance,
+			userId,
+			sectorId: this.sectorId,
+			type: "RECEPTIVE",
+			contactId: ctx.contact.id
+		};
 
-		return { isFinal: true, chat };
+		ctx.logger.log(`Usuário ${userId} será atribuído ao chat.`, chatData);
+
+		return {
+			isFinal: true,
+			chatData
+		};
 	}
 }
