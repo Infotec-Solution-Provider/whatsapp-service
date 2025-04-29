@@ -13,10 +13,12 @@ class ContactsService {
 		phone: string
 	) {
 		console.log("data", instance, name, phone);
-		const contact = await prismaService.wppContact.findFirst({
+		const contact = await prismaService.wppContact.findUnique({
 			where: {
-				instance,
-				phone
+				instance_phone: {
+					instance,
+					phone
+				}
 			}
 		});
 
@@ -35,7 +37,7 @@ class ContactsService {
 
 	public async getContactsWithCustomer(instance: string, token: string) {
 		const chats = await chatsService.getChats({ isFinished: "false" });
-		usersService
+		usersService;
 		usersService.setAuth(token);
 
 		const users = await usersService
