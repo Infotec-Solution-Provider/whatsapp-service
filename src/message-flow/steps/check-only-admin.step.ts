@@ -1,5 +1,4 @@
-import prismaService from "../../services/prisma.service";
-import Step, { FinalStep, NextStep, StepContext } from "./step";
+import Step, { ChatPayload, FinalStep, NextStep, StepContext } from "./step";
 
 interface CheckOnlyAdminStepOptions {
 	instance: string;
@@ -32,7 +31,7 @@ export default class CheckOnlyAdminStep implements Step {
 		if (ctx.contact.isOnlyAdmin) {
 			ctx.logger.log("O contato é apenas administrador.");
 
-			const chatData = {
+			const chatData: ChatPayload = {
 				instance: this.instance,
 				type: "RECEPTIVE",
 				userId: -1,
