@@ -25,7 +25,7 @@ class MessagesService {
 		instance: string,
 		contactId: number
 	) {
-		const res = await prismaService.wppMessage.updateMany({
+		await prismaService.wppMessage.updateMany({
 			where: {
 				OR: [
 					{
