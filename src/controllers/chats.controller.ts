@@ -54,13 +54,8 @@ class ChatsController {
 	}
 
 	private async getChatsMonitor(req: Request, res: Response) {
-		const includeMessages = Boolean(req.query["messages"] === "true");
-		const includeContact = Boolean(req.query["contact"] === "true");
-
 		const data = await chatsService.getChatsMonitor(
 			req.session,
-			includeMessages,
-			includeContact
 		);
 
 		res.status(200).send({

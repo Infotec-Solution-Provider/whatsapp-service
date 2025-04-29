@@ -133,74 +133,49 @@ class ChatsService {
 
 		return { chats, messages };
 	}
-	public async getChatsMonitor(
-		session: SessionData,
-		includeMessages = true,
-		includeContact = true
-	) {
+	public async getChatsMonitor(session: SessionData) {
 		const foundChats = await prismaService.wppChat.findMany({
-			where: {
-				instance: session.instance,
-				sectorId: session.sectorId,
-				isFinished: false
-			},
-			include: {
-				contact: {
-					include: {
-						WppMessage: true
-					}
-				}
-			}
+		  where: {
+			instance: session.instance,
+			sectorId: session.sectorId,
+			isFinished: false
+		  },
+		  include: {
+			contact: true
+		  }
 		});
-
-		const chats: Array<
-			WppChat & { customer: Customer | null; contact: WppContact | null }
-		> = [];
-		const messages: Array<WppMessage> = [];
-		const customerIds = includeContact
-			? foundChats
-					.filter(
-						(chat) => typeof chat.contact?.customerId === "number"
-					)
-					.map((c) => c.contact!.customerId!)
-			: [];
-
+	  
+		const customerIds = foundChats
+		  .filter(chat => typeof chat.contact?.customerId === "number")
+		  .map(chat => chat.contact!.customerId!);
+	  
 		const customers = customerIds.length
-			? await instancesService.executeQuery<Array<Customer>>(
-					session.instance,
-					FETCH_CUSTOMERS_QUERY,
-					[
-						foundChats
-							.filter(
-								(chat) =>
-									typeof chat.contact?.customerId === "number"
-							)
-							.map((c) => c.contact!.customerId!)
-					]
-				)
-			: [];
-
-		for (const foundChat of foundChats) {
-			const { contact, ...chat } = foundChat;
-
-			let customer: Customer | null = null;
-
-			if (includeContact && typeof contact?.customerId == "number") {
-				customer =
-					customers.find((c) => c.CODIGO === contact.customerId) ||
-					null;
-			}
-
-			chats.push({ ...chat, customer, contact: contact || null });
-
-			if (includeMessages && contact) {
-				messages.push(...contact.WppMessage);
-			}
-		}
-
-		return { chats, messages };
-	}
-
+		  ? await instancesService.executeQuery<Array<Customer>>(
+			  session.instance,
+			  FETCH_CUSTOMERS_QUERY,
+			  [customerIds]
+			)
+		  : [];
+	  
+		const monitorChats = foundChats.map(chat => {
+		  const customer = customers.find(c => c.CODIGO === chat.contact?.customerId);
+	  
+		  return {
+			id: chat.id.toString(),
+			erpCode: customer?.CODIGO?.toString() || "",
+			companyName: customer?.RAZAO || "",
+			contactName: chat.contact?.name || "",
+			whatsappNumber: chat.contact?.name || "",
+			sectorName: customer?.SETOR || "",
+			attendantName: chat.userId || "",
+			startDate: chat.startedAt?.toISOString() || "",
+			endDate: chat.finishedAt?.toISOString() || "",
+			result: chat.resultId || ""
+		  };
+		});
+		return monitorChats;
+	  }
+	  
 	public async getChats(filters: ChatsFilters) {
 		const whereClause: Prisma.WppChatWhereInput = {};
 
