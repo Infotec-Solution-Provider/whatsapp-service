@@ -1,12 +1,12 @@
-import CreateMessageDto from "../../dtos/create-message.dto";
-import { SendMessageOptions } from "../../types/whatsapp-instance.types";
+import CreateMessageDto from "../dtos/create-message.dto";
+import { SendMessageOptions } from "../types/whatsapp-instance.types";
 import WhatsappClient from "./whatsapp-client";
 
 class WABAWhatsappClient implements WhatsappClient {
 	constructor(
 		public readonly instance: string,
 		public readonly name: string,
-		public readonly phone: string,
+		public readonly phone: string
 	) {}
 
 	public async getProfilePictureUrl(_: string): Promise<string | null> {

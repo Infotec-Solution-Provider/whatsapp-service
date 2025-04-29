@@ -79,7 +79,7 @@ model WppChat {
     sectorId   Int?            @map("sector_id")
     type       WppChatType
     priority   WppChatPriority @default(NORMAL)
-    avatarUrl  String?         @map("avatar_url")
+    avatarUrl  String?         @map("avatar_url") @db.Text
     isFinished Boolean         @default(false) @map("is_finished")
     startedAt  DateTime?       @map("started_at")
     finishedAt DateTime?       @map("finished_at")

@@ -1,10 +1,9 @@
-import { WppClientType } from "@prisma/client";
-import WhatsappClient from "../classes/whatsapp-client/whatsapp-client";
-import WWEBJSWhatsappClient from "../classes/whatsapp-client/wwebjs-whatsapp-client";
+import { WppChat, WppClientType } from "@prisma/client";
+
 import prismaService from "./prisma.service";
 import { FileDirType, SessionData } from "@in.pulse-crm/sdk";
 import { BadRequestError } from "@rgranatodutra/http-errors";
-import OpusAudioConverter from "../classes/opus-audio-converter";
+import OpusAudioConverter from "../utils/opus-audio-converter";
 import {
 	SendFileOptions,
 	SendMessageOptions
@@ -13,9 +12,17 @@ import filesService from "./files.service";
 import CreateMessageDto from "../dtos/create-message.dto";
 import messagesService from "./messages.service";
 import messagesDistributionService from "./messages-distribution.service";
-import ProcessingLogger from "../classes/processing-logger";
+import ProcessingLogger from "../utils/processing-logger";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import instancesService from "./instances.service";
+import WhatsappClient from "../whatsapp-client/whatsapp-client";
+import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
+
+interface SendBotMessageData {
+	chat: WppChat;
+	text: string;
+	quotedId?: number | null;
+}
 
 interface SendMessageData {
 	sendAsChatOwner?: boolean;
@@ -259,6 +266,76 @@ class WhatsappService {
 		}
 	}
 
+	public async sendBotMessage(to: string, data: SendBotMessageData) {
+		const process = new ProcessingLogger(
+			data.chat.instance,
+			"send-bot-message",
+			`${to}-${Date.now()}`,
+			data
+		);
+
+		process.log("Iniciando o envio da mensagem.");
+		try {
+			process.log("Obtendo client do whatsapp...");
+			const client = await this.getClientBySector(
+				data.chat.instance,
+				data.chat.sectorId || 1
+			);
+			process.log(
+				`Client obtido para o setor: ${data.chat.sectorId || 1}`
+			);
+			let message = {
+				instance: data.chat.instance,
+				status: "PENDING",
+				timestamp: Date.now().toString(),
+				from: `bot:${client.phone}`,
+				to: `${to}`,
+				type: "chat",
+				body: data.text || ""
+			} as CreateMessageDto;
+
+			let options = { to, text: data.text } as SendMessageOptions;
+			message.chatId = data.chat.id;
+			data.chat.contactId && (message.contactId = data.chat.contactId);
+
+			if (data.quotedId) {
+				process.log(`Mensagem citada encontrada: ${data.quotedId}`);
+				const quotedMsg =
+					await prismaService.wppMessage.findUniqueOrThrow({
+						where: {
+							id: data.quotedId
+						}
+					});
+
+				options.quotedId = (quotedMsg.wwebjsId || quotedMsg.wabaId)!;
+				message.quotedId = quotedMsg.id;
+			}
+			process.log("Salvando mensagem no banco de dados.", message);
+			const pendingMsg = await messagesService.insertMessage(message);
+			process.log("Enviando mensagem para o cliente.");
+
+			const sentMsg = await client.sendMessage(options);
+			process.log("Atualizando mensagem no banco de dados.", sentMsg);
+
+			message = { ...pendingMsg, ...sentMsg, status: "SENT" };
+			const savedMsg = await messagesService.updateMessage(
+				pendingMsg.id,
+				sentMsg
+			);
+			process.log("Mensagem salva no banco de dados.", savedMsg);
+
+			messagesDistributionService.notifyMessage(process, savedMsg);
+			process.success(savedMsg);
+
+			return savedMsg;
+		} catch (err) {
+			console.error(err);
+			process.failed(
+				"Erro ao enviar mensagem: " + sanitizeErrorMessage(err)
+			);
+			throw new BadRequestError("Erro ao enviar mensagem.", err);
+		}
+	}
 	public async getResults(instance: string) {
 		const query = "SELECT CODIGO AS id, NOME AS name FROM resultados";
 		const result = await instancesService.executeQuery<
@@ -310,10 +387,16 @@ class WhatsappService {
 	}
 
 	public async getProfilePictureUrl(instance: string, phone: string) {
-		const wwebjs = this.unsafeGetWwebjsClient(instance);
-		const url = wwebjs ? await wwebjs?.getProfilePictureUrl(phone) : null;
+		try {
+			const wwebjs = this.unsafeGetWwebjsClient(instance);
+			const url = wwebjs
+				? await wwebjs?.getProfilePictureUrl(phone)
+				: null;
 
-		return url;
+			return url;
+		} catch {
+			return null;
+		}
 	}
 }
 

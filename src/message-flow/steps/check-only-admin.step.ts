@@ -1,4 +1,4 @@
-import prismaService from "../../../services/prisma.service";
+import prismaService from "../../services/prisma.service";
 import Step, { FinalStep, NextStep, StepContext } from "./step";
 
 interface CheckOnlyAdminStepOptions {
@@ -32,20 +32,19 @@ export default class CheckOnlyAdminStep implements Step {
 		if (ctx.contact.isOnlyAdmin) {
 			ctx.logger.log("O contato é apenas administrador.");
 
-			const chat = await prismaService.wppChat.create({
-				data: {
-					instance: this.instance,
-					type: "RECEPTIVE",
-					userId: -1,
-					sectorId: this.sectorId,
-					contactId: ctx.contact.id
-				}
-			});
-			ctx.logger.log("Chat criado.", chat);
+			const chatData = {
+				instance: this.instance,
+				type: "RECEPTIVE",
+				userId: -1,
+				sectorId: this.sectorId,
+				contactId: ctx.contact.id
+			};
+
+			ctx.logger.log("Chat criado.", chatData);
 
 			return {
 				isFinal: true,
-				chat
+				chatData
 			};
 		}
 		ctx.logger.log("O contato não é apenas administrador.");

@@ -27,9 +27,16 @@ class MessagesService {
 	) {
 		await prismaService.wppMessage.updateMany({
 			where: {
-				to: {
-					startsWith: "me:"
-				},
+				OR: [
+					{
+						to: {
+							startsWith: "me:"
+						}
+					},
+					{
+						to: "system"
+					}
+				],
 				WppChat: {
 					instance,
 					contactId

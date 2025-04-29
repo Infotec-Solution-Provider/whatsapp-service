@@ -1,18 +1,17 @@
-import ProcessingLogger from "../processing-logger";
-import Step, { StepContext } from "./steps/step";
-import { WppChat, WppContact, WppMessage } from "@prisma/client";
+import ProcessingLogger from "../utils/processing-logger";
+import Step, { ChatPayload, StepContext } from "./steps/step";
+import { WppContact } from "@prisma/client";
 
 export default class MessageFlow {
 	private steps: Map<number, Step> = new Map();
 
 	// Fluxos ativos por ContactId;
-	private activeFlows: Map<number, Promise<WppChat>> = new Map();
+	private activeFlows: Map<number, Promise<ChatPayload>> = new Map();
 
-	public async getChat(
+	public async getChatPayload(
 		logger: ProcessingLogger,
-		message: WppMessage,
 		contact: WppContact
-	): Promise<WppChat> {
+	): Promise<ChatPayload> {
 		logger.log("Iniciando o processamento da mensagem no fluxo de etapas.");
 
 		// Verifique se já existe um fluxo ativo para o contato
@@ -24,7 +23,7 @@ export default class MessageFlow {
 		}
 
 		// Crie um novo fluxo e armazene no mapa de controle
-		const flowPromise = this.processFlow(logger, message, contact);
+		const flowPromise = this.processFlow(logger, contact);
 		this.activeFlows.set(contact.id, flowPromise);
 
 		try {
@@ -38,11 +37,10 @@ export default class MessageFlow {
 
 	private async processFlow(
 		logger: ProcessingLogger,
-		message: WppMessage,
 		contact: WppContact
-	): Promise<WppChat> {
+	): Promise<ChatPayload> {
 		let currStepId = 1;
-		const context: StepContext = { logger, contact, message };
+		const context: StepContext = { logger, contact };
 
 		while (true) {
 			const step = this.getStep(currStepId, logger);
@@ -51,9 +49,9 @@ export default class MessageFlow {
 			if (result.isFinal) {
 				logger.log(
 					`A etapa ${currStepId} retornou um chat com sucesso!`,
-					result.chat
+					result.chatData
 				);
-				return this.validateChat(result.chat, logger);
+				return this.validateChat(result.chatData, logger);
 			}
 
 			currStepId = this.getNextStepId(result, currStepId, logger);
@@ -76,7 +74,6 @@ export default class MessageFlow {
 		context: {
 			logger: ProcessingLogger;
 			contact: WppContact;
-			message: WppMessage;
 		}
 	) {
 		context.logger.log(`Executando a lógica da etapa ${step.id}.`);
@@ -84,9 +81,9 @@ export default class MessageFlow {
 	}
 
 	private validateChat(
-		chat: WppChat | null,
+		chat: ChatPayload | null,
 		logger: ProcessingLogger
-	): WppChat {
+	): ChatPayload {
 		if (!chat) {
 			const err = new Error(
 				"Nenhum chat foi retornado pelo fluxo de etapas."

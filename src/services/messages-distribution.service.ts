@@ -1,15 +1,16 @@
 import {
 	WppChat,
+	WppContact,
 	WppMessage,
 	WppMessageStatus,
 	WppSector
 } from "@prisma/client";
-import MessageFlow from "../classes/message-flow/message-flow";
-import MessageFlowFactory from "../classes/message-flow/message-flow.factory";
+import MessageFlow from "../message-flow/message-flow";
+import MessageFlowFactory from "../message-flow/message-flow.factory";
 import prismaService from "./prisma.service";
 import contactsService from "./contacts.service";
 import { Formatter, sanitizeErrorMessage } from "@in.pulse-crm/utils";
-import ProcessingLogger from "../classes/processing-logger";
+import ProcessingLogger from "../utils/processing-logger";
 import socketService from "./socket.service";
 import {
 	SocketEventType,
@@ -23,6 +24,7 @@ import {
 import chatsService from "./chats.service";
 import messagesService from "./messages.service";
 import whatsappService from "./whatsapp.service";
+import chooseSectorBot from "../bots/choose-sector.bot";
 
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
@@ -47,6 +49,21 @@ class MessagesDistributionService {
 		return flow;
 	}
 
+	private async getSectors(clientId: number) {
+		const sectors = await prismaService.wppSector.findMany({
+			where: {
+				wppInstanceId: clientId,
+				receiveChats: true
+			}
+		});
+
+		if (!sectors || sectors.length === 0) {
+			throw new Error("Setor não encontrado para esta instância.");
+		}
+
+		return sectors;
+	}
+
 	public async processMessage(
 		instance: string,
 		clientId: number,
@@ -60,26 +77,6 @@ class MessagesDistributionService {
 		);
 
 		try {
-			const sectors = await prismaService.wppSector.findMany({
-				where: {
-					wppInstanceId: clientId,
-					receiveChats: true
-				}
-			});
-			let sector: WppSector | null = null;
-
-			if (!sectors || sectors.length === 0) {
-				throw new Error("Setor não encontrado para esta instância.");
-			}
-
-			if (sectors.length > 1) {
-				throw new Error(
-					"Múltiplos setores encontrados para esta instância."
-				);
-			}
-
-			sector = sectors[0]!;
-
 			logger.log("Buscando contato para a mensagem.");
 			const contact = await contactsService.getOrCreateContact(
 				instance,
@@ -90,7 +87,7 @@ class MessagesDistributionService {
 
 			logger.log("Buscando chat para o contato.");
 			const currChat = await chatsService.getChatForContact(
-				sector.id,
+				clientId,
 				contact
 			);
 
@@ -100,23 +97,68 @@ class MessagesDistributionService {
 					currChat
 				);
 				await this.insertAndNotify(logger, currChat, msg);
+
+				console.log("foi1");
+				if (currChat.botId === 1) {
+					await chooseSectorBot.processMessage(
+						currChat,
+						contact,
+						msg
+					);
+				}
 				return;
 			}
 
-			logger.log("Nenhum chat encontrado para o contato.");
-			logger.log("Obtendo fluxo de mensagens para a instância e setor.");
-			const flow = await this.getFlow(instance, sector.id);
-			logger.log("Fluxo recuperado.", flow);
+			let newChat: WppChat | null = null;
 
-			const newChat = await flow.getChat(logger, msg, contact);
+			logger.log("Nenhum chat encontrado para o contato.");
+
+			const sectors = await this.getSectors(clientId);
+			if (sectors.length > 1) {
+				logger.log(
+					"Mais de um setor encontrado, iniciando o fluxo de escolha de setor."
+				);
+				newChat = await prismaService.wppChat.create({
+					data: {
+						instance,
+						type: "RECEPTIVE",
+						contactId: contact.id,
+						sectorId: sectors[0]!.id,
+						botId: 1
+					}
+				});
+			} else {
+				logger.log(
+					"Um setor encontrado, iniciando o fluxo de atendimento."
+				);
+				const flow = await this.getFlow(instance, sectors[0]!.id);
+				const data = await flow.getChatPayload(logger, contact);
+
+				newChat = await prismaService.wppChat.create({ data });
+			}
+
+			if (!newChat) {
+				throw new Error("Nenhum chat foi criado.");
+			}
+
+			if (newChat.botId === 1) {
+				await chooseSectorBot.processMessage(newChat, contact, msg);
+			}
+
+			logger.log("Novo chat encontrado!", newChat);
+
+			logger.log("Buscando foto de perfil do cliente.");
 			const avatarUrl = await whatsappService.getProfilePictureUrl(
 				instance,
 				msg.from
 			);
-			await prismaService.wppChat.update({
-				data: { avatarUrl },
-				where: { id: newChat.id }
-			});
+			if (avatarUrl) {
+				await prismaService.wppChat.update({
+					data: { avatarUrl },
+					where: { id: newChat.id }
+				});
+			}
+
 			await this.addSystemMessage(
 				newChat,
 				"Atendimento iniciado pelo cliente!",
@@ -125,6 +167,40 @@ class MessagesDistributionService {
 			logger.log("Chat criado com sucesso!", newChat);
 
 			await this.insertAndNotify(logger, newChat, msg, true);
+		} catch (err) {
+			console.error(err);
+			logger.log(`Erro ao processar mensagem!`);
+			logger.failed(err);
+		}
+	}
+
+	public async transferChatSector(
+		sector: WppSector,
+		contact: WppContact,
+		chat: WppChat
+	) {
+		const logger = new ProcessingLogger(
+			sector.instance,
+			"transfer-chat-sector",
+			`WppChat-${chat.id}_${Date.now()}`,
+			{ sector, contact, chat }
+		);
+
+		try {
+			const flow = await this.getFlow(sector.instance, sector.id);
+			const data = await flow.getChatPayload(logger, contact);
+			const updatedChat = await prismaService.wppChat.update({
+				where: { id: chat.id },
+				data: { ...data, botId: null }
+			});
+
+			await this.addSystemMessage(
+				updatedChat,
+				`Transferido para o setor ${sector.name}!`
+			);
+
+			await this.notifyChatStarted(logger, updatedChat);
+			logger.success(updatedChat);
 		} catch (err) {
 			console.error(err);
 			logger.log(`Erro ao processar mensagem!`);

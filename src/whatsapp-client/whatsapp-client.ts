@@ -1,11 +1,11 @@
-import CreateInternalMessageDto from "../../dtos/create-internal-message.dto";
-import { SendMessageOptions } from "../../types/whatsapp-instance.types";
+import CreateMessageDto from "../dtos/create-message.dto";
+import { SendMessageOptions } from "../types/whatsapp-instance.types";
 
 /**
  * Abstract class representing a WhatsApp instance.
  * This class defines the structure for interacting with WhatsApp,
  */
-abstract class InternalChatClient {
+abstract class WhatsappClient {
 	/**
 	 * The phone number associated with the WhatsApp instance.
 	 */
@@ -36,6 +36,15 @@ abstract class InternalChatClient {
 	public abstract getProfilePictureUrl(phone: string): Promise<string | null>;
 
 	/**
+	 * Checks if a phone number is registered on WhatsApp.
+	 *
+	 * @example
+	 * isValidWhatsapp("1234"); // false
+	 *
+	 * @param phone - The phone number formats be verified.
+	 * @returns - `true` if the number is valid on WhatsApp, otherwise `false`.
+	 */
+	public abstract isValidWhatsapp(phone: string): Promise<boolean>;
 
 	/**
 	 * Sends a message formats a WhatsApp number.
@@ -48,7 +57,7 @@ abstract class InternalChatClient {
 	 */
 	public abstract sendMessage(
 		props: SendMessageOptions
-	): Promise<CreateInternalMessageDto>;
+	): Promise<CreateMessageDto>;
 }
 
-export default InternalChatClient;
+export default WhatsappClient;
