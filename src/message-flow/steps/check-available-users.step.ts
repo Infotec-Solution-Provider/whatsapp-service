@@ -1,7 +1,7 @@
 import { UserOnlineSession } from "@in.pulse-crm/sdk";
 import authService from "../../services/auth.service";
 import prismaService from "../../services/prisma.service";
-import Step, { FinalStep, NextStep, StepContext } from "./step";
+import Step, { ChatPayload, FinalStep, NextStep, StepContext } from "./step";
 
 interface CheckAvailableUsersStepOptions {
 	instance: string;
@@ -94,7 +94,7 @@ export default class CheckAvailableUsersStep implements Step {
 
 		const { userId } = usersChats[0]!;
 
-		const chatData = {
+		const chatData: ChatPayload = {
 			instance: this.instance,
 			userId,
 			sectorId: this.sectorId,

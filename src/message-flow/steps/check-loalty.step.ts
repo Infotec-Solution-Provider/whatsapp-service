@@ -1,6 +1,5 @@
 import instances from "../../services/instances.service";
-import Step, { FinalStep, NextStep, StepContext } from "./step";
-import prismaService from "../../services/prisma.service";
+import Step, { ChatPayload, FinalStep, NextStep, StepContext } from "./step";
 import instancesService from "../../services/instances.service";
 import { User } from "@in.pulse-crm/sdk";
 
@@ -82,7 +81,7 @@ export default class CheckLoaltyStep implements Step {
 			return this.nextStep(ctx, "O usuário não está no mesmo setor.");
 		}
 
-		const chatData = {
+		const chatData: ChatPayload = {
 			instance: this.instance,
 			type: "RECEPTIVE",
 			userId: customerSchedule.OPERADOR,

@@ -1,5 +1,4 @@
-import prismaService from "../../services/prisma.service";
-import Step, { FinalStep, StepContext } from "./step";
+import Step, { ChatPayload, FinalStep, StepContext } from "./step";
 
 interface SendToAdminStepOptions {
 	instance: string;
@@ -20,7 +19,7 @@ export default class SendToAdminStep implements Step {
 
 	public async run(ctx: StepContext): Promise<FinalStep> {
 		ctx.logger.log("Enviando mensagem para o administrador...");
-		const chatData = {
+		const chatData: ChatPayload = {
 			instance: this.instance,
 			type: "RECEPTIVE",
 			userId: -1,
