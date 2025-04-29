@@ -61,7 +61,7 @@ class ChooseSectorBot {
 				break;
 			case 2:
 				const chooseOption = message.body.trim().replace(/[^0-9]/g, "");
-				const chooseSector = sectors[+chooseOption + 1];
+				const chooseSector = sectors[+chooseOption - 1];
 				console.log("444", chooseOption, sectors);
 				if (chooseSector) {
 					const answer =
