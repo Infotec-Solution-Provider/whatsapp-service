@@ -25,7 +25,7 @@ class MessagesService {
 		instance: string,
 		contactId: number
 	) {
-		await prismaService.wppMessage.updateMany({
+		const res = await prismaService.wppMessage.updateMany({
 			where: {
 				OR: [
 					{
@@ -37,10 +37,7 @@ class MessagesService {
 						to: "system"
 					}
 				],
-				WppChat: {
-					instance,
-					contactId
-				}
+				contactId
 			},
 			data: {
 				status: "READ"
