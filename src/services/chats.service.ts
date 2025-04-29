@@ -133,7 +133,49 @@ class ChatsService {
 
 		return { chats, messages };
 	}
-
+	public async getChatsMonitor(session: SessionData) {
+		const foundChats = await prismaService.wppChat.findMany({
+		  where: {
+			instance: session.instance,
+			sectorId: session.sectorId,
+			isFinished: false
+		  },
+		  include: {
+			contact: true
+		  }
+		});
+	  
+		const customerIds = foundChats
+		  .filter(chat => typeof chat.contact?.customerId === "number")
+		  .map(chat => chat.contact!.customerId!);
+	  
+		const customers = customerIds.length
+		  ? await instancesService.executeQuery<Array<Customer>>(
+			  session.instance,
+			  FETCH_CUSTOMERS_QUERY,
+			  [customerIds]
+			)
+		  : [];
+	  
+		const monitorChats = foundChats.map(chat => {
+		  const customer = customers.find(c => c.CODIGO === chat.contact?.customerId);
+	  
+		  return {
+			id: chat.id.toString(),
+			erpCode: customer?.CODIGO?.toString() || "",
+			companyName: customer?.RAZAO || "",
+			contactName: chat.contact?.name || "",
+			whatsappNumber: chat.contact?.name || "",
+			sectorName: customer?.SETOR || "",
+			attendantName: chat.userId || "",
+			startDate: chat.startedAt?.toISOString() || "",
+			endDate: chat.finishedAt?.toISOString() || "",
+			result: chat.resultId || ""
+		  };
+		});
+		return monitorChats;
+	  }
+	  
 	public async getChats(filters: ChatsFilters) {
 		const whereClause: Prisma.WppChatWhereInput = {};
 
@@ -179,6 +221,41 @@ class ChatsService {
 		}
 
 		return chat;
+	}
+	public async transferAttendance(
+		token: string,
+		session: SessionData,
+		id: number,
+		userId: number
+	) {
+
+		const { instance } = session;
+		usersService.setAuth(token);
+
+
+		const chats= await prismaService.wppChat.findUnique({
+			where: { id },
+		});
+		if (!chats) {
+			throw new Error("Chat não encontrado!");
+		}
+		if (!chats.userId) {
+			throw new Error("Chat não possui userId!");
+		}
+		const user = await usersService.getUserById(chats.userId);
+
+		const chat = await prismaService.wppChat.update({
+			where: { id },
+			data: {
+				userId,
+			}
+		});
+		const event = SocketEventType.WppChatFinished;
+		const transferMsg = `Atendimento tranferido por ${user.NOME}.`;
+		await messagesDistributionService.addSystemMessage(chat, transferMsg);
+		await socketService.emit(event, `${instance}:chat:${chat.id}`, {
+			chatId: chat.id
+		});
 	}
 
 	public async finishChatById(
