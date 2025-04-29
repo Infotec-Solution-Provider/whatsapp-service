@@ -60,11 +60,12 @@ class ChooseSectorBot {
 				this.setRunningStep(chat.id, 2);
 				break;
 			case 2:
-				console.log("444");
+
 				const chooseOption = message.body.trim().replace(/[^0-9]/g, "");
 				const chooseSector = sectors.find(
 					(s) => s.id === Number(chooseOption)
 				);
+				console.log("444", chooseOption, sectors);
 				if (chooseSector) {
 					const answer =
 						"Estamos te redirecionado para o setor escolhido.\nVocê será atendido em breve!";
