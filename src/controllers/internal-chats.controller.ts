@@ -12,14 +12,21 @@ class InternalChatsController {
 		this.router.post(
 			"/api/internal/chats",
 			isAuthenticated,
-			this.createInternalChat
+			this.startInternalChat
 		);
 
 		// Obtem chats internos do usuário através da sessão
 		this.router.get(
 			"/api/internal/session/chats",
 			isAuthenticated,
-			this.getChatsBySession
+			this.getSessionInternalChats
+		);
+
+		// Obtem grupos internos
+		this.router.get(
+			"/api/internal/groups",
+			isAuthenticated,
+			this.getInternalGroups
 		);
 
 		// Envia mensagem para um chat interno
@@ -30,15 +37,15 @@ class InternalChatsController {
 			this.sendMessageToChat
 		);
 
-		// Atualiza participantes de um grupo interno
+		// Atualiza grupo interno
 		this.router.put(
-			"/api/internal/chats/:id/participants",
+			"/api/internal/groups/:id",
 			isAuthenticated,
-			this.updateGroupParticipantes
+			this.updateInternalGroup
 		);
 	}
 
-	private async createInternalChat(req: Request, res: Response) {
+	private async startInternalChat(req: Request, res: Response) {
 		const session = req.session;
 
 		const participants = req.body.participants;
@@ -72,10 +79,19 @@ class InternalChatsController {
 		});
 	}
 
-	private async getChatsBySession(req: Request, res: Response) {
+	private async getSessionInternalChats(req: Request, res: Response) {
 		const data = await internalChatsService.getInternalChatsBySession(
 			req.session
 		);
+
+		res.status(200).send({
+			message: "Internal chats retrieved successfully!",
+			data
+		});
+	}
+
+	private async getInternalGroups(req: Request, res: Response) {
+		const data = await internalChatsService.getInternalGroups(req.session);
 
 		res.status(200).send({
 			message: "Internal chats retrieved successfully!",
@@ -90,14 +106,13 @@ class InternalChatsController {
 		res.status(201).send({ message: "Message sent successfully!" });
 	}
 
-	private async updateGroupParticipantes(req: Request, res: Response) {
+	private async updateInternalGroup(req: Request, res: Response) {
 		const groupId = Number(req.params["id"]);
-		const participants = req.body.participants as number[];
 
 		const updated =
 			await internalChatsService.updateInternalChatParticipants(
 				groupId,
-				participants
+				req.body
 			);
 
 		res.status(200).send({
