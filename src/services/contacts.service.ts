@@ -16,7 +16,6 @@ class ContactsService {
 		const contact = await prismaService.wppContact.findFirst({
 			where: {
 				instance,
-				name,
 				phone
 			}
 		});
