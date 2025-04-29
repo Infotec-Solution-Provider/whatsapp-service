@@ -25,6 +25,16 @@ class ChatsController {
 			isAuthenticated,
 			this.startChatByContactId
 		);
+		this.router.get(
+			"/api/whatsapp/session/monitor",
+			isAuthenticated,
+			this.getChatsMonitor
+		);
+		this.router.get(
+			"/api/whatsapp/chats/:id/transfer",
+			isAuthenticated,
+			this.transferAttendance
+		);
 	}
 
 	private async getChatsBySession(req: Request, res: Response) {
@@ -43,6 +53,21 @@ class ChatsController {
 		});
 	}
 
+	private async getChatsMonitor(req: Request, res: Response) {
+		const includeMessages = Boolean(req.query["messages"] === "true");
+		const includeContact = Boolean(req.query["contact"] === "true");
+
+		const data = await chatsService.getChatsMonitor(
+			req.session,
+			includeMessages,
+			includeContact
+		);
+
+		res.status(200).send({
+			message: "Chats Monitor retrieved successfully!",
+			data
+		});
+	}
 	private async getChatById(req: Request, res: Response) {
 		const { id } = req.params;
 
@@ -61,6 +86,32 @@ class ChatsController {
 			data: chat
 		});
 	}
+	private async transferAttendance(req: Request, res: Response) {
+		const { id } = req.params;
+		const userId = req.body.resultId;
+
+		if (!id || isNaN(Number(id))) {
+			throw new BadRequestError("Chat ID is required!");
+		}
+
+		if (!userId || isNaN(Number(userId))) {
+			throw new BadRequestError("User ID is required!");
+		}
+
+		const session = req.session;
+
+		await chatsService.transferAttendance(
+			req.headers["authorization"] as string,
+			session,
+			Number(id),
+			+userId
+		);
+
+		res.status(200).send({
+			message: "Attendance transfer successfully!"
+		});
+	}
+
 
 	private async finishChatById(req: Request, res: Response) {
 		const { id } = req.params;

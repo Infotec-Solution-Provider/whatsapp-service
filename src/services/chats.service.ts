@@ -133,6 +133,73 @@ class ChatsService {
 
 		return { chats, messages };
 	}
+	public async getChatsMonitor(
+		session: SessionData,
+		includeMessages = true,
+		includeContact = true
+	) {
+		const foundChats = await prismaService.wppChat.findMany({
+			where: {
+				instance: session.instance,
+				sectorId: session.sectorId,
+				isFinished: false
+			},
+			include: {
+				contact: {
+					include: {
+						WppMessage: true
+					}
+				}
+			}
+		});
+
+		const chats: Array<
+			WppChat & { customer: Customer | null; contact: WppContact | null }
+		> = [];
+		const messages: Array<WppMessage> = [];
+		const customerIds = includeContact
+			? foundChats
+					.filter(
+						(chat) => typeof chat.contact?.customerId === "number"
+					)
+					.map((c) => c.contact!.customerId!)
+			: [];
+
+		const customers = customerIds.length
+			? await instancesService.executeQuery<Array<Customer>>(
+					session.instance,
+					FETCH_CUSTOMERS_QUERY,
+					[
+						foundChats
+							.filter(
+								(chat) =>
+									typeof chat.contact?.customerId === "number"
+							)
+							.map((c) => c.contact!.customerId!)
+					]
+				)
+			: [];
+
+		for (const foundChat of foundChats) {
+			const { contact, ...chat } = foundChat;
+
+			let customer: Customer | null = null;
+
+			if (includeContact && typeof contact?.customerId == "number") {
+				customer =
+					customers.find((c) => c.CODIGO === contact.customerId) ||
+					null;
+			}
+
+			chats.push({ ...chat, customer, contact: contact || null });
+
+			if (includeMessages && contact) {
+				messages.push(...contact.WppMessage);
+			}
+		}
+
+		return { chats, messages };
+	}
 
 	public async getChats(filters: ChatsFilters) {
 		const whereClause: Prisma.WppChatWhereInput = {};
@@ -179,6 +246,39 @@ class ChatsService {
 		}
 
 		return chat;
+	}
+	public async transferAttendance(
+		token: string,
+		session: SessionData,
+		id: number,
+		userId: number
+	) {
+
+		const { instance } = session;
+		usersService.setAuth(token);
+
+
+		const chats= await prismaService.wppChat.findUnique({
+			where: { id },
+		});
+		if (!chats || chats.userId !== userId) {
+			throw new Error("Você não pode transferir esse atendimento!");
+			throw new Error("Chat não encontrado!");
+		}
+		const user = await usersService.getUserById(chats?.userId);
+
+		const chat = await prismaService.wppChat.update({
+			where: { id },
+			data: {
+				userId,
+			}
+		});
+		const event = SocketEventType.WppChatFinished;
+		const transferMsg = `Atendimento tranferido por ${user.NOME}.`;
+		await messagesDistributionService.addSystemMessage(chat, transferMsg);
+		await socketService.emit(event, `${instance}:chat:${chat.id}`, {
+			chatId: chat.id
+		});
 	}
 
 	public async finishChatById(
