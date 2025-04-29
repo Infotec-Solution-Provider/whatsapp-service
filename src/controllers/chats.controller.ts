@@ -30,7 +30,7 @@ class ChatsController {
 			isAuthenticated,
 			this.getChatsMonitor
 		);
-		this.router.get(
+		this.router.post(
 			"/api/whatsapp/chats/:id/transfer",
 			isAuthenticated,
 			this.transferAttendance
