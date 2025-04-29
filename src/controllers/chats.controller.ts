@@ -88,7 +88,7 @@ class ChatsController {
 	}
 	private async transferAttendance(req: Request, res: Response) {
 		const { id } = req.params;
-		const userId = req.body.resultId;
+		const userId = req.body.userId;
 
 		if (!id || isNaN(Number(id))) {
 			throw new BadRequestError("Chat ID is required!");
