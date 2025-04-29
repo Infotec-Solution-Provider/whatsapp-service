@@ -60,11 +60,8 @@ class ChooseSectorBot {
 				this.setRunningStep(chat.id, 2);
 				break;
 			case 2:
-
 				const chooseOption = message.body.trim().replace(/[^0-9]/g, "");
-				const chooseSector = sectors.find(
-					(s) => s.id === Number(chooseOption)
-				);
+				const chooseSector = sectors[+chooseOption + 1];
 				console.log("444", chooseOption, sectors);
 				if (chooseSector) {
 					const answer =
