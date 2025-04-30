@@ -7,6 +7,7 @@ import socketService from "./socket.service";
 import messagesDistributionService from "./messages-distribution.service";
 import usersService from "./users.service";
 import whatsappService from "./whatsapp.service";
+import ProcessingLogger from "../utils/processing-logger";
 
 interface InpulseResult {
 	NOME: string;
@@ -262,21 +263,6 @@ class ChatsService {
 		});
 	}
 
-/* 	public async botTransferAttendance(chat: WppChat, targetUserId: number) {
-		const chat = await prismaService.wppChat.update({
-			where: { id },
-			data: {
-				userId
-			}
-		});
-		const event = SocketEventType.WppChatFinished;
-		const transferMsg = `Atendimento tranferido por ${user.NOME}.`;
-		await messagesDistributionService.addSystemMessage(chat, transferMsg);
-		await socketService.emit(event, `${instance}:chat:${chat.id}`, {
-			chatId: chat.id
-		});
-	} */
-
 	public async finishChatById(
 		token: string,
 		session: SessionData,
@@ -314,73 +300,87 @@ class ChatsService {
 		token: string,
 		contactId: number
 	) {
-		const contact = await prismaService.wppContact.findUnique({
-			where: { id: contactId }
-		});
-
-		if (!contact) {
-			throw new Error("Contato não encontrado!");
-		}
-
-		const existingChat = await prismaService.wppChat.findFirst({
-			where: {
-				instance: session.instance,
-				contactId,
-				isFinished: false
-			}
-		});
-
-		if (existingChat) {
-			throw new Error("Alguém já está atendendo esse contato!");
-		}
-
-		const profilePicture = await whatsappService.getProfilePictureUrl(
+		const process = new ProcessingLogger(
 			session.instance,
-			contact.phone
-		);
-		const newChat = await prismaService.wppChat.create({
-			data: {
-				instance: session.instance,
-				type: "ACTIVE",
-				avatarUrl: profilePicture,
-				userId: session.userId,
-				contactId,
-				sectorId: session.sectorId,
-				startedAt: new Date()
-			}
-		});
-
-		usersService.setAuth(token);
-		const user = await usersService.getUserById(session.userId);
-
-		const message = `Atendimento iniciado por ${user.NOME}.`;
-		await messagesDistributionService.addSystemMessage(
-			newChat,
-			message,
-			true
+			"start-chat",
+			`${session.userId}-${contactId}_${Date.now()}`,
+			{ session, contactId, token }
 		);
 
-		const newChatWithDetails = await prismaService.wppChat.findUnique({
-			where: { id: newChat.id },
-			include: {
-				contact: true,
-				messages: true
-			}
-		});
-		let customer: Customer | null = null;
+		try {
+			const contact = await prismaService.wppContact.findUnique({
+				where: { id: contactId }
+			});
 
-		if (contact.customerId) {
-			try {
-				customersService.setAuth(token);
-				customer = await customersService.getCustomerById(
-					contact.customerId
-				);
-			} catch (err) {
-				customer = null;
+			if (!contact) {
+				throw new Error("Contato não encontrado!");
 			}
+
+			const existingChat = await prismaService.wppChat.findFirst({
+				where: {
+					instance: session.instance,
+					contactId,
+					isFinished: false
+				}
+			});
+
+			if (existingChat) {
+				throw new Error("Alguém já está atendendo esse contato!");
+			}
+
+			const profilePicture = await whatsappService.getProfilePictureUrl(
+				session.instance,
+				contact.phone
+			);
+			const newChat = await prismaService.wppChat.create({
+				data: {
+					instance: session.instance,
+					type: "ACTIVE",
+					avatarUrl: profilePicture,
+					userId: session.userId,
+					contactId,
+					sectorId: session.sectorId,
+					startedAt: new Date()
+				}
+			});
+
+			usersService.setAuth(token);
+			const user = await usersService.getUserById(session.userId);
+
+			const message = `Atendimento iniciado por ${user.NOME}.`;
+			await messagesDistributionService.addSystemMessage(
+				newChat,
+				message,
+				true
+			);
+
+			const newChatWithDetails = await prismaService.wppChat.findUnique({
+				where: { id: newChat.id },
+				include: {
+					contact: true,
+					messages: true
+				}
+			});
+			let customer: Customer | null = null;
+
+			if (contact.customerId) {
+				try {
+					customersService.setAuth(token);
+					customer = await customersService.getCustomerById(
+						contact.customerId
+					);
+				} catch (err) {
+					customer = null;
+				}
+			}
+
+			const chatWithCustomer = { ...newChatWithDetails, customer };
+
+			await messagesDistributionService.notifyChatStarted(process, chatWithCustomer as WppChat);
+		} catch (err) {
+			process.log("Erro ao iniciar o atendimento ");
+			process.failed(err);
 		}
-
-		return { ...newChatWithDetails, customer };
 	}
 }
 

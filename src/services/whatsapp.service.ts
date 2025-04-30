@@ -243,17 +243,17 @@ class WhatsappService {
 			const pendingMsg = await messagesService.insertMessage(message);
 			process.log("Enviando mensagem para o cliente.");
 
+			messagesDistributionService.notifyMessage(process, pendingMsg);
 			const sentMsg = await client.sendMessage(options);
 			process.log("Atualizando mensagem no banco de dados.", sentMsg);
 
 			message = { ...pendingMsg, ...sentMsg, status: "SENT" };
 			const savedMsg = await messagesService.updateMessage(
 				pendingMsg.id,
-				sentMsg
+				message
 			);
-			process.log("Mensagem salva no banco de dados.", savedMsg);
-
 			messagesDistributionService.notifyMessage(process, savedMsg);
+			process.log("Mensagem salva no banco de dados.", savedMsg);
 			process.success(savedMsg);
 
 			return savedMsg;

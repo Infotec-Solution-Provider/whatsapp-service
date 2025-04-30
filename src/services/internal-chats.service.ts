@@ -37,6 +37,8 @@ class InternalChatsService {
 		isGroup: boolean = false,
 		groupName: string = ""
 	) {
+		const uniqueIds = new Set(participantIds);
+
 		const internalChat = await prismaService.internalChat.create({
 			data: {
 				isGroup,
@@ -45,7 +47,7 @@ class InternalChatsService {
 				instance: session.instance,
 				participants: {
 					createMany: {
-						data: participantIds.map((id) => ({
+						data: Array.from(uniqueIds).map((id) => ({
 							userId: id,
 							joinedAt: new Date()
 						}))

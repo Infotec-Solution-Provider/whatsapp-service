@@ -208,7 +208,7 @@ class MessagesDistributionService {
 		}
 	}
 
-	private async notifyChatStarted(process: ProcessingLogger, chat: WppChat) {
+	public async notifyChatStarted(process: ProcessingLogger, chat: WppChat) {
 		try {
 			const data = { chatId: chat.id };
 			const monitorRoom: SocketServerMonitorRoom = `${chat.instance}:${chat.sectorId!}:monitor`;

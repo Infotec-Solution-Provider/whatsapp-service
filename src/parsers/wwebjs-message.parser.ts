@@ -113,20 +113,22 @@ class WWEBJSMessageParser {
 		});
 	}
 
-	public static getMessageStatus(ack: WAWebJS.MessageAck): WppMessageStatus {
+	public static getMessageStatus(
+		ack: WAWebJS.MessageAck | null | undefined
+	): WppMessageStatus {
 		switch (ack) {
 			case WAWebJS.MessageAck.ACK_PENDING:
-				return "PENDING";
-			case WAWebJS.MessageAck.ACK_DEVICE:
-				return "RECEIVED";
-			case WAWebJS.MessageAck.ACK_READ:
-				return "READ";
-			case WAWebJS.MessageAck.ACK_PLAYED:
-				return "READ";
+				return WppMessageStatus.PENDING;
 			case WAWebJS.MessageAck.ACK_SERVER:
-				return "RECEIVED";
+				return WppMessageStatus.SENT;
+			case WAWebJS.MessageAck.ACK_DEVICE:
+				return WppMessageStatus.RECEIVED;
+			case WAWebJS.MessageAck.ACK_READ:
+				return WppMessageStatus.READ;
+			case WAWebJS.MessageAck.ACK_PLAYED:
+				return WppMessageStatus.READ;
 			default:
-				return "ERROR";
+				return WppMessageStatus.ERROR;
 		}
 	}
 }

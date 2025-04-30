@@ -3,7 +3,6 @@ import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
 import WhatsappClient from "./whatsapp-client";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { randomUUID } from "node:crypto";
-
 import { SocketEventType, SocketServerAdminRoom } from "@in.pulse-crm/sdk";
 import MessageParser from "../parsers/wwebjs-message.parser";
 import prismaService from "../services/prisma.service";
@@ -96,30 +95,44 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 	}
 
 	private async handleQr(qr: string) {
-		const client = await prismaService.wppClient.findUnique({
-			where: {
-				id: this.id
-			},
-			include: {
-				WppSector: true
-			}
-		});
-
-		if (client) {
-			Logger.debug(`QR generated for ${this.instance} - ${this.name}`);
-			client.WppSector.forEach((sector) => {
-				const room: SocketServerAdminRoom = `${this.instance}:${sector.id}:admin`;
-
-				socketService.emit(SocketEventType.WwebjsQr, room, {
-					qr,
-					phone: this.name
-				});
+		try {
+			Logger.info(`[${this.instance}:${this.id}] QR Generated!`);
+			const client = await prismaService.wppClient.findUnique({
+				where: {
+					id: this.id
+				},
+				include: {
+					WppSector: true
+				}
 			});
+
+			if (client) {
+				prismaService.wppClient.update({
+					data: {
+						phone: null
+					},
+					where: {
+						id: this.id
+					}
+				});
+				client.WppSector.forEach((sector) => {
+					const room: SocketServerAdminRoom = `${this.instance}:${sector.id}:admin`;
+
+					socketService.emit(SocketEventType.WwebjsQr, room, {
+						qr,
+						phone: this.name
+					});
+				});
+			}
+		} catch (err) {
+			Logger.error(
+				"Error handling QR code: " + sanitizeErrorMessage(err)
+			);
 		}
 	}
 
 	private async handleAuth() {
-		Logger.debug(`Authenticated for ${this.instance} - ${this.name}`);
+		Logger.info(`[${this.instance}:${this.id}] Authenticated!`);
 
 		const client = await prismaService.wppClient.findUnique({
 			where: {
@@ -131,7 +144,6 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		});
 
 		if (client) {
-			Logger.debug(`QR generated for ${this.instance} - ${this.name}`);
 			client.WppSector.forEach((sector) => {
 				const room: SocketServerAdminRoom = `${this.instance}:${sector.id}:admin`;
 
@@ -219,6 +231,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 	private handleMessageAck({ id }: WAWebJS.Message, ack: WAWebJS.MessageAck) {
 		Logger.info("Message ack: " + ack + " | " + id._serialized + "!");
 		const status = MessageParser.getMessageStatus(ack);
+
 		messagesDistributionService.processMessageStatus(
 			"wwebjs",
 			id._serialized,
