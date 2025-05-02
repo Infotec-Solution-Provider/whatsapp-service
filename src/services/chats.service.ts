@@ -139,11 +139,13 @@ class ChatsService {
 		return { chats, messages };
 	}
 	public async getChatsMonitor(session: SessionData) {
+		const isTI = session.sectorId === 3;
+
 		const foundChats = await prismaService.wppChat.findMany({
 			where: {
 				instance: session.instance,
-				sectorId: session.sectorId,
-				isFinished: false
+				isFinished: false,
+				...(isTI ? {} : { sectorId: session.sectorId })
 			},
 			include: {
 				contact: true
