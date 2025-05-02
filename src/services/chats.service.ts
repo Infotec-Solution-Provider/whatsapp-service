@@ -73,11 +73,13 @@ class ChatsService {
 		});
 
 		if (session.role === "ADMIN") {
+			const isTI = session.sectorId === 3;
 			const foundAdminChats = await prismaService.wppChat.findMany({
 				where: {
 					userId: -1,
-					sectorId: session.sectorId,
-					isFinished: false
+					isFinished: false,
+					...(isTI ? {} : { sectorId: session.sectorId })
+
 				},
 				include: {
 					contact: {
