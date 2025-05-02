@@ -55,7 +55,8 @@ class InternalChatsService {
 				}
 			},
 			include: {
-				participants: true
+				participants: true,
+				messages: true
 			}
 		});
 
@@ -151,6 +152,7 @@ class InternalChatsService {
 	public async getInternalChatsBySession(session: SessionData) {
 		const result = await prismaService.internalChat.findMany({
 			where: {
+				instance: session.instance,
 				participants: {
 					some: { userId: session.userId }
 				}
@@ -183,7 +185,8 @@ class InternalChatsService {
 				isFinished: false
 			},
 			include: {
-				participants: true
+				participants: true,
+				messages: true,
 			},
 			orderBy: {
 				startedAt: "desc"
