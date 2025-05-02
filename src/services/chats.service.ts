@@ -76,9 +76,8 @@ class ChatsService {
 			const isTI = session.sectorId === 3;
 			const foundAdminChats = await prismaService.wppChat.findMany({
 				where: {
-					userId: -1,
 					isFinished: false,
-					...(isTI ? {} : { sectorId: session.sectorId })
+					...(isTI ? {} : { sectorId: session.sectorId, userId: -1, })
 
 				},
 				include: {
