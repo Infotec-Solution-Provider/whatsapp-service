@@ -115,8 +115,34 @@ class InternalChatsService {
 					}
 				}
 			},
-			include: { participants: true }
+			include: { participants: true, messages: true }
 		});
+
+		for (const id of idsToAdd) {
+			const { participants, ...rest } = group;
+			const room: SocketServerUserRoom = `${group.instance}:user:${id}`;
+			await socketService.emit(
+				SocketEventType.InternalChatStarted,
+				room,
+				{
+					chat: {
+						...rest,
+						participants: group.participants.map((p) => p.userId)
+					}
+				}
+			);
+		}
+
+		for (const id of idsToRemove) {
+			const room: SocketServerUserRoom = `${group.instance}:user:${id.userId}`;
+			await socketService.emit(
+				SocketEventType.InternalChatFinished,
+				room,
+				{
+					chatId: groupId
+				}
+			);
+		}
 
 		return group;
 	}
