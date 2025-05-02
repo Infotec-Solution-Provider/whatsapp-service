@@ -36,22 +36,21 @@ class ChooseSectorBot {
 		contact: WppContact,
 		message: WppMessage
 	) {
-		console.log("111");
 		const currentStep = this.getRunningStep(chat.id);
-		const sectors = await sectorsService.getSectors(chat.instance);
+		const sectors = await sectorsService.getSectors(chat.instance, {
+			receiveChats: true
+		});
 
 		if (!sectors) {
 			throw new Error(`No sectors found for instance ${chat.instance}`);
 		}
 
-		console.log("222", currentStep);
 		const sectorsMessage =
 			`Olá, tudo bem? Escolha um setor para continuar:\n${sectors.map((s, i) => `${i + 1} - ${s.name}`).join("\n")}` +
 			"\nDigite o número do setor desejado!";
 
 		switch (currentStep) {
 			case 1:
-				console.log("333");
 				await whatsappService.sendBotMessage(message.from, {
 					chat,
 					text: sectorsMessage,
@@ -62,7 +61,7 @@ class ChooseSectorBot {
 			case 2:
 				const chooseOption = message.body.trim().replace(/[^0-9]/g, "");
 				const chooseSector = sectors[+chooseOption - 1];
-				console.log("444", chooseOption, sectors);
+
 				if (chooseSector) {
 					const answer =
 						"Estamos te redirecionado para o setor escolhido.\nVocê será atendido em breve!";
