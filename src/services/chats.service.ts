@@ -288,7 +288,15 @@ class ChatsService {
 			}
 		});
 		const event = SocketEventType.WppChatFinished;
-		const finishMsg = `Atendimento finalizado por ${user.NOME}.\nResultado: ${results[0]?.NOME || "N/D"} `;
+
+		let finishMsg: string = "";
+
+		if (resultId === -50) {
+			finishMsg = `Atendimento finalizado pelo sistema.`;
+		} else {
+			finishMsg = `Atendimento finalizado por ${user.NOME}.\nResultado: ${results[0]?.NOME || "N/D"} `;
+		}
+
 		await messagesDistributionService.addSystemMessage(chat, finishMsg);
 		await socketService.emit(event, `${instance}:chat:${chat.id}`, {
 			chatId: chat.id
@@ -376,7 +384,10 @@ class ChatsService {
 
 			const chatWithCustomer = { ...newChatWithDetails, customer };
 
-			await messagesDistributionService.notifyChatStarted(process, chatWithCustomer as WppChat);
+			await messagesDistributionService.notifyChatStarted(
+				process,
+				chatWithCustomer as WppChat
+			);
 		} catch (err) {
 			process.log("Erro ao iniciar o atendimento ");
 			process.failed(err);

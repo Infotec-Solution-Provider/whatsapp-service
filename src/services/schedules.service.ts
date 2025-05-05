@@ -1,12 +1,13 @@
 import { Prisma, WppSchedule } from "@prisma/client";
 import prismaService from "./prisma.service";
-import { SessionData } from "@in.pulse-crm/sdk";
+import { CreateScheduleDTO, SessionData } from "@in.pulse-crm/sdk";
+import chatsService from "./chats.service";
+import messagesDistributionService from "./messages-distribution.service";
 
 interface ChatsFilters {
 	userId?: string;
 	sectorId?: string;
 }
-
 class SchedulesService {
 	public async getSchedulesBySession(
 		session: SessionData,
@@ -30,10 +31,40 @@ class SchedulesService {
 		return schedules;
 	}
 
-	public async createSchedule(scheduleData: WppSchedule) {
-		const schedules = await prismaService.wppSchedule.create({
-			data: scheduleData
+	public async createSchedule(
+		token: string,
+		session: SessionData,
+		data: CreateScheduleDTO
+	) {
+		const chat = await prismaService.wppChat.findFirst({
+			where: {
+				contactId: data.contactId,
+				instance: session.instance,
+				isFinished: false
+			}
 		});
+
+		const date = new Date(data.date);
+
+		const schedules = await prismaService.wppSchedule.create({
+			data: {
+				instance: session.instance,
+				scheduledBy: session.userId,
+				scheduledFor: data.scheduledFor,
+				scheduleDate: date,
+				contactId: data.contactId,
+				sectorId: session.sectorId
+			}
+		});
+
+		if (chat) {
+			await chatsService.finishChatById(token, session, chat.id, -50);
+			await messagesDistributionService.addSystemMessage(
+				chat,
+				"Retorno agendado para: " + date.toLocaleString(),
+				true
+			);
+		}
 
 		return schedules;
 	}

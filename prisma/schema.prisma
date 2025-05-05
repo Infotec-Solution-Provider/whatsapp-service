@@ -222,15 +222,15 @@ model WppWallet {
 model WppSchedule {
     instance     String
     id           Int      @id @default(autoincrement())
-    name         String
+    description  String?
     contactId    Int      @map("contact_id")
     scheduleDate DateTime @map("schedule_date")
     scheduledBy  Int      @map("scheduled_by")
     scheduledFor Int      @map("scheduled_for")
-    sectorId     Int      @map("sector_id")
+	sectorId     Int?      @map("sector_id")
 
-    contact WppContact @relation(fields: [contactId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-    sector  WppSector  @relation(fields: [sectorId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+    contact     WppContact @relation(fields: [contactId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+    WppSector   WppSector? @relation(fields: [sectorId], references: [id])
 
     @@map("schedules")
 }
