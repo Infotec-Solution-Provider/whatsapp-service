@@ -77,8 +77,7 @@ class ChatsService {
 			const foundAdminChats = await prismaService.wppChat.findMany({
 				where: {
 					isFinished: false,
-					...(isTI ? {} : { sectorId: session.sectorId, userId: -1, })
-
+					...(isTI ? {} : { sectorId: session.sectorId, userId: -1 })
 				},
 				include: {
 					contact: {
@@ -267,7 +266,7 @@ class ChatsService {
 	}
 
 	public async finishChatById(
-		token: string,
+		token: string | null,
 		session: SessionData,
 		id: number,
 		resultId: number
@@ -278,9 +277,10 @@ class ChatsService {
 			[resultId]
 		);
 		const { instance, userId } = session;
-		usersService.setAuth(token);
+		usersService.setAuth(token || "");
 
-		const user = await usersService.getUserById(userId);
+		const user =
+			resultId !== -50 && (await usersService.getUserById(userId));
 		const chat = await prismaService.wppChat.update({
 			where: { id },
 			data: {
@@ -294,9 +294,10 @@ class ChatsService {
 
 		let finishMsg: string = "";
 
-		if (resultId === -50) {
+		if (!user && resultId === -50) {
 			finishMsg = `Atendimento finalizado pelo sistema.`;
-		} else {
+		}
+		if (user) {
 			finishMsg = `Atendimento finalizado por ${user.NOME}.\nResultado: ${results[0]?.NOME || "N/D"} `;
 		}
 
@@ -380,6 +381,97 @@ class ChatsService {
 					customer = await customersService.getCustomerById(
 						contact.customerId
 					);
+				} catch (err) {
+					customer = null;
+				}
+			}
+
+			const chatWithCustomer = { ...newChatWithDetails, customer };
+
+			await messagesDistributionService.notifyChatStarted(
+				process,
+				chatWithCustomer as WppChat
+			);
+		} catch (err) {
+			process.log("Erro ao iniciar o atendimento ");
+			process.failed(err);
+		}
+	}
+
+	public async startScheduledChat(
+		instance: string,
+		sectorId: number,
+		contactId: number,
+		scheduledFor: number
+	) {
+		const process = new ProcessingLogger(
+			instance,
+			"start-chat",
+			`${scheduledFor}-${contactId}_${Date.now()}`,
+			{ instance, contactId, scheduledFor }
+		);
+
+		try {
+			const contact = await prismaService.wppContact.findUnique({
+				where: { id: contactId }
+			});
+
+			if (!contact) {
+				throw new Error("Contato não encontrado!");
+			}
+
+			const existingChat = await prismaService.wppChat.findFirst({
+				where: {
+					instance,
+					contactId,
+					isFinished: false,
+					isSchedule: true
+				}
+			});
+
+			if (existingChat) {
+				throw new Error("Alguém já está atendendo esse contato!");
+			}
+
+			const profilePicture = await whatsappService.getProfilePictureUrl(
+				instance,
+				contact.phone
+			);
+			const newChat = await prismaService.wppChat.create({
+				data: {
+					instance,
+					type: "ACTIVE",
+					avatarUrl: profilePicture,
+					userId: scheduledFor,
+					contactId,
+					sectorId,
+					startedAt: new Date()
+				}
+			});
+
+			const message = `Atendimento iniciado pelo sistema.\nMotivo: Retorno agendado.`;
+			await messagesDistributionService.addSystemMessage(
+				newChat,
+				message,
+				true
+			);
+
+			const newChatWithDetails = await prismaService.wppChat.findUnique({
+				where: { id: newChat.id },
+				include: {
+					contact: true,
+					messages: true
+				}
+			});
+			let customer: Customer | null = null;
+
+			if (contact.customerId) {
+				try {
+					const customers = await instancesService.executeQuery<
+						Customer[]
+					>(instance, FETCH_CUSTOMERS_QUERY, [[contact.customerId]]);
+
+					customer = customers[0] || null;
 				} catch (err) {
 					customer = null;
 				}

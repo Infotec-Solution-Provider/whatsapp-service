@@ -3,12 +3,60 @@ import prismaService from "./prisma.service";
 import { CreateScheduleDTO, SessionData } from "@in.pulse-crm/sdk";
 import chatsService from "./chats.service";
 import messagesDistributionService from "./messages-distribution.service";
+import cron from "node-cron";
 
 interface ChatsFilters {
 	userId?: string;
 	sectorId?: string;
 }
 class SchedulesService {
+	constructor() {
+		cron.schedule("*/5 * * * *", async () => {
+			this.runSchedulesJob();
+		});
+	}
+
+	private async runSchedulesJob() {
+		const schedules = await prismaService.wppSchedule.findMany({
+			where: {
+				scheduleDate: {
+					lte: new Date()
+				}
+			}
+		});
+
+		for (const schedule of schedules) {
+			const chat = await prismaService.wppChat.findFirst({
+				where: {
+					contactId: schedule.contactId,
+					instance: schedule.instance,
+					isFinished: false
+				}
+			});
+
+			if (chat) {
+				await chatsService.finishChatById(
+					null,
+					{
+						instance: schedule.instance,
+						userId: schedule.scheduledBy,
+						sectorId: schedule.sectorId!,
+						role: "ADMIN"
+					},
+					chat.id,
+					-50
+				);
+			}
+
+			await chatsService.startScheduledChat(
+				schedule.instance,
+				schedule.sectorId!,
+				schedule.contactId,
+				schedule.scheduledFor
+			);
+		}
+	}
+
 	public async getSchedulesBySession(
 		session: SessionData,
 		filters: ChatsFilters
