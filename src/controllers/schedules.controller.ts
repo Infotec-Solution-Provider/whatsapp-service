@@ -3,12 +3,12 @@ import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import schedulesService from "../services/schedules.service";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import { WppSchedule } from "@prisma/client";
+import { CreateScheduleDTO } from "@in.pulse-crm/sdk";
 
 interface SchedulesFilters {
 	userId?: string;
 	sectorId?: string;
 }
-
 class ChatsController {
 	constructor(public readonly router: Router) {
 		this.router.get(
@@ -62,68 +62,39 @@ class ChatsController {
 
 	private async createSchedule(req: Request, res: Response) {
 		const session = req.session;
-		const formData = req.body;
+		const input = req.body;
 
-		if (!formData || typeof formData !== "object") {
+		if (!input || typeof input !== "object") {
 			throw new BadRequestError("Invalid or missing formData!");
 		}
 
-		const scheduleData = {
-			...formData,
-			scheduleDate: new Date(formData.scheduleDate),
-			instance: session.instance
-		} as WppSchedule;
-
-		if (!scheduleData.name || typeof scheduleData.name !== "string") {
-			throw new BadRequestError(
-				"Schedule name is required and must be a string!"
-			);
-		}
-
-		if (
-			!scheduleData.contactId ||
-			typeof scheduleData.contactId !== "number"
-		) {
+		if (!input.contactId || typeof input.contactId !== "number") {
 			throw new BadRequestError(
 				"Contact ID is required and must be a number!"
 			);
 		}
 
-		if (
-			!scheduleData.scheduleDate ||
-			!(scheduleData.scheduleDate instanceof Date)
-		) {
-			throw new BadRequestError("Valid schedule date is required!");
+		if (!input.date) {
+			throw new BadRequestError("Schedule date is required!");
 		}
 
-		if (
-			!scheduleData.scheduledBy ||
-			typeof scheduleData.scheduledBy !== "number"
-		) {
-			throw new BadRequestError(
-				"Scheduled By is required and must be a number!"
-			);
-		}
-
-		if (
-			!scheduleData.scheduledFor ||
-			typeof scheduleData.scheduledFor !== "number"
-		) {
+		if (!input.scheduledFor || typeof input.scheduledFor !== "number") {
 			throw new BadRequestError(
 				"Scheduled For is required and must be a number!"
 			);
 		}
 
-		if (
-			!scheduleData.sectorId ||
-			typeof scheduleData.sectorId !== "number"
-		) {
+		if (!input.sectorId || typeof input.sectorId !== "number") {
 			throw new BadRequestError(
 				"Sector ID is required and must be a number!"
 			);
 		}
 
-		const result = await schedulesService.createSchedule(scheduleData);
+		const result = await schedulesService.createSchedule(
+			(req.headers.authorization as string).replace("Bearer ", ""),
+			session,
+			input as CreateScheduleDTO
+		);
 
 		res.status(200).send({
 			message: "Schedule created successfully!",
@@ -144,45 +115,6 @@ class ChatsController {
 		}
 
 		let scheduleData = formData as WppSchedule;
-
-		if (scheduleData.name && typeof scheduleData.name !== "string") {
-			throw new BadRequestError("Schedule name must be a string!");
-		}
-
-		if (
-			scheduleData.contactId &&
-			typeof scheduleData.contactId !== "number"
-		) {
-			throw new BadRequestError("Contact ID must be a number!");
-		}
-
-		if (
-			scheduleData.scheduleDate &&
-			!(scheduleData.scheduleDate instanceof Date)
-		) {
-			throw new BadRequestError("Invalid schedule date!");
-		}
-
-		if (
-			scheduleData.scheduledBy &&
-			typeof scheduleData.scheduledBy !== "number"
-		) {
-			throw new BadRequestError("Scheduled By must be a number!");
-		}
-
-		if (
-			scheduleData.scheduledFor &&
-			typeof scheduleData.scheduledFor !== "number"
-		) {
-			throw new BadRequestError("Scheduled For must be a number!");
-		}
-
-		if (
-			scheduleData.sectorId &&
-			typeof scheduleData.sectorId !== "number"
-		) {
-			throw new BadRequestError("Sector ID must be a number!");
-		}
 
 		const result = await schedulesService.editSchedule(scheduleData, +id);
 
