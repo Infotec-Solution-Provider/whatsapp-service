@@ -150,12 +150,16 @@ class InternalChatsService {
 
 	// Obtém todos os chats internos do usuário
 	public async getInternalChatsBySession(session: SessionData) {
+		const isTI = session.sectorId === 3;
 		const result = await prismaService.internalChat.findMany({
+
 			where: {
 				instance: session.instance,
+			...(isTI ? {} : {
 				participants: {
 					some: { userId: session.userId }
 				}
+			}),
 			},
 			include: {
 				messages: true,

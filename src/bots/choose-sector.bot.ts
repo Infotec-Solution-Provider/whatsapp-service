@@ -59,12 +59,16 @@ class ChooseSectorBot {
 				this.setRunningStep(chat.id, 2);
 				break;
 			case 2:
-				const chooseOption = message.body.trim().replace(/[^0-9]/g, "");
-				const chooseSector = sectors[+chooseOption - 1];
+				const chooseOption = Number(
+					message.body.trim().replace(/[^0-9]/g, "")
+				);
+				const isValid =
+					chooseOption > 0 && chooseOption <= sectors.length;
+				const chooseSector = isValid && sectors[+chooseOption - 1];
 
 				if (chooseSector) {
 					const answer =
-						"Estamos te redirecionado para o setor escolhido.\nVocê será atendido em breve!";
+						`Estamos te redirecionado para o setor ${chooseSector.name}.\nVocê será atendido em breve!`;
 					await whatsappService.sendBotMessage(message.from, {
 						chat,
 						text: answer,
