@@ -4,12 +4,11 @@ import schedulesService from "../services/schedules.service";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import { WppSchedule } from "@prisma/client";
 import { CreateScheduleDTO } from "@in.pulse-crm/sdk";
-
 interface SchedulesFilters {
 	userId?: string;
 	sectorId?: string;
 }
-class ChatsController {
+class SchedulesController {
 	constructor(public readonly router: Router) {
 		this.router.get(
 			"/api/whatsapp/schedules",
@@ -31,6 +30,7 @@ class ChatsController {
 			isAuthenticated,
 			this.deleteSchedule
 		);
+
 	}
 
 	private async getSchedulesBySession(req: Request, res: Response) {
@@ -140,4 +140,4 @@ class ChatsController {
 	}
 }
 
-export default new ChatsController(Router());
+export default new SchedulesController(Router());
