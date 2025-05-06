@@ -180,7 +180,37 @@ class InternalChatsService {
 
 		return { chats, messages };
 	}
+	public async getInternalChatsMonitor(session: SessionData) {
+		const isTI = session.sectorId === 3;
 
+		const result = await prismaService.internalChat.findMany({
+			where: {
+				instance: session.instance,
+				...(isTI ? {} : { sectorId: session.sectorId })
+
+			},
+			include: {
+				messages: true,
+				participants: true
+			}
+		});
+
+		const chats: (InternalChat & { participants: InternalChatMember[] })[] =
+			[];
+		const messages: InternalMessage[] = [];
+
+		result.forEach((c) => {
+			const { messages: msgs, ...chat } = c;
+			messages.push(...msgs);
+			chats.push(
+				chat as unknown as InternalChat & {
+					participants: InternalChatMember[];
+				}
+			);
+		});
+
+		return { chats, messages };
+	}
 	public async getInternalGroups(session: SessionData) {
 		const result = await prismaService.internalChat.findMany({
 			where: {

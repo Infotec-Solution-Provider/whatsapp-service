@@ -43,12 +43,18 @@ class InternalChatsController {
 			isAuthenticated,
 			this.updateInternalGroup
 		);
-
 		this.router.patch(
 			"/api/internal/chat/:id/mark-as-read",
 			isAuthenticated,
 			this.markChatAsRead
 		);
+
+		this.router.get(
+			"/api/internal/monitor/chats",
+			isAuthenticated,
+			this.getInternalChatsMonitor
+		);
+
 	}
 
 	private async startInternalChat(req: Request, res: Response) {
@@ -85,6 +91,16 @@ class InternalChatsController {
 		});
 	}
 
+	private async getInternalChatsMonitor(req: Request, res: Response) {
+		const data = await internalChatsService.getInternalChatsMonitor(
+			req.session
+		);
+
+		res.status(200).send({
+			message: "Internal chats retrieved successfully!",
+			data
+		});
+	}
 	private async getSessionInternalChats(req: Request, res: Response) {
 		const data = await internalChatsService.getInternalChatsBySession(
 			req.session
