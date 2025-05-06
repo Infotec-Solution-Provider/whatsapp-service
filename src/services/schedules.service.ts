@@ -54,6 +54,12 @@ class SchedulesService {
 				schedule.contactId,
 				schedule.scheduledFor
 			);
+
+			await delete({
+			    where: {
+                    id: schedule.id
+				}
+			});
 		}
 	}
 
