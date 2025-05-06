@@ -1,6 +1,8 @@
-import { InternalChat, InternalMessage, Prisma } from "@prisma/client";
+import { InternalChat, Prisma } from "@prisma/client";
 import {
 	FileDirType,
+	InternalChatMember,
+	InternalMessage,
 	SessionData,
 	SocketEventType,
 	SocketServerInternalChatRoom,
@@ -67,9 +69,9 @@ class InternalChatsService {
 				SocketEventType.InternalChatStarted,
 				room,
 				{
-					chat: {
-						...internalChat,
-						participants: participantIds
+					chat: internalChat as unknown as InternalChat & {
+						participants: InternalChatMember[];
+						messages: InternalMessage[];
 					}
 				}
 			);
@@ -120,15 +122,14 @@ class InternalChatsService {
 		});
 
 		for (const id of idsToAdd) {
-			const { participants, ...rest } = group;
 			const room: SocketServerUserRoom = `${group.instance}:user:${id}`;
 			await socketService.emit(
 				SocketEventType.InternalChatStarted,
 				room,
 				{
-					chat: {
-						...rest,
-						participants: group.participants.map((p) => p.userId)
+					chat: group as unknown as InternalChat & {
+						participants: InternalChatMember[];
+						messages: InternalMessage[];
 					}
 				}
 			);
@@ -150,32 +151,31 @@ class InternalChatsService {
 
 	// Obtém todos os chats internos do usuário
 	public async getInternalChatsBySession(session: SessionData) {
-		const isTI = session.sectorId === 3;
 		const result = await prismaService.internalChat.findMany({
-
 			where: {
 				instance: session.instance,
-			...(isTI ? {} : {
 				participants: {
 					some: { userId: session.userId }
 				}
-			}),
 			},
 			include: {
 				messages: true,
 				participants: true
 			}
 		});
-		const chats: (InternalChat & { participants: number[] })[] = [];
+
+		const chats: (InternalChat & { participants: InternalChatMember[] })[] =
+			[];
 		const messages: InternalMessage[] = [];
 
-		result.forEach((chat) => {
-			const { messages: msgs, participants, ...rest } = chat;
+		result.forEach((c) => {
+			const { messages: msgs, ...chat } = c;
 			messages.push(...msgs);
-			chats.push({
-				...rest,
-				participants: participants.map((p) => p.userId)
-			});
+			chats.push(
+				chat as unknown as InternalChat & {
+					participants: InternalChatMember[];
+				}
+			);
 		});
 
 		return { chats, messages };
@@ -190,7 +190,7 @@ class InternalChatsService {
 			},
 			include: {
 				participants: true,
-				messages: true,
+				messages: true
 			},
 			orderBy: {
 				startedAt: "desc"
@@ -302,6 +302,20 @@ class InternalChatsService {
 		return await prismaService.internalMessage.update({
 			where: { id },
 			data
+		});
+	}
+
+	public async markChatMessagesAsRead(chatId: number, userId: number) {
+		await prismaService.internalChatMember.update({
+			data: {
+				lastReadAt: new Date()
+			},
+			where: {
+				internalChatId_userId: {
+					internalChatId: chatId,
+					userId
+				}
+			}
 		});
 	}
 }

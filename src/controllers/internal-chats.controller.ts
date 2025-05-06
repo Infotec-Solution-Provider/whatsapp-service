@@ -43,6 +43,12 @@ class InternalChatsController {
 			isAuthenticated,
 			this.updateInternalGroup
 		);
+
+		this.router.patch(
+			"/api/internal/chat/:id/mark-as-read",
+			isAuthenticated,
+			this.markChatAsRead
+		);
 	}
 
 	private async startInternalChat(req: Request, res: Response) {
@@ -118,6 +124,19 @@ class InternalChatsController {
 		res.status(200).send({
 			message: "Group members updated!",
 			data: updated
+		});
+	}
+
+	private async markChatAsRead(req: Request, res: Response) {
+		const chatId = Number(req.params["id"]);
+
+		await internalChatsService.markChatMessagesAsRead(
+			chatId,
+			req.session.userId
+		);
+
+		res.status(200).send({
+			message: "Chat marked as read!"
 		});
 	}
 }
