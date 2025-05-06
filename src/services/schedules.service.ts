@@ -55,11 +55,7 @@ class SchedulesService {
 				schedule.scheduledFor
 			);
 
-			await delete({
-			    where: {
-                    id: schedule.id
-				}
-			});
+			await this.deleteSchedule(schedule.id);
 		}
 	}
 
