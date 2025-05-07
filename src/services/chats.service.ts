@@ -199,8 +199,11 @@ class ChatsService {
 					customers.find((c) => c.CODIGO === contact.customerId) ||
 					null;
 			}
+			let userName = "";
+			if (foundChat.userId) {
 			const user = await usersService.getUserById(foundChat.userId);
-			const userName = user?.NOME || "";
+				userName = user?.NOME || "";
+			}
 			chats.push({ ...chat, customer, contact: contact || null, userName });
 
 			if (includeMessages && contact) {
