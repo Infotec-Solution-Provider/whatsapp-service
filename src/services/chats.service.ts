@@ -157,7 +157,6 @@ class ChatsService {
 						WppMessage: true
 					}
 				},
-				user: true
 
 			}
 		});
