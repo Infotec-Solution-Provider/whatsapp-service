@@ -73,11 +73,11 @@ class ChatsService {
 		});
 
 		if (session.role === "ADMIN") {
-			const isTI = session.sectorId === 3;
 			const foundAdminChats = await prismaService.wppChat.findMany({
 				where: {
 					isFinished: false,
-					...(isTI ? {} : { sectorId: session.sectorId, userId: -1 })
+					sectorId: session.sectorId,
+					userId: -1
 				},
 				include: {
 					contact: {
@@ -138,51 +138,75 @@ class ChatsService {
 
 		return { chats, messages };
 	}
-	public async getChatsMonitor(session: SessionData) {
+	public async getChatsMonitor(
+		session: SessionData,
+		includeMessages = true,
+		includeContact = true
+	) {
 		const isTI = session.sectorId === 3;
-
 		const foundChats = await prismaService.wppChat.findMany({
 			where: {
-				instance: session.instance,
 				isFinished: false,
-				...(isTI ? {} : { sectorId: session.sectorId })
+				instance: session.instance,
+				...(isTI ? {} : { sectorId: session.sectorId, userId: -1 })
+
 			},
 			include: {
-				contact: true
+				contact: {
+					include: {
+						WppMessage: true
+					}
+				}
 			}
 		});
 
-		const customerIds = foundChats
-			.filter((chat) => typeof chat.contact?.customerId === "number")
-			.map((chat) => chat.contact!.customerId!);
+
+		const chats: Array<
+			WppChat & { customer: Customer | null; contact: WppContact | null }
+		> = [];
+		const messages: Array<WppMessage> = [];
+		const customerIds = includeContact
+			? foundChats
+					.filter(
+						(chat) => typeof chat.contact?.customerId === "number"
+					)
+					.map((c) => c.contact!.customerId!)
+			: [];
 
 		const customers = customerIds.length
 			? await instancesService.executeQuery<Array<Customer>>(
 					session.instance,
 					FETCH_CUSTOMERS_QUERY,
-					[customerIds]
+					[
+						foundChats
+							.filter(
+								(chat) =>
+									typeof chat.contact?.customerId === "number"
+							)
+							.map((c) => c.contact!.customerId!)
+					]
 				)
 			: [];
 
-		const monitorChats = foundChats.map((chat) => {
-			const customer = customers.find(
-				(c) => c.CODIGO === chat.contact?.customerId
-			);
+		for (const foundChat of foundChats) {
+			const { contact, ...chat } = foundChat;
 
-			return {
-				id: chat.id.toString(),
-				erpCode: customer?.CODIGO?.toString() || "",
-				companyName: customer?.RAZAO || "",
-				contactName: chat.contact?.name || "",
-				whatsappNumber: chat.contact?.name || "",
-				sectorName: customer?.SETOR || "",
-				attendantName: chat.userId || "",
-				startDate: chat.startedAt?.toISOString() || "",
-				endDate: chat.finishedAt?.toISOString() || "",
-				result: chat.resultId || ""
-			};
-		});
-		return monitorChats;
+			let customer: Customer | null = null;
+
+			if (includeContact && typeof contact?.customerId == "number") {
+				customer =
+					customers.find((c) => c.CODIGO === contact.customerId) ||
+					null;
+			}
+
+			chats.push({ ...chat, customer, contact: contact || null });
+
+			if (includeMessages && contact) {
+				messages.push(...contact.WppMessage);
+			}
+		}
+
+		return { chats, messages };
 	}
 
 	public async getChats(filters: ChatsFilters) {
