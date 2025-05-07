@@ -1,6 +1,6 @@
 import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
 import prismaService from "./prisma.service";
-import { Customer, SessionData, SocketEventType } from "@in.pulse-crm/sdk";
+import { Customer, SessionData, SocketEventType, User } from "@in.pulse-crm/sdk";
 import customersService from "./customers.service";
 import instancesService from "./instances.service";
 import socketService from "./socket.service";
@@ -157,14 +157,14 @@ class ChatsService {
 						WppMessage: true
 					}
 				},
-				users: true
+				user: true
 
 			}
 		});
 
 
 		const chats: Array<
-			WppChat & { customer: Customer | null; contact: WppContact | null }
+			WppChat & { customer: Customer | null; contact: WppContact | null, user: User | null }
 		> = [];
 		const messages: Array<WppMessage> = [];
 		const customerIds = includeContact
