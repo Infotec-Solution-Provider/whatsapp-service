@@ -162,9 +162,8 @@ class ChatsService {
 		});
 
 
-		const chats: Array<
-			WppChat & { customer: Customer | null; contact: WppContact | null }
-		> = [];
+		const chats: Array<WppChat & { customer: Customer | null; contact: WppContact | null; userName: string }> = [];
+
 		const messages: Array<WppMessage> = [];
 		const customerIds = includeContact
 			? foundChats
