@@ -162,8 +162,9 @@ class ChatsService {
 		});
 
 
-		const chats: Array<WppChat & { customer: Customer | null; contact: WppContact | null; userName: string }> = [];
-
+		const chats: Array<
+			WppChat & { customer: Customer | null; contact: WppContact | null }
+		> = [];
 		const messages: Array<WppMessage> = [];
 		const customerIds = includeContact
 			? foundChats
@@ -198,12 +199,8 @@ class ChatsService {
 					customers.find((c) => c.CODIGO === contact.customerId) ||
 					null;
 			}
-			let userName = "";
-			if (foundChat.userId) {
-			const user = await usersService.getUserById(foundChat.userId);
-				userName = user?.NOME || "";
-			}
-			chats.push({ ...chat, customer, contact: contact || null, userName });
+
+			chats.push({ ...chat, customer, contact: contact || null });
 
 			if (includeMessages && contact) {
 				messages.push(...contact.WppMessage);
