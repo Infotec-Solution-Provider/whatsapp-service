@@ -148,7 +148,7 @@ class ChatsService {
 			where: {
 				isFinished: false,
 				instance: session.instance,
-				...(isTI ? {} : { sectorId: session.sectorId, userId: -1 })
+				...(isTI ? {} : { sectorId: session.sectorId })
 
 			},
 			include: {
@@ -199,8 +199,9 @@ class ChatsService {
 					customers.find((c) => c.CODIGO === contact.customerId) ||
 					null;
 			}
-
-			chats.push({ ...chat, customer, contact: contact || null });
+			const user = await usersService.getUserById(foundChat.userId);
+			const userName = user?.NOME || "";
+			chats.push({ ...chat, customer, contact: contact || null, userName });
 
 			if (includeMessages && contact) {
 				messages.push(...contact.WppMessage);

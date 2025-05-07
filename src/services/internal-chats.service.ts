@@ -181,10 +181,11 @@ class InternalChatsService {
 		return { chats, messages };
 	}
 	public async getInternalChatsMonitor(session: SessionData) {
-		const isTI = session.sectorId == 3;
+		const isTI = session.sectorId === 3;
 
 		const result = await prismaService.internalChat.findMany({
 			where: {
+				isFinished: false,
 				instance: session.instance,
 				...(isTI ? {} : { sectorId: session.sectorId })
 
