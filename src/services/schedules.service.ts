@@ -86,7 +86,7 @@ class SchedulesService {
 		return schedules;
 	}
 	public async finishChatRoutine() {
-		const trintaMinAtras = new Date(Date.now() - 30 * 60 * 1000)
+		const trintaMinAtras = new Date(Date.now() - 2 * 60 * 1000)
 		const duasHorasAtras = new Date(Date.now() - 2 * 60 * 60 * 1000)
 
 		console.log("Executando rotina de finalização de chats...");
