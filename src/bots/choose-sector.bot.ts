@@ -7,6 +7,7 @@ import { User } from "@in.pulse-crm/sdk";
 
 class ChooseSectorBot {
 	private readonly running: { step: number; chatId: number }[] = [];
+	private chatState = new Map<string, { operadores: User[], setor: any }>();
 
 	private getRunningStep(chatId: number) {
 		const running = this.running.find((r) => r.chatId === chatId);
@@ -89,7 +90,7 @@ class ChooseSectorBot {
 						text: answer,
 						quotedId: message.id
 					});
-
+					this.chatState.set(String(chat.id), { operadores, setor: chooseSector });
 					this.setRunningStep(chat.id, 3);
 					break;
 
@@ -101,10 +102,12 @@ class ChooseSectorBot {
 				});
 				break;
 			case 3:
-
 					const chooseOptionOp = Number(
 						message.body.trim().replace(/[^0-9]/g, "")
 					);
+					const state = this.chatState.get(String(chat.id));
+					const operadores = state?.operadores || [];
+					console.log("state",state);
 					console.log("chooseOptionOp",chooseOptionOp);
 					console.log("operadores",operadores);
 					console.log("operadores.length",operadores.length);
