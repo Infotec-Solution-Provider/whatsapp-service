@@ -43,7 +43,6 @@ class ChooseSectorBot {
 		const sectors = await sectorsService.getSectors(chat.instance, {
 			receiveChats: true,
 		});
-		let operadores: User[] = [];
 		if (!sectors) {
 			throw new Error(`No sectors found for instance ${chat.instance}`);
 		}
