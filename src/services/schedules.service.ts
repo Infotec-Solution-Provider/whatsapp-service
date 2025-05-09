@@ -13,9 +13,8 @@ class SchedulesService {
 	constructor() {
 		cron.schedule("*/5 * * * *", async () => {
 			this.runSchedulesJob();
+			this.finishChatRoutine();
 		});
-		cron.schedule("*/2 * * * *", async () => {
-		});this.finishChatRoutine();
 
 	}
 
