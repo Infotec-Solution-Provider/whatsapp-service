@@ -1,9 +1,10 @@
 import { Prisma, WppSchedule } from "@prisma/client";
 import prismaService from "./prisma.service";
-import { CreateScheduleDTO, SessionData } from "@in.pulse-crm/sdk";
+import { CreateScheduleDTO, SessionData, SocketEventType } from "@in.pulse-crm/sdk";
 import chatsService from "./chats.service";
 import messagesDistributionService from "./messages-distribution.service";
 import cron from "node-cron";
+import socketService from "./socket.service";
 
 interface ChatsFilters {
 	userId?: string;
@@ -13,6 +14,8 @@ class SchedulesService {
 	constructor() {
 		cron.schedule("*/5 * * * *", async () => {
 			this.runSchedulesJob();
+		});
+		cron.schedule("*/2 * * * *", async () => {
 			this.finishChatRoutine();
 		});
 
@@ -102,6 +105,9 @@ class SchedulesService {
 					},
 			},
 			}})
+			console.log("Chats encontrados:", chats.length);
+			console.log("Chats:", chats);
+
 			for (const chat of chats) {
 			// Verifica se nenhuma mensagem do usuário (operador) foi enviada
 			const teveMensagemDeOperador = chat.messages.some(
@@ -114,11 +120,18 @@ class SchedulesService {
 				data: {
 					isFinished: true,
 					finishedAt: new Date(),
-					finishedBy: null, // ou ID do sistema/bot
+					finishedBy: null,
 				},
 				})
+			const event = SocketEventType.WppChatFinished;
 
-	}
+			let finishMsg: string = `Atendimento finalizado pelo sistema devido inatividade do operador.`;
+			console.log("Mensagem de finalização:", finishMsg);
+			await messagesDistributionService.addSystemMessage(chat, finishMsg);
+			await socketService.emit(event, `${"nunes"}:chat:${chat.id}`, {
+				chatId: chat.id
+			});
+		}
 	  }
 	}
 	public async createSchedule(
