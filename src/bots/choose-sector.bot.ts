@@ -69,7 +69,7 @@ class ChooseSectorBot {
 				const chooseSector = isValid && sectors[+chooseOption - 1];
 
 				if (chooseSector) {
-					let query = `SELECT * FROM operadores WHERE sector_id = ${sectors[+chooseOption - 1]}`;
+					let query = `SELECT * FROM operadores WHERE SETOR = ${sectors[+chooseOption - 1]}`;
 					operadores = await instancesService.executeQuery< User[]>(chat.instance, query, []);
 
 					const answer =
