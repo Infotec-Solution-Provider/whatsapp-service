@@ -223,8 +223,10 @@ class MessagesDistributionService {
 
 		try {
 			const flow = await this.getFlow(sector.instance, sector.id);
-			 await flow.getChatPayload(logger, contact);
-
+			const data = await flow.getChatPayload(logger, contact);
+			console.log("data", data);
+			console.log("operador", operador);
+			console.log("chat", chat);
 			const updatedChat = await prismaService.wppChat.update({
 				where: { id: chat.id },
 				data: {
@@ -232,7 +234,7 @@ class MessagesDistributionService {
 					botId: null
 				}
 			});
-
+			console.log("updatedChat", updatedChat);
 			await this.addSystemMessage(
 				updatedChat,
 				`Transferido para o operador ${operador.NOME}!`
