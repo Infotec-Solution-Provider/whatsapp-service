@@ -88,11 +88,10 @@ class ChooseSectorBot {
 						text: answer,
 						quotedId: message.id
 					});
-
-					this.setRunningStep(chat.id, 3);
-					break;
-
 				}
+				this.setRunningStep(chat.id, 3);
+				break;
+
 			case 3:
 					const chooseOptionOp = Number(
 						message.body.trim().replace(/[^0-9]/g, "")
