@@ -10,7 +10,10 @@ class SectorsService {
 			where: {
 				instance,
 				...filters
-			}
+			},
+			orderBy: {
+				name: 'asc' // ou 'desc' se quiser em ordem decrescente
+			  }
 		});
 
 		return sectors;
