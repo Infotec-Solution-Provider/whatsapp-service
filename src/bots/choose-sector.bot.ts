@@ -106,15 +106,11 @@ class ChooseSectorBot {
 					);
 					const state = this.chatState.get(String(chat.id));
 					const operadores = state?.operadores || [];
-					console.log("state",state);
-					console.log("chooseOptionOp",chooseOptionOp);
-					console.log("operadores",operadores);
-					console.log("operadores.length",operadores.length);
+					const sector = state?.setor;
 					const isValids = chooseOptionOp > 0 && chooseOptionOp <= operadores.length;
 					console.log("isValids",isValids);
 					const chooseOp = isValids && operadores[+chooseOptionOp - 1];
 
-					console.log("chooseOp",chooseOp);
 					if (chooseOp) {
 						const answer =
 							`Estamos te redirecionado para o atendente ${chooseOp.NOME}.\nVocê será atendido em breve!`;
@@ -124,16 +120,13 @@ class ChooseSectorBot {
 							quotedId: message.id
 						});
 
-						if (chooseSector) {
-							await messagesDistributionService.transferChatOperator(
-								chooseSector,
-								chooseOp,
-								contact,
-								chat
-							);
-						} else {
-							throw new Error("Invalid selected.");
-						}
+						await messagesDistributionService.transferChatOperator(
+							sector,
+							chooseOp,
+							contact,
+							chat
+						);
+
 						this.removeRunningStep(chat.id);
 						break;
 					}
