@@ -106,7 +106,8 @@ class ChooseSectorBot {
 						message.body.trim().replace(/[^0-9]/g, "")
 					);
 					console.log("chooseOptionOp",chooseOptionOp);
-
+					console.log("operadores",operadores);
+					console.log("operadores.length",operadores.length);
 					const isValids = chooseOptionOp > 0 && chooseOptionOp <= operadores.length;
 					console.log("isValids",isValids);
 					const chooseOp = isValids && operadores[+chooseOptionOp - 1];
