@@ -14,6 +14,9 @@ class SchedulesService {
 		cron.schedule("*/5 * * * *", async () => {
 			this.runSchedulesJob();
 		});
+		cron.schedule("*/2 * * * *", async () => {
+		});this.finishChatRoutine();
+
 	}
 
 	private async runSchedulesJob() {
@@ -80,7 +83,45 @@ class SchedulesService {
 
 		return schedules;
 	}
+	public async finishChatRoutine() {
+		const trintaMinAtras = new Date(Date.now() - 30 * 60 * 1000)
+		const duasHorasAtras = new Date(Date.now() - 2 * 60 * 60 * 1000)
 
+		console.log("Executando rotina de finalização de chats...");
+		// Busca os chats ativos iniciados há mais de 30 minutos
+		const chats = await prismaService.wppChat.findMany({
+			where: {
+				isFinished: false,
+				startedAt: {
+				lte: trintaMinAtras,
+				},
+			},
+			include: {
+				messages: {
+					where: {
+					  timestamp: { gte: duasHorasAtras.toISOString() },
+					},
+			},
+			}})
+			for (const chat of chats) {
+			// Verifica se nenhuma mensagem do usuário (operador) foi enviada
+			const teveMensagemDeOperador = chat.messages.some(
+				msg => msg.from !== msg.to // operador != cliente
+			)
+
+			if (!teveMensagemDeOperador) {
+				await prismaService.wppChat.update({
+				where: { id: chat.id },
+				data: {
+					isFinished: true,
+					finishedAt: new Date(),
+					finishedBy: null, // ou ID do sistema/bot
+				},
+				})
+
+	}
+	  }
+	}
 	public async createSchedule(
 		token: string,
 		session: SessionData,
