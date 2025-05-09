@@ -69,16 +69,18 @@ class ChooseSectorBot {
 				const chooseSector = isValid && sectors[+chooseOption - 1];
 
 				if (chooseSector) {
-					let setorId = sectors[+chooseOption - 1]?.id
-					console.log("setorId",setorId);
-					console.log("chooseSector",chooseOption);
-					let query = `SELECT * FROM operadores WHERE SETOR = ${setorId} order by NOME`;
-					console.log("query",query);
-					console.log("instance", chat.instance);
-					console.log("chooseSector", chooseSector);
+					let setorId = sectors[+chooseOption - 1]
+					let query = `SELECT * FROM operadores WHERE SETOR = ${setorId?.id} order by NOME`;
 
 					let operadores = await instancesService.executeQuery<Array<User>>(chat.instance, query, []);
-					console.log("operadores",operadores);
+
+					if(setorId?.name === "Financeiro"){
+						operadores = operadores.filter((o) => o.NOME !== "Andréia");
+					};
+					if(setorId?.name === "Compras"){
+						operadores = operadores.filter((o) => o.NOME !== "Jorel");
+					};
+
 					const answer =
 						`Escolha com quem deseja falar\n${operadores.map((s, i) => `${i + 1} - ${s.NOME}`).join("\n")}`;
 					await whatsappService.sendBotMessage(message.from, {
@@ -91,13 +93,7 @@ class ChooseSectorBot {
 					break;
 
 				}
-				await whatsappService.sendBotMessage(message.from, {
-					chat,
-					text: "Opção inválida! Tente novamente.",
-					quotedId: message.id
-				});
-				break;
-				case 3:
+			case 3:
 					const chooseOptionOp = Number(
 						message.body.trim().replace(/[^0-9]/g, "")
 					);
