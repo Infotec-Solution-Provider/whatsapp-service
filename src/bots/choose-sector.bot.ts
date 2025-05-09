@@ -69,7 +69,7 @@ class ChooseSectorBot {
 				const chooseSector = isValid && sectors[+chooseOption - 1];
 
 				if (chooseSector) {
-					let setorId = sectors[+chooseOption - 1]
+					let setorId = sectors[+chooseOption - 1]?.id
 					console.log("setorId",setorId);
 					console.log("chooseSector",chooseOption);
 					let query = `SELECT * FROM operadores WHERE SETOR = ${setorId} order by NOME`;
