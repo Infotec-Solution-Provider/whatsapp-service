@@ -19,6 +19,7 @@ import {
 	SocketServerMonitorRoom,
 	SocketServerUserRoom,
 	SocketServerWalletRoom,
+	User,
 	WppMessageEventData
 } from "@in.pulse-crm/sdk";
 import chatsService from "./chats.service";
@@ -207,7 +208,40 @@ class MessagesDistributionService {
 			logger.failed(err);
 		}
 	}
+	public async transferChatOperator(
+		sector: WppSector,
+		operador: User,
+		contact: WppContact,
+		chat: WppChat
+	) {
+		const logger = new ProcessingLogger(
+			sector.instance,
+			"transfer-chat-operator",
+			`WppChat-${chat.id}_${Date.now()}`,
+			{ sector, contact, chat }
+		);
 
+		try {
+			const flow = await this.getFlow(sector.instance, sector.id);
+			const data = await flow.getChatPayload(logger, contact);
+			const updatedChat = await prismaService.wppChat.update({
+				where: { id: chat.id },
+				data: { ...data, userId:operador.CODIGO, botId: null }
+			});
+
+			await this.addSystemMessage(
+				updatedChat,
+				`Transferido para o setor ${sector.name}!`
+			);
+
+			await this.notifyChatStarted(logger, updatedChat);
+			logger.success(updatedChat);
+		} catch (err) {
+			console.error(err);
+			logger.log(`Erro ao processar mensagem!`);
+			logger.failed(err);
+		}
+	}
 	public async notifyChatStarted(process: ProcessingLogger, chat: WppChat) {
 		try {
 			const data = { chatId: chat.id };
