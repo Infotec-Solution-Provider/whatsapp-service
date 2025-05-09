@@ -50,6 +50,7 @@ class ChooseSectorBot {
 		const sectorsMessage =
 			`Olá,\nEstamos felizes por você entrar em contato com a Metalúrgica Nunes, Usinagem de Precisão. Escolha um setor para continuar:\n${sectors.map((s, i) => `${i + 1} - ${s.name}`).join("\n")}` +
 			"\nDigite o número do setor desejado!";
+			console.log("currentStep",currentStep);
 
 		switch (currentStep) {
 			case 1:
@@ -88,18 +89,29 @@ class ChooseSectorBot {
 						text: answer,
 						quotedId: message.id
 					});
-				}
-				this.setRunningStep(chat.id, 3);
-				break;
 
+					this.setRunningStep(chat.id, 3);
+					break;
+
+				}
+				await whatsappService.sendBotMessage(message.from, {
+					chat,
+					text: "Opção inválida! Tente novamente.",
+					quotedId: message.id
+				});
+				break;
 			case 3:
+
 					const chooseOptionOp = Number(
 						message.body.trim().replace(/[^0-9]/g, "")
 					);
-					const isValids =
-					chooseOptionOp > 0 && chooseOptionOp <= operadores.length;
+					console.log("chooseOptionOp",chooseOptionOp);
+
+					const isValids = chooseOptionOp > 0 && chooseOptionOp <= operadores.length;
+					console.log("isValids",isValids);
 					const chooseOp = isValids && operadores[+chooseOptionOp - 1];
 
+					console.log("chooseOp",chooseOp);
 					if (chooseOp) {
 						const answer =
 							`Estamos te redirecionado para o atendente ${chooseOp.NOME}.\nVocê será atendido em breve!`;
