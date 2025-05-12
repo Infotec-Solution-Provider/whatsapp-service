@@ -46,7 +46,8 @@ class SchedulesService {
 						instance: schedule.instance,
 						userId: schedule.scheduledBy,
 						sectorId: schedule.sectorId!,
-						role: "ADMIN"
+						role: "ADMIN",
+						name: "SYSTEM"
 					},
 					chat.id,
 					-50
