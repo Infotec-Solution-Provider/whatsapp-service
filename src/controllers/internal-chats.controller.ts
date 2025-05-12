@@ -29,6 +29,13 @@ class InternalChatsController {
 			this.getInternalGroups
 		);
 
+		// Deletar chat interno
+		this.router.delete(
+			"/api/internal/chats/:id",
+			isAuthenticated,
+			this.deleteInternalChat
+		);
+
 		// Envia mensagem para um chat interno
 		this.router.post(
 			"/api/internal/chats/:id/messages",
@@ -141,6 +148,17 @@ class InternalChatsController {
 		res.status(200).send({
 			message: "Group members updated!",
 			data: updated
+		});
+	}
+
+	//delete internal chat (Only if is group)
+	private async deleteInternalChat(req: Request, res: Response) {
+		const chatId = Number(req.params["id"]);
+
+		await internalChatsService.deleteInternalChat(chatId);
+
+		res.status(200).send({
+			message: "Chat deleted successfully!"
 		});
 	}
 

@@ -153,6 +153,26 @@ class InternalChatsService {
 		return group;
 	}
 
+	public async deleteInternalChat(id: number) {
+		const chat = await prismaService.internalChat.findUnique({
+			where: { id }
+		});
+
+		if (!chat) {
+			throw new BadRequestError("Chat not found");
+		}
+
+		await prismaService.internalChat.delete({
+			where: { id }
+		});
+
+		const room: SocketServerInternalChatRoom =
+			`${chat.instance}:internal-chat:${id}` as SocketServerInternalChatRoom;
+		await socketService.emit(SocketEventType.InternalChatFinished, room, {
+			chatId: id
+		});
+	}
+
 	// Obtém todos os chats internos do usuário
 	public async getInternalChatsBySession(session: SessionData) {
 		const result = await prismaService.internalChat.findMany({
