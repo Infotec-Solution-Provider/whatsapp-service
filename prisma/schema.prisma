@@ -103,6 +103,7 @@ model InternalMessage {
     from           String
     type           String
     quotedId       Int?             @map("quoted_id")
+    wwebjsId       String?          @unique @map("wwebjs_id")
     internalChatId Int              @map("internalchat_id")
     body           String
     timestamp      String           @map("timestamp")
@@ -132,7 +133,7 @@ model InternalChat {
     isGroup          Boolean @default(false) @map("is_group")
     groupName        String? @map("group_name")
     groupDescription String? @map("group_description")
-    wppGroupId       String? @map("wpp_group_id")
+    wppGroupId       String? @unique @map("wpp_group_id")
 
     sector       WppSector?           @relation(fields: [sectorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
     messages     InternalMessage[]
@@ -147,7 +148,6 @@ model InternalChatMember {
     userId         Int       @map("internalcontactId")
     joinedAt       DateTime  @default(now()) @map("joined_at")
     lastReadAt     DateTime? @map("last_read_at")
-    lastReadId     Int?      @map("last_read_id")
 
     chat InternalChat @relation(fields: [internalChatId], references: [id], onDelete: Cascade)
 

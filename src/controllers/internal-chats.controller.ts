@@ -54,7 +54,6 @@ class InternalChatsController {
 			isAuthenticated,
 			this.getInternalChatsMonitor
 		);
-
 	}
 
 	private async startInternalChat(req: Request, res: Response) {
@@ -63,6 +62,7 @@ class InternalChatsController {
 		const participants = req.body.participants;
 		const isGroup = Boolean(req.body.isGroup);
 		const groupName = req.body.groupName || "";
+		const groupId = req.body.groupId || null;
 
 		if (
 			!participants ||
@@ -82,7 +82,8 @@ class InternalChatsController {
 			session,
 			participants,
 			isGroup,
-			groupName
+			groupName,
+			groupId
 		);
 
 		res.status(200).send({

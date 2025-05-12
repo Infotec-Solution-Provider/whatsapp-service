@@ -11,6 +11,7 @@ import ProcessingLogger from "../utils/processing-logger";
 import messagesService from "../services/messages.service";
 import messagesDistributionService from "../services/messages-distribution.service";
 import { SendMessageOptions } from "../types/whatsapp-instance.types";
+import internalChatsService from "../services/internal-chats.service";
 
 const PUPPETEER_ARGS = {
 	headless: true,
@@ -81,7 +82,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		this.wwebjs.on("qr", this.handleQr.bind(this));
 		this.wwebjs.on("authenticated", this.handleAuth.bind(this));
 		this.wwebjs.on("ready", this.handleReady.bind(this));
-		this.wwebjs.on("message", this.handleMessage.bind(this));
+		this.wwebjs.on("message_create", this.handleMessage.bind(this));
 		this.wwebjs.on("message_edit", this.handleMessageEdit.bind(this));
 		this.wwebjs.on("message_ack", this.handleMessageAck.bind(this));
 		this.wwebjs.on(
@@ -179,6 +180,8 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		);
 
 		try {
+			const chat = await msg.getChat();
+
 			if (msg.fromMe) {
 				return process.log("Message ignored: it is from me.");
 			}
@@ -195,10 +198,6 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				return process.log("Message ignored: it is broadcast.");
 			}
 
-			if (!msg.from.includes("@c.us")) {
-				return process.log("Message ignored: it is not a contact.");
-			}
-
 			const parsedMsg = await MessageParser.parse(
 				process,
 				this.instance,
@@ -206,16 +205,25 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			);
 			process.log(`Message is successfully parsed!`, parsedMsg);
 
-			const savedMsg = await messagesService.insertMessage(parsedMsg);
-			process.log(`Message is successfully saved!`);
-
-			messagesDistributionService.processMessage(
-				this.instance,
-				this.id,
-				savedMsg
-			);
-			process.log(`Message sent to distribution service!`);
-			process.success(savedMsg);
+			if (!chat.isGroup) {
+				const savedMsg = await messagesService.insertMessage(parsedMsg);
+				process.log(`Message is successfully saved!`);
+				messagesDistributionService.processMessage(
+					this.instance,
+					this.id,
+					savedMsg
+				);
+				process.log(`Message sent to distribution service!`);
+				process.success(savedMsg);
+			}
+			if (chat.isGroup) {
+				console.log("Group message received!", chat.id);
+				internalChatsService.receiveMessage(
+					chat.id.user,
+					parsedMsg,
+					msg.author || msg.from.split("@")[0]!
+				);
+			}
 		} catch (err) {
 			process.log(
 				`Error while processing message: ${sanitizeErrorMessage(err)}`
@@ -319,6 +327,12 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			process.failed(err);
 			throw err;
 		}
+	}
+
+	public async getGroups() {
+		const chats = await this.wwebjs.getChats();
+
+		return chats.filter((c) => c.isGroup);
 	}
 }
 

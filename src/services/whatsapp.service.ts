@@ -1,5 +1,4 @@
 import { WppChat, WppClientType } from "@prisma/client";
-
 import prismaService from "./prisma.service";
 import { FileDirType, SessionData } from "@in.pulse-crm/sdk";
 import { BadRequestError } from "@rgranatodutra/http-errors";
@@ -397,6 +396,17 @@ class WhatsappService {
 		} catch {
 			return null;
 		}
+	}
+
+	public async getGroups(instance: string, sectorId: number) {
+		const client = await this.getClientBySector(instance, sectorId);
+		if (!(client instanceof WWEBJSWhatsappClient)) {
+			throw new BadRequestError("Client is not WWEBJS client");
+		}
+
+		const groups = await client.getGroups();
+
+		return groups;
 	}
 }
 

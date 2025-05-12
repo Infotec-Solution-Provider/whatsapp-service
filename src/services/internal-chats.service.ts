@@ -14,7 +14,8 @@ import filesService from "./files.service";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import prismaService from "./prisma.service";
-import { getMessageType } from "./whatsapp.service";
+import whatsappService, { getMessageType } from "./whatsapp.service";
+import CreateMessageDto from "../dtos/create-message.dto";
 
 interface ChatsFilters {
 	userId?: string;
@@ -37,7 +38,8 @@ class InternalChatsService {
 		session: SessionData,
 		participantIds: number[],
 		isGroup: boolean = false,
-		groupName: string = ""
+		groupName: string | null = null,
+		groupId: string | null = null
 	) {
 		const uniqueIds = new Set(participantIds);
 
@@ -45,6 +47,7 @@ class InternalChatsService {
 			data: {
 				isGroup,
 				groupName,
+				wppGroupId: groupId,
 				creatorId: session.userId,
 				instance: session.instance,
 				participants: {
@@ -188,7 +191,6 @@ class InternalChatsService {
 				isFinished: false,
 				instance: session.instance,
 				...(isTI ? {} : { sectorId: session.sectorId })
-
 			},
 			include: {
 				messages: true,
@@ -273,6 +275,7 @@ class InternalChatsService {
 		);
 
 		process.log("Iniciando o envio da mensagem interna.");
+
 		try {
 			let message = {
 				instance: session.instance,
@@ -321,12 +324,101 @@ class InternalChatsService {
 				message: savedMsg
 			});
 			process.success("Mensagem enviada com sucesso.");
+
+			const chat = await prismaService.internalChat.findUnique({
+				where: { id: +data.chatId }
+			});
+
+			if (chat?.wppGroupId) {
+				console.log(chat.wppGroupId);
+				const sentMsg = await this.sendMessageToWppGroup(
+					session,
+					chat.wppGroupId,
+					data,
+					savedMsg
+				);
+
+				sentMsg.wwebjsId &&
+					(await prismaService.internalMessage.update({
+						where: { id: savedMsg.id },
+						data: {
+							wwebjsId: sentMsg.wwebjsId!
+						}
+					}));
+			}
 		} catch (err) {
 			const msg = sanitizeErrorMessage(err) || "null";
 			process.log("Erro ao enviar mensagem: " + msg);
 			process.failed(err);
 			throw new BadRequestError("Erro ao enviar mensagem " + msg);
 		}
+	}
+
+	public async receiveMessage(
+		groupId: string,
+		msg: CreateMessageDto,
+		authorName: string
+	) {
+		const chat = await prismaService.internalChat.findUnique({
+			where: {
+				wppGroupId: groupId
+			}
+		});
+
+		console.log("Grupo encontrado: ", chat);
+		if (chat) {
+			const { to, ...rest } = msg;
+			const savedMsg = await prismaService.internalMessage.create({
+				data: {
+					...rest,
+					from: `external:${msg.from}:${authorName}`,
+					internalChatId: chat.id
+				}
+			});
+
+			const room =
+				`${msg.instance}:internal-chat:${chat.id}` as SocketServerInternalChatRoom;
+			await socketService.emit(SocketEventType.InternalMessage, room, {
+				message: savedMsg
+			});
+		}
+	}
+
+	public async sendMessageToWppGroup(
+		session: SessionData,
+		groupId: string,
+		data: InternalSendMessageData,
+		message: InternalMessage
+	) {
+		const client = await whatsappService.getClientBySector(
+			session.instance,
+			session.sectorId
+		);
+
+		if (groupId && client && message.fileId && message.fileName) {
+			const fileUrl = filesService.getFileDownloadUrl(message.fileId);
+			return await client.sendMessage({
+				fileName: message.fileName!,
+				fileUrl,
+				to: groupId,
+				quotedId: data.quotedId || null,
+				sendAsAudio: data.sendAsAudio === "true",
+				sendAsDocument: data.sendAsDocument === "true",
+				text: message.body || null
+			});
+		} else if (groupId && client) {
+			return await client.sendMessage({
+				to: groupId,
+				quotedId: data.quotedId || null,
+				text: message.body
+			});
+		}
+
+		return await client.sendMessage({
+			to: groupId,
+			quotedId: data.quotedId || null,
+			text: data.text
+		});
 	}
 
 	public async updateMessage(id: number, data: Partial<InternalMessage>) {
