@@ -16,6 +16,7 @@ import { BadRequestError } from "@rgranatodutra/http-errors";
 import prismaService from "./prisma.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
 import CreateMessageDto from "../dtos/create-message.dto";
+import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 
 interface ChatsFilters {
 	userId?: string;
@@ -330,7 +331,6 @@ class InternalChatsService {
 			});
 
 			if (chat?.wppGroupId) {
-				console.log(chat.wppGroupId);
 				const sentMsg = await this.sendMessageToWppGroup(
 					session,
 					chat.wppGroupId,
@@ -338,7 +338,7 @@ class InternalChatsService {
 					savedMsg
 				);
 
-				sentMsg.wwebjsId &&
+				sentMsg?.wwebjsId &&
 					(await prismaService.internalMessage.update({
 						where: { id: savedMsg.id },
 						data: {
@@ -395,23 +395,35 @@ class InternalChatsService {
 			session.sectorId
 		);
 
+		if (!(client instanceof WWEBJSWhatsappClient)) {
+			return;
+		}
+
+		const text = `*${session.name}*: ${message.body}`;
+
 		if (groupId && client && message.fileId && message.fileName) {
 			const fileUrl = filesService.getFileDownloadUrl(message.fileId);
-			return await client.sendMessage({
-				fileName: message.fileName!,
-				fileUrl,
-				to: groupId,
-				quotedId: data.quotedId || null,
-				sendAsAudio: data.sendAsAudio === "true",
-				sendAsDocument: data.sendAsDocument === "true",
-				text: message.body || null
-			});
+			return await client.sendMessage(
+				{
+					fileName: message.fileName!,
+					fileUrl,
+					to: groupId,
+					quotedId: data.quotedId || null,
+					sendAsAudio: data.sendAsAudio === "true",
+					sendAsDocument: data.sendAsDocument === "true",
+					text
+				},
+				true
+			);
 		} else if (groupId && client) {
-			return await client.sendMessage({
-				to: groupId,
-				quotedId: data.quotedId || null,
-				text: message.body
-			});
+			return await client.sendMessage(
+				{
+					to: groupId,
+					quotedId: data.quotedId || null,
+					text
+				},
+				true
+			);
 		}
 
 		return await client.sendMessage({

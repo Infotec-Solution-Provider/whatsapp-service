@@ -270,7 +270,10 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		return result ? result.user : null;
 	}
 
-	public async sendMessage(options: SendMessageOptions) {
+	public async sendMessage(
+		options: SendMessageOptions,
+		isGroup: boolean = false
+	) {
 		const id = randomUUID();
 		const process = new ProcessingLogger(
 			this.instance,
@@ -281,7 +284,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 		process.log("Iniciando envio de mensagem.", options);
 
-		options.to = `${options.to}@c.us`;
+		options.to = `${options.to}${isGroup ? "@g.us" : "@c.us"}`;
 
 		const { to, quotedId, text } = options;
 		let content: string | WAWebJS.MessageMedia | null = null;
