@@ -164,6 +164,7 @@ class InternalChatsService {
 		});
 
 		if (!chat) {
+			console.log("Chat not found for deletio id ", id);
 			throw new BadRequestError("Chat not found");
 		}
 
