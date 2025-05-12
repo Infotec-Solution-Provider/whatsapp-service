@@ -87,7 +87,11 @@ class InternalChatsService {
 	// Sobrescreve os participantes de um grupo interno
 	public async updateInternalChatParticipants(
 		groupId: number,
-		{ name, participants }: { name: string; participants: number[] }
+		{
+			name,
+			participants,
+			wppGroupId
+		}: { name: string; participants: number[]; wppGroupId: string | null }
 	) {
 		const currentParticipants =
 			await prismaService.internalChatMember.findMany({
@@ -107,6 +111,7 @@ class InternalChatsService {
 			where: { id: groupId },
 			data: {
 				groupName: name,
+				wppGroupId,
 				participants: {
 					createMany: {
 						data: idsToAdd.map((id) => ({
