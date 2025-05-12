@@ -170,6 +170,17 @@ class InternalChatsService {
 			throw new BadRequestError("Chat not found");
 		}
 
+		await prismaService.internalChatMember.deleteMany({
+			where: {
+				internalChatId: id
+			}
+		});
+		await prismaService.internalMessage.deleteMany({
+			where: {
+				internalChatId: id
+			}
+		});
+
 		await prismaService.internalChat.delete({
 			where: { id }
 		});
