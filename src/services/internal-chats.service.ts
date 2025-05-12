@@ -159,6 +159,8 @@ class InternalChatsService {
 	}
 
 	public async deleteInternalChat(id: number) {
+		console.log(id);
+
 		const chat = await prismaService.internalChat.findUnique({
 			where: { id }
 		});
