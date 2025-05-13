@@ -14,9 +14,8 @@ class SchedulesService {
 	constructor() {
 		cron.schedule("*/5 * * * *", async () => {
 			this.runSchedulesJob();
-		});
-		cron.schedule("*/30 * * * *", async () => {
 			this.finishChatRoutine();
+
 		});
 
 	}
@@ -103,6 +102,8 @@ class SchedulesService {
 			},
 			},
 		})
+		console.log(`[CRON] Verificando chats inativos...`)
+		console.log(`[CRON] Chats encontrados: ${chats.length}`)
 
 		for (const chat of chats) {
 			// Verifica se existe mensagem enviada pelo operador
