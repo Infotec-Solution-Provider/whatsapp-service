@@ -86,15 +86,18 @@ class SchedulesService {
 		return schedules;
 	}
 	public async finishChatRoutine() {
-		const trintaMinAtras = new Date(Date.now() - 30 * 60 * 1000)
+		const agora = new Date();
+		const trintaMinAtras = new Date(agora.getTime() - 30 * 60 * 1000);
+		const duasHorasAtras = new Date(agora.getTime() - 2 * 60 * 60 * 1000);
 
-		// Busca os chats ativos iniciados há mais de 30 minutos
+		// Busca os chats ativos iniciados há mais de 30 minutos e menos de 2 horas
 		const chats = await prismaService.wppChat.findMany({
 			where: {
 			isFinished: false,
 			startedAt: {
-				lte: trintaMinAtras,
-			},
+				gte: duasHorasAtras, // não mais antigo que 2h
+				lte: trintaMinAtras, // não mais recente que 30min
+			  },
 			},
 			include: {
 			messages: {
