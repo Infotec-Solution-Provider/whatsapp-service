@@ -104,13 +104,13 @@ class SchedulesService {
 		})
 		console.log(`[CRON] Verificando chats inativos...`)
 		console.log(`[CRON] Chats encontrados: ${chats.length}`)
-
+		console.log(`[CRON] Chats encontrados: ${JSON.stringify(chats)}`)
 		for (const chat of chats) {
 			// Verifica se existe mensagem enviada pelo operador
 			const teveMensagemDeOperador = chat.messages.some(
 			msg => msg.from.startsWith("me:")
 			)
-
+			console.log(`[CRON] Chat ${chat.id} - Teve mensagem de operador: ${teveMensagemDeOperador}`)
 			if (!teveMensagemDeOperador) {
 			await prismaService.wppChat.update({
 				where: { id: chat.id },
