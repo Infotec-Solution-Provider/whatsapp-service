@@ -110,14 +110,11 @@ class SchedulesService {
 		console.log(`[CRON] Chats encontrados: ${JSON.stringify(chats)}`)
 		for (const chat of chats) {
 			// Verifica se existe mensagem enviada pelo operador
-			const mensagensDoOperador = chat.messages.filter(
-				msg => msg.from.startsWith("me:")
-			);
-			const totalMensagensDoOperador = mensagensDoOperador.length;
-
-			console.log(`[CRON] Chat ${chat.id} - Mensagens do operador: ${totalMensagensDoOperador}`);
-			// Finaliza se teve 3 ou menos mensagens do operador
-			if (totalMensagensDoOperador === 3) {
+			const teveMensagemDeOperador = chat.messages.some(
+			msg => msg.from.startsWith("me:")
+			)
+			console.log(`[CRON] Chat ${chat.id} - Teve mensagem de operador: ${teveMensagemDeOperador}`)
+			if (!teveMensagemDeOperador) {
 			await prismaService.wppChat.update({
 				where: { id: chat.id },
 				data: {
