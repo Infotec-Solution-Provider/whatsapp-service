@@ -125,6 +125,7 @@ class MessagesDistributionService {
 						type: "RECEPTIVE",
 						contactId: contact.id,
 						sectorId: sectors[0]!.id,
+						startedAt: new Date(),
 						botId: 1
 					}
 				});
