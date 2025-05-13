@@ -71,6 +71,8 @@ class InternalChatsController {
 		const groupName = req.body.groupName || "";
 		const groupId = req.body.groupId || null;
 
+		console.log("createInternalChat", req.body);
+
 		if (
 			!participants ||
 			!Array.isArray(participants) ||

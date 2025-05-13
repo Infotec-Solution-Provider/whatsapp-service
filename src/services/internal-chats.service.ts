@@ -50,38 +50,42 @@ class InternalChatsService {
 				groupName,
 				wppGroupId: groupId,
 				creatorId: session.userId,
-				instance: session.instance,
-				participants: {
-					createMany: {
-						data: Array.from(uniqueIds).map((id) => ({
-							userId: id,
-							joinedAt: new Date()
-						}))
-					}
-				}
-			},
-			include: {
-				participants: true,
-				messages: true
+				instance: session.instance
 			}
 		});
 
-		participantIds.forEach(async (id) => {
+		await prismaService.internalChatMember.createMany({
+			data: Array.from(uniqueIds).map((id) => ({
+				userId: id,
+				internalChatId: internalChat.id,
+				joinedAt: new Date()
+			}))
+		});
+
+		const result = await prismaService.internalChat.findUnique({
+			where: { id: internalChat.id },
+			include: {
+				messages: true,
+				participants: true
+			}
+		});
+
+		for (const id of uniqueIds) {
 			const room: SocketServerUserRoom = `${session.instance}:user:${id}`;
 
 			await socketService.emit(
 				SocketEventType.InternalChatStarted,
 				room,
 				{
-					chat: internalChat as unknown as InternalChat & {
+					chat: result as unknown as InternalChat & {
 						participants: InternalChatMember[];
 						messages: InternalMessage[];
 					}
 				}
 			);
-		});
+		}
 
-		return internalChat;
+		return result;
 	}
 
 	// Sobrescreve os participantes de um grupo interno
@@ -480,9 +484,22 @@ class InternalChatsService {
 	}
 
 	public async markChatMessagesAsRead(chatId: number, userId: number) {
+		const lastMsg = await prismaService.internalMessage.findFirst({
+			where: {
+				internalChatId: chatId
+			},
+			orderBy: {
+				timestamp: "desc"
+			}
+		});
+
+		console.log(lastMsg, lastMsg && new Date(lastMsg.timestamp));
+
 		await prismaService.internalChatMember.update({
 			data: {
-				lastReadAt: new Date()
+				lastReadAt: lastMsg?.timestamp
+					? new Date(+lastMsg.timestamp)
+					: new Date()
 			},
 			where: {
 				internalChatId_userId: {
