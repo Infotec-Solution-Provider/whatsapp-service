@@ -45,9 +45,23 @@ class InternalChatsService {
 		participantIds: number[],
 		isGroup: boolean = false,
 		groupName: string | null = null,
-		groupId: string | null = null
+		groupId: string | null = null,
+		groupImage: Express.Multer.File | null = null
 	) {
 		const uniqueIds = new Set(participantIds);
+		let fileId: number | null = null;
+
+		if (groupImage) {
+			const fileData = await filesService.uploadFile({
+				instance: session.instance,
+				fileName: groupImage.originalname,
+				buffer: groupImage.buffer,
+				mimeType: groupImage.mimetype,
+				dirType: FileDirType.PUBLIC
+			});
+
+			fileId = fileData.id;
+		}
 
 		const internalChat = await prismaService.internalChat.create({
 			data: {
@@ -55,7 +69,8 @@ class InternalChatsService {
 				groupName,
 				wppGroupId: groupId,
 				creatorId: session.userId,
-				instance: session.instance
+				instance: session.instance,
+				groupImageFileId: fileId
 			}
 		});
 
@@ -426,7 +441,7 @@ class InternalChatsService {
 	) {
 		const chat = await prismaService.internalChat.findUnique({
 			where: {
-				wppGroupId: groupId,
+				wppGroupId: groupId
 			}
 		});
 

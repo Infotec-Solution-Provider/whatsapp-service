@@ -12,6 +12,7 @@ class InternalChatsController {
 		this.router.post(
 			"/api/internal/chats",
 			isAuthenticated,
+			upload.single("file"),
 			this.startInternalChat
 		);
 
@@ -82,12 +83,12 @@ class InternalChatsController {
 	private async startInternalChat(req: Request, res: Response) {
 		const session = req.session;
 
-		const participants = req.body.participants;
-		const isGroup = Boolean(req.body.isGroup);
-		const groupName = req.body.groupName || "";
-		const groupId = req.body.groupId || null;
+		const body = JSON.parse(req.body.data);
 
-		console.log("createInternalChat", req.body);
+		const participants = body.participants;
+		const isGroup = Boolean(body.isGroup);
+		const groupName = body.groupName || "";
+		const groupId = body.groupId || null;
 
 		if (
 			!participants ||
@@ -108,7 +109,8 @@ class InternalChatsController {
 			participants,
 			isGroup,
 			groupName,
-			groupId
+			groupId,
+			req.file || null
 		);
 
 		res.status(200).send({
