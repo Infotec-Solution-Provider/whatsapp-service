@@ -316,10 +316,11 @@ class WhatsappService {
 			const sentMsg = await client.sendMessage(options);
 			process.log("Atualizando mensagem no banco de dados.", sentMsg);
 
-			message = { ...pendingMsg, ...sentMsg, status: "SENT" };
+			message = { ...pendingMsg, ...sentMsg,from: `bot:${client.phone}`,status: "SENT" };
+
 			const savedMsg = await messagesService.updateMessage(
 				pendingMsg.id,
-				sentMsg
+				message
 			);
 			process.log("Mensagem salva no banco de dados.", savedMsg);
 

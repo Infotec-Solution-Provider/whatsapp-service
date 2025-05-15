@@ -14,9 +14,8 @@ class SchedulesService {
 	constructor() {
 		cron.schedule("*/5 * * * *", async () => {
 			this.runSchedulesJob();
-		});
-		cron.schedule("*/30 * * * *", async () => {
 			this.finishChatRoutine();
+
 		});
 
 	}
@@ -87,15 +86,18 @@ class SchedulesService {
 		return schedules;
 	}
 	public async finishChatRoutine() {
-		const trintaMinAtras = new Date(Date.now() - 30 * 60 * 1000)
+		const agora = new Date();
+		const trintaMinAtras = new Date(agora.getTime() - 30 * 60 * 1000);
+		const duasHorasAtras = new Date(agora.getTime() - 2 * 60 * 60 * 1000);
 
-		// Busca os chats ativos iniciados há mais de 30 minutos
+		// Busca os chats ativos iniciados há mais de 30 minutos e menos de 2 horas
 		const chats = await prismaService.wppChat.findMany({
 			where: {
 			isFinished: false,
 			startedAt: {
-				lte: trintaMinAtras,
-			},
+				gte: duasHorasAtras, // não mais antigo que 2h
+				lte: trintaMinAtras, // não mais recente que 30min
+			  },
 			},
 			include: {
 			messages: {
@@ -103,13 +105,15 @@ class SchedulesService {
 			},
 			},
 		})
-
+		console.log(`[CRON] Verificando chats inativos...`)
+		console.log(`[CRON] Chats encontrados: ${chats.length}`)
+		console.log(`[CRON] Chats encontrados: ${JSON.stringify(chats)}`)
 		for (const chat of chats) {
 			// Verifica se existe mensagem enviada pelo operador
 			const teveMensagemDeOperador = chat.messages.some(
 			msg => msg.from.startsWith("me:")
 			)
-
+			console.log(`[CRON] Chat ${chat.id} - Teve mensagem de operador: ${teveMensagemDeOperador}`)
 			if (!teveMensagemDeOperador) {
 			await prismaService.wppChat.update({
 				where: { id: chat.id },
