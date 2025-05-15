@@ -133,7 +133,8 @@ model InternalChat {
     isGroup          Boolean @default(false) @map("is_group")
     groupName        String? @map("group_name")
     groupDescription String? @map("group_description")
-    wppGroupId       String? @map("wpp_group_id")
+    groupImageFileId Int?    @map("group_image_file_id")
+    wppGroupId       String? @unique @map("wpp_group_id")
 
     sector       WppSector?           @relation(fields: [sectorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
     messages     InternalMessage[]

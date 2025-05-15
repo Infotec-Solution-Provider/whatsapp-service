@@ -50,6 +50,22 @@ class InternalChatsController {
 			isAuthenticated,
 			this.updateInternalGroup
 		);
+
+		// Atualiza imagem do grupo interno
+		this.router.put(
+			"/api/internal/groups/:id/image",
+			isAuthenticated,
+			upload.single("file"),
+			this.updateInternalGroupImage
+		);
+
+		// Atualiza grupo interno
+		this.router.put(
+			"/api/internal/groups/:id/image",
+			isAuthenticated,
+			this.updateInternalGroup
+		);
+
 		this.router.patch(
 			"/api/internal/chat/:id/mark-as-read",
 			isAuthenticated,
@@ -141,14 +157,33 @@ class InternalChatsController {
 	private async updateInternalGroup(req: Request, res: Response) {
 		const groupId = Number(req.params["id"]);
 
-		const updated =
-			await internalChatsService.updateInternalChatParticipants(
-				groupId,
-				req.body
-			);
+		const updated = await internalChatsService.updateInternalGroup(
+			groupId,
+			req.body
+		);
 
 		res.status(200).send({
 			message: "Group members updated!",
+			data: updated
+		});
+	}
+
+	private async updateInternalGroupImage(req: Request, res: Response) {
+		const groupId = Number(req.params["id"]);
+		const file = req.file;
+
+		if (!file) {
+			throw new BadRequestError("File is required");
+		}
+
+		const updated = await internalChatsService.updateGroupImage(
+			req.session,
+			groupId,
+			file
+		);
+
+		res.status(200).send({
+			message: "Group image updated!",
 			data: updated
 		});
 	}

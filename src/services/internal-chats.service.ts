@@ -29,10 +29,15 @@ interface InternalSendMessageData {
 	quotedId?: string | null;
 	chatId: string;
 	text: string;
-	file?: Express.Multer.File;
+	file?: Express.Multer.File | null;
 	fileId?: string;
 }
 
+interface UpdateInternalGroupData {
+	name: string;
+	participants: number[];
+	wppGroupId: string | null;
+}
 class InternalChatsService {
 	// Cria um grupo interno com um nome e participantes
 	public async createInternalChat(
@@ -89,13 +94,9 @@ class InternalChatsService {
 	}
 
 	// Sobrescreve os participantes de um grupo interno
-	public async updateInternalChatParticipants(
+	public async updateInternalGroup(
 		groupId: number,
-		{
-			name,
-			participants,
-			wppGroupId
-		}: { name: string; participants: number[]; wppGroupId: string | null }
+		data: UpdateInternalGroupData
 	) {
 		const currentParticipants =
 			await prismaService.internalChatMember.findMany({
@@ -104,18 +105,18 @@ class InternalChatsService {
 				}
 			});
 
-		const idsToAdd = participants.filter(
+		const idsToAdd = data.participants.filter(
 			(p) => !currentParticipants.some((c) => c.userId === p)
 		);
 		const idsToRemove = currentParticipants.filter(
-			(p) => !participants.includes(p.userId)
+			(p) => !data.participants.includes(p.userId)
 		);
 
 		const group = await prismaService.internalChat.update({
 			where: { id: groupId },
 			data: {
-				groupName: name,
-				wppGroupId,
+				groupName: data.name,
+				wppGroupId: data.wppGroupId,
 				participants: {
 					createMany: {
 						data: idsToAdd.map((id) => ({
@@ -162,9 +163,28 @@ class InternalChatsService {
 		return group;
 	}
 
-	public async deleteInternalChat(id: number) {
-		console.log(id);
+	public async updateGroupImage(
+		session: SessionData,
+		groupId: number,
+		file: Express.Multer.File
+	) {
+		const fileData = await filesService.uploadFile({
+			instance: session.instance,
+			fileName: file.originalname,
+			buffer: file.buffer,
+			mimeType: file.mimetype,
+			dirType: FileDirType.PUBLIC
+		});
 
+		return await prismaService.internalChat.update({
+			where: { id: groupId },
+			data: {
+				groupImageFileId: fileData.id
+			}
+		});
+	}
+
+	public async deleteInternalChat(id: number) {
 		const chat = await prismaService.internalChat.findUnique({
 			where: { id }
 		});
@@ -227,6 +247,7 @@ class InternalChatsService {
 
 		return { chats, messages };
 	}
+
 	public async getInternalChatsMonitor(session: SessionData) {
 		const isTI = session.sectorId === 3;
 
@@ -258,6 +279,7 @@ class InternalChatsService {
 
 		return { chats, messages };
 	}
+
 	public async getInternalGroups(session: SessionData) {
 		const result = await prismaService.internalChat.findMany({
 			where: {
@@ -404,11 +426,10 @@ class InternalChatsService {
 	) {
 		const chat = await prismaService.internalChat.findUnique({
 			where: {
-				wppGroupId: groupId
+				wppGroupId: groupId,
 			}
 		});
 
-		console.log("Grupo encontrado: ", chat);
 		if (chat) {
 			const { to, ...rest } = msg;
 			const savedMsg = await prismaService.internalMessage.create({
