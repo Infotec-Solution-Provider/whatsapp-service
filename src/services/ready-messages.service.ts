@@ -128,7 +128,7 @@ class ReadyMessagesService {
 		const updatedReadyMessage = instancesService.executeQuery(session.instance,updateQuery,[])
 			.then(async () => {
 				return await instancesService.executeQuery(session.instance,selectQuery,[])
-					.then((res) => plainToInstance(ReadyMessage, res[0][0]))
+					.then((res:any) => plainToInstance(ReadyMessage, res[0][0]))
 					.catch((err) => {
 						throw new Error(err);
 					});
