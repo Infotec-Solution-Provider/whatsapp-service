@@ -48,6 +48,7 @@ class ReadyMessagesController {
 		const TITULO = body.TITULO;
 		const TEXTO_MENSAGEM = body.TEXTO_MENSAGEM;
 		const SETOR = body.SETOR || null;
+		console.log("[TITULO]",TITULO,req.file )
 		const result = await readyMessagesService.createReadyMessage(
 			session,
 			{
