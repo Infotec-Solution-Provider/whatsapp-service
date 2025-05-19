@@ -49,7 +49,8 @@ logRoutes("", [
 	contactsController.router,
 	sectorsController.router,
 	schedulesController.router,
-	internalchatsController.router
+	internalchatsController.router,
+	readyMessagesController.router,
 ]);
 
 const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;
