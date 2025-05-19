@@ -14,6 +14,7 @@ import sectorsController from "./controllers/sectors.controller";
 import schedulesController from "./controllers/schedules.controller";
 import internalchatsController from "./controllers/internal-chats.controller";
 import whatsappController from "./controllers/whatsapp.controller";
+import readyMessagesController from "./controllers/ready-messages.controller";
 
 whatsappService.buildClients();
 const app = express();
@@ -30,7 +31,7 @@ app.use(contactsController.router);
 app.use(sectorsController.router);
 app.use(schedulesController.router);
 app.use(internalchatsController.router);
-
+app.use(readyMessagesController.router);
 app.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
 	console.error(err);
 	next(err);
