@@ -45,10 +45,11 @@ class ReadyMessagesController {
 
 		const body = JSON.parse(req.body.data);
 
-		const TITULO = body.TITULO;
-		const TEXTO_MENSAGEM = body.TEXTO_MENSAGEM;
-		const SETOR = body.SETOR || null;
-		console.log("[TITULO]",TITULO,req.file )
+		const { TITULO, TEXTO_MENSAGEM, SETOR: setorFromBody } = body;
+		const isTI = session.sectorId === 3;
+
+		const SETOR = isTI ? setorFromBody : session.sectorId;
+
 		const result = await readyMessagesService.createReadyMessage(
 			session,
 			{

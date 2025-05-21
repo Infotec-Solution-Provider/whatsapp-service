@@ -66,13 +66,22 @@ class ReadyMessagesService {
 		return result[0];
 	}
 	public async getReadyMessages(session: SessionData) {
-		const query = `
-		SELECT *
-		FROM w_mensagens_prontas
-		ORDER BY w_mensagens_prontas.TITULO ASC`;
+		const isTI = session.sectorId === 3;
 
-		let result = await instancesService.executeQuery<Array<ReadyMessage>>(session.instance, query,
-			[])
+		const baseQuery = `
+			SELECT *
+			FROM w_mensagens_prontas
+			${!isTI ? 'WHERE SETOR = ?' : ''}
+			ORDER BY TITULO ASC
+		`;
+
+		const params = !isTI ? [session.sectorId] : [];
+
+		const result = await instancesService.executeQuery<Array<ReadyMessage>>(
+			session.instance,
+			baseQuery,
+			params
+		);
 
 		result.map(m => {
 			m.TITULO = decodeURI(m.TITULO);
