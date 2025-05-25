@@ -5,6 +5,8 @@ import chatsService from "./chats.service";
 import messagesDistributionService from "./messages-distribution.service";
 import cron from "node-cron";
 import socketService from "./socket.service";
+import whatsappService from "./whatsapp.service";
+import chooseSectorBot from "../bots/choose-sector.bot";
 
 interface ChatsFilters {
 	userId?: string;
@@ -100,9 +102,12 @@ class SchedulesService {
 			  },
 			},
 			include: {
-			messages: {
-				select: { from: true } // evita trazer conteúdo desnecessário
-			},
+				messages: {
+					select: {
+						from: true,
+						timestamp: true
+					}
+				},
 			},
 		})
 		console.log(`[CRON] Verificando chats inativos...`)
@@ -115,25 +120,68 @@ class SchedulesService {
 			)
 			console.log(`[CRON] Chat ${chat.id} - Teve mensagem de operador: ${teveMensagemDeOperador}`)
 			if (!teveMensagemDeOperador) {
-			await prismaService.wppChat.update({
-				where: { id: chat.id },
-				data: {
-				isFinished: true,
-				finishedAt: new Date(),
-				finishedBy: null, // ou ID do sistema
-				},
-			})
-			console.log(`[CRON] Chat ${chat.id} finalizado automaticamente.`)
+				await prismaService.wppChat.update({
+					where: { id: chat.id },
+					data: {
+					isFinished: true,
+					finishedAt: new Date(),
+					finishedBy: null, // ou ID do sistema
+					},
+				})
+				console.log(`[CRON] Chat ${chat.id} finalizado automaticamente.`)
 
-			const event = SocketEventType.WppChatFinished;
+				const event = SocketEventType.WppChatFinished;
 
-			let finishMsg: string = `Atendimento finalizado pelo sistema devido inatividade do operador.`;
-			console.log("Mensagem de finalização:", finishMsg);
-			await messagesDistributionService.addSystemMessage(chat, finishMsg);
-			await socketService.emit(event, `${"nunes"}:chat:${chat.id}`, {
-				chatId: chat.id
-			});
-		}
+				let finishMsg: string = `Atendimento finalizado pelo sistema devido inatividade do operador.`;
+				console.log("Mensagem de finalização:", finishMsg);
+				await messagesDistributionService.addSystemMessage(chat, finishMsg);
+				await socketService.emit(event, `${"nunes"}:chat:${chat.id}`, {
+					chatId: chat.id
+				});
+			}
+			else{
+
+				const trintaMinAtras = new Date(Date.now() - 30 * 60 * 1000);
+
+				const ultimaMsgOperador = chat.messages
+				.filter(m => m.from.startsWith("me:"))
+				.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+
+				if (ultimaMsgOperador && new Date(ultimaMsgOperador.timestamp) > trintaMinAtras) {
+				console.log(`[CRON] Chat ${chat.id} - Operador respondeu nos últimos 30min`);
+				continue;
+				}
+
+				const client = chat.messages.find(m => !m.from.startsWith("me:") && !m.from.startsWith("bot:"));
+				if(!client) return
+				await whatsappService.sendBotMessage(client.from, {
+					chat,
+					text: [
+					"Deseja voltar ao menu de setores, encerrar o atendimento ou continuar aguardando?",
+					"",
+					"*1* - Voltar ao menu de setores",
+					"*2* - Encerrar o atendimento",
+					"*3* - Continuar aguardando",
+					"",
+					"*Responda apenas com o número da opção desejada.*"
+					].join('\n')
+				});
+				await prismaService.wppChat.update({
+					where: { id: chat.id },
+					data: { userId:null, botId: 1 }
+				});
+				chooseSectorBot.forceStep(chat.id, 4);
+
+				console.log(`[CRON] Chat ${chat.id} - Mensagem de retorno enviada.`);
+				const event = SocketEventType.WppChatFinished;
+				let finishMsg: string = `Atendimento finalizado pelo cliente devido inatividade do operador.`;
+
+				await messagesDistributionService.addSystemMessage(chat, finishMsg);
+
+				await socketService.emit(event, `${"nunes"}:chat:${chat.id}`, {
+					chatId: chat.id
+				});
+			}
 	  }
 	}
 	public async createSchedule(

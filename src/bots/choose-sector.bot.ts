@@ -3,7 +3,9 @@ import whatsappService from "../services/whatsapp.service";
 import sectorsService from "../services/sectors.service";
 import messagesDistributionService from "../services/messages-distribution.service";
 import instancesService from "../services/instances.service";
-import { User } from "@in.pulse-crm/sdk";
+import { SocketEventType, User } from "@in.pulse-crm/sdk";
+import socketService from "../services/socket.service";
+import prismaService from "../services/prisma.service";
 
 class ChooseSectorBot {
 	private readonly running: { step: number; chatId: number }[] = [];
@@ -15,6 +17,10 @@ class ChooseSectorBot {
 			return this.setRunningStep(chatId, 1);
 		}
 		return running.step;
+	}
+
+	public forceStep(chatId: number, step: number) {
+		this.setRunningStep(chatId, step);
 	}
 
 	private setRunningStep(chatId: number, step: number) {
@@ -47,9 +53,9 @@ class ChooseSectorBot {
 			throw new Error(`No sectors found for instance ${chat.instance}`);
 		}
 
+		const returnMessageSectors =`Escolha um setor para continuar:\n${sectors.map((s, i) => `${i + 1} - ${s.name}`).join("\n")}`
 		const sectorsMessage =
-			`Olá,\nEstamos felizes por você entrar em contato com a Metalúrgica Nunes, Usinagem de Precisão. Escolha um setor para continuar:\n${sectors.map((s, i) => `${i + 1} - ${s.name}`).join("\n")}` +
-			"\nDigite o número do setor desejado!";
+			`Olá,\nEstamos felizes por você entrar em contato com a Metalúrgica Nunes, Usinagem de Precisão. `+ returnMessageSectors;
 			console.log("currentStep",currentStep);
 
 		switch (currentStep) {
@@ -83,7 +89,9 @@ class ChooseSectorBot {
 					};
 
 					const answer =
-						`Escolha com quem deseja falar\n${operadores.map((s, i) => `${i + 1} - ${s.NOME}`).join("\n")}`;
+						returnMessageSectors +
+						`\n0 - Voltar à escolha de setor`;
+
 					await whatsappService.sendBotMessage(message.from, {
 						chat,
 						text: answer,
@@ -104,6 +112,20 @@ class ChooseSectorBot {
 					const chooseOptionOp = Number(
 						message.body.trim().replace(/[^0-9]/g, "")
 					);
+					if (chooseOptionOp === 0) {
+						await whatsappService.sendBotMessage(message.from, {
+							chat,
+							text: "Tudo bem, voltando para a escolha de setor...",
+							quotedId: message.id
+						});
+						await whatsappService.sendBotMessage(message.from, {
+							chat,
+							text: sectorsMessage,
+							quotedId: message.id
+						});
+						this.setRunningStep(chat.id, 2);
+						break;
+					}
 					const state = this.chatState.get(String(chat.id));
 					const operadores = state?.operadores || [];
 					const sector = state?.setor;
@@ -135,8 +157,68 @@ class ChooseSectorBot {
 						text: "Opção inválida! Tente novamente.",
 						quotedId: message.id
 					});
-					break;
+				break;
+			case 4:
+				const option = Number(message.body.trim().replace(/[^0-9]/g, ""));
 
+				switch (option) {
+					case 1:
+						await whatsappService.sendBotMessage(message.from, {
+							chat,
+							text: "Certo, retornando ao menu de setores...",
+							quotedId: message.id
+						});
+						await whatsappService.sendBotMessage(message.from, {
+							chat,
+							text: sectorsMessage,
+							quotedId: message.id
+						});
+						this.setRunningStep(chat.id, 2);
+						break;
+
+					case 2:
+						await whatsappService.sendBotMessage(message.from, {
+							chat,
+							text: "Atendimento encerrado. Caso precise de algo, estamos à disposição!",
+							quotedId: message.id
+						});
+						await prismaService.wppChat.update({
+							where: { id: chat.id },
+							data: {
+							isFinished: true,
+							finishedAt: new Date(),
+							finishedBy: null,
+							},
+						})
+						const event = SocketEventType.WppChatFinished;
+						let finishMsg: string = `Atendimento finalizado pelo cliente devido inatividade do operador.`;
+
+						await messagesDistributionService.addSystemMessage(chat, finishMsg);
+
+						await socketService.emit(event, `${"nunes"}:chat:${chat.id}`, {
+							chatId: chat.id
+						});
+
+						this.removeRunningStep(chat.id);
+						break;
+					case 3:
+						await whatsappService.sendBotMessage(message.from, {
+							chat,
+							text: "Tudo bem! Vamos continuar aguardando o atendimento.",
+							quotedId: message.id
+						});
+						this.removeRunningStep(chat.id);
+						break;
+
+					default:
+						await whatsappService.sendBotMessage(message.from, {
+							chat,
+							text: "Opção inválida! Responda apenas com o número da opção desejada.",
+							quotedId: message.id
+						});
+						break;
+				}
+				break;
 			default:
 				break;
 		}
