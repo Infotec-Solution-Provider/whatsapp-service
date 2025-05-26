@@ -149,18 +149,15 @@ class ChatsService {
 				isFinished: false,
 				instance: session.instance,
 				...(isTI ? {} : { sectorId: session.sectorId })
-
 			},
 			include: {
 				contact: {
 					include: {
 						WppMessage: true
 					}
-				},
-
+				}
 			}
 		});
-
 
 		const chats: Array<
 			WppChat & { customer: Customer | null; contact: WppContact | null }
@@ -395,7 +392,11 @@ class ChatsService {
 				where: { id: newChat.id },
 				include: {
 					contact: true,
-					messages: true
+					messages: {
+						where: {
+							contactId: newChat.contactId
+						}
+					}
 				}
 			});
 			let customer: Customer | null = null;
