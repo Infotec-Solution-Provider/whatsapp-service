@@ -105,6 +105,7 @@ model InternalMessage {
     type           String
     quotedId       Int?             @map("quoted_id")
     wwebjsId       String?          @unique @map("wwebjs_id")
+    wwebjsIdStanza String?          @unique @map("wwebjs_id_stanza")
     internalChatId Int              @map("internalchat_id")
     body           String
     timestamp      String           @map("timestamp")

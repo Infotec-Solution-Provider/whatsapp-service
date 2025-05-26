@@ -82,7 +82,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		this.wwebjs.on("qr", this.handleQr.bind(this));
 		this.wwebjs.on("authenticated", this.handleAuth.bind(this));
 		this.wwebjs.on("ready", this.handleReady.bind(this));
-		this.wwebjs.on("message_create", this.handleMessage.bind(this));
+		this.wwebjs.on("message", this.handleMessage.bind(this));
 		this.wwebjs.on("message_edit", this.handleMessageEdit.bind(this));
 		this.wwebjs.on("message_ack", this.handleMessageAck.bind(this));
 		this.wwebjs.on(
@@ -201,7 +201,8 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			const parsedMsg = await MessageParser.parse(
 				process,
 				this.instance,
-				msg
+				msg,
+				!chat.isGroup
 			);
 			process.log(`Message is successfully parsed!`, parsedMsg);
 

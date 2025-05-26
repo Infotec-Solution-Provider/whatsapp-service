@@ -13,7 +13,8 @@ class WWEBJSMessageParser {
 		instance: string,
 		message: WAWebJS.Message,
 		skipParsingFile = false,
-		skipParsingQuoted = false
+		skipParsingQuoted = false,
+		isInternal = false
 	) {
 		logger.log(`Sanitizando mensagem...`);
 
@@ -54,7 +55,8 @@ class WWEBJSMessageParser {
 			);
 			const quotedId = await WWEBJSMessageParser.getQuotedId(
 				logger,
-				message
+				message,
+				isInternal
 			);
 			parsedMessage.quotedId = quotedId;
 			logger.log("Mensagem citada atribuída a mensagem com sucesso.");
@@ -66,7 +68,8 @@ class WWEBJSMessageParser {
 
 	private static async getQuotedId(
 		logger: ProcessingLogger,
-		message: WAWebJS.Message
+		message: WAWebJS.Message,
+		isInternal: boolean
 	) {
 		logger.log(`Recuperando mensagem citada...`);
 		const wwebjsQuotedMsg = await message.getQuotedMessage();
@@ -79,7 +82,23 @@ class WWEBJSMessageParser {
 		logger.log(
 			`Mensagem citada encontrada com ID: ${wwebjsQuotedMsg.id._serialized}`
 		);
-		logger.log(`Recuperando ID da mensagem citada no banco de dados...`);
+		if (isInternal) {
+			logger.log(
+				`Buscando mensagem citada no banco de dados como mensagem interna...`
+			);
+			const quotedMsg = await prismaService.internalMessage.findUnique({
+				where: { wwebjsIdStanza: wwebjsQuotedMsg.id.id }
+			});
+			logger.log(
+				`ID da mensagem citada no banco de dados: ${quotedMsg?.id}`
+			);
+
+			return quotedMsg?.id || null;
+		}
+
+		logger.log(
+			`Buscando mensagem citada no banco de dados como mensagem externa...`
+		);
 		const quotedMsg = await prismaService.wppMessage.findUnique({
 			where: { wwebjsIdStanza: wwebjsQuotedMsg.id.id }
 		});
