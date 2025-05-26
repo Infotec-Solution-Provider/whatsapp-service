@@ -156,7 +156,7 @@ class SchedulesService {
 				Logger.debug(`[CRON] Chat ${chat.id} - Já foi enviado o menu antes`);
 				continue;
 				}
-				
+
 				const trintaMinAtras = new Date(Date.now() - 30 * 60 * 1000);
 
 				const ultimaMsgOperador = chat.messages
@@ -186,7 +186,7 @@ class SchedulesService {
 					where: { id: chat.id },
 					data: { userId:null, botId: 1 }
 				});
-				chooseSectorBot.forceStep(chat.id, 4);
+				chooseSectorBot.forceStep(chat.id, 4, chat.userId ?? 0);
 
 			}
 	  }

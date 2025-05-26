@@ -8,7 +8,9 @@ import socketService from "../services/socket.service";
 import prismaService from "../services/prisma.service";
 
 class ChooseSectorBot {
-	private readonly running: { step: number; chatId: number }[] = [];
+	private readonly running: { step: number; chatId: number}[] = [];
+	private readonly runningOperadorOld: { operadorOldId: number; chatId: number; }[] = [];
+
 	private chatState = new Map<string, { operadores: User[], setor: any }>();
 
 	private getRunningStep(chatId: number) {
@@ -19,10 +21,26 @@ class ChooseSectorBot {
 		return running.step;
 	}
 
-	public forceStep(chatId: number, step: number) {
+	public forceStep(chatId: number, step: number, operadorOldId: number) {
 		this.setRunningStep(chatId, step);
+		this.setOperadorOld(chatId, operadorOldId);
 	}
-
+	private getOperadorOld(chatId: number) {
+		const running = this.runningOperadorOld.find((r) => r.chatId === chatId);
+		if (!running) {
+			return this.setRunningStep(chatId, 1);
+		}
+		return running.operadorOldId;
+	}
+	private setOperadorOld(chatId: number, operadorOldId: number) {
+		const running = this.runningOperadorOld.find((r) => r.chatId === chatId);
+		if (running) {
+			running.operadorOldId = operadorOldId;
+		} else {
+			this.runningOperadorOld.push({ chatId, operadorOldId });
+		}
+		return operadorOldId;
+	}
 	private setRunningStep(chatId: number, step: number) {
 		const running = this.running.find((r) => r.chatId === chatId);
 		if (running) {
@@ -205,6 +223,11 @@ class ChooseSectorBot {
 							quotedId: message.id
 						});
 						this.removeRunningStep(chat.id);
+						let user = this.getOperadorOld(chat.id);
+						await prismaService.wppChat.update({
+							where: { id: chat.id },
+							data: { userId: user, botId: null }
+						});
 						break;
 
 					default:
