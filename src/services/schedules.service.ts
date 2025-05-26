@@ -108,7 +108,8 @@ class SchedulesService {
 				messages: {
 					select: {
 						from: true,
-						timestamp: true
+						timestamp: true,
+						body: true,
 					}
 				},
 			},
@@ -147,7 +148,15 @@ class SchedulesService {
 				});
 			}
 			else{
+				const jaMandouPrompt = chat.messages.some(
+				m => m.from.startsWith("bot:") && m.timestamp && m.body?.includes("Deseja voltar ao menu de setores")
+				);
 
+				if (jaMandouPrompt) {
+				Logger.debug(`[CRON] Chat ${chat.id} - Já foi enviado o menu antes`);
+				continue;
+				}
+				
 				const trintaMinAtras = new Date(Date.now() - 30 * 60 * 1000);
 
 				const ultimaMsgOperador = chat.messages
@@ -160,7 +169,7 @@ class SchedulesService {
 				}
 
 				const client = chat.messages.find(m => !m.from.startsWith("me:") && !m.from.startsWith("bot:"));
-				if(!client) return
+				if(!client) continue;
 				await whatsappService.sendBotMessage(client.from, {
 					chat,
 					text: [
