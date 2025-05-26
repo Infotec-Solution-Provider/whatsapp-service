@@ -113,11 +113,11 @@ class SchedulesService {
 				},
 			},
 		})
-    
+
 		Logger.debug(`[CRON] Verificando chats inativos...`);
 		Logger.debug(`[CRON] Chats encontrados: ${chats.length}`);
 		Logger.debug(`[CRON] Chats encontrados: ${JSON.stringify(chats)}`);
-    
+
 		for (const chat of chats) {
 			// Verifica se existe mensagem enviada pelo operador
 			const teveMensagemDeOperador = chat.messages.some((msg) =>
@@ -179,15 +179,6 @@ class SchedulesService {
 				});
 				chooseSectorBot.forceStep(chat.id, 4);
 
-				console.log(`[CRON] Chat ${chat.id} - Mensagem de retorno enviada.`);
-				const event = SocketEventType.WppChatFinished;
-				let finishMsg: string = `Atendimento finalizado pelo cliente devido inatividade do operador.`;
-
-				await messagesDistributionService.addSystemMessage(chat, finishMsg);
-
-				await socketService.emit(event, `${"nunes"}:chat:${chat.id}`, {
-					chatId: chat.id
-				});
 			}
 	  }
 	}
