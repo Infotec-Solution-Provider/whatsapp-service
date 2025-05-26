@@ -205,7 +205,6 @@ class InternalChatsService {
 		});
 
 		if (!chat) {
-			console.log("Chat not found for deletio id ", id);
 			throw new BadRequestError("Chat not found");
 		}
 
@@ -365,6 +364,7 @@ class InternalChatsService {
 				from: `user:${session.userId}`,
 				type: "chat",
 				body: data.text || "",
+				quotedId: data.quotedId ? Number(data.quotedId) : null,
 				chat: {
 					connect: {
 						id: +data.chatId
@@ -480,6 +480,14 @@ class InternalChatsService {
 
 		const text = `*${session.name}*: ${message.body}`;
 
+		if (data.quotedId) {
+			const quotedmsg = await prismaService.internalMessage.findUnique({
+				where: { id: +data.quotedId }
+			});
+
+			data.quotedId = quotedmsg?.wwebjsId || null;
+		}
+
 		if (groupId && client && message.fileId && message.fileName) {
 			const fileUrl = filesService.getFileDownloadUrl(message.fileId);
 			return await client.sendMessage(
@@ -528,8 +536,6 @@ class InternalChatsService {
 				timestamp: "desc"
 			}
 		});
-
-		console.log(lastMsg, lastMsg && new Date(lastMsg.timestamp));
 
 		await prismaService.internalChatMember.update({
 			data: {

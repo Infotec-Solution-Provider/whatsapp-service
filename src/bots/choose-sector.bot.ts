@@ -50,7 +50,6 @@ class ChooseSectorBot {
 		const sectorsMessage =
 			`Olá,\nEstamos felizes por você entrar em contato com a Metalúrgica Nunes, Usinagem de Precisão. Escolha um setor para continuar:\n${sectors.map((s, i) => `${i + 1} - ${s.name}`).join("\n")}` +
 			"\nDigite o número do setor desejado!";
-			console.log("currentStep",currentStep);
 
 		switch (currentStep) {
 			case 1:
@@ -108,7 +107,6 @@ class ChooseSectorBot {
 					const operadores = state?.operadores || [];
 					const sector = state?.setor;
 					const isValids = chooseOptionOp > 0 && chooseOptionOp <= operadores.length;
-					console.log("isValids",isValids);
 					const chooseOp = isValids && operadores[+chooseOptionOp - 1];
 
 					if (chooseOp) {

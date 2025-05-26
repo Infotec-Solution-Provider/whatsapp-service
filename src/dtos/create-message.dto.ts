@@ -12,6 +12,7 @@ export default interface CreateMessageDto {
 	chatId?: null | number;
 	contactId?: null | number;
 	wwebjsId?: null | string;
+	wwebjsIdStanza?: null | string;
 	wabaId?: null | string;
 	fileId?: null | number;
 	fileName?: null | string;

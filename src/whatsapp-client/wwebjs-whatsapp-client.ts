@@ -217,7 +217,6 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				process.success(savedMsg);
 			}
 			if (chat.isGroup) {
-				console.log("Group message received!", chat.id);
 				internalChatsService.receiveMessage(
 					chat.id.user,
 					parsedMsg,
