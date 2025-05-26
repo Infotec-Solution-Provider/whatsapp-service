@@ -44,25 +44,26 @@ model WppContact {
 }
 
 model WppMessage {
-    id         Int              @id @default(autoincrement())
-    instance   String           @map("instance")
-    wwebjsId   String?          @unique @map("wwebjs_id")
-    wabaId     String?          @unique @map("waba_id")
-    from       String
-    to         String
-    type       String
-    quotedId   Int?             @map("quoted_id")
-    chatId     Int?             @map("chat_id")
-    contactId  Int?             @map("contact_id")
-    body       String
-    timestamp  String
-    status     WppMessageStatus
-    fileId     Int?             @map("file_id")
-    fileName   String?          @map("file_name")
-    fileType   String?          @map("file_type")
-    fileSize   String?          @map("file_size")
-    WppChat    WppChat?         @relation(fields: [chatId], references: [id])
-    WppContact WppContact?      @relation(fields: [contactId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+    id             Int              @id @default(autoincrement())
+    instance       String           @map("instance")
+    wwebjsId       String?          @unique @map("wwebjs_id")
+    wwebjsIdStanza String?          @unique @map("wwebjs_id_stanza")
+    wabaId         String?          @unique @map("waba_id")
+    from           String
+    to             String
+    type           String
+    quotedId       Int?             @map("quoted_id")
+    chatId         Int?             @map("chat_id")
+    contactId      Int?             @map("contact_id")
+    body           String
+    timestamp      String
+    status         WppMessageStatus
+    fileId         Int?             @map("file_id")
+    fileName       String?          @map("file_name")
+    fileType       String?          @map("file_type")
+    fileSize       String?          @map("file_size")
+    WppChat        WppChat?         @relation(fields: [chatId], references: [id])
+    WppContact     WppContact?      @relation(fields: [contactId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
     @@index([from, to, chatId])
     @@map("messages")

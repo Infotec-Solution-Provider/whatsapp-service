@@ -99,7 +99,6 @@ class MessagesDistributionService {
 				);
 				await this.insertAndNotify(logger, currChat, msg);
 
-				console.log("foi1");
 				if (currChat.botId === 1) {
 					await chooseSectorBot.processMessage(
 						currChat,

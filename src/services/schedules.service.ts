@@ -1,10 +1,15 @@
 import { Prisma, WppSchedule } from "@prisma/client";
 import prismaService from "./prisma.service";
-import { CreateScheduleDTO, SessionData, SocketEventType } from "@in.pulse-crm/sdk";
+import {
+	CreateScheduleDTO,
+	SessionData,
+	SocketEventType
+} from "@in.pulse-crm/sdk";
 import chatsService from "./chats.service";
 import messagesDistributionService from "./messages-distribution.service";
 import cron from "node-cron";
 import socketService from "./socket.service";
+import { Logger } from "@in.pulse-crm/utils";
 import whatsappService from "./whatsapp.service";
 import chooseSectorBot from "../bots/choose-sector.bot";
 
@@ -17,9 +22,7 @@ class SchedulesService {
 		cron.schedule("*/5 * * * *", async () => {
 			this.runSchedulesJob();
 			this.finishChatRoutine();
-
 		});
-
 	}
 
 	private async runSchedulesJob() {
@@ -95,11 +98,11 @@ class SchedulesService {
 		// Busca os chats ativos iniciados há mais de 30 minutos e menos de 2 horas
 		const chats = await prismaService.wppChat.findMany({
 			where: {
-			isFinished: false,
-			startedAt: {
-				gte: duasHorasAtras, // não mais antigo que 2h
-				lte: trintaMinAtras, // não mais recente que 30min
-			  },
+				isFinished: false,
+				startedAt: {
+					gte: duasHorasAtras, // não mais antigo que 2h
+					lte: trintaMinAtras // não mais recente que 30min
+				}
 			},
 			include: {
 				messages: {
@@ -110,15 +113,19 @@ class SchedulesService {
 				},
 			},
 		})
-		console.log(`[CRON] Verificando chats inativos...`)
-		console.log(`[CRON] Chats encontrados: ${chats.length}`)
-		console.log(`[CRON] Chats encontrados: ${JSON.stringify(chats)}`)
+    
+		Logger.debug(`[CRON] Verificando chats inativos...`);
+		Logger.debug(`[CRON] Chats encontrados: ${chats.length}`);
+		Logger.debug(`[CRON] Chats encontrados: ${JSON.stringify(chats)}`);
+    
 		for (const chat of chats) {
 			// Verifica se existe mensagem enviada pelo operador
-			const teveMensagemDeOperador = chat.messages.some(
-			msg => msg.from.startsWith("me:")
-			)
-			console.log(`[CRON] Chat ${chat.id} - Teve mensagem de operador: ${teveMensagemDeOperador}`)
+			const teveMensagemDeOperador = chat.messages.some((msg) =>
+				msg.from.startsWith("me:")
+			);
+			Logger.debug(
+				`[CRON] Chat ${chat.id} - Teve mensagem de operador: ${teveMensagemDeOperador}`
+			);
 			if (!teveMensagemDeOperador) {
 				await prismaService.wppChat.update({
 					where: { id: chat.id },
@@ -128,12 +135,12 @@ class SchedulesService {
 					finishedBy: null, // ou ID do sistema
 					},
 				})
-				console.log(`[CRON] Chat ${chat.id} finalizado automaticamente.`)
+				Logger.debug(`[CRON] Chat ${chat.id} finalizado automaticamente.`);
 
 				const event = SocketEventType.WppChatFinished;
 
 				let finishMsg: string = `Atendimento finalizado pelo sistema devido inatividade do operador.`;
-				console.log("Mensagem de finalização:", finishMsg);
+				Logger.debug("Mensagem de finalização:", finishMsg);
 				await messagesDistributionService.addSystemMessage(chat, finishMsg);
 				await socketService.emit(event, `${"nunes"}:chat:${chat.id}`, {
 					chatId: chat.id

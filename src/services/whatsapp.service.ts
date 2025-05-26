@@ -150,9 +150,11 @@ class WhatsappService {
 				const quotedMsg =
 					await prismaService.wppMessage.findUniqueOrThrow({
 						where: {
-							id: data.quotedId
+							id: +data.quotedId
 						}
 					});
+
+				console.log("quotedMsg", quotedMsg);
 
 				options.quotedId = (quotedMsg.wwebjsId || quotedMsg.wabaId)!;
 				message.quotedId = quotedMsg.id;
@@ -302,7 +304,7 @@ class WhatsappService {
 				const quotedMsg =
 					await prismaService.wppMessage.findUniqueOrThrow({
 						where: {
-							id: data.quotedId
+							id: +data.quotedId
 						}
 					});
 
@@ -316,7 +318,12 @@ class WhatsappService {
 			const sentMsg = await client.sendMessage(options);
 			process.log("Atualizando mensagem no banco de dados.", sentMsg);
 
-			message = { ...pendingMsg, ...sentMsg,from: `bot:${client.phone}`,status: "SENT" };
+			message = {
+				...pendingMsg,
+				...sentMsg,
+				from: `bot:${client.phone}`,
+				status: "SENT"
+			};
 
 			const savedMsg = await messagesService.updateMessage(
 				pendingMsg.id,

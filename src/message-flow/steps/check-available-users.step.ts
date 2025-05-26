@@ -78,7 +78,6 @@ export default class CheckAvailableUsersStep implements Step {
 		ctx.logger.log("Verificando usuários disponíveis...");
 
 		const sessions = await this.getSectorOnlineSessions();
-		console.log(sessions);
 		ctx.logger.log(`Encontradas ${sessions.length} sessões online`);
 
 		if (sessions.length === 0) {
@@ -87,7 +86,6 @@ export default class CheckAvailableUsersStep implements Step {
 		}
 
 		const usersChats = await this.getUserChatsCount(sessions);
-		console.log(usersChats);
 
 		if (usersChats.length === 0) {
 			ctx.logger.log("Nenhum usuário disponível encontrado.");

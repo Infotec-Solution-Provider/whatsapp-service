@@ -20,6 +20,7 @@ class WWEBJSMessageParser {
 		const parsedMessage: CreateMessageDto = {
 			instance,
 			wwebjsId: message.id._serialized,
+			wwebjsIdStanza: message.id.id,
 			from: `${(message.fromMe ? "me:" : "") + message.from.split("@")[0]}`,
 			to: `${(message.fromMe ? "" : "me:") + message.to.split("@")[0]}`,
 			body: message.body,
@@ -80,7 +81,7 @@ class WWEBJSMessageParser {
 		);
 		logger.log(`Recuperando ID da mensagem citada no banco de dados...`);
 		const quotedMsg = await prismaService.wppMessage.findUnique({
-			where: { wwebjsId: wwebjsQuotedMsg.id._serialized }
+			where: { wwebjsIdStanza: wwebjsQuotedMsg.id.id }
 		});
 		logger.log(`ID da mensagem citada no banco de dados: ${quotedMsg?.id}`);
 
