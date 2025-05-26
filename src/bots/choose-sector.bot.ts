@@ -87,7 +87,7 @@ class ChooseSectorBot {
 					};
 
 					const answer =
-						returnMessageSectors +
+						`Escolha com quem deseja falar\n${operadores.map((s, i) => `${i + 1} - ${s.NOME}`).join("\n")}` +
 						`\n0 - Voltar à escolha de setor`;
 
 					await whatsappService.sendBotMessage(message.from, {
