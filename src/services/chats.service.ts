@@ -234,10 +234,16 @@ class ChatsService {
 		const chat = await prismaService.wppChat.findUnique({
 			where: { id },
 			include: {
-				messages: true,
 				contact: true
 			}
 		});
+
+		const messages = chat?.contactId
+			? await prismaService.wppMessage.findMany({
+					where: { contactId: chat?.contactId },
+					orderBy: { timestamp: "asc" }
+				})
+			: [];
 
 		if (chat?.contact?.customerId) {
 			try {
@@ -245,14 +251,15 @@ class ChatsService {
 					chat.contact.customerId
 				);
 
-				return { ...chat, customer };
+				return { ...chat, customer, messages };
 			} catch (err) {
 				return chat;
 			}
 		}
 
-		return chat;
+		return { ...chat, messages };
 	}
+
 	public async transferAttendance(
 		token: string,
 		session: SessionData,
@@ -388,35 +395,9 @@ class ChatsService {
 				true
 			);
 
-			const newChatWithDetails = await prismaService.wppChat.findUnique({
-				where: { id: newChat.id },
-				include: {
-					contact: true,
-					messages: {
-						where: {
-							contactId: newChat.contactId
-						}
-					}
-				}
-			});
-			let customer: Customer | null = null;
-
-			if (contact.customerId) {
-				try {
-					customersService.setAuth(token);
-					customer = await customersService.getCustomerById(
-						contact.customerId
-					);
-				} catch (err) {
-					customer = null;
-				}
-			}
-
-			const chatWithCustomer = { ...newChatWithDetails, customer };
-
 			await messagesDistributionService.notifyChatStarted(
 				process,
-				chatWithCustomer as WppChat
+				newChat as WppChat
 			);
 		} catch (err) {
 			process.log("Erro ao iniciar o atendimento ");
