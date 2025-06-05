@@ -1,6 +1,6 @@
 import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
 import prismaService from "./prisma.service";
-import { Customer, SessionData, SocketEventType } from "@in.pulse-crm/sdk";
+import { Customer, SessionData, SocketEventType, SocketServerMonitorRoom, SocketServerUserRoom } from "@in.pulse-crm/sdk";
 import customersService from "./customers.service";
 import instancesService from "./instances.service";
 import socketService from "./socket.service";
@@ -67,6 +67,7 @@ class ChatsService {
 				contact: {
 					include: {
 						WppMessage: true
+
 					}
 				}
 			}
@@ -286,12 +287,21 @@ class ChatsService {
 				userId
 			}
 		});
-		const event = SocketEventType.WppChatFinished;
-		const transferMsg = `Atendimento tranferido por ${user.NOME}.`;
+		const event = SocketEventType.WppChatTransfer;
+		const monitorRoom: SocketServerMonitorRoom = `${chat.instance}:${chat.sectorId!}:monitor`;
+
+		if (chat.userId === null || chat.userId === undefined) {
+			throw new Error("chat.userId is null or undefined, cannot construct userRoom.");
+		}
+
+		const userRoom: SocketServerUserRoom = `${chat.instance}:user:${chat.userId}`;
+
+		const transferMsg = `Atendimento transferido por ${user.NOME}.`;
 		await messagesDistributionService.addSystemMessage(chat, transferMsg);
-		await socketService.emit(event, `${instance}:chat:${chat.id}`, {
-			chatId: chat.id
+		await socketService.emit(event, `${instance}:chat:${chat.id}`, {chatId: chat.id
 		});
+		await socketService.emit(SocketEventType.WppChatStarted,monitorRoom, { chatId: chat.id });
+		await socketService.emit(SocketEventType.WppChatStarted,userRoom,{ chatId: chat.id });
 	}
 
 	public async finishChatById(
