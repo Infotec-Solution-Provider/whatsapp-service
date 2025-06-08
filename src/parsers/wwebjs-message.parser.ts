@@ -12,7 +12,7 @@ class WWEBJSMessageParser {
 		logger: ProcessingLogger,
 		instance: string,
 		message: WAWebJS.Message,
-		skipParsingFile = false,
+		//skipParsingFile = false,
 		skipParsingQuoted = false,
 		isInternal = false
 	) {
