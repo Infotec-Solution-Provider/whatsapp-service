@@ -30,7 +30,7 @@ class WWEBJSMessageParser {
 			status: WWEBJSMessageParser.getMessageStatus(message.ack)
 		};
 
-		if (!skipParsingFile && message.hasMedia) {
+		if ( message.hasMedia) {
 			logger.log(
 				`Mensagem contém mídia. Processando arquivo de mídia...`
 			);
