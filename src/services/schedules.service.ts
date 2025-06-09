@@ -159,17 +159,35 @@ class SchedulesService {
 
 				const trintaMinAtras = new Date(Date.now() - 30 * 60 * 1000);
 
-				const ultimaMsgOperador = chat.messages
-				.filter(m => m.from.startsWith("me:"))
-				.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+				const mensagensOrdenadas = chat.messages
+				.filter(m => m.timestamp)
+				.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-				if (ultimaMsgOperador && new Date(ultimaMsgOperador.timestamp) > trintaMinAtras) {
-				console.log(`[CRON] Chat ${chat.id} - Operador respondeu nos últimos 30min`);
-				continue;
+				const ultimaMensagem = mensagensOrdenadas[0];
+				if (!ultimaMensagem) continue;
+
+				if (ultimaMensagem.from.startsWith("me:")) {
+					const ultimaData = new Date(ultimaMensagem.timestamp);
+					if (ultimaData <= trintaMinAtras) {
+						// Operador foi o último a responder, mas faz mais de 30 minutos
+						const awaitClient = "O cliente está aguardando há mais de 30 minutos após sua última resposta. Deseja encerrar ou continuar o atendimento?";
+
+						await messagesDistributionService.addSystemMessage(chat, awaitClient);
+
+						continue; // Evita enviar o menu novamente
+					} else {
+						Logger.debug(`[CRON] Chat ${chat.id} - Operador respondeu recentemente`);
+						continue;
+					}
 				}
 
-				const client = chat.messages.find(m => !m.from.startsWith("me:") && !m.from.startsWith("bot:"));
-				if(!client) continue;
+				const client = chat.messages.find(m =>
+				!m.from.startsWith("me:") &&
+				!m.from.startsWith("bot:") &&
+				!m.from.startsWith("system")
+				);
+				if (!client) continue;
+
 				await whatsappService.sendBotMessage(client.from, {
 					chat,
 					text: [
