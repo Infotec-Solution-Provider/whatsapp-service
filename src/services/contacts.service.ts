@@ -53,7 +53,9 @@ class ContactsService {
 
 		const contacts = await prismaService.wppContact.findMany({
 			where: {
-				instance
+				instance,
+				isDeleted:false
+
 			}
 		});
 
@@ -84,10 +86,20 @@ class ContactsService {
 		const contacts = await prismaService.wppContact.findMany({
 			where: {
 				instance,
-				customerId
+				customerId,
+				isDeleted:false
 			}
 		});
 
+		return contacts;
+	}
+	public async getContacts(instance: string) {
+		const contacts = await prismaService.wppContact.findMany({
+			where: {
+				instance,
+				isDeleted:false
+			}
+		});
 		return contacts;
 	}
 
@@ -95,7 +107,7 @@ class ContactsService {
 		instance: string,
 		name: string,
 		phone: string,
-		customerId: number
+		customerId?: number
 	) {
 		const validPhone = await whatsappService.getValidWhatsappPhone(
 			instance,
@@ -105,13 +117,12 @@ class ContactsService {
 		if (!validPhone) {
 			throw new Error("Invalid phone number!");
 		}
-
 		const contact = await prismaService.wppContact.create({
 			data: {
 				instance,
 				name,
 				phone: validPhone,
-				customerId
+				customerId: customerId ?? null
 			}
 		});
 
@@ -133,9 +144,12 @@ class ContactsService {
 	}
 
 	public async deleteContact(contactId: number) {
-		const contact = await prismaService.wppContact.delete({
+		const contact = await prismaService.wppContact.update({
 			where: {
 				id: contactId
+			},
+			data: {
+				isDeleted:true
 			}
 		});
 
