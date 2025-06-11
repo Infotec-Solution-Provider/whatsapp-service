@@ -10,12 +10,22 @@ class ContactsController {
 			this.getCustomerContacts
 		);
 		this.router.get(
-			"/api/whatsapp/contacts",
+			"/api/whatsapp/contacts/customer",
 			isAuthenticated,
 			this.getContactsWithCustomer
 		);
+		this.router.get(
+			"/api/whatsapp/contacts",
+			isAuthenticated,
+			this.getContacts
+		);
 		this.router.post(
 			"/api/whatsapp/customers/:id/contacts",
+			isAuthenticated,
+			this.createContact
+		);
+		this.router.post(
+			"/api/whatsapp/contacts",
 			isAuthenticated,
 			this.createContact
 		);
@@ -35,6 +45,17 @@ class ContactsController {
 		const data = await contactsService.getCustomerContacts(
 			req.session.instance,
 			Number(req.params["id"])
+		);
+
+		res.status(200).send({
+			message: "Chats retrieved successfully!",
+			data
+		});
+	}
+
+	private async getContacts(req: Request, res: Response) {
+		const data = await contactsService.getContacts(
+			req.session.instance,
 		);
 
 		res.status(200).send({
