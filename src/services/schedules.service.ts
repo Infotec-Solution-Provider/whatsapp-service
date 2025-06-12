@@ -191,11 +191,11 @@ class SchedulesService {
 				await whatsappService.sendBotMessage(client.from, {
 					chat,
 					text: [
-					"Deseja voltar ao menu de setores, encerrar o atendimento ou continuar aguardando?",
+					"Deseja voltar ao menu de setores, finalizar conversa ou aguardar resposta do contato?",
 					"",
 					"*1* - Voltar ao menu de setores",
-					"*2* - Encerrar o atendimento",
-					"*3* - Continuar aguardando",
+					"*2* - Finalizar conversa",
+					"*3* - Aguardar resposta do contato",
 					"",
 					"*Responda apenas com o número da opção desejada.*"
 					].join('\n')
