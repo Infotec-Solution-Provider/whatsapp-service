@@ -12,9 +12,9 @@ class WWEBJSMessageParser {
 		logger: ProcessingLogger,
 		instance: string,
 		message: WAWebJS.Message,
-		//skipParsingFile = false,
+		skipParsingFile = false,
 		skipParsingQuoted = false,
-		isInternal = false
+		isInternal = false,
 	) {
 		logger.log(`Sanitizando mensagem...`);
 
@@ -30,7 +30,7 @@ class WWEBJSMessageParser {
 			status: WWEBJSMessageParser.getMessageStatus(message.ack)
 		};
 
-		if ( message.hasMedia) {
+		if (!skipParsingFile && message.hasMedia) {
 			logger.log(
 				`Mensagem contém mídia. Processando arquivo de mídia...`
 			);

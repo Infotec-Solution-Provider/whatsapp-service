@@ -422,6 +422,7 @@ class InternalChatsService {
 					(await prismaService.internalMessage.update({
 						where: { id: savedMsg.id },
 						data: {
+							wwebjsIdStanza: sentMsg.wwebjsIdStanza ?? null,
 							wwebjsId: sentMsg.wwebjsId!
 						}
 					}));

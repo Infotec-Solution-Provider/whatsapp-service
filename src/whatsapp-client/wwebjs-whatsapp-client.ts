@@ -197,12 +197,13 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			if (msg.from === "status@broadcast") {
 				return process.log("Message ignored: it is broadcast.");
 			}
-
 			const parsedMsg = await MessageParser.parse(
 				process,
 				this.instance,
 				msg,
-				!chat.isGroup
+				false,
+				false,
+				chat.isGroup
 			);
 			process.log(`Message is successfully parsed!`, parsedMsg);
 
