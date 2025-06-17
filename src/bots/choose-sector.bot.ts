@@ -157,7 +157,7 @@ class ChooseSectorBot {
 							quotedId: message.id
 						});
 						const operatoranswer =
-							`${chooseOp.NOME}: Olá, em que posso ajudar?`;
+							`*${chooseOp.NOME}*: Olá, em que posso ajudar?`;
 						await whatsappService.sendBotMessage(message.from, {
 							chat,
 							text: operatoranswer,
