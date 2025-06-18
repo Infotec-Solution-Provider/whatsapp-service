@@ -113,19 +113,38 @@ class ContactsService {
 			instance,
 			phone
 		);
-
+		let contact;
 		if (!validPhone) {
 			throw new Error("Invalid phone number!");
 		}
-		const contact = await prismaService.wppContact.create({
-			data: {
-				instance,
-				name,
-				phone: validPhone,
-				customerId: customerId ?? null
+		const isDeleted = await prismaService.wppContact.findUnique({
+			where: {
+				instance_phone: {
+					instance: instance,
+					phone: phone
+				}
 			}
 		});
-
+		if (isDeleted) {
+			contact = await prismaService.wppContact.update({
+				where: {
+					id: isDeleted.id
+				},
+				data: {
+					isDeleted: false,
+				}
+			});
+		}
+		else{
+			contact = await prismaService.wppContact.create({
+				data: {
+					instance,
+					name,
+					phone: validPhone,
+					customerId: customerId ?? null
+				}
+			});
+		}
 		return contact;
 	}
 
