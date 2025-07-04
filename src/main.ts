@@ -32,6 +32,7 @@ app.use(sectorsController.router);
 app.use(schedulesController.router);
 app.use(internalchatsController.router);
 app.use(readyMessagesController.router);
+
 app.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
 	console.error(err);
 	next(err);
@@ -50,7 +51,7 @@ logRoutes("", [
 	sectorsController.router,
 	schedulesController.router,
 	internalchatsController.router,
-	readyMessagesController.router,
+	readyMessagesController.router
 ]);
 
 const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;

@@ -1,6 +1,12 @@
 import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
 import prismaService from "./prisma.service";
-import { Customer, SessionData, SocketEventType, SocketServerMonitorRoom, SocketServerUserRoom } from "@in.pulse-crm/sdk";
+import {
+	Customer,
+	SessionData,
+	SocketEventType,
+	SocketServerMonitorRoom,
+	SocketServerUserRoom
+} from "@in.pulse-crm/sdk";
 import customersService from "./customers.service";
 import instancesService from "./instances.service";
 import socketService from "./socket.service";
@@ -67,9 +73,9 @@ class ChatsService {
 				contact: {
 					include: {
 						WppMessage: true
-
 					}
-				}
+				},
+				schedule: true
 			}
 		});
 
@@ -85,7 +91,8 @@ class ChatsService {
 						include: {
 							WppMessage: true
 						}
-					}
+					},
+					schedule: true
 				}
 			});
 
@@ -139,6 +146,7 @@ class ChatsService {
 
 		return { chats, messages };
 	}
+
 	public async getChatsMonitor(
 		session: SessionData,
 		includeMessages = true,
@@ -156,7 +164,8 @@ class ChatsService {
 					include: {
 						WppMessage: true
 					}
-				}
+				},
+				schedule: true
 			}
 		});
 
@@ -223,7 +232,8 @@ class ChatsService {
 		const chats = await prismaService.wppChat.findMany({
 			include: {
 				messages: true,
-				contact: true
+				contact: true,
+				schedule: true
 			},
 			where: whereClause
 		});
@@ -291,17 +301,24 @@ class ChatsService {
 		const monitorRoom: SocketServerMonitorRoom = `${chat.instance}:${chat.sectorId!}:monitor`;
 
 		if (chat.userId === null || chat.userId === undefined) {
-			throw new Error("chat.userId is null or undefined, cannot construct userRoom.");
+			throw new Error(
+				"chat.userId is null or undefined, cannot construct userRoom."
+			);
 		}
 
 		const userRoom: SocketServerUserRoom = `${chat.instance}:user:${chat.userId}`;
 
 		const transferMsg = `Atendimento transferido por ${user.NOME}.`;
 		await messagesDistributionService.addSystemMessage(chat, transferMsg);
-		await socketService.emit(event, `${instance}:chat:${chat.id}`, {chatId: chat.id
+		await socketService.emit(event, `${instance}:chat:${chat.id}`, {
+			chatId: chat.id
 		});
-		await socketService.emit(SocketEventType.WppChatStarted,monitorRoom, { chatId: chat.id });
-		await socketService.emit(SocketEventType.WppChatStarted,userRoom,{ chatId: chat.id });
+		await socketService.emit(SocketEventType.WppChatStarted, monitorRoom, {
+			chatId: chat.id
+		});
+		await socketService.emit(SocketEventType.WppChatStarted, userRoom, {
+			chatId: chat.id
+		});
 	}
 
 	public async finishChatById(
@@ -462,7 +479,8 @@ class ChatsService {
 					userId: scheduledFor,
 					contactId,
 					sectorId,
-					startedAt: new Date()
+					startedAt: new Date(),
+					isSchedule: true
 				}
 			});
 
@@ -500,9 +518,13 @@ class ChatsService {
 				process,
 				chatWithCustomer as WppChat
 			);
+
+			return newChatWithDetails!.id;
 		} catch (err) {
 			process.log("Erro ao iniciar o atendimento ");
 			process.failed(err);
+
+			return null;
 		}
 	}
 }
