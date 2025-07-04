@@ -17,6 +17,7 @@ import prismaService from "./prisma.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
 import CreateMessageDto from "../dtos/create-message.dto";
 import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
+import { Mention } from "../types/whatsapp-instance.types";
 
 interface ChatsFilters {
 	userId?: string;
@@ -31,6 +32,7 @@ interface InternalSendMessageData {
 	text: string;
 	file?: Express.Multer.File | null;
 	fileId?: string;
+	mentions?: Mention[];
 }
 
 interface UpdateInternalGroupData {
@@ -399,6 +401,18 @@ class InternalChatsService {
 				data: message
 			});
 			process.log("Mensagem salva no banco de dados.", savedMsg);
+			if (data.mentions?.length) {
+			const mentionsParsed = typeof data.mentions === "string" ? JSON.parse(data.mentions) : data.mentions || [];
+
+			const mentionData = mentionsParsed.map((mention:any) => ({
+				userId: typeof mention === "object" ? mention.userId ?? mention.id : mention,
+				messageId: savedMsg.id,
+			}));
+
+			if (mentionData.length > 0) {
+				await prismaService.internalMention.createMany({ data: mentionData });
+			}
+			}
 			const room =
 				`${session.instance}:internal-chat:${data.chatId}` as SocketServerInternalChatRoom;
 			await socketService.emit(SocketEventType.InternalMessage, room, {
@@ -478,6 +492,25 @@ class InternalChatsService {
 		if (!(client instanceof WWEBJSWhatsappClient)) {
 			return;
 		}
+		let mentionsText = "";
+		let waMentions: Mention[] = [];
+		if (data.mentions) {
+			let mentions: Mention[] = [];
+
+			if (typeof data.mentions === "string") {
+				mentions = JSON.parse(data.mentions);
+			} else if (Array.isArray(data.mentions)) {
+				mentions = data.mentions;
+			}
+
+			waMentions = mentions.map(m => ({
+				userId: m.userId ?? "",
+				phone: m.phone ?? "",
+				name: m.name || m.phone || ""
+			}));
+
+			mentionsText = "\n\n" + waMentions.map(m => `@${m.phone}`).join(" ");
+		}
 
 		const text = `*${session.name}*: ${message.body}`;
 
@@ -499,7 +532,8 @@ class InternalChatsService {
 					quotedId: data.quotedId || null,
 					sendAsAudio: data.sendAsAudio === "true",
 					sendAsDocument: data.sendAsDocument === "true",
-					text
+					text,
+					mentions: waMentions
 				},
 				true
 			);
@@ -508,7 +542,8 @@ class InternalChatsService {
 				{
 					to: groupId,
 					quotedId: data.quotedId || null,
-					text
+					text,
+					mentions: waMentions
 				},
 				true
 			);
@@ -517,7 +552,8 @@ class InternalChatsService {
 		return await client.sendMessage({
 			to: groupId,
 			quotedId: data.quotedId || null,
-			text: data.text
+			text: data.text,
+			mentions: waMentions
 		});
 	}
 

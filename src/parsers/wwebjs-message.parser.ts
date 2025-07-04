@@ -27,9 +27,10 @@ class WWEBJSMessageParser {
 			body: message.body,
 			type: message.type,
 			timestamp: String(message.timestamp * 1000),
-			status: WWEBJSMessageParser.getMessageStatus(message.ack)
-		};
+			status: WWEBJSMessageParser.getMessageStatus(message.ack),
+			isForwarded: true
 
+		};
 		if (!skipParsingFile && message.hasMedia) {
 			logger.log(
 				`Mensagem contém mídia. Processando arquivo de mídia...`

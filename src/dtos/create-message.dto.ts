@@ -18,4 +18,5 @@ export default interface CreateMessageDto {
 	fileName?: null | string;
 	fileType?: null | string;
 	fileSize?: null | string;
+	isForwarded?: false | boolean;
 }

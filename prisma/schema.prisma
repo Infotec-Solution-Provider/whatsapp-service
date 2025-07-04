@@ -55,6 +55,7 @@ model WppMessage {
     quotedId       Int?             @map("quoted_id")
     chatId         Int?             @map("chat_id")
     contactId      Int?             @map("contact_id")
+	isForwarded    Boolean?		  @map("is_forwarded")
     body           String
     timestamp      String
     status         WppMessageStatus
@@ -62,10 +63,13 @@ model WppMessage {
     fileName       String?          @map("file_name")
     fileType       String?          @map("file_type")
     fileSize       String?          @map("file_size")
+	userId         Int?
     WppChat        WppChat?         @relation(fields: [chatId], references: [id])
     WppContact     WppContact?      @relation(fields: [contactId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
     @@index([from, to, chatId])
+	@@index([chatId, userId])
+  	@@index([contactId], map: "messages_contact_id_fkey")
     @@map("messages")
 }
 
@@ -106,6 +110,8 @@ model InternalMessage {
     from           String
     type           String
     quotedId       Int?             @map("quoted_id")
+	isForwarded    Boolean?		  @map("is_forwarded")
+
     wwebjsId       String?          @unique @map("wwebjs_id")
     wwebjsIdStanza String?          @unique @map("wwebjs_id_stanza")
     internalChatId Int              @map("internalchat_id")
@@ -116,6 +122,7 @@ model InternalMessage {
     fileName       String?          @map("file_name")
     fileType       String?          @map("file_type")
     fileSize       String?          @map("file_size")
+  	mentions       InternalMention[]
 
     // Relações
     chat InternalChat? @relation(fields: [internalChatId], references: [id])
@@ -158,6 +165,16 @@ model InternalChatMember {
 
     @@id([internalChatId, userId])
     @@map("internal_chat_members")
+}
+model InternalMention {
+  id         Int             @id @default(autoincrement())
+  messageId  Int             @map("internalmessage_id")
+  userId     Int             @map("user_id")
+  message    InternalMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([userId])
+  @@map("internal_mentions")
 }
 
 model WppTag {

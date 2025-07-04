@@ -360,13 +360,12 @@ class MessagesDistributionService {
 		id: string,
 		status: WppMessageStatus
 	) {
-		try {
-			const search =
-				type === "wwebjs" ? { wwebjsId: id } : { wabaId: id };
+			try {
+				const search = type === "wwebjs" ? { wwebjsId: id } : { wabaId: id };
 
-			if (!("wwebjsId" in search) && !("wabaId" in search)) {
+				if (!("wwebjsId" in search) && !("wabaId" in search)) {
 				return;
-			}
+				}
 
 			const message = await prismaService.wppMessage.update({
 				where: search,

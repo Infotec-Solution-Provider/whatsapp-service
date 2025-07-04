@@ -1,6 +1,7 @@
 interface BaseSendMessageOptions {
 	to: string;
 	quotedId?: string | null;
+	mentions?: Mentions
 }
 
 export interface SendFileOptions extends BaseSendMessageOptions {
@@ -20,3 +21,12 @@ export interface WhatsappInstanceProps {
 	phone: string;
 	instanceName: string;
 }
+export type Mention = {
+  userId: number;
+  name: string;
+  phone: string;
+};
+
+export type Mentions = Mention[];
+
+export type WhatsAppMention = { id: string; tag?: string };

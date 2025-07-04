@@ -33,6 +33,7 @@ interface SendMessageData {
 	text?: string | null;
 	file?: Express.Multer.File;
 	fileId?: number;
+	isForwarded?: boolean;
 }
 
 export function getMessageType(
@@ -137,7 +138,8 @@ class WhatsappService {
 				from: `me:${client.phone}`,
 				to: `${to}`,
 				type: "chat",
-				body: data.text || ""
+				body: data.text || "",
+				isForwarded: true
 			} as CreateMessageDto;
 
 			let options = { to, text: data.text } as SendMessageOptions;
@@ -245,10 +247,22 @@ class WhatsappService {
 			process.log("Enviando mensagem para o cliente.");
 
 			messagesDistributionService.notifyMessage(process, pendingMsg);
+			console.log("options",options)
 			const sentMsg = await client.sendMessage(options);
 			process.log("Atualizando mensagem no banco de dados.", sentMsg);
+			console.log("sentMsg",sentMsg)
 
-			message = { ...pendingMsg, ...sentMsg, status: "SENT" };
+			message = {
+				...pendingMsg,
+				...sentMsg,
+				status: "SENT",
+				isForwarded:
+					typeof sentMsg.isForwarded === "boolean"
+						? sentMsg.isForwarded
+						: typeof pendingMsg.isForwarded === "boolean"
+							? pendingMsg.isForwarded
+							: false
+			} as CreateMessageDto;
 			const savedMsg = await messagesService.updateMessage(
 				pendingMsg.id,
 				message
@@ -319,11 +333,17 @@ class WhatsappService {
 			process.log("Atualizando mensagem no banco de dados.", sentMsg);
 
 			message = {
-				...pendingMsg,
-				...sentMsg,
-				from: `bot:${client.phone}`,
-				status: "SENT"
-			};
+			...pendingMsg,
+			...sentMsg,
+			status: "SENT",
+			isForwarded:
+				typeof sentMsg.isForwarded === "boolean"
+				? sentMsg.isForwarded
+				: typeof pendingMsg.isForwarded === "boolean"
+					? pendingMsg.isForwarded
+					: false // <- garante que nunca será null
+			} as CreateMessageDto;
+
 
 			const savedMsg = await messagesService.updateMessage(
 				pendingMsg.id,
