@@ -28,6 +28,7 @@ class SchedulesService {
 	private async runSchedulesJob() {
 		const schedules = await prismaService.wppSchedule.findMany({
 			where: {
+				chatId: null,
 				scheduleDate: {
 					lte: new Date()
 				}
@@ -58,14 +59,23 @@ class SchedulesService {
 				);
 			}
 
-			await chatsService.startScheduledChat(
+			const chatId = await chatsService.startScheduledChat(
 				schedule.instance,
 				schedule.sectorId!,
 				schedule.contactId,
 				schedule.scheduledFor
 			);
 
-			await this.deleteSchedule(schedule.id);
+			if (chatId) {
+				await prismaService.wppSchedule.update({
+					where: {
+						id: schedule.id
+					},
+					data: {
+						chatId
+					}
+				});
+			}
 		}
 	}
 
@@ -90,6 +100,7 @@ class SchedulesService {
 
 		return schedules;
 	}
+
 	public async finishChatRoutine() {
 		const agora = new Date();
 		const trintaMinAtras = new Date(agora.getTime() - 30 * 60 * 1000);
@@ -109,11 +120,11 @@ class SchedulesService {
 					select: {
 						from: true,
 						timestamp: true,
-						body: true,
+						body: true
 					}
-				},
-			},
-		})
+				}
+			}
+		});
 
 		Logger.debug(`[CRON] Verificando chats inativos...`);
 		Logger.debug(`[CRON] Chats encontrados: ${chats.length}`);
@@ -131,37 +142,50 @@ class SchedulesService {
 				await prismaService.wppChat.update({
 					where: { id: chat.id },
 					data: {
-					isFinished: true,
-					finishedAt: new Date(),
-					finishedBy: null, // ou ID do sistema
-					},
-				})
-				Logger.debug(`[CRON] Chat ${chat.id} finalizado automaticamente.`);
+						isFinished: true,
+						finishedAt: new Date(),
+						finishedBy: null // ou ID do sistema
+					}
+				});
+				Logger.debug(
+					`[CRON] Chat ${chat.id} finalizado automaticamente.`
+				);
 
 				const event = SocketEventType.WppChatFinished;
 
 				let finishMsg: string = `Atendimento finalizado pelo sistema devido inatividade do operador.`;
 				Logger.debug("Mensagem de finalização:", finishMsg);
-				await messagesDistributionService.addSystemMessage(chat, finishMsg);
+				await messagesDistributionService.addSystemMessage(
+					chat,
+					finishMsg
+				);
 				await socketService.emit(event, `${"nunes"}:chat:${chat.id}`, {
 					chatId: chat.id
 				});
-			}
-			else{
+			} else {
 				const jaMandouPrompt = chat.messages.some(
-				m => m.from.startsWith("bot:") && m.timestamp && m.body?.includes("Deseja voltar ao menu de setores")
+					(m) =>
+						m.from.startsWith("bot:") &&
+						m.timestamp &&
+						m.body?.includes("Deseja voltar ao menu de setores")
 				);
 
 				if (jaMandouPrompt) {
-				Logger.debug(`[CRON] Chat ${chat.id} - Já foi enviado o menu antes`);
-				continue;
+					Logger.debug(
+						`[CRON] Chat ${chat.id} - Já foi enviado o menu antes`
+					);
+					continue;
 				}
 
 				const trintaMinAtras = new Date(Date.now() - 30 * 60 * 1000);
 
 				const mensagensOrdenadas = chat.messages
-				.filter(m => m.timestamp)
-				.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+					.filter((m) => m.timestamp)
+					.sort(
+						(a, b) =>
+							new Date(b.timestamp).getTime() -
+							new Date(a.timestamp).getTime()
+					);
 
 				const ultimaMensagem = mensagensOrdenadas[0];
 				if (!ultimaMensagem) continue;
@@ -170,45 +194,52 @@ class SchedulesService {
 					const ultimaData = new Date(ultimaMensagem.timestamp);
 					if (ultimaData <= trintaMinAtras) {
 						// Operador foi o último a responder, mas faz mais de 30 minutos
-						const awaitClient = "O cliente está aguardando há mais de 30 minutos após sua última resposta. Deseja encerrar ou continuar o atendimento?";
+						const awaitClient =
+							"O cliente está aguardando há mais de 30 minutos após sua última resposta. Deseja encerrar ou continuar o atendimento?";
 
-						await messagesDistributionService.addSystemMessage(chat, awaitClient);
+						await messagesDistributionService.addSystemMessage(
+							chat,
+							awaitClient
+						);
 
 						continue; // Evita enviar o menu novamente
 					} else {
-						Logger.debug(`[CRON] Chat ${chat.id} - Operador respondeu recentemente`);
+						Logger.debug(
+							`[CRON] Chat ${chat.id} - Operador respondeu recentemente`
+						);
 						continue;
 					}
 				}
 
-				const client = chat.messages.find(m =>
-				!m.from.startsWith("me:") &&
-				!m.from.startsWith("bot:") &&
-				!m.from.startsWith("system")
+				const client = chat.messages.find(
+					(m) =>
+						!m.from.startsWith("me:") &&
+						!m.from.startsWith("bot:") &&
+						!m.from.startsWith("system")
 				);
 				if (!client) continue;
 
 				await whatsappService.sendBotMessage(client.from, {
 					chat,
 					text: [
-					"Deseja voltar ao menu de setores, finalizar conversa ou aguardar resposta do contato?",
-					"",
-					"*1* - Voltar ao menu de setores",
-					"*2* - Finalizar conversa",
-					"*3* - Aguardar resposta do contato",
-					"",
-					"*Responda apenas com o número da opção desejada.*"
-					].join('\n')
+						"Deseja voltar ao menu de setores, finalizar conversa ou aguardar resposta do contato?",
+						"",
+						"*1* - Voltar ao menu de setores",
+						"*2* - Finalizar conversa",
+						"*3* - Aguardar resposta do contato",
+						"",
+						"*Responda apenas com o número da opção desejada.*"
+					].join("\n")
 				});
 				await prismaService.wppChat.update({
 					where: { id: chat.id },
-					data: { userId:null, botId: 1 }
+					data: { userId: null, botId: 1 }
 				});
 				chooseSectorBot.forceStep(chat.id, 4, chat.userId ?? 0);
-
 			}
-	  }
+		}
 	}
+
 	public async createSchedule(
 		token: string,
 		session: SessionData,
@@ -231,7 +262,8 @@ class SchedulesService {
 				scheduledFor: data.scheduledFor,
 				scheduleDate: date,
 				contactId: data.contactId,
-				sectorId: session.sectorId
+				sectorId: session.sectorId,
+				scheduledAt: new Date()
 			}
 		});
 
