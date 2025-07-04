@@ -509,7 +509,6 @@ class InternalChatsService {
 				name: m.name || m.phone || ""
 			}));
 
-			mentionsText = "\n\n" + waMentions.map(m => `@${m.phone}`).join(" ");
 		}
 
 		const text = `*${session.name}*: ${message.body}`;
