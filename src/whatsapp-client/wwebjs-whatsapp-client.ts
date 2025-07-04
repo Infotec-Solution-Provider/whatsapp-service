@@ -43,8 +43,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				clientId: `${this.instance}_${this.name}`
 			}),
 			puppeteer: {
-				...PUPPETEER_ARGS,
-				browserURL: process.env["WWEBJS_BROWSER_PATH"]!
+				...PUPPETEER_ARGS
 			}
 		});
 
