@@ -492,7 +492,7 @@ class InternalChatsService {
 		if (!(client instanceof WWEBJSWhatsappClient)) {
 			return;
 		}
-		let mentionsText = "";
+
 		let waMentions: Mention[] = [];
 		if (data.mentions) {
 			let mentions: Mention[] = [];
