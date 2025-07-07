@@ -24,7 +24,7 @@ interface ChatsFilters {
 	isFinished?: string;
 }
 
-const FETCH_CUSTOMERS_QUERY = "SELECT * FROM clientes WHERE CODIGO IN (?)";
+export const FETCH_CUSTOMERS_QUERY = "SELECT * FROM clientes WHERE CODIGO IN (?)";
 const FETCH_RESULT_QUERY = "SELECT * FROM resultados WHERE CODIGO = ?";
 
 class ChatsService {

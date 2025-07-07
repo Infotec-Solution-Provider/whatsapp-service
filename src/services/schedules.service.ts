@@ -1,17 +1,19 @@
-import { Prisma, WppSchedule } from "@prisma/client";
+import { Prisma, WppContact, WppSchedule } from "@prisma/client";
 import prismaService from "./prisma.service";
 import {
 	CreateScheduleDTO,
+	Customer,
 	SessionData,
 	SocketEventType
 } from "@in.pulse-crm/sdk";
-import chatsService from "./chats.service";
+import chatsService, { FETCH_CUSTOMERS_QUERY } from "./chats.service";
 import messagesDistributionService from "./messages-distribution.service";
 import cron from "node-cron";
 import socketService from "./socket.service";
 import { Logger } from "@in.pulse-crm/utils";
 import whatsappService from "./whatsapp.service";
 import chooseSectorBot from "../bots/choose-sector.bot";
+import instancesService from "./instances.service";
 
 interface ChatsFilters {
 	userId?: string;
@@ -83,7 +85,10 @@ class SchedulesService {
 		session: SessionData,
 		filters: ChatsFilters
 	) {
-		const whereClause: Prisma.WppScheduleWhereInput = {};
+		const whereClause: Prisma.WppScheduleWhereInput = {
+			chat: null
+		};
+
 		whereClause.instance = session.instance;
 
 		if (filters.userId) {
@@ -95,10 +100,49 @@ class SchedulesService {
 		}
 
 		const schedules = await prismaService.wppSchedule.findMany({
-			where: whereClause
+			where: whereClause,
+			include: {
+				contact: true
+			}
 		});
 
-		return schedules;
+		const detailedSchedules: Array<
+			WppSchedule & {
+				customer: Customer | null;
+				contact: WppContact | null;
+			}
+		> = [];
+		const customerIds = schedules
+			.filter((chat) => typeof chat.contact?.customerId === "number")
+			.map((c) => c.contact!.customerId!);
+
+		const customers = customerIds.length
+			? await instancesService.executeQuery<Array<Customer>>(
+					session.instance,
+					FETCH_CUSTOMERS_QUERY,
+					[customerIds]
+				)
+			: [];
+
+		for (const schedule of schedules) {
+			const { contact, ...s } = schedule;
+
+			let customer: Customer | null = null;
+
+			if (typeof contact?.customerId == "number") {
+				customer =
+					customers.find((c) => c.CODIGO === contact.customerId) ||
+					null;
+			}
+
+			detailedSchedules.push({
+				...s,
+				customer,
+				contact: contact || null
+			});
+		}
+
+		return detailedSchedules;
 	}
 
 	public async finishChatRoutine() {
@@ -275,6 +319,24 @@ class SchedulesService {
 				true
 			);
 		}
+
+		return schedules;
+	}
+
+	public async getAllSchedules() {
+		const schedules = await prismaService.wppSchedule.findMany({
+			where: {
+				chatId: null
+			},
+			include: {
+				contact: true,
+				sector: true,
+				chat: true
+			},
+			orderBy: {
+				scheduleDate: "asc"
+			}
+		});
 
 		return schedules;
 	}
