@@ -409,6 +409,13 @@ class ChatsService {
 					contactId,
 					sectorId: session.sectorId,
 					startedAt: new Date()
+				},
+				include: {
+					messages: {
+						where: {
+							contactId: contact.id
+						}
+					}
 				}
 			});
 
@@ -417,7 +424,7 @@ class ChatsService {
 
 			const message = `Atendimento iniciado por ${user.NOME}.`;
 			await messagesDistributionService.addSystemMessage(
-				newChat,
+				newChat as WppChat,
 				message,
 				true
 			);
