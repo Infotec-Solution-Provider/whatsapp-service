@@ -1,4 +1,3 @@
-import { log } from 'console';
 import { InternalChat, Prisma } from "@prisma/client";
 import {
 	FileDirType,
