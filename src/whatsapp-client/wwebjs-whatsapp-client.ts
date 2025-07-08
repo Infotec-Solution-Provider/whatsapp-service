@@ -306,7 +306,7 @@ if (options.mentions?.length) {
     process.log("Preparando conteúdo da mensagem como mídia.");
     if (options.sendAsAudio) params.sendAudioAsVoice = true;
     if (options.sendAsDocument) params.sendMediaAsDocument = true;
-
+	console.log("File sendAsAudio:", options.sendAsAudio);
     // Se houver texto e menções, concatena no caption
     params.caption = mentionsText ? `${mentionsText}\n${text ?? ""}` : (text ?? "");
 
@@ -314,6 +314,7 @@ if (options.mentions?.length) {
       unsafeMime: true,
       filename: options.fileName,
     });
+	console.log("File content prepared:", content);
   } else {
     process.log("Preparando conteúdo da mensagem como texto.");
     content = mentionsText ? `${mentionsText}\n${text ?? ""}` : (text ?? "");
