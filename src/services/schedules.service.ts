@@ -211,7 +211,7 @@ class SchedulesService {
 					(m) =>
 						m.from.startsWith("bot:") &&
 						m.timestamp &&
-						m.body?.includes("Deseja voltar ao menu de setores")
+    					m.body?.startsWith("Deseja voltar ao menu de setores")
 				);
 
 				if (jaMandouPrompt) {
