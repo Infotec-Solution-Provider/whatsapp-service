@@ -153,6 +153,7 @@ class SchedulesService {
 		// Busca os chats ativos iniciados há mais de 30 minutos e menos de 2 horas
 		const chats = await prismaService.wppChat.findMany({
 			where: {
+				instance: "nunes",
 				isFinished: false,
 				startedAt: {
 					gte: duasHorasAtras, // não mais antigo que 2h
