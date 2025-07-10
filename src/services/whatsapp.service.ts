@@ -190,7 +190,7 @@ class WhatsappService {
 				);
 				process.log("Arquivo processado com sucesso.", message);
 			}
-
+			console.log("data.file",data)
 			if ("file" in data && !!data.file) {
 				process.log(
 					`Processando arquivo enviado diretamente: ${data.file.originalname}`
@@ -209,7 +209,7 @@ class WhatsappService {
 				if (data.sendAsAudio) {
 					process.log("Mensagem convertida com sucesso.");
 				}
-
+				console.log("data.filedata.file",data.file)
 				const savedFile = await filesService.uploadFile({
 					instance: session.instance,
 					fileName: data.file.originalname,
