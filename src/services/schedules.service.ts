@@ -208,12 +208,10 @@ class SchedulesService {
 					chatId: chat.id
 				});
 			} else {
-				const jaMandouPrompt = chat.messages.some(
-					(m) =>
-						m.from.startsWith("bot:") &&
-						m.timestamp &&
-    					m.body?.startsWith("Deseja voltar ao menu de setores")
-				);
+				const jaMandouPrompt = chat.messages.some((m) => {
+					const texto = m.body?.toLowerCase().trim();
+					return texto?.includes("deseja voltar ao menu de setores");
+				});
 
 				if (jaMandouPrompt) {
 					Logger.debug(
