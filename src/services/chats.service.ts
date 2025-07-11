@@ -144,7 +144,7 @@ class ChatsService {
 						try {
 							return {
 								...msg,
-								body: decodeURIComponent(escape(atob(msg.body)))
+								body: decodeURIComponent(msg.body)
 							};
 						} catch (e) {
 							return msg;
