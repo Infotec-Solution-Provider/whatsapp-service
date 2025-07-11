@@ -224,7 +224,21 @@ class ChatsService {
 			chats.push({ ...chat, customer, contact: contact || null });
 
 			if (includeMessages && contact) {
-				messages.push(...contact.WppMessage);
+				const decodedMessages = contact.WppMessage.map((msg) => {
+					if (session.instance === "vollo" && typeof msg.body === "string") {
+						try {
+							return {
+								...msg,
+								body: decodeURIComponent(msg.body)
+							};
+						} catch (e) {
+							return msg;
+						}
+					}
+					return msg;
+				});
+
+				messages.push(...decodedMessages);
 			}
 		}
 
