@@ -298,7 +298,8 @@ class ChatsService {
 
 				return { ...chat, customer, messages };
 			} catch (err) {
-				return chat;
+				console.error(err);
+				return { ...chat, messages };
 			}
 		}
 
