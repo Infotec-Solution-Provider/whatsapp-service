@@ -141,7 +141,10 @@ class ChatsService {
 			chats.push({ ...chat, customer, contact: contact || null });
 			if (includeMessages && contact) {
 				const decodedMessages = contact.WppMessage.map((msg) => {
-					if (session.instance === "vollo" && typeof msg.body === "string") {
+					if (
+						session.instance === "vollo" &&
+						typeof msg.body === "string"
+					) {
 						try {
 							return {
 								...msg,
@@ -156,7 +159,6 @@ class ChatsService {
 
 				messages.push(...decodedMessages);
 			}
-
 		}
 
 		return { chats, messages };
@@ -226,7 +228,10 @@ class ChatsService {
 
 			if (includeMessages && contact) {
 				const decodedMessages = contact.WppMessage.map((msg) => {
-					if (session.instance === "vollo" && typeof msg.body === "string") {
+					if (
+						session.instance === "vollo" &&
+						typeof msg.body === "string"
+					) {
 						try {
 							return {
 								...msg,
@@ -533,7 +538,7 @@ class ChatsService {
 					contact: true,
 					messages: {
 						where: {
-							contactId: contact.id
+							contactId
 						}
 					}
 				}
