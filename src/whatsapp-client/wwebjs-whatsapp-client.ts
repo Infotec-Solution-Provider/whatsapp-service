@@ -324,12 +324,15 @@ public async sendMessage(
 
     }
 	if (!options.sendAsAudio) {
-	const texto = options.text?.trim();
-	const usarMentionsText = mentionsText && (texto === "@" || !texto);
+	const texto = options.text?.trim() ?? "";
 
-	params.caption = usarMentionsText ? mentionsText : (options.text ?? "");
+	const usarMentionsText = !!mentionsText && /@\s*$/.test(texto);
 
+	params.caption = usarMentionsText
+	? texto.replace(/@\s*$/, mentionsText)
+	: texto;
 	}
+
     try {
       content = await WAWebJS.MessageMedia.fromUrl(options.fileUrl, {
         unsafeMime: true,
@@ -340,9 +343,13 @@ public async sendMessage(
       throw err;
     }
   } else {
-	const texto = options.text?.trim();
-	const usarMentionsText = mentionsText && (texto === "@" || !texto);
-    content = usarMentionsText ? mentionsText : (options.text ?? "");
+	const texto = options.text?.trim() ?? "";
+	const usarMentionsText = !!mentionsText && /@\s*$/.test(texto);
+
+	console.log("usarMentionsText",usarMentionsText,texto)
+    content = usarMentionsText
+	? texto.replace(/@\s*$/, mentionsText)
+	: texto;
   }
 
   process.log("Conteúdo final:", { content, params });
