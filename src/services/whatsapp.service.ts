@@ -131,6 +131,8 @@ class WhatsappService {
 				session.sectorId
 			);
 			process.log(`Client obtido para o setor: ${session.sectorId}`);
+			const text = `*${session.name}*: ${data.text}`;
+
 			let message = {
 				instance: session.instance,
 				status: "PENDING",
@@ -142,7 +144,7 @@ class WhatsappService {
 				isForwarded: true
 			} as CreateMessageDto;
 
-			let options = { to, text: data.text } as SendMessageOptions;
+			let options = { to, text: text } as SendMessageOptions;
 
 			data.contactId && (message.contactId = +data.contactId);
 			data.chatId && (message.chatId = +data.chatId);
