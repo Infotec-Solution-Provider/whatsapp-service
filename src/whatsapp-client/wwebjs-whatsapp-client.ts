@@ -333,6 +333,7 @@ public async sendMessage(
         unsafeMime: true,
         filename: options.fileName
       });
+	  console.log('[content url file]',content)
     } catch (err) {
       process.log("Erro ao carregar mídia:", err);
       throw err;
@@ -347,6 +348,10 @@ public async sendMessage(
   process.log("Conteúdo final:", { content, params });
 
   try {
+	  console.log("[params recebida]",params)
+	  console.log("[content recebida]",content)
+	  console.log("[to recebida]",to)
+
     const sentMsg = await this.wwebjs.sendMessage(to, content, params);
     process.log("Mensagem enviada com sucesso.", sentMsg);
 
