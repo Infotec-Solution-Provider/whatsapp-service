@@ -324,9 +324,11 @@ public async sendMessage(
 
     }
 	if (!options.sendAsAudio) {
-	params.caption = mentionsText
-      ? `${options.text ?? ""}`
-      : (options.text ?? "");
+	const texto = options.text?.trim();
+	const usarMentionsText = mentionsText && (texto === "@" || !texto);
+
+	params.caption = usarMentionsText ? mentionsText : (options.text ?? "");
+
 	}
     try {
       content = await WAWebJS.MessageMedia.fromUrl(options.fileUrl, {
@@ -338,10 +340,9 @@ public async sendMessage(
       throw err;
     }
   } else {
-
-    content = mentionsText
-      ? `${options.text}`
-      : options.text;
+	const texto = options.text?.trim();
+	const usarMentionsText = mentionsText && (texto === "@" || !texto);
+    content = usarMentionsText ? mentionsText : (options.text ?? "");
   }
 
   process.log("Conteúdo final:", { content, params });
