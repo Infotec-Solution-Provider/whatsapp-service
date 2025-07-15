@@ -322,12 +322,13 @@ public async sendMessage(
     }
     if (options.sendAsDocument) {
       params.sendMediaAsDocument = true;
-    }
 
-    params.caption = mentionsText
+    }
+	if (!options.sendAsAudio) {
+	params.caption = mentionsText
       ? `${mentionsText}\n${options.text ?? ""}`
       : (options.text ?? "");
-
+	}
     try {
       content = await WAWebJS.MessageMedia.fromUrl(options.fileUrl, {
         unsafeMime: true,
