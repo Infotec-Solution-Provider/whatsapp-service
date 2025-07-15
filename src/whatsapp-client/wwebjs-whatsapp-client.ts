@@ -247,7 +247,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		);
 	}
 
-	private handleMessageReaction(_reaction: WAWebJS.Reaction) { }
+	private handleMessageReaction(_reaction: WAWebJS.Reaction) {}
 
 	private handleMessageRevoked({ id }: WAWebJS.Message) {
 		Logger.info("Message revoked! " + id._serialized);
@@ -270,92 +270,101 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		return result ? result.user : null;
 	}
 
-	public async sendMessage(
-		options: SendMessageOptions,
-		isGroup: boolean = false
-	) {
-		const id = randomUUID();
-		const process = new ProcessingLogger(
-			this.instance,
-			"wwebjs-send-message",
-			id,
-			options
-		);
+public async sendMessage(
+  options: SendMessageOptions,
+  isGroup: boolean = false
+) {
+  const id = randomUUID();
+  const process = new ProcessingLogger(
+    this.instance,
+    "wwebjs-send-message",
+    id,
+    options
+  );
 
-		process.log("Iniciando envio de mensagem.", options);
+  process.log("Iniciando envio de mensagem.", options);
 
-		options.to = `${options.to}${isGroup ? "@g.us" : "@c.us"}`;
+  const to = `${options.to}${isGroup ? "@g.us" : "@c.us"}`;
+  const params: WAWebJS.MessageSendOptions = {};
 
-		const { to, quotedId, text } = options;
-		const params: WAWebJS.MessageSendOptions = {};
-		if (quotedId) params.quotedMessageId = quotedId;
+  if (options.quotedId) {
+    params.quotedMessageId = options.quotedId;
+  }
 
-		let content: string | WAWebJS.MessageMedia | null = null;
-		let mentionsText = "";
+  let mentionsText = "";
+  if (options.mentions?.length) {
+    const mentionIds = options.mentions
+      .map(user => {
+        const phone = user.phone?.replace(/\D/g, "");
+        if (!phone) {
+          process.log("Telefone inválido em menção:", user);
+          return null;
+        }
+        return `${phone}@c.us`;
+      })
+      .filter((id): id is string => id !== null);
 
-		if (options.mentions?.length) {
-			const contactIds = options.mentions
-				.map(user => {
-					// Valide o telefone, removendo espaços, só números
-					const phone = user.phone?.replace(/\D/g, "");
-					if (!phone) {
-						process.log("Telefone inválido em menção:", user);
-						return null;
-					}
-					return `${phone}@c.us`;
-				})
-				.filter((id): id is string => id !== null);
+    mentionsText = options.mentions
+      .map(user => `@${user.name || user.phone}`)
+      .join(" ");
 
-			mentionsText = options.mentions
-				.map(user => `@${user.name || user.phone}`)
-				.join(" ");
+    params.mentions = mentionIds;
+  }
 
-			params.mentions = contactIds;
-		}
+  let content: string | WAWebJS.MessageMedia;
 
-		if ("fileUrl" in options && options.fileUrl) {
-			process.log("Preparando conteúdo da mensagem como mídia.");
-			if (options.sendAsAudio) params.sendAudioAsVoice = true;
-			if (options.sendAsDocument) params.sendMediaAsDocument = true;
-			params.caption = mentionsText ? `${mentionsText}\n${text ?? ""}` : (text ?? "");
+  if ("fileUrl" in options) {
+    process.log("Preparando mídia via fileUrl:", options.fileUrl);
 
-			try {
-				content = await WAWebJS.MessageMedia.fromUrl(options.fileUrl, {
-					unsafeMime: true,
-					filename: options.fileName,
-				});
-			} catch (err) {
-				process.log("Erro ao carregar mídia da URL:", err);
-				throw err;
-			}
-		} else {
-			process.log("Preparando conteúdo da mensagem como texto.");
-			content = mentionsText ? `${mentionsText}\n${text ?? ""}` : (text ?? "");
-		}
+    if (options.sendAsAudio) {
+      params.sendAudioAsVoice = true;
+    }
+    if (options.sendAsDocument) {
+      params.sendMediaAsDocument = true;
+    }
 
-		process.log("Conteúdo da mensagem pronto!", { content, params });
+    params.caption = mentionsText
+      ? `${mentionsText}\n${options.text ?? ""}`
+      : (options.text ?? "");
 
-		try {
-			process.log("Enviando mensagem.", options);
-			const sentMsg = await this.wwebjs.sendMessage(to, content, params);
-			process.log("Mensagem enviada com sucesso.", sentMsg);
+    try {
+      content = await WAWebJS.MessageMedia.fromUrl(options.fileUrl, {
+        unsafeMime: true,
+        filename: options.fileName
+      });
+    } catch (err) {
+      process.log("Erro ao carregar mídia:", err);
+      throw err;
+    }
+  } else {
+    content = mentionsText
+      ? `${mentionsText}\n${options.text}`
+      : options.text;
+  }
 
-			const parsedMsg = await MessageParser.parse(
-				process,
-				this.instance,
-				sentMsg,
-				true,
-				true
-			);
+  process.log("Conteúdo final:", { content, params });
 
-			process.success(parsedMsg);
-			return parsedMsg;
-		} catch (err) {
-			process.log("Erro ao enviar mensagem.", err);
-			process.failed(err);
-			throw err;
-		}
-	}
+  try {
+    const sentMsg = await this.wwebjs.sendMessage(to, content, params);
+    process.log("Mensagem enviada com sucesso.", sentMsg);
+
+    const parsedMsg = await MessageParser.parse(
+      process,
+      this.instance,
+      sentMsg,
+      true,
+      true
+    );
+
+    process.success(parsedMsg);
+    return parsedMsg;
+  } catch (err) {
+    process.log("Erro ao enviar mensagem.", err);
+    process.failed(err);
+    throw err;
+  }
+}
+
 
 	public async getGroups() {
 		const chats = await this.wwebjs.getChats();
@@ -363,28 +372,28 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		return chats.filter((c) => c.isGroup);
 	}
 
-	public async forwardMessage(to: string, messageId: string, isGroup: boolean = false) {
-		const process = new ProcessingLogger(this.instance, "wwebjs-forward-message", messageId, { to, messageId, isGroup });
+public async forwardMessage(to: string, messageId: string, isGroup: boolean = false) {
+	const process = new ProcessingLogger(this.instance, "wwebjs-forward-message", messageId, { to, messageId, isGroup });
 
-		try {
-			process.log("Buscando mensagem original...");
-			const message = await this.wwebjs.getMessageById(messageId);
+	try {
+		process.log("Buscando mensagem original...");
+		const message = await this.wwebjs.getMessageById(messageId);
 
-			if (!message) {
-				process.failed("Mensagem original não encontrada.");
-				throw new Error("Mensagem original não encontrada.");
-			}
-
-			const chatId = `${to}${isGroup ? "@g.us" : "@c.us"}`;
-			process.log(`Encaminhando mensagem para ${chatId}`);
-			await message.forward(chatId);
-
-			process.success("Mensagem encaminhada com sucesso.");
-		} catch (err) {
-			process.failed("Erro ao encaminhar mensagem.");
-			throw err;
+		if (!message) {
+			process.failed("Mensagem original não encontrada.");
+			throw new Error("Mensagem original não encontrada.");
 		}
+
+		const chatId = `${to}${isGroup ? "@g.us" : "@c.us"}`;
+		process.log(`Encaminhando mensagem para ${chatId}`);
+		await message.forward(chatId);
+
+		process.success("Mensagem encaminhada com sucesso.");
+	} catch (err) {
+		process.failed("Erro ao encaminhar mensagem.");
+		throw err;
 	}
+}
 
 }
 
