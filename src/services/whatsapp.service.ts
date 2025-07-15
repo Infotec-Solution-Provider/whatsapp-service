@@ -156,7 +156,6 @@ class WhatsappService {
 						}
 					});
 
-				console.log("quotedMsg", quotedMsg);
 
 				options.quotedId = (quotedMsg.wwebjsId || quotedMsg.wabaId)!;
 				message.quotedId = quotedMsg.id;
@@ -190,7 +189,6 @@ class WhatsappService {
 				);
 				process.log("Arquivo processado com sucesso.", message);
 			}
-			console.log("data.file",data)
 			if ("file" in data && !!data.file) {
 				process.log(
 					`Processando arquivo enviado diretamente: ${data.file.originalname}`
@@ -209,7 +207,6 @@ class WhatsappService {
 				if (data.sendAsAudio) {
 					process.log("Mensagem convertida com sucesso.");
 				}
-				console.log("data.filedata.file",data.file)
 				const savedFile = await filesService.uploadFile({
 					instance: session.instance,
 					fileName: data.file.originalname,
@@ -247,10 +244,8 @@ class WhatsappService {
 			process.log("Enviando mensagem para o cliente.");
 
 			messagesDistributionService.notifyMessage(process, pendingMsg);
-			console.log("options",options)
 			const sentMsg = await client.sendMessage(options);
 			process.log("Atualizando mensagem no banco de dados.", sentMsg);
-			console.log("sentMsg",sentMsg)
 
 			message = {
 				...pendingMsg,

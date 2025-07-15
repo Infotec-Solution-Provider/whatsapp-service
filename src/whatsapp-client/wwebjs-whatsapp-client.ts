@@ -12,7 +12,6 @@ import messagesService from "../services/messages.service";
 import messagesDistributionService from "../services/messages-distribution.service";
 import { SendMessageOptions } from "../types/whatsapp-instance.types";
 import internalChatsService from "../services/internal-chats.service";
-import { convertMp3ToOgg } from "../utils/ogg-audio-converter";
 
 const PUPPETEER_ARGS = {
 	headless: true,
@@ -313,69 +312,32 @@ public async sendMessage(
   }
 
   let content: string | WAWebJS.MessageMedia;
-  console.log("[fileUrl recebida]",options)
 
-if ("fileUrl" in options) {
-  process.log("Preparando mídia via fileUrl:", options.fileUrl);
-  if (options.sendAsAudio) {
-    params.sendAudioAsVoice = true;
+  if ("fileUrl" in options) {
+    process.log("Preparando mídia via fileUrl:", options.fileUrl);
 
-    let buffer: Buffer;
-    try {
-      const response = await fetch(options.fileUrl);
-      buffer = Buffer.from(await response.arrayBuffer());
-    } catch (err) {
-      process.log("Erro ao buscar arquivo:", err);
-      throw err;
+    if (options.sendAsAudio) {
+      params.sendAudioAsVoice = true;
     }
-    console.log("Buffer length1:", buffer.length);
-console.log("Base64 sample:1", buffer.toString("base64").slice(0, 30));
-
-    if (options.fileName?.endsWith(".mp3")) {
-      try {
-        buffer = await convertMp3ToOgg(buffer);
-        process.log("Áudio convertido de MP3 para OGG.");
-      } catch (err) {
-        process.log("Erro na conversão MP3 para OGG:", err);
-        throw err;
-      }
-    }
-
-    const mimetype = "audio/ogg";
-	console.log("Buffer length2:", buffer.length);
-	console.log("Base64 sample2:", buffer.toString("base64").slice(0, 30));
-
-    content = new WAWebJS.MessageMedia(
-      mimetype,
-      buffer.toString("base64"),
-      options.fileName?.replace(/\.mp3$/, ".ogg") || "audio.ogg"
-    );
-
-  } else {
-    // Para documentos ou outros tipos de mídia
     if (options.sendAsDocument) {
       params.sendMediaAsDocument = true;
-    }
 
-    if (!options.sendAsAudio) {
-      params.caption = mentionsText
-        ? `${mentionsText}\n${options.text ?? ""}`
-        : options.text ?? "";
     }
-
+	if (!options.sendAsAudio) {
+	params.caption = mentionsText
+      ? `${mentionsText}\n${options.text ?? ""}`
+      : (options.text ?? "");
+	}
     try {
       content = await WAWebJS.MessageMedia.fromUrl(options.fileUrl, {
         unsafeMime: true,
         filename: options.fileName
       });
-      process.log("Mídia carregada via fromUrl", content);
     } catch (err) {
       process.log("Erro ao carregar mídia:", err);
       throw err;
     }
-  }
-}
- else {
+  } else {
 
     content = mentionsText
       ? `${mentionsText}\n${options.text}`
@@ -385,9 +347,6 @@ console.log("Base64 sample:1", buffer.toString("base64").slice(0, 30));
   process.log("Conteúdo final:", { content, params });
 
   try {
-	  console.log("[params recebida]",params)
-	  console.log("[content recebida]",content)
-	  console.log("[to recebida]",to)
 
     const sentMsg = await this.wwebjs.sendMessage(to, content, params);
     process.log("Mensagem enviada com sucesso.", sentMsg);
