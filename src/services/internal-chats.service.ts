@@ -525,6 +525,8 @@ class InternalChatsService {
 		if (groupId && client && message.fileId && message.fileName) {
 			const fileUrl = filesService.getFileDownloadUrl(message.fileId);
 			console.log("[sendAsAudio]",data.sendAsAudio === "true")
+      console.log("[fileUrl]",fileUrl)
+      console.log("[fileName]", message.fileName)
 			return await client.sendMessage(
 				{
 					fileName: message.fileName!,

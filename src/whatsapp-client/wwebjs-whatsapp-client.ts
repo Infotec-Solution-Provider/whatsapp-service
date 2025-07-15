@@ -312,6 +312,7 @@ public async sendMessage(
   }
 
   let content: string | WAWebJS.MessageMedia;
+  console.log("[fileUrl recebida]",options)
 
   if ("fileUrl" in options) {
     process.log("Preparando mídia via fileUrl:", options.fileUrl);
@@ -337,6 +338,7 @@ public async sendMessage(
       throw err;
     }
   } else {
+
     content = mentionsText
       ? `${mentionsText}\n${options.text}`
       : options.text;
@@ -365,12 +367,11 @@ public async sendMessage(
   }
 }
 
+public async getGroups() {
+	const chats = await this.wwebjs.getChats();
 
-	public async getGroups() {
-		const chats = await this.wwebjs.getChats();
-
-		return chats.filter((c) => c.isGroup);
-	}
+	return chats.filter((c) => c.isGroup);
+}
 
 public async forwardMessage(to: string, messageId: string, isGroup: boolean = false) {
 	const process = new ProcessingLogger(this.instance, "wwebjs-forward-message", messageId, { to, messageId, isGroup });
