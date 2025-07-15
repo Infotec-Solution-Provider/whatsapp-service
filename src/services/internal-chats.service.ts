@@ -360,13 +360,52 @@ class InternalChatsService {
 		process.log("Iniciando o envio da mensagem interna.");
 
 		try {
+			let mentionsText = "";
+
+			if (data.mentions?.length) {
+				let mentions = data.mentions;
+
+				if (typeof mentions === "string") {
+					try {
+						mentions = JSON.parse(mentions);
+					} catch (err) {
+						throw new BadRequestError("mentions não é um JSON válido");
+					}
+				}
+
+				if (!Array.isArray(mentions)) {
+					throw new BadRequestError("mentions precisa ser um array");
+				}
+
+				console.log("data.mentions (parsed):", mentions);
+
+				mentions
+					.map(user => {
+						const phone = user.phone?.replace(/\D/g, "");
+						if (!phone) {
+							process.log("Telefone inválido em menção:", user);
+							return null;
+						}
+						return `${phone}@c.us`;
+					})
+					.filter((id): id is string => id !== null);
+
+				mentionsText = mentions
+					.map(user => `@${user.name || user.phone}`)
+					.join(" ");
+			}
+
+			const texto = data.text?.trim() ?? "";
+			const usarMentionsText = !!mentionsText && /@\s*$/.test(texto);
+
 			let message = {
 				instance: session.instance,
 				status: "RECEIVED",
 				timestamp: Date.now().toString(),
 				from: `user:${session.userId}`,
 				type: "chat",
-				body: data.text || "",
+				body: usarMentionsText
+					? texto.replace(/@\s*$/, mentionsText) : data.text,
 				quotedId: data.quotedId ? Number(data.quotedId) : null,
 				chat: {
 					connect: {
@@ -411,16 +450,16 @@ class InternalChatsService {
 			});
 			process.log("Mensagem salva no banco de dados.", savedMsg);
 			if (data.mentions?.length) {
-			const mentionsParsed = typeof data.mentions === "string" ? JSON.parse(data.mentions) : data.mentions || [];
+				const mentionsParsed = typeof data.mentions === "string" ? JSON.parse(data.mentions) : data.mentions || [];
 
-			const mentionData = mentionsParsed.map((mention:any) => ({
-				userId: typeof mention === "object" ? mention.userId ?? mention.id : mention,
-				messageId: savedMsg.id,
-			}));
+				const mentionData = mentionsParsed.map((mention: any) => ({
+					userId: typeof mention === "object" ? mention.userId ?? mention.id : mention,
+					messageId: savedMsg.id,
+				}));
 
-			if (mentionData.length > 0) {
-				await prismaService.internalMention.createMany({ data: mentionData });
-			}
+				if (mentionData.length > 0) {
+					await prismaService.internalMention.createMany({ data: mentionData });
+				}
 			}
 			const room =
 				`${session.instance}:internal-chat:${data.chatId}` as SocketServerInternalChatRoom;
