@@ -328,6 +328,8 @@ if ("fileUrl" in options) {
       process.log("Erro ao buscar arquivo:", err);
       throw err;
     }
+    console.log("Buffer length1:", buffer.length);
+console.log("Base64 sample:1", buffer.toString("base64").slice(0, 30));
 
     if (options.fileName?.endsWith(".mp3")) {
       try {
@@ -340,6 +342,8 @@ if ("fileUrl" in options) {
     }
 
     const mimetype = "audio/ogg";
+	console.log("Buffer length2:", buffer.length);
+	console.log("Base64 sample2:", buffer.toString("base64").slice(0, 30));
 
     content = new WAWebJS.MessageMedia(
       mimetype,
