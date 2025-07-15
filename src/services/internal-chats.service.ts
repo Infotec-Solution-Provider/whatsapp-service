@@ -529,13 +529,9 @@ class InternalChatsService {
 
 			data.quotedId = quotedmsg?.wwebjsId || null;
 		}
-		console.log("Sending message to WhatsApp group",
-			groupId, message.fileId, waMentions	)
+
 		if (groupId && client && message.fileId && message.fileName) {
 			const fileUrl = filesService.getFileDownloadUrl(message.fileId);
-			console.log("[sendAsAudio]",data.sendAsAudio === "true")
-      console.log("[fileUrl]",fileUrl)
-      console.log("[fileName]", message.fileName)
 			return await client.sendMessage(
 				{
 					fileName: message.fileName!,

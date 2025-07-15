@@ -325,7 +325,7 @@ public async sendMessage(
     }
 	if (!options.sendAsAudio) {
 	params.caption = mentionsText
-      ? `${mentionsText}\n${options.text ?? ""}`
+      ? `${options.text ?? ""}`
       : (options.text ?? "");
 	}
     try {
@@ -340,7 +340,7 @@ public async sendMessage(
   } else {
 
     content = mentionsText
-      ? `${mentionsText}\n${options.text}`
+      ? `${options.text}`
       : options.text;
   }
 
