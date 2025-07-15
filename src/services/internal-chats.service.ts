@@ -18,6 +18,7 @@ import whatsappService, { getMessageType } from "./whatsapp.service";
 import CreateMessageDto from "../dtos/create-message.dto";
 import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 import { Mention } from "../types/whatsapp-instance.types";
+import OpusAudioConverter from "../utils/opus-audio-converter";
 
 interface ChatsFilters {
 	userId?: string;
@@ -377,11 +378,19 @@ class InternalChatsService {
 			if ("fileId" in data) {
 				message.fileId = +data.fileId;
 			}
+
 			if ("file" in data && !!data.file) {
+				const buffer = data.sendAsAudio
+					? await OpusAudioConverter.convert(data.file.buffer)
+					: data.file.buffer;
+
+				if (data.sendAsAudio) {
+					process.log("Mensagem convertida com sucesso.");
+				}
 				const file = await filesService.uploadFile({
 					instance: session.instance,
 					fileName: data.file!.originalname,
-					buffer: data.file!.buffer,
+					buffer,
 					mimeType: data.file!.mimetype,
 					dirType: FileDirType.PUBLIC
 				});
