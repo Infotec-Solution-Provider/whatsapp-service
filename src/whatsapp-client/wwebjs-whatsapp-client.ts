@@ -340,7 +340,7 @@ public async sendMessage(
   } else {
 
     content = mentionsText
-      ? `${mentionsText}\n${options.text}`
+      ? `${options.text}`
       : options.text;
   }
 
