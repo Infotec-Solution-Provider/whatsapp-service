@@ -134,8 +134,13 @@ class MessagesDistributionService {
 				);
 				const flow = await this.getFlow(instance, sectors[0]!.id);
 				const data = await flow.getChatPayload(logger, contact);
-
-				newChat = await prismaService.wppChat.create({ data });
+				newChat = await prismaService.wppChat.create({
+					data: {
+						...data,
+						botId: instance === "vollo" ? 1 : null,
+						userId: null
+					}
+				});
 			}
 
 			if (!newChat) {
@@ -144,7 +149,7 @@ class MessagesDistributionService {
 
 			if (newChat.botId === 1) {
 				if (newChat.instance === "vollo") {
-					await chooseSectorBot.processMessage(newChat, contact, msg);
+					await chooseSellerBot.processMessage(newChat, contact, msg);
 				} else {
 					await chooseSectorBot.processMessage(newChat, contact, msg);
 				}
