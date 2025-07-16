@@ -134,8 +134,12 @@ class MessagesDistributionService {
 				);
 				const flow = await this.getFlow(instance, sectors[0]!.id);
 				const data = await flow.getChatPayload(logger, contact);
-
-				newChat = await prismaService.wppChat.create({ data });
+				newChat = await prismaService.wppChat.create({
+					data: {
+						...data,
+						botId: instance === "vollo" ? 1 : null
+					}
+				});
 			}
 
 			if (!newChat) {
