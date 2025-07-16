@@ -169,7 +169,8 @@ class ChatsService {
 		includeMessages = true,
 		includeContact = true
 	) {
-		const isTI = session.sectorId === 3;
+		const isTI = session.sectorId === 3 || session.instance !== "nunes";
+
 		const foundChats = await prismaService.wppChat.findMany({
 			where: {
 				isFinished: false,
