@@ -114,7 +114,7 @@ class MessagesDistributionService {
 			logger.log("Nenhum chat encontrado para o contato.");
 
 			const sectors = await this.getSectors(clientId);
-			if (sectors.length > 1 || instance === "vollo") {
+			if (sectors.length > 1) {
 				logger.log(
 					"Mais de um setor encontrado, iniciando o fluxo de escolha de setor."
 				);
