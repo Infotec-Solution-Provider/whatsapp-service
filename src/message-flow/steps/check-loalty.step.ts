@@ -112,7 +112,7 @@ export default class CheckLoaltyStep implements Step {
 	): Promise<boolean> {
 		const users = await instancesService.executeQuery<User[]>(
 			instance,
-			"SELECT * FROM users WHERE id = ?",
+			"SELECT * FROM operadores WHERE CODIGO = ?",
 			[userId]
 		);
 
