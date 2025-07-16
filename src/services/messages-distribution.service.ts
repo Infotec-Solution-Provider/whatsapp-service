@@ -26,7 +26,7 @@ import chatsService from "./chats.service";
 import messagesService from "./messages.service";
 import whatsappService from "./whatsapp.service";
 import chooseSectorBot from "../bots/choose-sector.bot";
-
+import chooseSellerBot from "../bots/seller-vollo.bot";
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
 
@@ -100,11 +100,11 @@ class MessagesDistributionService {
 				await this.insertAndNotify(logger, currChat, msg);
 
 				if (currChat.botId === 1) {
-					await chooseSectorBot.processMessage(
-						currChat,
-						contact,
-						msg
-					);
+					if (currChat.instance === "vollo") {
+						await chooseSellerBot.processMessage(currChat, contact, msg);
+					} else {
+						await chooseSectorBot.processMessage(currChat, contact, msg);
+					}
 				}
 				return;
 			}
@@ -143,7 +143,11 @@ class MessagesDistributionService {
 			}
 
 			if (newChat.botId === 1) {
-				await chooseSectorBot.processMessage(newChat, contact, msg);
+				if (newChat.instance === "vollo") {
+					await chooseSectorBot.processMessage(newChat, contact, msg);
+				} else {
+					await chooseSectorBot.processMessage(newChat, contact, msg);
+				}
 			}
 
 			logger.log("Novo chat encontrado!", newChat);
