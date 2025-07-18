@@ -252,8 +252,8 @@ class SchedulesService {
 					const quinzeMinutosAtras = new Date(agora.getTime() - 15 * 60 * 1000);
 					Logger.debug("⏱️ Verificação de encerramento:");
 					Logger.debug(`15min atrás: ${quinzeMinutosAtras.toISOString()}`);
-					Logger.debug(`Operador: ${ultimaMensagemOperador?.timestamp || "nenhuma"} | >= 15min? ${ultimaMensagemOperador ? new Date(ultimaMensagemOperador.timestamp) >= quinzeMinutosAtras : true}`);
-					Logger.debug(`Cliente: ${ultimaMensagemCliente?.timestamp || "nenhuma"} | >= 15min? ${ultimaMensagemCliente ? new Date(ultimaMensagemCliente.timestamp) >= quinzeMinutosAtras : true}`);
+					Logger.debug(`Operador: ${ultimaMensagemOperador?.timestamp || "nenhuma"} | <= 15min? ${ultimaMensagemOperador ? new Date(ultimaMensagemOperador.timestamp) <= quinzeMinutosAtras : true}`);
+					Logger.debug(`Cliente: ${ultimaMensagemCliente?.timestamp || "nenhuma"} | <= 15min? ${ultimaMensagemCliente ? new Date(ultimaMensagemCliente.timestamp) <= quinzeMinutosAtras : true}`);
 
 					// Condição para finalizar:
 					//  - O prompt foi enviado (tem ultimaMensagemOperador)
@@ -263,9 +263,9 @@ class SchedulesService {
 
 					if (
 					// Operador não falou ou falou há mais de 15 minutos
-					(!ultimaMensagemOperador || new Date(ultimaMensagemOperador.timestamp) >= quinzeMinutosAtras) &&
+					(!ultimaMensagemOperador || new Date(ultimaMensagemOperador.timestamp) <= quinzeMinutosAtras) &&
 					// Cliente falou há mais de 15 minutos
-					(!ultimaMensagemCliente || new Date(ultimaMensagemCliente.timestamp) >= quinzeMinutosAtras)
+					(!ultimaMensagemCliente || new Date(ultimaMensagemCliente.timestamp) <= quinzeMinutosAtras)
 					) {
 
 					// Finaliza o chat
