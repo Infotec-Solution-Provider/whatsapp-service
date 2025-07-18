@@ -360,7 +360,7 @@ class SchedulesService {
 				});
 				await prismaService.wppChat.update({
 					where: { id: chat.id },
-					data: { userId: null, botId: 1 }
+					data: { botId: 1 }
 				});
 				chooseSectorBot.forceStep(chat.id, 4, chat.userId ?? 0);
 			}
