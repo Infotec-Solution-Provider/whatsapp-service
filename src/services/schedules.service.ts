@@ -250,6 +250,10 @@ class SchedulesService {
 
 					const agora = new Date();
 					const quinzeMinutosAtras = new Date(agora.getTime() - 15 * 60 * 1000);
+					Logger.debug("⏱️ Verificação de encerramento:");
+					Logger.debug(`15min atrás: ${quinzeMinutosAtras.toISOString()}`);
+					Logger.debug(`Operador: ${ultimaMensagemOperador?.timestamp || "nenhuma"} | >= 15min? ${ultimaMensagemOperador ? new Date(ultimaMensagemOperador.timestamp) >= quinzeMinutosAtras : true}`);
+					Logger.debug(`Cliente: ${ultimaMensagemCliente?.timestamp || "nenhuma"} | >= 15min? ${ultimaMensagemCliente ? new Date(ultimaMensagemCliente.timestamp) >= quinzeMinutosAtras : true}`);
 
 					// Condição para finalizar:
 					//  - O prompt foi enviado (tem ultimaMensagemOperador)
