@@ -204,9 +204,25 @@ class SchedulesService {
 					chat,
 					finishMsg
 				);
-				await socketService.emit(event, `${"nunes"}:chat:${chat.id}`, {
+				await socketService.emit(event, `${chat.instance}:chat:${chat.id}`, {
 					chatId: chat.id
 				});
+				const contact = await prismaService.wppContact.findUnique({
+				where: {
+					id: chat.contactId as number
+				}
+				});
+				await prismaService.notification.create({
+				data: {
+					instance: chat.instance,
+					title: "Atendimento finalizado automaticamente",
+					description: `O chat com ${contact ? contact.name : chat.contactId} do contato, foi finalizado por inatividade do operador.`,
+					chatId: chat.id,
+					type: "CHAT_AUTO_FINISHED",
+					userId: chat.userId ?? null
+				}
+				});
+
 			} else {
 				const jaMandouPrompt = chat.messages.some((m) => {
 					const texto = m.body?.toLowerCase().trim();
@@ -214,10 +230,78 @@ class SchedulesService {
 				});
 
 				if (jaMandouPrompt) {
-					Logger.debug(
-						`[CRON] Chat ${chat.id} - Já foi enviado o menu antes`
+					// Pega a última mensagem do operador (que enviou o prompt)
+					const mensagensOrdenadas = chat.messages
+					.filter((m) => m.timestamp)
+					.sort(
+						(a, b) =>
+						new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
 					);
+
+					// Encontrar a última mensagem do operador
+					const ultimaMensagemOperador = mensagensOrdenadas.find((m) =>
+					m.from.startsWith("me:")
+					);
+
+					// Encontrar a última mensagem do cliente
+					const ultimaMensagemCliente = mensagensOrdenadas.find((m) =>
+					!m.from.startsWith("me:") && !m.from.startsWith("bot:") && !m.from.startsWith("system")
+					);
+
+					const agora = new Date();
+					const quinzeMinutosAtras = new Date(agora.getTime() - 15 * 60 * 1000);
+
+					// Condição para finalizar:
+					//  - O prompt foi enviado (tem ultimaMensagemOperador)
+					//  - Nem o cliente nem o operador falaram depois desse prompt por 15 minutos
+					// Verifica se a última mensagem do cliente é anterior ao prompt (ou inexistente)
+					// E se o prompt foi enviado há mais de 15 minutos
+
+					if (
+					ultimaMensagemOperador &&
+					new Date(ultimaMensagemOperador.timestamp) <= quinzeMinutosAtras &&
+					(!ultimaMensagemCliente ||
+						new Date(ultimaMensagemCliente.timestamp) <= new Date(ultimaMensagemOperador.timestamp))
+					) {
+					// Finaliza o chat
+					await prismaService.wppChat.update({
+						where: { id: chat.id },
+						data: {
+						isFinished: true,
+						finishedAt: new Date(),
+						finishedBy: null // ou id do sistema
+						}
+					});
+
+					Logger.debug(`[CRON] Chat ${chat.id} finalizado automaticamente após 15 minutos sem resposta do cliente ou operador.`);
+
+					const event = SocketEventType.WppChatFinished;
+					const finishMsg = "Atendimento finalizado automaticamente após 15 minutos sem resposta do cliente e operador.";
+
+					await messagesDistributionService.addSystemMessage(chat, finishMsg);
+					await socketService.emit(event, `${chat.instance}:chat:${chat.id}`, { chatId: chat.id });
+
+					const contact = await prismaService.wppContact.findUnique({
+						where: { id: chat.contactId as number }
+					});
+
+					await prismaService.notification.create({
+						data: {
+						instance: chat.instance,
+						title: "Atendimento finalizado automaticamente",
+						description: `O chat com ${contact ? contact.name : chat.contactId} do contato, foi finalizado por inatividade após envio do menu.`,
+						chatId: chat.id,
+						type: "CHAT_AUTO_FINISHED",
+						userId: chat.userId ?? null
+						}
+					});
+
+					continue; // passa pro próximo chat do loop
+					} else {
+					// Se não passou o tempo, só continuar normalmente
+					Logger.debug(`[CRON] Chat ${chat.id} ainda aguardando resposta do cliente ou operador após envio do menu.`);
 					continue;
+					}
 				}
 
 				const trintaMinAtras = new Date(Date.now() - 30 * 60 * 1000);
