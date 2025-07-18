@@ -258,11 +258,12 @@ class SchedulesService {
 					// E se o prompt foi enviado há mais de 15 minutos
 
 					if (
-					ultimaMensagemOperador &&
-					new Date(ultimaMensagemOperador.timestamp) <= quinzeMinutosAtras &&
-					(!ultimaMensagemCliente ||
-						new Date(ultimaMensagemCliente.timestamp) <= new Date(ultimaMensagemOperador.timestamp))
+					// Operador não falou ou falou há mais de 15 minutos
+					(!ultimaMensagemOperador || new Date(ultimaMensagemOperador.timestamp) >= quinzeMinutosAtras) &&
+					// Cliente falou há mais de 15 minutos
+					(!ultimaMensagemCliente || new Date(ultimaMensagemCliente.timestamp) >= quinzeMinutosAtras)
 					) {
+
 					// Finaliza o chat
 					await prismaService.wppChat.update({
 						where: { id: chat.id },
