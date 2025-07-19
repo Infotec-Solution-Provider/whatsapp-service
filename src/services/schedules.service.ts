@@ -230,76 +230,60 @@ class SchedulesService {
 				});
 
 				if (jaMandouPrompt) {
-					// Pega a última mensagem do operador (que enviou o prompt)
 					const mensagensOrdenadas = chat.messages
 					.filter((m) => m.timestamp)
 					.sort(
-						(a, b) =>
-						new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+						(a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
 					);
 
-					// Encontrar a última mensagem do operador
-					const ultimaMensagemOperador = mensagensOrdenadas.find((m) =>
-					m.from.startsWith("me:")
-					);
-
-					// Encontrar a última mensagem do cliente
-					const ultimaMensagemCliente = mensagensOrdenadas.find((m) =>
-					!m.from.startsWith("me:") && !m.from.startsWith("bot:") && !m.from.startsWith("system")
-					);
+					const ultimaMensagem = mensagensOrdenadas[0];
 
 					const agora = new Date();
 					const quinzeMinutosAtras = new Date(agora.getTime() - 15 * 60 * 1000);
-					Logger.debug("⏱️ Verificação de encerramento:");
-					Logger.debug(`15min atrás: ${quinzeMinutosAtras.toISOString()}`);
-					Logger.debug(`Operador: ${ultimaMensagemOperador?.timestamp || "nenhuma"} | <= 15min? ${ultimaMensagemOperador ? new Date(ultimaMensagemOperador.timestamp) <= quinzeMinutosAtras : true}`);
-					Logger.debug(`Cliente: ${ultimaMensagemCliente?.timestamp || "nenhuma"} | <= 15min? ${ultimaMensagemCliente ? new Date(ultimaMensagemCliente.timestamp) <= quinzeMinutosAtras : true}`);
 
-					// Condição para finalizar:
-					//  - O prompt foi enviado (tem ultimaMensagemOperador)
-					//  - Nem o cliente nem o operador falaram depois desse prompt por 15 minutos
-					// Verifica se a última mensagem do cliente é anterior ao prompt (ou inexistente)
-					// E se o prompt foi enviado há mais de 15 minutos
+					// Verifica se a última mensagem tem o texto esperado e foi enviada há 15 minutos ou mais
+					const deveEncerrar =
+					ultimaMensagem &&
+					new Date(ultimaMensagem.timestamp) <= quinzeMinutosAtras;
 
-					if (
-					// Operador não falou ou falou há mais de 15 minutos
-					(!ultimaMensagemOperador || new Date(ultimaMensagemOperador.timestamp) <= quinzeMinutosAtras) &&
-					// Cliente falou há mais de 15 minutos
-					(!ultimaMensagemCliente || new Date(ultimaMensagemCliente.timestamp) <= quinzeMinutosAtras)
-					) {
+					Logger.debug("[CRON] Verificação de encerramento simplificada:");
+					Logger.debug(`[CRON] Última mensagem: ${ultimaMensagem?.body}`);
+					Logger.debug(`[CRON] Timestamp: ${ultimaMensagem?.timestamp}`);
+					Logger.debug(`[CRON] Deve encerrar? ${deveEncerrar}`);
 
+					if (deveEncerrar) {
 					// Finaliza o chat
-					await prismaService.wppChat.update({
-						where: { id: chat.id },
-						data: {
-						isFinished: true,
-						finishedAt: new Date(),
-						finishedBy: null // ou id do sistema
-						}
-					});
+						await prismaService.wppChat.update({
+							where: { id: chat.id },
+							data: {
+							isFinished: true,
+							finishedAt: new Date(),
+							finishedBy: null // ou id do sistema
+							}
+						});
 
-					Logger.debug(`[CRON] Chat ${chat.id} finalizado automaticamente após 15 minutos sem resposta do cliente ou operador.`);
+						Logger.debug(`[CRON] Chat ${chat.id} finalizado automaticamente após 15 minutos sem resposta do cliente ou operador.`);
 
-					const event = SocketEventType.WppChatFinished;
-					const finishMsg = "Atendimento finalizado automaticamente após 15 minutos sem resposta do cliente e operador.";
+						const event = SocketEventType.WppChatFinished;
+						const finishMsg = "Atendimento finalizado automaticamente após 15 minutos sem resposta do cliente e operador.";
 
-					await messagesDistributionService.addSystemMessage(chat, finishMsg);
-					await socketService.emit(event, `${chat.instance}:chat:${chat.id}`, { chatId: chat.id });
+						await messagesDistributionService.addSystemMessage(chat, finishMsg);
+						await socketService.emit(event, `${chat.instance}:chat:${chat.id}`, { chatId: chat.id });
 
-					const contact = await prismaService.wppContact.findUnique({
-						where: { id: chat.contactId as number }
-					});
+						const contact = await prismaService.wppContact.findUnique({
+							where: { id: chat.contactId as number }
+						});
 
-					await prismaService.notification.create({
-						data: {
-						instance: chat.instance,
-						title: "Atendimento finalizado automaticamente",
-						description: `O chat com ${contact ? contact.name : chat.contactId} do contato, foi finalizado por inatividade após envio do menu.`,
-						chatId: chat.id,
-						type: "CHAT_AUTO_FINISHED",
-						userId: chat.userId ?? null
-						}
-					});
+						await prismaService.notification.create({
+							data: {
+							instance: chat.instance,
+							title: "Atendimento finalizado automaticamente",
+							description: `O chat com ${contact ? contact.name : chat.contactId} do contato, foi finalizado por inatividade após envio do menu.`,
+							chatId: chat.id,
+							type: "CHAT_AUTO_FINISHED",
+							userId: chat.userId ?? null
+							}
+						});
 
 					continue; // passa pro próximo chat do loop
 					} else {
