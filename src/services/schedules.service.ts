@@ -247,7 +247,7 @@ class SchedulesService {
 					Logger.debug(`[CRON] Agora: ${agora.toISOString()} | ${agora.getTime()}`);
 					Logger.debug(`[CRON] 15min atrás: ${quinzeMinutosAtras.toISOString()} | ${quinzeMinutosAtras.getTime()}`);
 					Logger.debug(`[CRON] Última mensagem: ${ultimaMensagem?.body}`);
-					Logger.debug(`[CRON] Timestamp: ${ultimaMensagem ? new Date(ultimaMensagem.timestamp).toISOString() : 'nenhum timestamp'} | ${ultimaMensagem?.timestamp ?? 'nenhum'}`);
+					Logger.debug(`[CRON] Timestamp: ${ultimaMensagem?.timestamp ?? 'nenhum'}`);
 					Logger.debug(`[CRON] Deve encerrar? ${deveEncerrar}`);
 
 					if (deveEncerrar) {
