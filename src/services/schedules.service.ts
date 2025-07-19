@@ -232,23 +232,22 @@ class SchedulesService {
 				if (jaMandouPrompt) {
 					const mensagensOrdenadas = chat.messages
 					.filter((m) => m.timestamp)
-					.sort(
-						(a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-					);
+					.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
 					const ultimaMensagem = mensagensOrdenadas[0];
 
 					const agora = new Date();
 					const quinzeMinutosAtras = new Date(agora.getTime() - 15 * 60 * 1000);
 
-					// Verifica se a última mensagem tem o texto esperado e foi enviada há 15 minutos ou mais
-					const deveEncerrar =
-					ultimaMensagem &&
-					new Date(ultimaMensagem.timestamp) <= quinzeMinutosAtras;
+						const deveEncerrar =
+						ultimaMensagem !== undefined &&
+						Number(ultimaMensagem.timestamp) <= quinzeMinutosAtras.getTime()
 
 					Logger.debug("[CRON] Verificação de encerramento simplificada:");
+					Logger.debug(`[CRON] Agora: ${agora.toISOString()} | ${agora.getTime()}`);
+					Logger.debug(`[CRON] 15min atrás: ${quinzeMinutosAtras.toISOString()} | ${quinzeMinutosAtras.getTime()}`);
 					Logger.debug(`[CRON] Última mensagem: ${ultimaMensagem?.body}`);
-					Logger.debug(`[CRON] Timestamp: ${ultimaMensagem?.timestamp}`);
+					Logger.debug(`[CRON] Timestamp: ${ultimaMensagem ? new Date(ultimaMensagem.timestamp).toISOString() : 'nenhum timestamp'} | ${ultimaMensagem?.timestamp ?? 'nenhum'}`);
 					Logger.debug(`[CRON] Deve encerrar? ${deveEncerrar}`);
 
 					if (deveEncerrar) {
