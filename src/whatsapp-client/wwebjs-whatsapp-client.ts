@@ -326,9 +326,9 @@ public async sendMessage(
 	if (!options.sendAsAudio) {
 	const texto = options.text?.trim() ?? "";
 
-	const usarMentionsText = !!mentionsText && /@\s*$/.test(texto);
+	//const usarMentionsText = !!mentionsText && /@\s*$/.test(texto);
 
-	params.caption = usarMentionsText
+	params.caption = options.mentions?.length
 	? texto.replace(/@\s*$/, mentionsText)
 	: texto;
 	}
@@ -344,10 +344,9 @@ public async sendMessage(
     }
   } else {
 	const texto = options.text?.trim() ?? "";
-	const usarMentionsText = !!mentionsText && /@\s*$/.test(texto);
+	//const usarMentionsText = !!mentionsText && /@\s*$/.test(texto);
 
-	console.log("usarMentionsText",usarMentionsText,texto)
-    content = usarMentionsText
+    content = options.mentions?.length
 	? texto.replace(/@\s*$/, mentionsText)
 	: texto;
   }
