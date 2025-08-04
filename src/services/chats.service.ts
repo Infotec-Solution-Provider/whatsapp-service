@@ -167,20 +167,21 @@ class ChatsService {
 	public async getChatsMonitor(
 		session: SessionData,
 		includeMessages = true,
-		includeContact = true
+		includeCustomer = true,
+		includeFinished = false
 	) {
 		const isTI = session.sectorId === 3 || session.instance !== "nunes";
 
 		const foundChats = await prismaService.wppChat.findMany({
 			where: {
-				isFinished: false,
 				instance: session.instance,
-				...(isTI ? {} : { sectorId: session.sectorId })
+				...(isTI ? {} : { sectorId: session.sectorId }),
+				...(includeFinished ? {} : { isFinished: false })
 			},
 			include: {
 				contact: {
 					include: {
-						WppMessage: true
+						WppMessage: includeMessages
 					}
 				},
 				schedule: true
@@ -191,7 +192,7 @@ class ChatsService {
 			WppChat & { customer: Customer | null; contact: WppContact | null }
 		> = [];
 		const messages: Array<WppMessage> = [];
-		const customerIds = includeContact
+		const customerIds = includeCustomer
 			? foundChats
 					.filter(
 						(chat) => typeof chat.contact?.customerId === "number"
@@ -219,7 +220,7 @@ class ChatsService {
 
 			let customer: Customer | null = null;
 
-			if (includeContact && typeof contact?.customerId == "number") {
+			if (includeCustomer && typeof contact?.customerId == "number") {
 				customer =
 					customers.find((c) => c.CODIGO === contact.customerId) ||
 					null;
