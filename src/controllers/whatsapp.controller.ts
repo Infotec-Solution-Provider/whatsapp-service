@@ -41,6 +41,7 @@ class WhatsappController {
 	private async receiveMessage(req: Request, res: Response) {
 		console.log("GUP MESSAGE", req.body);
 
+		res.status(200).send();
 		res.status(500).send();
 	}
 
@@ -48,6 +49,7 @@ class WhatsappController {
 		console.log("challenge body", req.body);
 		console.log("challenge headers", req.headers)
 
+		res.status(200).send();
 		res.status(500).send();
 	}
 }
