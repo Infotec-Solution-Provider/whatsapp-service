@@ -16,6 +16,15 @@ import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import instancesService from "./instances.service";
 import WhatsappClient from "../whatsapp-client/whatsapp-client";
 import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
+import GupshupWhatsappClient from "../whatsapp-client/gupshup-whatsapp-client";
+
+export interface SendTemplateData {
+	chatId: number;
+	contactId: number;
+	templateId: string;
+	templateText: string;
+	templateParams: string[];
+}
 
 interface SendBotMessageData {
 	chat: WppChat;
@@ -77,6 +86,18 @@ class WhatsappService {
 					break;
 				case WppClientType.WABA:
 					throw new Error("WABA client not supported yet!");
+					break;
+				case WppClientType.GUPSHUP:
+					const GUPSHUPClient = new GupshupWhatsappClient(
+						client.id,
+						client.instance,
+						client.name,
+						client.phone || "",
+						client.gupshupToken || "",
+						client.gupshupAppName || "",
+						client.gupshupAppId || ""
+					);
+					this.clients.set(client.id, GUPSHUPClient);
 					break;
 				default:
 					break;
@@ -158,7 +179,6 @@ class WhatsappService {
 						}
 					});
 
-
 				options.quotedId = (quotedMsg.wwebjsId || quotedMsg.wabaId)!;
 				message.quotedId = quotedMsg.id;
 			}
@@ -171,13 +191,26 @@ class WhatsappService {
 				);
 
 				process.log(`Arquivo encontrado: ${fileData.name}`);
+				let fileType = "document";
+
+				if (fileData.mime_type.startsWith("image/")) {
+					fileType = "image";
+				}
+				if (fileData.mime_type.startsWith("video/")) {
+					fileType = "video";
+				}
+				if (data.sendAsAudio) {
+					fileType = "audio";
+				}
 
 				options = {
 					...options,
 					fileUrl: filesService.getFileDownloadUrl(data.fileId),
 					sendAsAudio: !!data.sendAsAudio,
 					sendAsDocument: !!data.sendAsDocument,
-					fileName: fileData.name
+					fileName: fileData.name,
+					fileType,
+					file: fileData
 				} as SendFileOptions;
 
 				message.fileId = data.fileId;
@@ -220,12 +253,25 @@ class WhatsappService {
 				process.log(`Arquivo salvo com sucesso!`, savedFile);
 
 				const fileUrl = filesService.getFileDownloadUrl(savedFile.id);
+				let fileType = "document";
+
+				if (data.file.mimetype.startsWith("image/")) {
+					fileType = "image";
+				}
+				if (data.file.mimetype.startsWith("video/")) {
+					fileType = "video";
+				}
+				if (data.sendAsAudio) {
+					fileType = "audio";
+				}
 
 				options = {
 					...options,
 					fileUrl,
+					fileType,
 					sendAsAudio: data.sendAsAudio,
-					sendAsDocument: data.sendAsDocument
+					sendAsDocument: data.sendAsDocument,
+					file: savedFile
 				} as SendFileOptions;
 
 				message.fileId = savedFile.id;
@@ -260,10 +306,12 @@ class WhatsappService {
 							? pendingMsg.isForwarded
 							: false
 			} as CreateMessageDto;
+
 			const savedMsg = await messagesService.updateMessage(
 				pendingMsg.id,
 				message
 			);
+
 			messagesDistributionService.notifyMessage(process, savedMsg);
 			process.log("Mensagem salva no banco de dados.", savedMsg);
 			process.success(savedMsg);
@@ -330,17 +378,16 @@ class WhatsappService {
 			process.log("Atualizando mensagem no banco de dados.", sentMsg);
 
 			message = {
-			...pendingMsg,
-			...sentMsg,
-			status: "SENT",
-			isForwarded:
-				typeof sentMsg.isForwarded === "boolean"
-				? sentMsg.isForwarded
-				: typeof pendingMsg.isForwarded === "boolean"
-					? pendingMsg.isForwarded
-					: false // <- garante que nunca será null
+				...pendingMsg,
+				...sentMsg,
+				status: "SENT",
+				isForwarded:
+					typeof sentMsg.isForwarded === "boolean"
+						? sentMsg.isForwarded
+						: typeof pendingMsg.isForwarded === "boolean"
+							? pendingMsg.isForwarded
+							: false // <- garante que nunca será null
 			} as CreateMessageDto;
-
 
 			const savedMsg = await messagesService.updateMessage(
 				pendingMsg.id,
@@ -360,6 +407,7 @@ class WhatsappService {
 			throw new BadRequestError("Erro ao enviar mensagem.", err);
 		}
 	}
+
 	public async getResults(instance: string) {
 		const query = "SELECT CODIGO AS id, NOME AS name FROM resultados";
 		const result = await instancesService.executeQuery<
@@ -432,6 +480,62 @@ class WhatsappService {
 		const groups = await client.getGroups();
 
 		return groups;
+	}
+
+	private getGupshupClient(session: SessionData) {
+		const client = this.getClientBySector(
+			session.instance,
+			session.sectorId
+		);
+
+		if (!(client instanceof GupshupWhatsappClient)) {
+			throw new Error(
+				"Invalid WhatsApp client type for Gupshup service."
+			);
+		}
+
+		return client;
+	}
+
+	public async sendTemplate(
+		session: SessionData,
+		to: string,
+		data: SendTemplateData
+	) {
+		const process = new ProcessingLogger(
+			session.instance,
+			"send-template",
+			`${to}-${Date.now()}`,
+			data
+		);
+
+		try {
+			const client = this.getGupshupClient(session);
+
+			const message = await client.sendTemplate({
+				to,
+				templateId: data.templateId,
+				templateText: data.templateText,
+				parameters: data.templateParams
+			});
+
+			const savedMsg = await messagesService.insertMessage(message);
+			process.log("Mensagem salva no banco de dados.", savedMsg);
+
+			messagesDistributionService.notifyMessage(process, savedMsg);
+			process.success("Mensagem de template enviada com sucesso.");
+		} catch (error) {
+			process.failed(
+				"Erro ao enviar mensagem de template.\n" +
+					sanitizeErrorMessage(error)
+			);
+		}
+	}
+
+	public async getTemplates(session: SessionData) {
+		const client = this.getGupshupClient(session);
+
+		return await client.getTemplates();
 	}
 }
 

@@ -1,7 +1,9 @@
+import { File } from "@in.pulse-crm/sdk";
+
 interface BaseSendMessageOptions {
 	to: string;
 	quotedId?: string | null;
-	mentions?: Mentions
+	mentions?: Mentions;
 }
 
 export interface SendFileOptions extends BaseSendMessageOptions {
@@ -10,6 +12,8 @@ export interface SendFileOptions extends BaseSendMessageOptions {
 	sendAsDocument?: boolean;
 	fileUrl: string;
 	fileName: string;
+	fileType?: "image" | "video" | "audio" | "document";
+	file: File;
 }
 
 export interface SendTextOptions extends BaseSendMessageOptions {
@@ -17,14 +21,21 @@ export interface SendTextOptions extends BaseSendMessageOptions {
 }
 
 export type SendMessageOptions = SendTextOptions | SendFileOptions;
+
+export interface SendTemplateOptions extends BaseSendMessageOptions {
+	templateId: string;
+	templateText: string;
+	parameters: string[];
+}
+
 export interface WhatsappInstanceProps {
 	phone: string;
 	instanceName: string;
 }
 export type Mention = {
-  userId: number;
-  name: string;
-  phone: string;
+	userId: number;
+	name: string;
+	phone: string;
 };
 
 export type Mentions = Mention[];
