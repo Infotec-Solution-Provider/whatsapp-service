@@ -16,6 +16,7 @@ import internalchatsController from "./controllers/internal-chats.controller";
 import whatsappController from "./controllers/whatsapp.controller";
 import readyMessagesController from "./controllers/ready-messages.controller";
 import notificationsController from "./controllers/notifications.controller";
+import monitorController from "./controllers/monitor.controller";
 
 whatsappService.buildClients();
 const app = express();
@@ -35,6 +36,7 @@ app.use(schedulesController.router);
 app.use(internalchatsController.router);
 app.use(readyMessagesController.router);
 app.use(notificationsController.router);
+app.use(monitorController.router);
 
 app.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
 	console.error(err);
@@ -55,7 +57,8 @@ logRoutes("", [
 	schedulesController.router,
 	internalchatsController.router,
 	readyMessagesController.router,
-	notificationsController.router
+	notificationsController.router,
+	monitorController.router
 ]);
 
 const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;
