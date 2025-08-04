@@ -16,8 +16,8 @@ class WhatsappController {
 			this.getTemplates
 		);
 
-		this.router.post("/api/whatsapp/meta/webhooks", this.receiveMessage);
-		this.router.get("/api/whatsapp/meta/webhooks", this.webhook);
+		this.router.post("/api/whatsapp/meta/:instance/webhooks", this.receiveMessage);
+		this.router.get("/api/whatsapp/meta/:instanc/webhooks", this.webhook);
 	}
 
 	private async getGroups(req: Request, res: Response) {

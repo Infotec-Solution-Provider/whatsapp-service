@@ -12,8 +12,8 @@ class WhatsappController {
         this.router = router;
         this.router.get("/api/whatsapp/groups", is_authenticated_middleware_1.default, this.getGroups);
         this.router.get("/api/whatsapp/templates", is_authenticated_middleware_1.default, this.getTemplates);
-        this.router.post("/api/whatsapp/meta/webhooks", this.receiveMessage);
-        this.router.get("/api/whatsapp/meta/webhooks", this.webhook);
+        this.router.post("/api/whatsapp/meta/exatron/webhooks", this.receiveMessage);
+        this.router.get("/api/whatsapp/meta/exatron/webhooks", this.webhook);
     }
     async getGroups(req, res) {
         const groups = await whatsapp_service_1.default.getGroups(req.session.instance, req.session.sectorId);
