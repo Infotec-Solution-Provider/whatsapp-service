@@ -14,6 +14,7 @@ const chats_service_1 = __importDefault(require("./chats.service"));
 const messages_service_1 = __importDefault(require("./messages.service"));
 const whatsapp_service_1 = __importDefault(require("./whatsapp.service"));
 const choose_sector_bot_1 = __importDefault(require("../bots/choose-sector.bot"));
+const seller_vollo_bot_1 = __importDefault(require("../bots/seller-vollo.bot"));
 class MessagesDistributionService {
     flows = new Map();
     async getFlow(instance, sectorId) {
@@ -49,9 +50,13 @@ class MessagesDistributionService {
             if (currChat) {
                 logger.log("Chat anterior encontrado para o contato.", currChat);
                 await this.insertAndNotify(logger, currChat, msg);
-                console.log("foi1");
                 if (currChat.botId === 1) {
-                    await choose_sector_bot_1.default.processMessage(currChat, contact, msg);
+                    if (currChat.instance === "vollo") {
+                        await seller_vollo_bot_1.default.processMessage(currChat, contact, msg);
+                    }
+                    else {
+                        await choose_sector_bot_1.default.processMessage(currChat, contact, msg);
+                    }
                 }
                 return;
             }
@@ -66,6 +71,7 @@ class MessagesDistributionService {
                         type: "RECEPTIVE",
                         contactId: contact.id,
                         sectorId: sectors[0].id,
+                        startedAt: new Date(),
                         botId: 1
                     }
                 });
@@ -74,13 +80,24 @@ class MessagesDistributionService {
                 logger.log("Um setor encontrado, iniciando o fluxo de atendimento.");
                 const flow = await this.getFlow(instance, sectors[0].id);
                 const data = await flow.getChatPayload(logger, contact);
-                newChat = await prisma_service_1.default.wppChat.create({ data });
+                newChat = await prisma_service_1.default.wppChat.create({
+                    data: {
+                        ...data,
+                        botId: instance === "vollo" ? 1 : null,
+                        userId: null
+                    }
+                });
             }
             if (!newChat) {
                 throw new Error("Nenhum chat foi criado.");
             }
             if (newChat.botId === 1) {
-                await choose_sector_bot_1.default.processMessage(newChat, contact, msg);
+                if (newChat.instance === "vollo") {
+                    await seller_vollo_bot_1.default.processMessage(newChat, contact, msg);
+                }
+                else {
+                    await choose_sector_bot_1.default.processMessage(newChat, contact, msg);
+                }
             }
             logger.log("Novo chat encontrado!", newChat);
             logger.log("Buscando foto de perfil do cliente.");
@@ -109,6 +126,25 @@ class MessagesDistributionService {
             const updatedChat = await prisma_service_1.default.wppChat.update({
                 where: { id: chat.id },
                 data: { ...data, botId: null }
+            });
+            await this.addSystemMessage(updatedChat, `Transferido para o setor ${sector.name}!`);
+            await this.notifyChatStarted(logger, updatedChat);
+            logger.success(updatedChat);
+        }
+        catch (err) {
+            console.error(err);
+            logger.log(`Erro ao processar mensagem!`);
+            logger.failed(err);
+        }
+    }
+    async transferChatOperator(sector, operador, contact, chat) {
+        const logger = new processing_logger_1.default(sector.instance, "transfer-chat-operator", `WppChat-${chat.id}_${Date.now()}`, { sector, contact, chat });
+        try {
+            const flow = await this.getFlow(sector.instance, sector.id);
+            const data = await flow.getChatPayload(logger, contact);
+            const updatedChat = await prisma_service_1.default.wppChat.update({
+                where: { id: chat.id },
+                data: { ...data, userId: operador.CODIGO, botId: null }
             });
             await this.addSystemMessage(updatedChat, `Transferido para o setor ${sector.name}!`);
             await this.notifyChatStarted(logger, updatedChat);

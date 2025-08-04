@@ -11,13 +11,22 @@ class ContactsController {
     constructor(router) {
         this.router = router;
         this.router.get("/api/whatsapp/customer/:id/contacts", is_authenticated_middleware_1.default, this.getCustomerContacts);
-        this.router.get("/api/whatsapp/contacts", is_authenticated_middleware_1.default, this.getContactsWithCustomer);
+        this.router.get("/api/whatsapp/contacts/customer", is_authenticated_middleware_1.default, this.getContactsWithCustomer);
+        this.router.get("/api/whatsapp/contacts", is_authenticated_middleware_1.default, this.getContacts);
         this.router.post("/api/whatsapp/customers/:id/contacts", is_authenticated_middleware_1.default, this.createContact);
+        this.router.post("/api/whatsapp/contacts", is_authenticated_middleware_1.default, this.createContact);
         this.router.put("/api/whatsapp/contacts/:contactId", is_authenticated_middleware_1.default, this.updateContact);
         this.router.delete("/api/whatsapp/contacts/:contactId", is_authenticated_middleware_1.default, this.deleteContact);
     }
     async getCustomerContacts(req, res) {
         const data = await contacts_service_1.default.getCustomerContacts(req.session.instance, Number(req.params["id"]));
+        res.status(200).send({
+            message: "Chats retrieved successfully!",
+            data
+        });
+    }
+    async getContacts(req, res) {
+        const data = await contacts_service_1.default.getContacts(req.session.instance);
         res.status(200).send({
             message: "Chats retrieved successfully!",
             data

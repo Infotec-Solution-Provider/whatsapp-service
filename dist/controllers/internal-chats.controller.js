@@ -13,17 +13,24 @@ class InternalChatsController {
     constructor(router) {
         this.router = router;
         this.router = (0, express_1.Router)();
-        this.router.post("/api/internal/chats", is_authenticated_middleware_1.default, this.startInternalChat);
+        this.router.post("/api/internal/chats", is_authenticated_middleware_1.default, multer_middleware_1.default.single("file"), this.startInternalChat);
         this.router.get("/api/internal/session/chats", is_authenticated_middleware_1.default, this.getSessionInternalChats);
         this.router.get("/api/internal/groups", is_authenticated_middleware_1.default, this.getInternalGroups);
+        this.router.delete("/api/internal/chats/:id", is_authenticated_middleware_1.default, this.deleteInternalChat);
         this.router.post("/api/internal/chats/:id/messages", is_authenticated_middleware_1.default, multer_middleware_1.default.single("file"), this.sendMessageToChat);
         this.router.put("/api/internal/groups/:id", is_authenticated_middleware_1.default, this.updateInternalGroup);
+        this.router.put("/api/internal/groups/:id/image", is_authenticated_middleware_1.default, multer_middleware_1.default.single("file"), this.updateInternalGroupImage);
+        this.router.put("/api/internal/groups/:id/image", is_authenticated_middleware_1.default, this.updateInternalGroup);
+        this.router.patch("/api/internal/chat/:id/mark-as-read", is_authenticated_middleware_1.default, this.markChatAsRead);
+        this.router.get("/api/internal/monitor/chats", is_authenticated_middleware_1.default, this.getInternalChatsMonitor);
     }
     async startInternalChat(req, res) {
         const session = req.session;
-        const participants = req.body.participants;
-        const isGroup = Boolean(req.body.isGroup);
-        const groupName = req.body.groupName || "";
+        const body = JSON.parse(req.body.data);
+        const participants = body.participants;
+        const isGroup = Boolean(body.isGroup);
+        const groupName = body.groupName || "";
+        const groupId = body.groupId || null;
         if (!participants ||
             !Array.isArray(participants) ||
             !participants.every((v) => typeof v === "number")) {
@@ -32,10 +39,17 @@ class InternalChatsController {
         if (isGroup && groupName.length < 1) {
             throw new http_errors_1.BadRequestError("Group name is required for group chats");
         }
-        const result = await internal_chats_service_1.default.createInternalChat(session, participants, isGroup, groupName);
+        const result = await internal_chats_service_1.default.createInternalChat(session, participants, isGroup, groupName, groupId, req.file || null);
         res.status(200).send({
             message: "Internal chat started successfully!",
             data: result
+        });
+    }
+    async getInternalChatsMonitor(req, res) {
+        const data = await internal_chats_service_1.default.getInternalChatsMonitor(req.session);
+        res.status(200).send({
+            message: "Internal chats retrieved successfully!",
+            data
         });
     }
     async getSessionInternalChats(req, res) {
@@ -59,10 +73,36 @@ class InternalChatsController {
     }
     async updateInternalGroup(req, res) {
         const groupId = Number(req.params["id"]);
-        const updated = await internal_chats_service_1.default.updateInternalChatParticipants(groupId, req.body);
+        const updated = await internal_chats_service_1.default.updateInternalGroup(groupId, req.body);
         res.status(200).send({
             message: "Group members updated!",
             data: updated
+        });
+    }
+    async updateInternalGroupImage(req, res) {
+        const groupId = Number(req.params["id"]);
+        const file = req.file;
+        if (!file) {
+            throw new http_errors_1.BadRequestError("File is required");
+        }
+        const updated = await internal_chats_service_1.default.updateGroupImage(req.session, groupId, file);
+        res.status(200).send({
+            message: "Group image updated!",
+            data: updated
+        });
+    }
+    async deleteInternalChat(req, res) {
+        const chatId = Number(req.params["id"]);
+        await internal_chats_service_1.default.deleteInternalChat(chatId);
+        res.status(200).send({
+            message: "Chat deleted successfully!"
+        });
+    }
+    async markChatAsRead(req, res) {
+        const chatId = Number(req.params["id"]);
+        await internal_chats_service_1.default.markChatMessagesAsRead(chatId, req.session.userId);
+        res.status(200).send({
+            message: "Chat marked as read!"
         });
     }
 }

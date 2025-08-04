@@ -7,7 +7,7 @@ const express_1 = require("express");
 const is_authenticated_middleware_1 = __importDefault(require("../middlewares/is-authenticated.middleware"));
 const schedules_service_1 = __importDefault(require("../services/schedules.service"));
 const http_errors_1 = require("@rgranatodutra/http-errors");
-class ChatsController {
+class SchedulesController {
     router;
     constructor(router) {
         this.router = router;
@@ -39,39 +39,23 @@ class ChatsController {
     }
     async createSchedule(req, res) {
         const session = req.session;
-        const formData = req.body;
-        if (!formData || typeof formData !== "object") {
+        const input = req.body;
+        if (!input || typeof input !== "object") {
             throw new http_errors_1.BadRequestError("Invalid or missing formData!");
         }
-        const scheduleData = {
-            ...formData,
-            scheduleDate: new Date(formData.scheduleDate),
-            instance: session.instance
-        };
-        if (!scheduleData.name || typeof scheduleData.name !== "string") {
-            throw new http_errors_1.BadRequestError("Schedule name is required and must be a string!");
-        }
-        if (!scheduleData.contactId ||
-            typeof scheduleData.contactId !== "number") {
+        if (!input.contactId || typeof input.contactId !== "number") {
             throw new http_errors_1.BadRequestError("Contact ID is required and must be a number!");
         }
-        if (!scheduleData.scheduleDate ||
-            !(scheduleData.scheduleDate instanceof Date)) {
-            throw new http_errors_1.BadRequestError("Valid schedule date is required!");
+        if (!input.date) {
+            throw new http_errors_1.BadRequestError("Schedule date is required!");
         }
-        if (!scheduleData.scheduledBy ||
-            typeof scheduleData.scheduledBy !== "number") {
-            throw new http_errors_1.BadRequestError("Scheduled By is required and must be a number!");
-        }
-        if (!scheduleData.scheduledFor ||
-            typeof scheduleData.scheduledFor !== "number") {
+        if (!input.scheduledFor || typeof input.scheduledFor !== "number") {
             throw new http_errors_1.BadRequestError("Scheduled For is required and must be a number!");
         }
-        if (!scheduleData.sectorId ||
-            typeof scheduleData.sectorId !== "number") {
+        if (!input.sectorId || typeof input.sectorId !== "number") {
             throw new http_errors_1.BadRequestError("Sector ID is required and must be a number!");
         }
-        const result = await schedules_service_1.default.createSchedule(scheduleData);
+        const result = await schedules_service_1.default.createSchedule(req.headers.authorization.replace("Bearer ", ""), session, input);
         res.status(200).send({
             message: "Schedule created successfully!",
             data: result
@@ -87,29 +71,6 @@ class ChatsController {
             throw new http_errors_1.BadRequestError("Invalid or missing formData!");
         }
         let scheduleData = formData;
-        if (scheduleData.name && typeof scheduleData.name !== "string") {
-            throw new http_errors_1.BadRequestError("Schedule name must be a string!");
-        }
-        if (scheduleData.contactId &&
-            typeof scheduleData.contactId !== "number") {
-            throw new http_errors_1.BadRequestError("Contact ID must be a number!");
-        }
-        if (scheduleData.scheduleDate &&
-            !(scheduleData.scheduleDate instanceof Date)) {
-            throw new http_errors_1.BadRequestError("Invalid schedule date!");
-        }
-        if (scheduleData.scheduledBy &&
-            typeof scheduleData.scheduledBy !== "number") {
-            throw new http_errors_1.BadRequestError("Scheduled By must be a number!");
-        }
-        if (scheduleData.scheduledFor &&
-            typeof scheduleData.scheduledFor !== "number") {
-            throw new http_errors_1.BadRequestError("Scheduled For must be a number!");
-        }
-        if (scheduleData.sectorId &&
-            typeof scheduleData.sectorId !== "number") {
-            throw new http_errors_1.BadRequestError("Sector ID must be a number!");
-        }
         const result = await schedules_service_1.default.editSchedule(scheduleData, +id);
         res.status(200).send({
             message: "Schedule patched successfully!",
@@ -128,4 +89,4 @@ class ChatsController {
         });
     }
 }
-exports.default = new ChatsController((0, express_1.Router)());
+exports.default = new SchedulesController((0, express_1.Router)());

@@ -52,7 +52,7 @@ class CheckLoaltyStep {
         return result[0] || null;
     }
     async isUserInSameSector(instance, userId) {
-        const users = await instances_service_2.default.executeQuery(instance, "SELECT * FROM users WHERE id = ?", [userId]);
+        const users = await instances_service_2.default.executeQuery(instance, "SELECT * FROM operadores WHERE CODIGO = ?", [userId]);
         return users.length > 0 && users[0].SETOR === this.sectorId;
     }
     nextStep(ctx, logMessage) {

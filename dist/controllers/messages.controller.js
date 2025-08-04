@@ -16,6 +16,7 @@ class MessagesController {
         this.router.get("/api/whatsapp/messages/:id", is_authenticated_middleware_1.default, this.getMessageById);
         this.router.patch("/api/whatsapp/messages/mark-as-read", is_authenticated_middleware_1.default, this.readContactMessages);
         this.router.post("/api/whatsapp/messages", multer_middleware_1.default.single("file"), is_authenticated_middleware_1.default, this.sendMessage);
+        this.router.post("/api/whatsapp/messages/template", is_authenticated_middleware_1.default, this.sendTemplate);
     }
     async getMessageById(req, res) {
         const { id } = req.params;
@@ -48,7 +49,7 @@ class MessagesController {
         if (file) {
             data.file = file;
         }
-        Object.keys(data).forEach(key => {
+        Object.keys(data).forEach((key) => {
             if (data[key] === undefined) {
                 delete data[key];
             }
@@ -56,6 +57,14 @@ class MessagesController {
         const message = await whatsapp_service_1.default.sendMessage(req.session, to, data);
         res.status(201).send({
             message: "Message sent successfully!",
+            data: message
+        });
+    }
+    async sendTemplate(req, res) {
+        const { to, ...data } = req.body;
+        const message = await whatsapp_service_1.default.sendTemplate(req.session, to, data);
+        res.status(201).send({
+            message: "",
             data: message
         });
     }

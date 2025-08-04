@@ -30,10 +30,7 @@ class MessagesService {
                         to: "system"
                     }
                 ],
-                WppChat: {
-                    instance,
-                    contactId
-                }
+                contactId
             },
             data: {
                 status: "READ"

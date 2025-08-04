@@ -1,0 +1,33 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const whatsapp_service_1 = __importDefault(require("../services/whatsapp.service"));
+const is_authenticated_middleware_1 = __importDefault(require("../middlewares/is-authenticated.middleware"));
+class WhatsappController {
+    router;
+    constructor(router) {
+        this.router = router;
+        this.router.get("/api/whatsapp/groups", is_authenticated_middleware_1.default, this.getGroups);
+        this.router.get("/api/whatsapp/templates", is_authenticated_middleware_1.default, this.getTemplates);
+        this.router.post("/api/whatsapp/meta/webhooks", this.receiveMessage);
+    }
+    async getGroups(req, res) {
+        const groups = await whatsapp_service_1.default.getGroups(req.session.instance, req.session.sectorId);
+        res.status(200).json({
+            message: "Groups retrieved successfully!",
+            data: groups
+        });
+    }
+    async getTemplates(req, res) {
+        const templates = await whatsapp_service_1.default.getTemplates(req.session);
+        res.status(200).json({ templates });
+    }
+    async receiveMessage(req, res) {
+        console.log("GUP MESSAGE", req.body);
+        res.status(500).send();
+    }
+}
+exports.default = new WhatsappController((0, express_1.Router)());
