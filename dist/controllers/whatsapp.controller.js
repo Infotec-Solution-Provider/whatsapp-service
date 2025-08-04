@@ -13,6 +13,7 @@ class WhatsappController {
         this.router.get("/api/whatsapp/groups", is_authenticated_middleware_1.default, this.getGroups);
         this.router.get("/api/whatsapp/templates", is_authenticated_middleware_1.default, this.getTemplates);
         this.router.post("/api/whatsapp/meta/webhooks", this.receiveMessage);
+        this.router.get("/api/whatsapp/meta/webhooks", this.webhook);
     }
     async getGroups(req, res) {
         const groups = await whatsapp_service_1.default.getGroups(req.session.instance, req.session.sectorId);
@@ -27,6 +28,11 @@ class WhatsappController {
     }
     async receiveMessage(req, res) {
         console.log("GUP MESSAGE", req.body);
+        res.status(500).send();
+    }
+    async webhook(req, res) {
+        console.log("challenge body", req.body);
+        console.log("challenge headers", req.headers);
         res.status(500).send();
     }
 }

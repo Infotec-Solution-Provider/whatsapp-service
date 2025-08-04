@@ -17,6 +17,7 @@ class WhatsappController {
 		);
 
 		this.router.post("/api/whatsapp/meta/webhooks", this.receiveMessage);
+		this.router.get("/api/whatsapp/meta/webhooks", this.webhook);
 	}
 
 	private async getGroups(req: Request, res: Response) {
@@ -39,6 +40,13 @@ class WhatsappController {
 
 	private async receiveMessage(req: Request, res: Response) {
 		console.log("GUP MESSAGE", req.body);
+
+		res.status(500).send();
+	}
+
+	private async webhook(req: Request, res: Response) {
+		console.log("challenge body", req.body);
+		console.log("challenge headers", req.headers)
 
 		res.status(500).send();
 	}
