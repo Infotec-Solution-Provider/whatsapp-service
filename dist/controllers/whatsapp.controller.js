@@ -77,7 +77,7 @@ class WhatsappController {
                     break;
                 case "status":
                     const status = gupshup_message_parser_1.default.parseStatus(data);
-                    await messages_distribution_service_1.default.processMessageStatus("waba", data.id, status);
+                    await messages_distribution_service_1.default.processMessageStatus("waba", data.gs_id, status);
                     break;
                 default:
                     break;

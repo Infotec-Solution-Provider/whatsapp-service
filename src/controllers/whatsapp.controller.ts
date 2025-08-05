@@ -118,7 +118,7 @@ class WhatsappController {
 
 					await messagesDistributionService.processMessageStatus(
 						"waba",
-						data.id,
+						data.gs_id,
 						status
 					);
 					break;
