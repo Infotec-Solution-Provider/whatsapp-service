@@ -237,7 +237,7 @@ class WWEBJSWhatsappClient {
         let mentionsText = "";
         if (options.mentions?.length) {
             const mentionIds = options.mentions
-                .map(user => {
+                .map((user) => {
                 const phone = user.phone?.replace(/\D/g, "");
                 if (!phone) {
                     process.log("Telefone inválido em menção:", user);
@@ -247,7 +247,7 @@ class WWEBJSWhatsappClient {
             })
                 .filter((id) => id !== null);
             mentionsText = options.mentions
-                .map(user => `@${user.name || user.phone}`)
+                .map((user) => `@${user.name || user.phone}`)
                 .join(" ");
             params.mentions = mentionIds;
         }

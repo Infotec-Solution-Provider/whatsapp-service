@@ -186,20 +186,20 @@ class MessagesDistributionService {
     }
     async notifyMessage(process, message) {
         try {
-            process.log("Transmitindo mensagem via socket.");
+            process?.log("Transmitindo mensagem via socket.");
             const instance = message.instance;
             if (message.chatId === null) {
-                process.log("Mensagem não possui chatId.");
+                process?.log("Mensagem não possui chatId.");
                 return;
             }
             const room = `${instance}:chat:${message.chatId}`;
             const data = { message };
             await socket_service_1.default.emit(sdk_1.SocketEventType.WppMessage, room, data);
-            process.log(`Mensagem transmitida para a sala: /${room}/ room!`);
+            process?.log(`Mensagem transmitida para a sala: /${room}/ room!`);
         }
         catch (err) {
             const msg = (0, utils_1.sanitizeErrorMessage)(err);
-            process.log(`Falha ao transmitir mensagem: ${msg}`);
+            process?.log(`Falha ao transmitir mensagem: ${msg}`);
             throw err;
         }
     }

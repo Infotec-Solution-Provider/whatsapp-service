@@ -4,18 +4,29 @@ import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import { WABAMessageStatusData } from "../types/whatsapp-api.types";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import GUPSHUPMessageParser from "../parsers/gupshup-message.parser";
+import messagesService from "../services/messages.service";
+import messagesDistributionService from "../services/messages-distribution.service";
+import prismaService from "../services/prisma.service";
 
-function validateWebhookEntry(instance: string, data: any) {
+async function validateWebhookEntry(instance: string, data: any) {
 	console.log(new Date().toLocaleString() + " GS Message: ");
 	console.dir(data, { depth: null });
+
 	if (!data?.entry[0]?.changes[0]?.value) {
 		throw new BadRequestError("invalid webhook entry.");
 	}
 
+	const recipient =
+		data.entry[0].changes[0].value.metadata.display_phone_number;
+
 	if (data.entry[0].changes[0].value?.statuses?.[0]) {
 		const statusChange = data.entry[0].changes[0].value.statuses[0];
 
-		return statusChange as WABAMessageStatusData;
+		return {
+			type: "status" as const,
+			data: statusChange as WABAMessageStatusData,
+			recipient
+		};
 	}
 
 	if (data.entry[0].changes[0].value?.messages?.[0]) {
@@ -24,13 +35,13 @@ function validateWebhookEntry(instance: string, data: any) {
 			depth: null
 		});
 
-		const message = GUPSHUPMessageParser.parse(
-			"",
+		const message = await GUPSHUPMessageParser.parse(
+			recipient,
 			instance,
 			data.entry[0].changes[0].value.messages[0]
 		);
 
-		return message;
+		return { type: "message" as const, data: message, recipient };
 	}
 
 	throw new Error("unexpected webhook message format.");
@@ -76,13 +87,46 @@ class WhatsappController {
 	}
 
 	private async receiveMessage(req: Request, res: Response) {
-		const instance = req.params["instance"] as string;
-		const data = validateWebhookEntry(instance, req.body);
+		try {
+			const instance = req.params["instance"] as string;
+			const { type, data, recipient } = await validateWebhookEntry(
+				instance,
+				req.body
+			);
+			const client = await prismaService.wppClient.findFirstOrThrow({
+				where: {
+					phone: recipient
+				}
+			});
 
-		console.log("parsedMsg", data);
+			console.log("client encontrado!", client);
 
-		res.status(200).send();
-		res.status(500).send();
+			switch (type) {
+				case "message":
+					const savedMsg = await messagesService.insertMessage(data);
+					await messagesDistributionService.processMessage(
+						instance,
+						client.id,
+						savedMsg
+					);
+					break;
+				case "status":
+					const status = GUPSHUPMessageParser.parseStatus(data);
+					messagesDistributionService.processMessageStatus(
+						"waba",
+						data.id,
+						status
+					);
+					break;
+				default:
+					break;
+			}
+
+			res.status(200).send();
+		} catch (err) {
+			console.error(err);
+			res.status(500).send();
+		}
 	}
 
 	private async webhook(req: Request, res: Response) {

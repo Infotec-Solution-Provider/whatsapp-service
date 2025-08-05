@@ -101,9 +101,17 @@ class MessagesDistributionService {
 
 				if (currChat.botId === 1) {
 					if (currChat.instance === "vollo") {
-						await chooseSellerBot.processMessage(currChat, contact, msg);
+						await chooseSellerBot.processMessage(
+							currChat,
+							contact,
+							msg
+						);
 					} else {
-						await chooseSectorBot.processMessage(currChat, contact, msg);
+						await chooseSectorBot.processMessage(
+							currChat,
+							contact,
+							msg
+						);
 					}
 				}
 				return;
@@ -236,7 +244,7 @@ class MessagesDistributionService {
 
 			const updatedChat = await prismaService.wppChat.update({
 				where: { id: chat.id },
-				data: { ...data, userId:operador.CODIGO, botId: null }
+				data: { ...data, userId: operador.CODIGO, botId: null }
 			});
 
 			await this.addSystemMessage(
@@ -303,23 +311,26 @@ class MessagesDistributionService {
 		}
 	}
 
-	public async notifyMessage(process: ProcessingLogger, message: WppMessage) {
+	public async notifyMessage(
+		process: ProcessingLogger | null,
+		message: WppMessage
+	) {
 		try {
-			process.log("Transmitindo mensagem via socket.");
+			process?.log("Transmitindo mensagem via socket.");
 			const instance = message.instance;
 
 			if (message.chatId === null) {
-				process.log("Mensagem não possui chatId.");
+				process?.log("Mensagem não possui chatId.");
 				return;
 			}
 
 			const room: SocketServerChatRoom = `${instance}:chat:${message.chatId}`;
 			const data: WppMessageEventData = { message };
 			await socketService.emit(SocketEventType.WppMessage, room, data);
-			process.log(`Mensagem transmitida para a sala: /${room}/ room!`);
+			process?.log(`Mensagem transmitida para a sala: /${room}/ room!`);
 		} catch (err) {
 			const msg = sanitizeErrorMessage(err);
-			process.log(`Falha ao transmitir mensagem: ${msg}`);
+			process?.log(`Falha ao transmitir mensagem: ${msg}`);
 			throw err;
 		}
 	}
@@ -369,12 +380,13 @@ class MessagesDistributionService {
 		id: string,
 		status: WppMessageStatus
 	) {
-			try {
-				const search = type === "wwebjs" ? { wwebjsId: id } : { wabaId: id };
+		try {
+			const search =
+				type === "wwebjs" ? { wwebjsId: id } : { wabaId: id };
 
-				if (!("wwebjsId" in search) && !("wabaId" in search)) {
+			if (!("wwebjsId" in search) && !("wabaId" in search)) {
 				return;
-				}
+			}
 
 			const message = await prismaService.wppMessage.update({
 				where: search,
