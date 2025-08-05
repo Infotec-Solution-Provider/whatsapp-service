@@ -13,6 +13,7 @@ async function validateWebhookEntry(instance: string, data: any) {
 		throw new BadRequestError("invalid webhook entry.");
 	}
 
+	console.dir(data, { depth: null });
 	const recipient =
 		data.entry[0].changes[0].value.metadata.display_phone_number;
 

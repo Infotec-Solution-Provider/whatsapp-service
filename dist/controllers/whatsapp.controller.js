@@ -15,6 +15,7 @@ async function validateWebhookEntry(instance, data) {
     if (!data?.entry[0]?.changes[0]?.value) {
         throw new http_errors_1.BadRequestError("invalid webhook entry.");
     }
+    console.dir(data, { depth: null });
     const recipient = data.entry[0].changes[0].value.metadata.display_phone_number;
     if (data.entry[0].changes[0].value?.statuses?.[0]) {
         const statusChange = data.entry[0].changes[0].value.statuses[0];
