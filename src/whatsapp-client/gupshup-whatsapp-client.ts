@@ -52,9 +52,11 @@ class GupshupWhatsappClient implements WhatsappClient {
 			const urlKey = options.fileType === "image" ? "originalUrl" : "url";
 			console.log("options.fileUrl", options.fileUrl);
 			console.log("urlKey", urlKey);
+			const updatedFileUrl = options.fileUrl.replace("http://localhost:8003", "https://inpulse.infotecrs.inf.br");
+
 			let message = {
 				type: options.fileType || "document",
-				[urlKey]: options.fileUrl
+				[urlKey]: updatedFileUrl
 			};
 
 			options.text && (message["caption"] = options.text);
