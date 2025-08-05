@@ -46,6 +46,9 @@ class GUPSHUPMessageParser {
         }
         console.log("fileUrl", fileUrl);
         console.log("fileType", fileType);
+        if (fileUrl) {
+            GUPSHUPMessageParser.processMediaFile(fileUrl);
+        }
         return parsedMessage;
     }
     static async processMediaFile(url) {
