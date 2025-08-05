@@ -12,11 +12,11 @@ function validateWebhookEntry(data) {
     if (!data?.entry[0]?.changes[0]?.value) {
         throw new http_errors_1.BadRequestError("invalid webhook entry.");
     }
-    if (data.entry[0].changes[0].value.statuses[0]) {
+    if (data.entry[0].changes[0].value?.statuses?.[0]) {
         const statusChange = data.entry[0].changes[0].value.statuses[0];
         return statusChange;
     }
-    if (data.entry[0].changes[0].value.messages[0]) {
+    if (data.entry[0].changes[0].value?.messages?.[0]) {
         console.log(new Date().toLocaleString() + " WABA Message: ");
         console.dir(data.entry[0].changes[0].value.messages[0], {
             depth: null
