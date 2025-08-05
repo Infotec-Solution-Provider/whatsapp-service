@@ -98,8 +98,9 @@ class GupshupWhatsappClient {
         data.append("destination", options.to);
         data.append("template", JSON.stringify({
             id: options.templateId,
-            parameters: options.parameters || []
+            params: options.parameters || []
         }));
+        console.log(data);
         const response = await this.api.post("/wa/api/v1/template/msg", data, {
             headers: {
                 "Content-Type": "application/x-www-form-urlencoded"
