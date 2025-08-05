@@ -58,6 +58,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 
 			options.text && (message["caption"] = options.text);
 			data.append("message", JSON.stringify(message));
+			console.log("data", data);
 		} else {
 			if (!("text" in options)) {
 				throw new Error("Text is required for text messages");
@@ -80,7 +81,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 				console.error(err.response.data);
 				throw new Error("F");
 			});
-
+		console.log(response.data);
 		const message: CreateMessageDto = {
 			instance: this.instance,
 			from: `me:${this.phone}`,
