@@ -15,20 +15,22 @@ async function validateWebhookEntry(instance, data) {
     if (!data?.entry[0]?.changes[0]?.value) {
         throw new http_errors_1.BadRequestError("invalid webhook entry.");
     }
-    console.dir(data, { depth: null });
-    const recipient = data.entry[0].changes[0].value.metadata.display_phone_number;
     if (data.entry[0].changes[0].value?.statuses?.[0]) {
         const statusChange = data.entry[0].changes[0].value.statuses[0];
-        console.log("statusChange", statusChange);
         return {
             type: "status",
             data: statusChange,
-            recipient
+            appId: data.gs_app_id
         };
     }
     if (data.entry[0].changes[0].value?.messages?.[0]) {
+        const recipient = data.entry[0].changes[0].value.metadata.display_phone_number;
         const message = await gupshup_message_parser_1.default.parse(recipient, instance, data.entry[0].changes[0].value.messages[0]);
-        return { type: "message", data: message, recipient };
+        return {
+            type: "message",
+            data: message,
+            appId: data.gs_app_id
+        };
     }
     return null;
 }
@@ -60,10 +62,10 @@ class WhatsappController {
                 res.status(200).send();
                 return;
             }
-            const { type, data, recipient } = entry;
+            const { type, data, appId } = entry;
             const client = await prisma_service_1.default.wppClient.findFirstOrThrow({
                 where: {
-                    phone: recipient
+                    gupshupAppId: appId
                 }
             });
             switch (type) {
@@ -73,7 +75,6 @@ class WhatsappController {
                     break;
                 case "status":
                     const status = gupshup_message_parser_1.default.parseStatus(data);
-                    console.log("status parsed", status);
                     await messages_distribution_service_1.default.processMessageStatus("waba", data.id, status);
                     break;
                 default:
