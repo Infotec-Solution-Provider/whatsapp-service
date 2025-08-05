@@ -12,6 +12,7 @@ const messages_service_1 = __importDefault(require("../services/messages.service
 const messages_distribution_service_1 = __importDefault(require("../services/messages-distribution.service"));
 const prisma_service_1 = __importDefault(require("../services/prisma.service"));
 async function validateWebhookEntry(instance, data) {
+    console.dir(data, { depth: null });
     if (!data?.entry[0]?.changes[0]?.value) {
         throw new http_errors_1.BadRequestError("invalid webhook entry.");
     }
@@ -68,6 +69,7 @@ class WhatsappController {
                     gupshupAppId: appId
                 }
             });
+            console.log(!!client ? "Achou o client!" : "Não achou o client...");
             switch (type) {
                 case "message":
                     const savedMsg = await messages_service_1.default.insertMessage(data);
