@@ -58,6 +58,10 @@ class GupshupWhatsappClient implements WhatsappClient {
 				type: options.fileType || "document",
 				[urlKey]: updatedFileUrl
 			};
+  			const cleanedCaption = options.text?.replace(/undefined/g, "");
+			if (cleanedCaption) {
+				message["caption"] = cleanedCaption;
+			}
 
 			options.text && (message["caption"] = options.text);
 			data.append("message", JSON.stringify(message));
