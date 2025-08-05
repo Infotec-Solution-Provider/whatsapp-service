@@ -19,8 +19,6 @@ import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 import GupshupWhatsappClient from "../whatsapp-client/gupshup-whatsapp-client";
 
 export interface SendTemplateData {
-	chatId: number;
-	contactId: number;
 	templateId: string;
 	templateText: string;
 	templateParams: string[];
@@ -482,8 +480,8 @@ class WhatsappService {
 		return groups;
 	}
 
-	private getGupshupClient(session: SessionData) {
-		const client = this.getClientBySector(
+	private async getGupshupClient(session: SessionData) {
+		const client = await this.getClientBySector(
 			session.instance,
 			session.sectorId
 		);
@@ -500,7 +498,9 @@ class WhatsappService {
 	public async sendTemplate(
 		session: SessionData,
 		to: string,
-		data: SendTemplateData
+		data: SendTemplateData,
+		chatId: number,
+		contactId: number
 	) {
 		const process = new ProcessingLogger(
 			session.instance,
@@ -510,14 +510,18 @@ class WhatsappService {
 		);
 
 		try {
-			const client = this.getGupshupClient(session);
+			const client = await this.getGupshupClient(session);
 
-			const message = await client.sendTemplate({
-				to,
-				templateId: data.templateId,
-				templateText: data.templateText,
-				parameters: data.templateParams
-			});
+			const message = await client.sendTemplate(
+				{
+					to,
+					templateId: data.templateId,
+					templateText: data.templateText,
+					parameters: data.templateParams
+				},
+				chatId,
+				contactId
+			);
 
 			const savedMsg = await messagesService.insertMessage(message);
 			process.log("Mensagem salva no banco de dados.", savedMsg);
@@ -533,9 +537,15 @@ class WhatsappService {
 	}
 
 	public async getTemplates(session: SessionData) {
-		const client = this.getGupshupClient(session);
+		const client = await this.getGupshupClient(session);
+		const templates = await client.getTemplates();
 
-		return await client.getTemplates();
+		return templates.map((t) => ({
+			id: t.id,
+			name: t.elementName,
+			category: t.category,
+			text: t.data
+		}));
 	}
 }
 

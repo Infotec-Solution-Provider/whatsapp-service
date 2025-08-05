@@ -130,49 +130,35 @@ export interface GSFileOptions {
 }
 
 export interface GSMessageTemplate {
-	name: string;
-	components: Array<GSTemplateComponents>;
-	language: string;
-	status: string;
+	appId: string;
 	category: string;
+	contanerMeta: string;
+	createdOn: number;
+	data: string; // Texto do template
+	elementName: string; // Nome do template
+	externalId: string;
 	id: string;
-}
-
-export type GSTemplateComponents =
-	| GSTemplateHeaderComponent
-	| GSTemplateBodyComponent
-	| GSTemplateFooterComponent;
-
-export interface GSTemplateHeaderComponent {
-	type: "HEADER";
-	format: "string";
-	text: string;
-	example?: {
-		header_text?: Array<string>;
-	};
-}
-
-export interface GSTemplateBodyComponent {
-	type: "BODY";
-	text: string;
-	example?: {
-		body_text?: Array<string[]>;
-	};
-}
-
-export interface GSTemplateFooterComponent {
-	type: "FOOTER";
-	text: string;
+	internalCategory: string;
+	internalType: string;
+	languageCode: string;
+	languagePolicy: string;
+	meta: string;
+	modifiedOn: number;
+	namespace: string;
+	priority: number;
+	quality: string;
+	retry: number;
+	stage: string;
+	status: string;
+	templateType: string;
+	vertical: string;
+	wabaId: string;
+	buttonSupported?: string;
 }
 
 export interface GSRecoverTemplatesResponse {
-	data: GSMessageTemplate[];
-	paging: {
-		cursors: {
-			before: string;
-			after: string;
-		};
-	};
+	templates: GSMessageTemplate[];
+	status: string;
 }
 
 export interface ReceiveMessageBody {

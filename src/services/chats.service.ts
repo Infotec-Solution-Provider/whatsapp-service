@@ -12,7 +12,7 @@ import instancesService from "./instances.service";
 import socketService from "./socket.service";
 import messagesDistributionService from "./messages-distribution.service";
 import usersService from "./users.service";
-import whatsappService from "./whatsapp.service";
+import whatsappService, { SendTemplateData } from "./whatsapp.service";
 import ProcessingLogger from "../utils/processing-logger";
 
 interface InpulseResult {
@@ -300,7 +300,6 @@ class ChatsService {
 
 				return { ...chat, customer, messages };
 			} catch (err) {
-				console.error(err);
 				return { ...chat, messages };
 			}
 		}
@@ -403,7 +402,8 @@ class ChatsService {
 	public async startChatByContactId(
 		session: SessionData,
 		token: string,
-		contactId: number
+		contactId: number,
+		template?: SendTemplateData
 	) {
 		const process = new ProcessingLogger(
 			session.instance,
@@ -448,6 +448,7 @@ class ChatsService {
 					startedAt: new Date()
 				},
 				include: {
+					contact: true,
 					messages: {
 						where: {
 							contactId: contact.id
@@ -465,6 +466,16 @@ class ChatsService {
 				message,
 				true
 			);
+			console.log("contact", newChat.contact);
+			if (template && newChat.contact) {
+				await whatsappService.sendTemplate(
+					session,
+					newChat.contact.phone,
+					template,
+					newChat.id,
+					newChat.contact.id
+				);
+			}
 
 			await messagesDistributionService.notifyChatStarted(
 				process,

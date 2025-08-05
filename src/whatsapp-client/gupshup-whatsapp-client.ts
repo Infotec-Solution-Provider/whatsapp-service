@@ -5,6 +5,7 @@ import {
 	SendTemplateOptions
 } from "../types/whatsapp-instance.types";
 import WhatsappClient from "./whatsapp-client";
+import { GSRecoverTemplatesResponse } from "../types/gupshup-api.types";
 
 const GUP_URL = "https://api.gupshup.io";
 
@@ -105,14 +106,18 @@ class GupshupWhatsappClient implements WhatsappClient {
 		return message;
 	}
 
-	public async sendTemplate(options: SendTemplateOptions) {
-		const form = new FormData();
+	public async sendTemplate(
+		options: SendTemplateOptions,
+		chatId: number,
+		contactId: number
+	) {
+		const data = new URLSearchParams();
 
-		form.append("channel", "whatsapp");
-		form.append("src.name", this.appName);
-		form.append("source", this.phone);
-		form.append("destination", options.to);
-		form.append(
+		data.append("channel", "whatsapp");
+		data.append("src.name", this.appName);
+		data.append("source", this.phone);
+		data.append("destination", options.to);
+		data.append(
 			"template",
 			JSON.stringify({
 				id: options.templateId,
@@ -120,11 +125,13 @@ class GupshupWhatsappClient implements WhatsappClient {
 			})
 		);
 
-		const response = await this.api.post("/wa/api/v1/template/msg", form, {
+		const response = await this.api.post("/wa/api/v1/template/msg", data, {
 			headers: {
-				"Content-Type": "multipart/form-data"
+				"Content-Type": "application/x-www-form-urlencoded"
 			}
 		});
+
+		console.log(response.data);
 
 		const text = options.templateText.replace(/{{(\d+)}}/g, (_, index) => {
 			return options.parameters[parseInt(index, 10)] || "";
@@ -135,17 +142,19 @@ class GupshupWhatsappClient implements WhatsappClient {
 			from: `me:${this.phone}`,
 			to: options.to,
 			body: text,
-			status: "PENDING",
+			status: "SENT",
 			timestamp: Date.now().toString(),
 			type: "template",
-			wabaId: response.data["messageId"] || null
+			wabaId: response.data["messageId"] || null,
+			chatId,
+			contactId
 		};
 
 		return message;
 	}
 
 	public async getTemplates() {
-		const response = await this.api.get(
+		const response = await this.api.get<GSRecoverTemplatesResponse>(
 			`/wa/app/${this.appId}/template?templateStatus=APPROVED`
 		);
 

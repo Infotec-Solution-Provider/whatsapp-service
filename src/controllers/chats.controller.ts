@@ -54,9 +54,7 @@ class ChatsController {
 	}
 
 	private async getChatsMonitor(req: Request, res: Response) {
-		const data = await chatsService.getChatsMonitor(
-			req.session,
-		);
+		const data = await chatsService.getChatsMonitor(req.session);
 
 		res.status(200).send({
 			message: "Chats Monitor retrieved successfully!",
@@ -107,7 +105,6 @@ class ChatsController {
 		});
 	}
 
-
 	private async finishChatById(req: Request, res: Response) {
 		const { id } = req.params;
 		const resultId = req.body.resultId;
@@ -136,16 +133,20 @@ class ChatsController {
 
 	private async startChatByContactId(req: Request, res: Response) {
 		const contactId = +req.body.contactId;
+		const template = req.body.template;
 		const session = req.session;
 
 		if (Number.isNaN(contactId)) {
 			throw new BadRequestError("Contact ID is required!");
 		}
 
+		console.log("template", template);
+
 		const result = await chatsService.startChatByContactId(
 			session,
 			req.headers["authorization"] as string,
-			contactId
+			contactId,
+			template
 		);
 
 		res.status(200).send({
