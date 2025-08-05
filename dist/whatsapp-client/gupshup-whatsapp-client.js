@@ -47,7 +47,6 @@ class GupshupWhatsappClient {
                 type: options.fileType || "document",
                 [urlKey]: options.fileUrl
             };
-            console.log(message);
             options.text && (message["caption"] = options.text);
             data.append("message", JSON.stringify(message));
         }
@@ -61,7 +60,6 @@ class GupshupWhatsappClient {
             };
             data.append("message", JSON.stringify(message));
         }
-        console.log(data);
         const response = await this.api
             .post("/wa/api/v1/msg", data, {
             headers: {
@@ -100,13 +98,11 @@ class GupshupWhatsappClient {
             id: options.templateId,
             params: options.parameters || []
         }));
-        console.log(data);
         const response = await this.api.post("/wa/api/v1/template/msg", data, {
             headers: {
                 "Content-Type": "application/x-www-form-urlencoded"
             }
         });
-        console.log(response.data);
         const text = options.templateText.replace(/{{(\d+)}}/g, (_, index) => {
             return options.parameters[parseInt(index, 10)] || "";
         });

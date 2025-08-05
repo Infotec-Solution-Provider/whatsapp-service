@@ -9,9 +9,6 @@ import messagesDistributionService from "../services/messages-distribution.servi
 import prismaService from "../services/prisma.service";
 
 async function validateWebhookEntry(instance: string, data: any) {
-	console.log(new Date().toLocaleString() + " GS Message: ");
-	console.dir(data, { depth: null });
-
 	if (!data?.entry[0]?.changes[0]?.value) {
 		throw new BadRequestError("invalid webhook entry.");
 	}
@@ -21,7 +18,7 @@ async function validateWebhookEntry(instance: string, data: any) {
 
 	if (data.entry[0].changes[0].value?.statuses?.[0]) {
 		const statusChange = data.entry[0].changes[0].value.statuses[0];
-
+		console.log("statusChange", statusChange);
 		return {
 			type: "status" as const,
 			data: statusChange as WABAMessageStatusData,
@@ -30,11 +27,6 @@ async function validateWebhookEntry(instance: string, data: any) {
 	}
 
 	if (data.entry[0].changes[0].value?.messages?.[0]) {
-		console.log(new Date().toLocaleString() + " WABA Message: ");
-		console.dir(data.entry[0].changes[0].value.messages[0], {
-			depth: null
-		});
-
 		const message = await GUPSHUPMessageParser.parse(
 			recipient,
 			instance,
@@ -44,7 +36,7 @@ async function validateWebhookEntry(instance: string, data: any) {
 		return { type: "message" as const, data: message, recipient };
 	}
 
-	throw new Error("unexpected webhook message format.");
+	return null;
 }
 
 class WhatsappController {
@@ -89,17 +81,20 @@ class WhatsappController {
 	private async receiveMessage(req: Request, res: Response) {
 		try {
 			const instance = req.params["instance"] as string;
-			const { type, data, recipient } = await validateWebhookEntry(
-				instance,
-				req.body
-			);
+			const entry = await validateWebhookEntry(instance, req.body);
+
+			if (!entry) {
+				res.status(200).send();
+				return;
+			}
+
+			const { type, data, recipient } = entry;
+
 			const client = await prismaService.wppClient.findFirstOrThrow({
 				where: {
 					phone: recipient
 				}
 			});
-
-			console.log("client encontrado!", client);
 
 			switch (type) {
 				case "message":
@@ -112,7 +107,10 @@ class WhatsappController {
 					break;
 				case "status":
 					const status = GUPSHUPMessageParser.parseStatus(data);
-					messagesDistributionService.processMessageStatus(
+
+					console.log("status parsed", status);
+
+					await messagesDistributionService.processMessageStatus(
 						"waba",
 						data.id,
 						status
@@ -134,7 +132,6 @@ class WhatsappController {
 		console.log("challenge headers", req.headers);
 
 		res.status(200).send();
-		res.status(500).send();
 	}
 }
 

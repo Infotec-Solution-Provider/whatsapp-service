@@ -12,14 +12,13 @@ const messages_service_1 = __importDefault(require("../services/messages.service
 const messages_distribution_service_1 = __importDefault(require("../services/messages-distribution.service"));
 const prisma_service_1 = __importDefault(require("../services/prisma.service"));
 async function validateWebhookEntry(instance, data) {
-    console.log(new Date().toLocaleString() + " GS Message: ");
-    console.dir(data, { depth: null });
     if (!data?.entry[0]?.changes[0]?.value) {
         throw new http_errors_1.BadRequestError("invalid webhook entry.");
     }
     const recipient = data.entry[0].changes[0].value.metadata.display_phone_number;
     if (data.entry[0].changes[0].value?.statuses?.[0]) {
         const statusChange = data.entry[0].changes[0].value.statuses[0];
+        console.log("statusChange", statusChange);
         return {
             type: "status",
             data: statusChange,
@@ -27,14 +26,10 @@ async function validateWebhookEntry(instance, data) {
         };
     }
     if (data.entry[0].changes[0].value?.messages?.[0]) {
-        console.log(new Date().toLocaleString() + " WABA Message: ");
-        console.dir(data.entry[0].changes[0].value.messages[0], {
-            depth: null
-        });
         const message = await gupshup_message_parser_1.default.parse(recipient, instance, data.entry[0].changes[0].value.messages[0]);
         return { type: "message", data: message, recipient };
     }
-    throw new Error("unexpected webhook message format.");
+    return null;
 }
 class WhatsappController {
     router;
@@ -59,13 +54,17 @@ class WhatsappController {
     async receiveMessage(req, res) {
         try {
             const instance = req.params["instance"];
-            const { type, data, recipient } = await validateWebhookEntry(instance, req.body);
+            const entry = await validateWebhookEntry(instance, req.body);
+            if (!entry) {
+                res.status(200).send();
+                return;
+            }
+            const { type, data, recipient } = entry;
             const client = await prisma_service_1.default.wppClient.findFirstOrThrow({
                 where: {
                     phone: recipient
                 }
             });
-            console.log("client encontrado!", client);
             switch (type) {
                 case "message":
                     const savedMsg = await messages_service_1.default.insertMessage(data);
@@ -73,7 +72,8 @@ class WhatsappController {
                     break;
                 case "status":
                     const status = gupshup_message_parser_1.default.parseStatus(data);
-                    messages_distribution_service_1.default.processMessageStatus("waba", data.id, status);
+                    console.log("status parsed", status);
+                    await messages_distribution_service_1.default.processMessageStatus("waba", data.id, status);
                     break;
                 default:
                     break;
@@ -89,7 +89,6 @@ class WhatsappController {
         console.log("challenge body", req.body);
         console.log("challenge headers", req.headers);
         res.status(200).send();
-        res.status(500).send();
     }
 }
 exports.default = new WhatsappController((0, express_1.Router)());

@@ -140,8 +140,6 @@ class ChatsController {
 			throw new BadRequestError("Contact ID is required!");
 		}
 
-		console.log("template", template);
-
 		const result = await chatsService.startChatByContactId(
 			session,
 			req.headers["authorization"] as string,

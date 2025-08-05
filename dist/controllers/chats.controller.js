@@ -85,7 +85,6 @@ class ChatsController {
         if (Number.isNaN(contactId)) {
             throw new http_errors_1.BadRequestError("Contact ID is required!");
         }
-        console.log("template", template);
         const result = await chats_service_1.default.startChatByContactId(session, req.headers["authorization"], contactId, template);
         res.status(200).send({
             message: "Chat started successfully!",
