@@ -23,7 +23,6 @@ class GUPSHUPMessageParser {
 			status: "RECEIVED",
 			body: ""
 		};
-
 		let fileUrl: string | null = null;
 		let fileType: string | null = null;
 		let fileName: string | null = null;
@@ -108,6 +107,11 @@ class GUPSHUPMessageParser {
 				break;
 			case "read":
 				return WppMessageStatus.READ;
+				break;
+			case "enqueued":
+				return WppMessageStatus.SENT; /// This is a temporary status, it will be updated later
+				// In Gupshup, "enqueued" means the message is queued for sending, not yet sent.
+				// We treat it as "SENT" for now, but it should be updated to "SENT" once the message is actually sent.
 				break;
 			default:
 				throw new BadRequestError(`${data.status} status is not expected`);
