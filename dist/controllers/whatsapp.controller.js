@@ -6,6 +6,26 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const whatsapp_service_1 = __importDefault(require("../services/whatsapp.service"));
 const is_authenticated_middleware_1 = __importDefault(require("../middlewares/is-authenticated.middleware"));
+const http_errors_1 = require("@rgranatodutra/http-errors");
+const waba_message_adapter_1 = require("../adapters/waba-message.adapter");
+function validateWebhookEntry(data) {
+    if (!data?.entry[0]?.changes[0]?.value) {
+        throw new http_errors_1.BadRequestError("invalid webhook entry.");
+    }
+    if (data.entry[0].changes[0].value.statuses[0]) {
+        const statusChange = data.entry[0].changes[0].value.statuses[0];
+        return statusChange;
+    }
+    if (data.entry[0].changes[0].value.messages[0]) {
+        console.log(new Date().toLocaleString() + " WABA Message: ");
+        console.dir(data.entry[0].changes[0].value.messages[0], {
+            depth: null
+        });
+        const message = waba_message_adapter_1.WABAMessage.fromData(data.entry[0].changes[0].value.messages);
+        return message;
+    }
+    throw new Error("unexpected webhook message format.");
+}
 class WhatsappController {
     router;
     constructor(router) {
@@ -27,7 +47,8 @@ class WhatsappController {
         res.status(200).json({ templates });
     }
     async receiveMessage(req, res) {
-        console.log("GUP MESSAGE", req.body);
+        const data = validateWebhookEntry(req.body);
+        console.log(data.id);
         res.status(200).send();
         res.status(500).send();
     }
