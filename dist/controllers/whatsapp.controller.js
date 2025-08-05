@@ -7,8 +7,10 @@ const express_1 = require("express");
 const whatsapp_service_1 = __importDefault(require("../services/whatsapp.service"));
 const is_authenticated_middleware_1 = __importDefault(require("../middlewares/is-authenticated.middleware"));
 const http_errors_1 = require("@rgranatodutra/http-errors");
-const waba_message_adapter_1 = require("../adapters/waba-message.adapter");
-function validateWebhookEntry(data) {
+const gupshup_message_parser_1 = __importDefault(require("../parsers/gupshup-message.parser"));
+function validateWebhookEntry(instance, data) {
+    console.log(new Date().toLocaleString() + " GS Message: ");
+    console.dir(data, { depth: null });
     if (!data?.entry[0]?.changes[0]?.value) {
         throw new http_errors_1.BadRequestError("invalid webhook entry.");
     }
@@ -21,7 +23,7 @@ function validateWebhookEntry(data) {
         console.dir(data.entry[0].changes[0].value.messages[0], {
             depth: null
         });
-        const message = waba_message_adapter_1.WABAMessage.fromData(data.entry[0].changes[0].value.messages);
+        const message = gupshup_message_parser_1.default.parse("", instance, data.entry[0].changes[0].value.messages[0]);
         return message;
     }
     throw new Error("unexpected webhook message format.");
@@ -33,7 +35,7 @@ class WhatsappController {
         this.router.get("/api/whatsapp/groups", is_authenticated_middleware_1.default, this.getGroups);
         this.router.get("/api/whatsapp/templates", is_authenticated_middleware_1.default, this.getTemplates);
         this.router.post("/api/whatsapp/meta/:instance/webhooks", this.receiveMessage);
-        this.router.get("/api/whatsapp/meta/:instanc/webhooks", this.webhook);
+        this.router.get("/api/whatsapp/meta/:instance/webhooks", this.webhook);
     }
     async getGroups(req, res) {
         const groups = await whatsapp_service_1.default.getGroups(req.session.instance, req.session.sectorId);
@@ -47,8 +49,9 @@ class WhatsappController {
         res.status(200).json({ templates });
     }
     async receiveMessage(req, res) {
-        const data = validateWebhookEntry(req.body);
-        console.log(data.id);
+        const instance = req.params["instance"];
+        const data = validateWebhookEntry(instance, req.body);
+        console.log("parsedMsg", data);
         res.status(200).send();
         res.status(500).send();
     }

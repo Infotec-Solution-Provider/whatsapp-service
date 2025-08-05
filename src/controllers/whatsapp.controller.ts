@@ -3,9 +3,11 @@ import whatsappService from "../services/whatsapp.service";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import { WABAMessageStatusData } from "../types/whatsapp-api.types";
 import { BadRequestError } from "@rgranatodutra/http-errors";
-import { WABAMessage } from "../adapters/waba-message.adapter";
+import GUPSHUPMessageParser from "../parsers/gupshup-message.parser";
 
-function validateWebhookEntry(data: any) {
+function validateWebhookEntry(instance: string, data: any) {
+	console.log(new Date().toLocaleString() + " GS Message: ");
+	console.dir(data, { depth: null });
 	if (!data?.entry[0]?.changes[0]?.value) {
 		throw new BadRequestError("invalid webhook entry.");
 	}
@@ -22,8 +24,10 @@ function validateWebhookEntry(data: any) {
 			depth: null
 		});
 
-		const message = WABAMessage.fromData(
-			data.entry[0].changes[0].value.messages
+		const message = GUPSHUPMessageParser.parse(
+			"",
+			instance,
+			data.entry[0].changes[0].value.messages[0]
 		);
 
 		return message;
@@ -50,7 +54,7 @@ class WhatsappController {
 			"/api/whatsapp/meta/:instance/webhooks",
 			this.receiveMessage
 		);
-		this.router.get("/api/whatsapp/meta/:instanc/webhooks", this.webhook);
+		this.router.get("/api/whatsapp/meta/:instance/webhooks", this.webhook);
 	}
 
 	private async getGroups(req: Request, res: Response) {
@@ -72,9 +76,10 @@ class WhatsappController {
 	}
 
 	private async receiveMessage(req: Request, res: Response) {
-		const data = validateWebhookEntry(req.body);
+		const instance = req.params["instance"] as string;
+		const data = validateWebhookEntry(instance, req.body);
 
-		console.log(data.id);
+		console.log("parsedMsg", data);
 
 		res.status(200).send();
 		res.status(500).send();
