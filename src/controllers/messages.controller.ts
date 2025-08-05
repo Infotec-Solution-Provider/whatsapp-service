@@ -23,11 +23,6 @@ class MessagesController {
 			isAuthenticated,
 			this.sendMessage
 		);
-		this.router.post(
-			"/api/whatsapp/messages/template",
-			isAuthenticated,
-			this.sendTemplate
-		);
 	}
 
 	private async getMessageById(req: Request, res: Response) {
@@ -89,21 +84,6 @@ class MessagesController {
 
 		res.status(201).send({
 			message: "Message sent successfully!",
-			data: message
-		});
-	}
-
-	private async sendTemplate(req: Request, res: Response) {
-		const { to, ...data } = req.body;
-
-		const message = await whatsappService.sendTemplate(
-			req.session,
-			to,
-			data
-		);
-
-		res.status(201).send({
-			message: "",
 			data: message
 		});
 	}

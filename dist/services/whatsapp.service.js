@@ -318,23 +318,23 @@ class WhatsappService {
         const groups = await client.getGroups();
         return groups;
     }
-    getGupshupClient(session) {
-        const client = this.getClientBySector(session.instance, session.sectorId);
+    async getGupshupClient(session) {
+        const client = await this.getClientBySector(session.instance, session.sectorId);
         if (!(client instanceof gupshup_whatsapp_client_1.default)) {
             throw new Error("Invalid WhatsApp client type for Gupshup service.");
         }
         return client;
     }
-    async sendTemplate(session, to, data) {
+    async sendTemplate(session, to, data, chatId, contactId) {
         const process = new processing_logger_1.default(session.instance, "send-template", `${to}-${Date.now()}`, data);
         try {
-            const client = this.getGupshupClient(session);
+            const client = await this.getGupshupClient(session);
             const message = await client.sendTemplate({
                 to,
                 templateId: data.templateId,
                 templateText: data.templateText,
                 parameters: data.templateParams
-            });
+            }, chatId, contactId);
             const savedMsg = await messages_service_1.default.insertMessage(message);
             process.log("Mensagem salva no banco de dados.", savedMsg);
             messages_distribution_service_1.default.notifyMessage(process, savedMsg);
@@ -346,8 +346,14 @@ class WhatsappService {
         }
     }
     async getTemplates(session) {
-        const client = this.getGupshupClient(session);
-        return await client.getTemplates();
+        const client = await this.getGupshupClient(session);
+        const templates = await client.getTemplates();
+        return templates.map((t) => ({
+            id: t.id,
+            name: t.elementName,
+            category: t.category,
+            text: t.data
+        }));
     }
 }
 exports.default = new WhatsappService();
