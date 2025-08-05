@@ -13,28 +13,31 @@ async function validateWebhookEntry(instance: string, data: any) {
 		throw new BadRequestError("invalid webhook entry.");
 	}
 
-	console.dir(data, { depth: null });
-	const recipient =
-		data.entry[0].changes[0].value.metadata.display_phone_number;
-
 	if (data.entry[0].changes[0].value?.statuses?.[0]) {
 		const statusChange = data.entry[0].changes[0].value.statuses[0];
-		console.log("statusChange", statusChange);
+
 		return {
 			type: "status" as const,
 			data: statusChange as WABAMessageStatusData,
-			recipient
+			appId: data.gs_app_id
 		};
 	}
 
 	if (data.entry[0].changes[0].value?.messages?.[0]) {
+		const recipient =
+			data.entry[0].changes[0].value.metadata.display_phone_number;
+
 		const message = await GUPSHUPMessageParser.parse(
 			recipient,
 			instance,
 			data.entry[0].changes[0].value.messages[0]
 		);
 
-		return { type: "message" as const, data: message, recipient };
+		return {
+			type: "message" as const,
+			data: message,
+			appId: data.gs_app_id
+		};
 	}
 
 	return null;
@@ -89,11 +92,11 @@ class WhatsappController {
 				return;
 			}
 
-			const { type, data, recipient } = entry;
+			const { type, data, appId } = entry;
 
 			const client = await prismaService.wppClient.findFirstOrThrow({
 				where: {
-					phone: recipient
+					gupshupAppId: appId
 				}
 			});
 
@@ -108,8 +111,6 @@ class WhatsappController {
 					break;
 				case "status":
 					const status = GUPSHUPMessageParser.parseStatus(data);
-
-					console.log("status parsed", status);
 
 					await messagesDistributionService.processMessageStatus(
 						"waba",
