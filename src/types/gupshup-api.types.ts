@@ -19,7 +19,7 @@ export type GSMessageData =
 	| GSDocumentMessageData
 	| GSContactsMessageData;
 
-export type MessageStatus = "read" | "delivered" | "sent";
+export type MessageStatus = "read" | "delivered" | "sent" | "enqueued";
 
 export interface GSMessageStatusData {
 	id: string;
