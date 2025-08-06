@@ -17,26 +17,37 @@ import whatsappController from "./controllers/whatsapp.controller";
 import readyMessagesController from "./controllers/ready-messages.controller";
 import notificationsController from "./controllers/notifications.controller";
 import monitorController from "./controllers/monitor.controller";
+import parametersController from "./controllers/parameters.controller";
 
 whatsappService.buildClients();
 const app = express();
 
-app.use(express.json({ limit: '2gb' }));
-app.use(express.urlencoded({ extended: true, limit: '2gb' }));
+const routesToLog: Array<express.Router> = [];
+const logRoute = (r: express.Router) => {
+	routesToLog.push(r);
+
+	return r;
+};
+
+app.use(express.json({ limit: "2gb" }));
+app.use(express.urlencoded({ extended: true, limit: "2gb" }));
 app.use(cors());
 
-app.use(whatsappController.router);
-app.use(chatsController.router);
-app.use(messagesController.router);
-app.use(walletsController.router);
-app.use(resultsController.router);
-app.use(contactsController.router);
-app.use(sectorsController.router);
-app.use(schedulesController.router);
-app.use(internalchatsController.router);
-app.use(readyMessagesController.router);
-app.use(notificationsController.router);
-app.use(monitorController.router);
+app.use(logRoute(whatsappController.router));
+app.use(logRoute(chatsController.router));
+app.use(logRoute(messagesController.router));
+app.use(logRoute(walletsController.router));
+app.use(logRoute(resultsController.router));
+app.use(logRoute(contactsController.router));
+app.use(logRoute(sectorsController.router));
+app.use(logRoute(schedulesController.router));
+app.use(logRoute(internalchatsController.router));
+app.use(logRoute(readyMessagesController.router));
+app.use(logRoute(notificationsController.router));
+app.use(logRoute(monitorController.router));
+app.use(logRoute(parametersController.router));
+
+logRoutes("", routesToLog);
 
 app.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
 	console.error(err);
@@ -45,21 +56,6 @@ app.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
 
 // @ts-ignore
 app.use(handleRequestError);
-
-logRoutes("", [
-	whatsappController.router,
-	chatsController.router,
-	messagesController.router,
-	walletsController.router,
-	resultsController.router,
-	contactsController.router,
-	sectorsController.router,
-	schedulesController.router,
-	internalchatsController.router,
-	readyMessagesController.router,
-	notificationsController.router,
-	monitorController.router
-]);
 
 const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;
 

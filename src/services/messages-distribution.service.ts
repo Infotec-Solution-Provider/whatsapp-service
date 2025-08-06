@@ -381,19 +381,15 @@ class MessagesDistributionService {
 		status: WppMessageStatus
 	) {
 		try {
-			const search =
-				type === "wwebjs" ? { wwebjsId: id } : { wabaId: id };
-
-			if (!("wwebjsId" in search) && !("wabaId" in search)) {
-				return;
-			}
-
 			const message = await prismaService.wppMessage.update({
-				where: search,
+				where: {
+					[(type + "Id") as "wwebjsId"]: id
+				},
 				data: {
 					status
 				}
 			});
+
 			if (message.chatId === null) {
 				return;
 			}
@@ -405,8 +401,7 @@ class MessagesDistributionService {
 				status
 			});
 		} catch (err) {
-			const msg = sanitizeErrorMessage(err);
-			console.error(`Erro ao processar status da mensagem: ${msg}`);
+			console.log("Não foi possível atualizar a mensagem de id: " + id);
 		}
 	}
 

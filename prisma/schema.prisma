@@ -276,6 +276,24 @@ model WppWalletUser {
     @@map("wallets_users")
 }
 
+model Parameter {
+    id       Int            @id @default(autoincrement())
+    scope    ParameterScope
+    key      String
+    value    String
+    instance String? // se escopo = INSTANCE ou USER
+    sectorId Int? // se escopo = SECTOR ou USER
+    userId   Int? // se escopo = USER
+
+    @@map("parameters")
+}
+
+enum ParameterScope {
+    INSTANCE
+    SECTOR
+    USER
+}
+
 model Notification {
     id          Int              @id @default(autoincrement())
     instance    String           @map("instance")
