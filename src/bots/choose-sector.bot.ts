@@ -111,9 +111,15 @@ class ChooseSectorBot {
 				const chooseOption = Number(
 					message.body.trim().replace(/[^0-9]/g, "")
 				);
+
+				console.log("chooseOption", chooseOption);
+
 				const isValid =
 					chooseOption > 0 && chooseOption <= sectors.length;
+				console.log("isValid", isValid)
+
 				const chooseSector = isValid && sectors[+chooseOption - 1];
+				console.log("chooseSector", chooseSector);
 
 				if (chooseSector) {
 					let setorId = sectors[+chooseOption - 1];
