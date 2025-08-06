@@ -43,12 +43,20 @@ class GupshupWhatsappClient {
         data.append("destination", options.to);
         if ("fileUrl" in options) {
             const urlKey = options.fileType === "image" ? "originalUrl" : "url";
+            console.log("options.fileUrl", options.fileUrl);
+            console.log("urlKey", urlKey);
+            const updatedFileUrl = options.fileUrl.replace("http://localhost:8003", "https://inpulse.infotecrs.inf.br");
             let message = {
                 type: options.fileType || "document",
-                [urlKey]: options.fileUrl
+                [urlKey]: updatedFileUrl
             };
+            const cleanedCaption = options.text?.replace(/undefined/g, "");
+            if (cleanedCaption) {
+                message["caption"] = cleanedCaption;
+            }
             options.text && (message["caption"] = options.text);
             data.append("message", JSON.stringify(message));
+            console.log("data", data);
         }
         else {
             if (!("text" in options)) {
@@ -70,6 +78,7 @@ class GupshupWhatsappClient {
             console.error(err.response.data);
             throw new Error("F");
         });
+        console.log("response.data", response.data);
         const message = {
             instance: this.instance,
             from: `me:${this.phone}`,

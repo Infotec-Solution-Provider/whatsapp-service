@@ -84,7 +84,7 @@ class MessagesDistributionService {
                     data: {
                         ...data,
                         botId: instance === "vollo" ? 1 : null,
-                        userId: null
+                        ...(instance === "vollo" && { userId: null })
                     }
                 });
             }
@@ -234,12 +234,10 @@ class MessagesDistributionService {
     }
     async processMessageStatus(type, id, status) {
         try {
-            const search = type === "wwebjs" ? { wwebjsId: id } : { wabaId: id };
-            if (!("wwebjsId" in search) && !("wabaId" in search)) {
-                return;
-            }
             const message = await prisma_service_1.default.wppMessage.update({
-                where: search,
+                where: {
+                    [(type + "Id")]: id
+                },
                 data: {
                     status
                 }
@@ -255,8 +253,7 @@ class MessagesDistributionService {
             });
         }
         catch (err) {
-            const msg = (0, utils_1.sanitizeErrorMessage)(err);
-            console.error(`Erro ao processar status da mensagem: ${msg}`);
+            console.log("Não foi possível atualizar a mensagem de id: " + id);
         }
     }
     async addSystemMessage(chat, text, notify = true) {

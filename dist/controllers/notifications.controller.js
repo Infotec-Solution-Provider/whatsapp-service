@@ -53,17 +53,21 @@ class NotificationsController {
             await prisma_service_1.default.notification.updateMany({
                 where: {
                     userId,
-                    read: false,
+                    read: false
                 },
                 data: {
-                    read: true,
-                },
+                    read: true
+                }
             });
-            res.status(200).send({ message: "Todas as notificações marcadas como lidas." });
+            res.status(200).send({
+                message: "Todas as notificações marcadas como lidas."
+            });
         }
         catch (error) {
             console.error("Erro ao marcar notificações como lidas:", error);
-            res.status(500).send({ message: "Erro ao atualizar notificações." });
+            res.status(500).send({
+                message: "Erro ao atualizar notificações."
+            });
         }
     }
 }

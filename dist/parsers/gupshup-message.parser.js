@@ -87,6 +87,9 @@ class GUPSHUPMessageParser {
             case "read":
                 return client_1.WppMessageStatus.READ;
                 break;
+            case "enqueued":
+                return client_1.WppMessageStatus.SENT;
+                break;
             default:
                 throw new http_errors_1.BadRequestError(`${data.status} status is not expected`);
         }

@@ -285,6 +285,7 @@ model Parameter {
     sectorId Int? // se escopo = SECTOR ou USER
     userId   Int? // se escopo = USER
 
+    @@unique([scope, instance, sectorId, userId, key])
     @@map("parameters")
 }
 
