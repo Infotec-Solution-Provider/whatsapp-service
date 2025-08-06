@@ -74,6 +74,8 @@ class ChooseSectorBot {
 		}
 
 		let chooseSectorMessage = `Escolha um setor para continuar:\n${sectors.map((s, i) => `${i + 1} - ${s.name}`).join("\n")}`;
+		console.log(chooseSectorMessage);
+
 		if (chat.instance === "nunes") {
 			chooseSectorMessage =
 				`Olá,\nEstamos felizes por você entrar em contato com a Metalúrgica Nunes, Usinagem de Precisão. ` +
@@ -83,8 +85,8 @@ class ChooseSectorBot {
 		switch (currentStep) {
 			case 1:
 				this.setRunningStep(chat.id, 2);
-				console.log(`[Step 1] Enviando mensagem de escolha de setor`);
 				await whatsappService.sendBotMessage(message.from, { chat, text: chooseSectorMessage });
+				console.log(`[Step 1] Enviando mensagem de escolha de setor`);
 				break;
 
 			case 2:
@@ -126,9 +128,10 @@ class ChooseSectorBot {
 
 				if (chooseOptionOp === 0) {
 					console.log(`[Step 3] Usuário optou por voltar à escolha de setor`);
+
+					this.setRunningStep(chat.id, 2);
 					await whatsappService.sendBotMessage(message.from, { chat, text: "Tudo bem, voltando para a escolha de setor..." });
 					await whatsappService.sendBotMessage(message.from, { chat, text: chooseSectorMessage });
-					this.setRunningStep(chat.id, 2);
 					break;
 				}
 
@@ -140,13 +143,13 @@ class ChooseSectorBot {
 					const answer = `Estamos te redirecionado para o atendente ${chooseOp.NOME}.\nVocê será atendido em breve!`;
 					const operatoranswer = `*${chooseOp.NOME}*: Olá, em que posso ajudar?`;
 
+					this.removeRunningStep(chat.id);
 					await whatsappService.sendBotMessage(message.from, { chat, text: answer });
 					await whatsappService.sendBotMessage(message.from, { chat, text: operatoranswer });
 
 					console.log(`[Step 3] Transferindo chat para operador ${chooseOp.NOME}`);
 					await messagesDistributionService.transferChatOperator(sector, chooseOp, contact, chat);
 
-					this.removeRunningStep(chat.id);
 				} else {
 					console.warn(`[Step 3] Opção inválida para operador`);
 					await whatsappService.sendBotMessage(message.from, { chat, text: "Opção inválida! Tente novamente." });
@@ -159,18 +162,16 @@ class ChooseSectorBot {
 
 				switch (option) {
 					case 1:
+						this.setRunningStep(chat.id, 2);
 						console.log(`[Step 4] Retornando ao menu de setores`);
 						await whatsappService.sendBotMessage(message.from, { chat, text: "Certo, retornando ao menu de setores..." });
 						await whatsappService.sendBotMessage(message.from, { chat, text: chooseSectorMessage });
-						this.setRunningStep(chat.id, 2);
 						break;
 
 					case 2:
+						this.removeRunningStep(chat.id);
 						console.log(`[Step 4] Encerrando atendimento`);
-						await whatsappService.sendBotMessage(message.from, {
-							chat,
-							text: "Atendimento encerrado. Caso precise de algo, estamos à disposição!",
-						});
+
 						await prismaService.wppChat.update({
 							where: { id: chat.id },
 							data: { isFinished: true, finishedAt: new Date(), finishedBy: null }
@@ -178,20 +179,25 @@ class ChooseSectorBot {
 						const finishMsg = `Atendimento finalizado pelo cliente devido inatividade do operador.`;
 						await messagesDistributionService.addSystemMessage(chat, finishMsg);
 						await socketService.emit(SocketEventType.WppChatFinished, `${chat.instance}:chat:${chat.id}`, { chatId: chat.id });
-						this.removeRunningStep(chat.id);
+						await whatsappService.sendBotMessage(message.from, {
+							chat,
+							text: "Atendimento encerrado. Caso precise de algo, estamos à disposição!",
+						});
 						break;
 
 					case 3:
 						console.log(`[Step 4] Cliente deseja continuar aguardando`);
-						await whatsappService.sendBotMessage(message.from, {
-							chat,
-							text: "Tudo bem! Vamos continuar aguardando o atendimento.",
-						});
+
 						this.removeRunningStep(chat.id);
 						const user = this.getOperadorOld(chat.id);
 						await prismaService.wppChat.update({
 							where: { id: chat.id },
 							data: { userId: user, botId: null }
+						});
+
+						await whatsappService.sendBotMessage(message.from, {
+							chat,
+							text: "Tudo bem! Vamos continuar aguardando o atendimento.",
 						});
 						break;
 
