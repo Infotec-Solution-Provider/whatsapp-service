@@ -48,6 +48,18 @@ class GupshupWhatsappClient implements WhatsappClient {
 		data.append("source", this.phone);
 		data.append("destination", options.to);
 
+		const msgType = (() => {
+			if (!("fileUrl" in options)) {
+				return "text";
+			}
+
+			if ((!options.fileType) || options.fileType === "document") {
+				return "file";
+			}
+
+			return options.fileType;
+		})()
+
 		if ("fileUrl" in options) {
 			const urlKey = options.fileType === "image" ? "originalUrl" : "url";
 			const updatedFileUrl = options.fileUrl.replace(
@@ -56,7 +68,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 			);
 
 			let message = {
-				type: options.fileType || "document",
+				type: msgType,
 				[urlKey]: updatedFileUrl
 			};
 
@@ -77,8 +89,6 @@ class GupshupWhatsappClient implements WhatsappClient {
 			data.append("message", JSON.stringify(message));
 		}
 
-		console.log(data);
-
 		const response = await this.api
 			.post("/wa/api/v1/msg", data, {
 				headers: {
@@ -89,18 +99,6 @@ class GupshupWhatsappClient implements WhatsappClient {
 				console.error(err.response.data);
 				throw new Error("F");
 			});
-
-		const msgType = (() => {
-			if (!("fileUrl" in options)) {
-				return "text";
-			}
-
-			if ((!options.fileType) || options.fileType === "document") {
-				return "file";
-			}
-
-			return options.fileType;
-		})()
 
 		const message: CreateMessageDto = {
 			instance: this.instance,
