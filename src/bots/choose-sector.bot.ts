@@ -153,7 +153,7 @@ class ChooseSectorBot {
 					await whatsappService.sendBotMessage(message.from, {
 						chat,
 						text: answer,
-						quotedId: message.id
+
 					});
 					this.chatState.set(String(chat.id), {
 						operadores,
@@ -176,12 +176,12 @@ class ChooseSectorBot {
 					await whatsappService.sendBotMessage(message.from, {
 						chat,
 						text: "Tudo bem, voltando para a escolha de setor...",
-						quotedId: message.id
+
 					});
 					await whatsappService.sendBotMessage(message.from, {
 						chat,
 						text: chooseSectorMessage,
-						quotedId: message.id
+
 					});
 					this.setRunningStep(chat.id, 2);
 					break;
@@ -198,13 +198,13 @@ class ChooseSectorBot {
 					await whatsappService.sendBotMessage(message.from, {
 						chat,
 						text: answer,
-						quotedId: message.id
+
 					});
 					const operatoranswer = `*${chooseOp.NOME}*: Olá, em que posso ajudar?`;
 					await whatsappService.sendBotMessage(message.from, {
 						chat,
 						text: operatoranswer,
-						quotedId: message.id
+
 					});
 
 					await messagesDistributionService.transferChatOperator(
@@ -233,12 +233,12 @@ class ChooseSectorBot {
 						await whatsappService.sendBotMessage(message.from, {
 							chat,
 							text: "Certo, retornando ao menu de setores...",
-							quotedId: message.id
+
 						});
 						await whatsappService.sendBotMessage(message.from, {
 							chat,
 							text: chooseSectorMessage,
-							quotedId: message.id
+
 						});
 						this.setRunningStep(chat.id, 2);
 						break;
@@ -247,7 +247,7 @@ class ChooseSectorBot {
 						await whatsappService.sendBotMessage(message.from, {
 							chat,
 							text: "Atendimento encerrado. Caso precise de algo, estamos à disposição!",
-							quotedId: message.id
+
 						});
 						await prismaService.wppChat.update({
 							where: { id: chat.id },
@@ -279,7 +279,7 @@ class ChooseSectorBot {
 						await whatsappService.sendBotMessage(message.from, {
 							chat,
 							text: "Tudo bem! Vamos continuar aguardando o atendimento.",
-							quotedId: message.id
+
 						});
 						this.removeRunningStep(chat.id);
 						let user = this.getOperadorOld(chat.id);
@@ -293,7 +293,7 @@ class ChooseSectorBot {
 						await whatsappService.sendBotMessage(message.from, {
 							chat,
 							text: "Opção inválida! Responda apenas com o número da opção desejada.",
-							quotedId: message.id
+
 						});
 						break;
 				}
