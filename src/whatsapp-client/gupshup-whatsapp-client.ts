@@ -90,6 +90,18 @@ class GupshupWhatsappClient implements WhatsappClient {
 				throw new Error("F");
 			});
 
+		const msgType = (() => {
+			if (!("fileUrl" in options)) {
+				return "text";
+			}
+
+			if ((!options.fileType) || options.fileType === "document") {
+				return "file";
+			}
+
+			return options.fileType;
+		})()
+
 		const message: CreateMessageDto = {
 			instance: this.instance,
 			from: `me:${this.phone}`,
@@ -97,8 +109,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 			body: options.text || "",
 			status: "PENDING",
 			timestamp: Date.now().toString(),
-			type:
-				"fileUrl" in options ? options.fileType || "document" : "text",
+			type: msgType,
 			wabaId: response.data["messageId"] || null
 		};
 
