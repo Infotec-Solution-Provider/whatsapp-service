@@ -17,7 +17,11 @@ class ChooseSectorBot {
 	private chatState = new Map<string, { operadores: User[]; setor: any }>();
 
 	private getRunningStep(chatId: number) {
+		console.log("Getting Running step for chat id", chatId);
+
 		const running = this.running.find((r) => r.chatId === chatId);
+		console.log("findRunning for chatId " + chatId, ": ", running)
+
 		if (!running) {
 			return this.setRunningStep(chatId, 1);
 		}
@@ -28,6 +32,7 @@ class ChooseSectorBot {
 		this.setRunningStep(chatId, step);
 		this.setOperadorOld(chatId, operadorOldId);
 	}
+
 	private getOperadorOld(chatId: number) {
 		const running = this.runningOperadorOld.find(
 			(r) => r.chatId === chatId
@@ -37,6 +42,7 @@ class ChooseSectorBot {
 		}
 		return running.operadorOldId;
 	}
+
 	private setOperadorOld(chatId: number, operadorOldId: number) {
 		const running = this.runningOperadorOld.find(
 			(r) => r.chatId === chatId
@@ -48,6 +54,7 @@ class ChooseSectorBot {
 		}
 		return operadorOldId;
 	}
+
 	private setRunningStep(chatId: number, step: number) {
 		const running = this.running.find((r) => r.chatId === chatId);
 		if (running) {
@@ -71,9 +78,13 @@ class ChooseSectorBot {
 		message: WppMessage
 	) {
 		const currentStep = this.getRunningStep(chat.id);
+		console.log(`chatId: ${chat.id} || currentStep: ${currentStep}`);
+
 		const sectors = await sectorsService.getSectors(chat.instance, {
 			receiveChats: true
 		});
+
+
 		if (!sectors) {
 			throw new Error(`No sectors found for instance ${chat.instance}`);
 		}
@@ -88,12 +99,13 @@ class ChooseSectorBot {
 
 		switch (currentStep) {
 			case 1:
+				this.setRunningStep(chat.id, 2);
 				await whatsappService.sendBotMessage(message.from, {
 					chat,
 					text: chooseSectorMessage,
 					quotedId: message.id
 				});
-				this.setRunningStep(chat.id, 2);
+
 				break;
 			case 2:
 				const chooseOption = Number(
