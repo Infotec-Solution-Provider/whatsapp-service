@@ -109,9 +109,9 @@ class ChooseSectorBot {
 					}
 
 					const answer = `Escolha com quem deseja falar\n${operadores.map((s, i) => `${i + 1} - ${s.NOME}`).join("\n")}\n0 - Voltar à escolha de setor`;
-					await whatsappService.sendBotMessage(message.from, { chat, text: answer });
-					this.chatState.set(String(chat.id), { operadores, setor: chooseSector });
 					this.setRunningStep(chat.id, 3);
+					this.chatState.set(String(chat.id), { operadores, setor: chooseSector });
+					await whatsappService.sendBotMessage(message.from, { chat, text: answer });
 				} else {
 					console.warn(`[Step 2] Opção inválida`);
 					await whatsappService.sendBotMessage(message.from, { chat, text: "Opção inválida! Tente novamente." });
