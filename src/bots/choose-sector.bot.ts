@@ -103,7 +103,6 @@ class ChooseSectorBot {
 				await whatsappService.sendBotMessage(message.from, {
 					chat,
 					text: chooseSectorMessage,
-					quotedId: message.id
 				});
 
 				break;
@@ -165,7 +164,6 @@ class ChooseSectorBot {
 				await whatsappService.sendBotMessage(message.from, {
 					chat,
 					text: "Opção inválida! Tente novamente.",
-					quotedId: message.id
 				});
 				break;
 			case 3:
@@ -220,7 +218,6 @@ class ChooseSectorBot {
 				await whatsappService.sendBotMessage(message.from, {
 					chat,
 					text: "Opção inválida! Tente novamente.",
-					quotedId: message.id
 				});
 				break;
 			case 4:
