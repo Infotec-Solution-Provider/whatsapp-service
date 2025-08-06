@@ -28,7 +28,8 @@ class ChooseSectorBot {
 	private getOperadorOld(chatId: number) {
 		const running = this.runningOperadorOld.find((r) => r.chatId === chatId);
 		console.log(`[Get Operador Old] chatId: ${chatId}, operadorOldId: ${running?.operadorOldId}`);
-		return running?.operadorOldId ?? null;
+		if (!running) return this.setRunningStep(chatId, 1);
+		return running.operadorOldId;
 	}
 
 	private setOperadorOld(chatId: number, operadorOldId: number) {
@@ -54,18 +55,20 @@ class ChooseSectorBot {
 	}
 
 	private removeRunningStep(chatId: number) {
-		this.running = this.running.filter((r) => r.chatId !== chatId);
-		this.runningOperadorOld = this.runningOperadorOld.filter((r) => r.chatId !== chatId);
-		this.chatState.delete(String(chatId));
-		console.log(`[Remove Running State] chatId: ${chatId}`);
+		const index = this.running.findIndex((r) => r.chatId === chatId);
+		if (index !== -1) {
+			this.running.splice(index, 1);
+		}
+		console.log(`[Remove Running Step] chatId: ${chatId}`);
 	}
 
 	public async processMessage(chat: WppChat, contact: WppContact, message: WppMessage) {
 		console.log(`📩 [Bot] processMessage - chatId: ${chat.id}, message: "${message.body}"`);
 		const currentStep = this.getRunningStep(chat.id);
 
+		console.log(`[Step ${currentStep}] Recuperando setores da instância: ${chat.instance}`);
 		const sectors = await sectorsService.getSectors(chat.instance, { receiveChats: true });
-		if (!sectors || sectors.length === 0) {
+		if (!sectors) {
 			console.error(`❌ Nenhum setor encontrado para a instância ${chat.instance}`);
 			throw new Error(`No sectors found for instance ${chat.instance}`);
 		}
@@ -80,29 +83,29 @@ class ChooseSectorBot {
 		switch (currentStep) {
 			case 1:
 				this.setRunningStep(chat.id, 2);
+				console.log(`[Step 1] Enviando mensagem de escolha de setor`);
 				await whatsappService.sendBotMessage(message.from, { chat, text: chooseSectorMessage });
 				break;
 
-			case 2: {
-				const input = message.body.trim();
-				const isNumber = /^\d+$/.test(input);
-				if (!isNumber) {
-					await whatsappService.sendBotMessage(message.from, { chat, text: "Opção inválida! Tente novamente." });
-					return;
-				}
+			case 2:
+				const chooseOption = Number(message.body.trim().replace(/[^0-9]/g, ""));
+				const isValid = chooseOption > 0 && chooseOption <= sectors.length;
+				console.log(`[Step 2] Opção recebida: ${chooseOption}, válida: ${isValid}`);
 
-				const chooseOption = Number(input);
-				if (chooseOption > 0 && chooseOption <= sectors.length) {
-					const chooseSector = sectors[chooseOption - 1];
-					console.log(`[Setor escolhido] ${chooseSector.name}`);
-
-					let operadores = await instancesService.executeQuery<User[]>(chat.instance, `SELECT * FROM operadores WHERE SETOR = ${chooseSector.id} ORDER BY NOME`, []);
+				const chooseSector = isValid ? sectors[chooseOption - 1] : null;
+				if (chooseSector) {
+					console.log(`[Step 2] Setor escolhido: ${chooseSector.name} (ID: ${chooseSector.id})`);
+					let query = `SELECT * FROM operadores WHERE SETOR = ${chooseSector.id} ORDER BY NOME`;
+					let operadores = await instancesService.executeQuery<Array<User>>(chat.instance, query, []);
+					console.log(`[Step 2] Operadores encontrados: ${operadores.map(o => o.NOME).join(", ")}`);
 
 					if (chat.instance === "nunes" && chooseSector.name === "Financeiro") {
 						operadores = operadores.filter((o) => o.NOME !== "Andréia");
+						console.log(`[Step 2] Andréia removida dos operadores do setor Financeiro`);
 					}
 					if (chat.instance === "nunes" && chooseSector.name === "Compras") {
 						operadores = operadores.filter((o) => o.NOME !== "Jorel");
+						console.log(`[Step 2] Jorel removido dos operadores do setor Compras`);
 					}
 
 					const answer = `Escolha com quem deseja falar\n${operadores.map((s, i) => `${i + 1} - ${s.NOME}`).join("\n")}\n0 - Voltar à escolha de setor`;
@@ -110,75 +113,97 @@ class ChooseSectorBot {
 					this.chatState.set(String(chat.id), { operadores, setor: chooseSector });
 					this.setRunningStep(chat.id, 3);
 				} else {
+					console.warn(`[Step 2] Opção inválida`);
 					await whatsappService.sendBotMessage(message.from, { chat, text: "Opção inválida! Tente novamente." });
 				}
 				break;
-			}
 
-			case 3: {
-				const input = message.body.trim();
-				const isNumber = /^\d+$/.test(input);
-				if (!isNumber) {
-					await whatsappService.sendBotMessage(message.from, { chat, text: "Opção inválida! Tente novamente." });
-					return;
-				}
-
-				const chooseOption = Number(input);
+			case 3:
+				const chooseOptionOp = Number(message.body.trim().replace(/[^0-9]/g, ""));
 				const state = this.chatState.get(String(chat.id));
 				const operadores = state?.operadores || [];
-				const setor = state?.setor;
+				const sector = state?.setor;
 
-				if (chooseOption === 0) {
+				if (chooseOptionOp === 0) {
+					console.log(`[Step 3] Usuário optou por voltar à escolha de setor`);
 					await whatsappService.sendBotMessage(message.from, { chat, text: "Tudo bem, voltando para a escolha de setor..." });
-					this.chatState.delete(String(chat.id));
-					this.setRunningStep(chat.id, 2);
 					await whatsappService.sendBotMessage(message.from, { chat, text: chooseSectorMessage });
-					return;
+					this.setRunningStep(chat.id, 2);
+					break;
 				}
 
-				if (chooseOption > 0 && chooseOption <= operadores.length) {
-					const operador = operadores[chooseOption - 1];
-					const notify = `Estamos te redirecionando para o atendente ${operador.NOME}.\nVocê será atendido em breve!`;
-					const greet = `*${operador.NOME}*: Olá, em que posso ajudar?`;
+				const isValids = chooseOptionOp > 0 && chooseOptionOp <= operadores.length;
+				const chooseOp = isValids ? operadores[chooseOptionOp - 1] : null;
 
-					await whatsappService.sendBotMessage(message.from, { chat, text: notify });
-					await whatsappService.sendBotMessage(message.from, { chat, text: greet });
+				if (chooseOp) {
+					console.log(`[Step 3] Operador escolhido: ${chooseOp.NOME}`);
+					const answer = `Estamos te redirecionado para o atendente ${chooseOp.NOME}.\nVocê será atendido em breve!`;
+					const operatoranswer = `*${chooseOp.NOME}*: Olá, em que posso ajudar?`;
 
-					await messagesDistributionService.transferChatOperator(setor, operador, contact, chat);
+					await whatsappService.sendBotMessage(message.from, { chat, text: answer });
+					await whatsappService.sendBotMessage(message.from, { chat, text: operatoranswer });
+
+					console.log(`[Step 3] Transferindo chat para operador ${chooseOp.NOME}`);
+					await messagesDistributionService.transferChatOperator(sector, chooseOp, contact, chat);
+
 					this.removeRunningStep(chat.id);
 				} else {
+					console.warn(`[Step 3] Opção inválida para operador`);
 					await whatsappService.sendBotMessage(message.from, { chat, text: "Opção inválida! Tente novamente." });
 				}
 				break;
-			}
 
-			case 4: {
+			case 4:
 				const option = Number(message.body.trim().replace(/[^0-9]/g, ""));
+				console.log(`[Step 4] Opção recebida: ${option}`);
+
 				switch (option) {
 					case 1:
+						console.log(`[Step 4] Retornando ao menu de setores`);
 						await whatsappService.sendBotMessage(message.from, { chat, text: "Certo, retornando ao menu de setores..." });
-						this.setRunningStep(chat.id, 2);
 						await whatsappService.sendBotMessage(message.from, { chat, text: chooseSectorMessage });
+						this.setRunningStep(chat.id, 2);
 						break;
+
 					case 2:
-						await whatsappService.sendBotMessage(message.from, { chat, text: "Atendimento encerrado. Caso precise de algo, estamos à disposição!" });
-						await prismaService.wppChat.update({ where: { id: chat.id }, data: { isFinished: true, finishedAt: new Date(), finishedBy: null } });
-						await messagesDistributionService.addSystemMessage(chat, `Atendimento finalizado pelo cliente devido inatividade do operador.`);
+						console.log(`[Step 4] Encerrando atendimento`);
+						await whatsappService.sendBotMessage(message.from, {
+							chat,
+							text: "Atendimento encerrado. Caso precise de algo, estamos à disposição!",
+						});
+						await prismaService.wppChat.update({
+							where: { id: chat.id },
+							data: { isFinished: true, finishedAt: new Date(), finishedBy: null }
+						});
+						const finishMsg = `Atendimento finalizado pelo cliente devido inatividade do operador.`;
+						await messagesDistributionService.addSystemMessage(chat, finishMsg);
 						await socketService.emit(SocketEventType.WppChatFinished, `${chat.instance}:chat:${chat.id}`, { chatId: chat.id });
 						this.removeRunningStep(chat.id);
 						break;
+
 					case 3:
-						await whatsappService.sendBotMessage(message.from, { chat, text: "Tudo bem! Vamos continuar aguardando o atendimento." });
-						const userId = this.getOperadorOld(chat.id);
-						await prismaService.wppChat.update({ where: { id: chat.id }, data: { userId, botId: null } });
+						console.log(`[Step 4] Cliente deseja continuar aguardando`);
+						await whatsappService.sendBotMessage(message.from, {
+							chat,
+							text: "Tudo bem! Vamos continuar aguardando o atendimento.",
+						});
 						this.removeRunningStep(chat.id);
+						const user = this.getOperadorOld(chat.id);
+						await prismaService.wppChat.update({
+							where: { id: chat.id },
+							data: { userId: user, botId: null }
+						});
 						break;
+
 					default:
-						await whatsappService.sendBotMessage(message.from, { chat, text: "Opção inválida! Responda apenas com o número da opção desejada." });
+						console.warn(`[Step 4] Opção inválida`);
+						await whatsappService.sendBotMessage(message.from, {
+							chat,
+							text: "Opção inválida! Responda apenas com o número da opção desejada.",
+						});
 						break;
 				}
 				break;
-			}
 
 			default:
 				console.warn(`[Bot] Etapa desconhecida: ${currentStep}`);
