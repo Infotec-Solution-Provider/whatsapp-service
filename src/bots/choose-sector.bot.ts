@@ -85,7 +85,7 @@ class ChooseSectorBot {
 		switch (currentStep) {
 			case 1:
 				this.setRunningStep(chat.id, 2);
-				await whatsappService.sendBotMessage(message.from, { chat, text: chooseSectorMessage });
+				whatsappService.sendBotMessage(message.from, { chat, text: chooseSectorMessage });
 				console.log(`[Step 1] Enviando mensagem de escolha de setor`);
 				break;
 
@@ -113,10 +113,10 @@ class ChooseSectorBot {
 					const answer = `Escolha com quem deseja falar\n${operadores.map((s, i) => `${i + 1} - ${s.NOME}`).join("\n")}\n0 - Voltar à escolha de setor`;
 					this.setRunningStep(chat.id, 3);
 					this.chatState.set(String(chat.id), { operadores, setor: chooseSector });
-					await whatsappService.sendBotMessage(message.from, { chat, text: answer });
+					whatsappService.sendBotMessage(message.from, { chat, text: answer });
 				} else {
 					console.warn(`[Step 2] Opção inválida`);
-					await whatsappService.sendBotMessage(message.from, { chat, text: "Opção inválida! Tente novamente." });
+					whatsappService.sendBotMessage(message.from, { chat, text: "Opção inválida! Tente novamente." });
 				}
 				break;
 
@@ -130,8 +130,8 @@ class ChooseSectorBot {
 					console.log(`[Step 3] Usuário optou por voltar à escolha de setor`);
 
 					this.setRunningStep(chat.id, 2);
-					await whatsappService.sendBotMessage(message.from, { chat, text: "Tudo bem, voltando para a escolha de setor..." });
-					await whatsappService.sendBotMessage(message.from, { chat, text: chooseSectorMessage });
+					whatsappService.sendBotMessage(message.from, { chat, text: "Tudo bem, voltando para a escolha de setor..." });
+					whatsappService.sendBotMessage(message.from, { chat, text: chooseSectorMessage });
 					break;
 				}
 
@@ -144,15 +144,15 @@ class ChooseSectorBot {
 					const operatoranswer = `*${chooseOp.NOME}*: Olá, em que posso ajudar?`;
 
 					this.removeRunningStep(chat.id);
-					await whatsappService.sendBotMessage(message.from, { chat, text: answer });
-					await whatsappService.sendBotMessage(message.from, { chat, text: operatoranswer });
+					await messagesDistributionService.transferChatOperator(sector, chooseOp, contact, chat);
+					whatsappService.sendBotMessage(message.from, { chat, text: answer });
+					whatsappService.sendBotMessage(message.from, { chat, text: operatoranswer });
 
 					console.log(`[Step 3] Transferindo chat para operador ${chooseOp.NOME}`);
-					await messagesDistributionService.transferChatOperator(sector, chooseOp, contact, chat);
 
 				} else {
 					console.warn(`[Step 3] Opção inválida para operador`);
-					await whatsappService.sendBotMessage(message.from, { chat, text: "Opção inválida! Tente novamente." });
+					whatsappService.sendBotMessage(message.from, { chat, text: "Opção inválida! Tente novamente." });
 				}
 				break;
 
