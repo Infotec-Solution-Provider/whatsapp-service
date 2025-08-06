@@ -377,7 +377,6 @@ class InternalChatsService {
 					throw new BadRequestError("mentions precisa ser um array");
 				}
 
-				console.log("data.mentions (parsed):", mentions);
 
 				mentions
 					.map(user => {

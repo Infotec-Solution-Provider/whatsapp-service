@@ -102,7 +102,6 @@ class WhatsappController {
 				}
 			});
 
-			console.log(!!client ? "Achou o client!" : "Não achou o client...");
 
 			switch (type) {
 				case "message":

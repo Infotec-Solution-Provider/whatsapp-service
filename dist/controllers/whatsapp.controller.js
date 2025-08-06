@@ -69,7 +69,7 @@ class WhatsappController {
                     gupshupAppId: appId
                 }
             });
-            console.log(!!client ? "Achou o client!" : "Não achou o client...");
+            
             switch (type) {
                 case "message":
                     const savedMsg = await messages_service_1.default.insertMessage(data);

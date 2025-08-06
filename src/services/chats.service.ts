@@ -466,7 +466,7 @@ class ChatsService {
 				message,
 				true
 			);
-			console.log("contact", newChat.contact);
+
 			if (template && newChat.contact) {
 				await whatsappService.sendTemplate(
 					session,

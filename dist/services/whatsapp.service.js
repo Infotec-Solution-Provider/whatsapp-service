@@ -282,6 +282,8 @@ class WhatsappService {
         }
         const clients = this.clients.values();
         const wwebjsClient = Array.from(clients).find((client) => client instanceof wwebjs_whatsapp_client_1.default && client.isReady) || null;
+
+        console.log("find Client", wwebjsClient);
         return wwebjsClient;
     }
     getWwebjsClient(instance) {

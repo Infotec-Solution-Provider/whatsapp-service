@@ -267,7 +267,7 @@ class InternalChatsService {
                 if (!Array.isArray(mentions)) {
                     throw new http_errors_1.BadRequestError("mentions precisa ser um array");
                 }
-                console.log("data.mentions (parsed):", mentions);
+
                 mentions
                     .map(user => {
                     const phone = user.phone?.replace(/\D/g, "");

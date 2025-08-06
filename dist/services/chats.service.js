@@ -331,7 +331,7 @@ class ChatsService {
             const user = await users_service_1.default.getUserById(session.userId);
             const message = `Atendimento iniciado por ${user.NOME}.`;
             await messages_distribution_service_1.default.addSystemMessage(newChat, message, true);
-            console.log("contact", newChat.contact);
+
             if (template && newChat.contact) {
                 await whatsapp_service_1.default.sendTemplate(session, newChat.contact.phone, template, newChat.id, newChat.contact.id);
             }
