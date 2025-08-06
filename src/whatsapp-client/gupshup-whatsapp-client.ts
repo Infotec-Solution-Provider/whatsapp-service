@@ -50,22 +50,21 @@ class GupshupWhatsappClient implements WhatsappClient {
 
 		if ("fileUrl" in options) {
 			const urlKey = options.fileType === "image" ? "originalUrl" : "url";
-			console.log("options.fileUrl", options.fileUrl);
-			console.log("urlKey", urlKey);
-			const updatedFileUrl = options.fileUrl.replace("http://localhost:8003", "https://inpulse.infotecrs.inf.br");
+			const updatedFileUrl = options.fileUrl.replace(
+				"http://localhost:8003",
+				"https://inpulse.infotecrs.inf.br"
+			);
 
 			let message = {
 				type: options.fileType || "document",
 				[urlKey]: updatedFileUrl
 			};
-  			const cleanedCaption = options.text?.replace(/undefined/g, "");
-			if (cleanedCaption) {
-				message["caption"] = cleanedCaption;
+
+			if (options.text && !options.sendAsAudio) {
+				message["caption"] = options.text;
 			}
 
-			options.text && (message["caption"] = options.text);
 			data.append("message", JSON.stringify(message));
-			console.log("data", data);
 		} else {
 			if (!("text" in options)) {
 				throw new Error("Text is required for text messages");
@@ -78,6 +77,8 @@ class GupshupWhatsappClient implements WhatsappClient {
 			data.append("message", JSON.stringify(message));
 		}
 
+		console.log(data);
+
 		const response = await this.api
 			.post("/wa/api/v1/msg", data, {
 				headers: {
@@ -88,7 +89,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 				console.error(err.response.data);
 				throw new Error("F");
 			});
-		console.log("response.data",response.data);
+
 		const message: CreateMessageDto = {
 			instance: this.instance,
 			from: `me:${this.phone}`,

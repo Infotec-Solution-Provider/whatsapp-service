@@ -87,7 +87,7 @@ class WhatsappService {
             process.log("Obtendo client do whatsapp...");
             const client = await this.getClientBySector(session.instance, session.sectorId);
             process.log(`Client obtido para o setor: ${session.sectorId}`);
-            const text = `*${session.name}*: ${data.text}`;
+            const text = `*${session.name}*: ${data.text || ""}`;
             let message = {
                 instance: session.instance,
                 status: "PENDING",

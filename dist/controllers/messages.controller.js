@@ -48,11 +48,6 @@ class MessagesController {
         if (file) {
             data.file = file;
         }
-        Object.keys(data).forEach((key) => {
-            if (data[key] === undefined) {
-                delete data[key];
-            }
-        });
         const message = await whatsapp_service_1.default.sendMessage(req.session, to, data);
         res.status(201).send({
             message: "Message sent successfully!",
