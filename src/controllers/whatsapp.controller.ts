@@ -9,8 +9,6 @@ import messagesDistributionService from "../services/messages-distribution.servi
 import prismaService from "../services/prisma.service";
 
 async function validateWebhookEntry(instance: string, data: any) {
-	console.dir(data, { depth: null });
-
 	if (!data?.entry[0]?.changes[0]?.value) {
 		throw new BadRequestError("invalid webhook entry.");
 	}
