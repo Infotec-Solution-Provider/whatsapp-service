@@ -146,7 +146,7 @@ class MessagesDistributionService {
 					data: {
 						...data,
 						botId: instance === "vollo" ? 1 : null,
-						...(instance === "vollo" && { userId: null })
+						...(instance === "vollo" && { userId: 15 })
 					}
 				});
 			}
