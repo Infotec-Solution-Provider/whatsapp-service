@@ -28,6 +28,7 @@ const PUPPETEER_ARGS = {
 
 const IGNORED_MESSAGE_TYPES =
 	process.env["WWEBJS_IGNORED_MESSAGE_TYPES"]?.split(",") || [];
+const BROWSER_PATH = process.env["WWEBJS_BROWSER_PATH"]!;
 
 class WWEBJSWhatsappClient implements WhatsappClient {
 	public wwebjs: Client;
@@ -43,7 +44,8 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				clientId: `${this.instance}_${this.name}`
 			}),
 			puppeteer: {
-				...PUPPETEER_ARGS
+				...PUPPETEER_ARGS,
+				executablePath: BROWSER_PATH
 			}
 		});
 
@@ -319,7 +321,9 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			if (options.sendAsAudio) {
 				params.sendAudioAsVoice = true;
 			}
-			if (options.sendAsDocument) {
+			if (
+				options.sendAsDocument /* || options.fileType?.includes("video") */
+			) {
 				params.sendMediaAsDocument = true;
 			}
 			if (!options.sendAsAudio) {
