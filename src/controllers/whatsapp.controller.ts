@@ -62,6 +62,11 @@ class WhatsappController {
 			this.receiveMessage
 		);
 		this.router.get("/api/whatsapp/meta/:instance/webhooks", this.webhook);
+		this.router.post(
+			"/api/whatsapp/templates/send",
+			isAuthenticated,
+			this.sendTemplate
+		);
 	}
 
 	private async getGroups(req: Request, res: Response) {
@@ -82,6 +87,28 @@ class WhatsappController {
 		res.status(200).json({ templates });
 	}
 
+	private async sendTemplate(req: Request, res: Response) {
+		try {
+			const session = req.session;
+			const { chatId, contactId, data, to } = req.body;
+
+			await whatsappService.sendTemplate(
+				session,
+				to,
+				data,
+				chatId,
+				contactId
+			);
+
+			res.status(201).send();
+		} catch (err: any) {
+			res.status(500).send({
+				message: "failed to send template",
+				error: err?.message || err
+			});
+		}
+	}
+
 	private async receiveMessage(req: Request, res: Response) {
 		try {
 			const instance = req.params["instance"] as string;
@@ -99,7 +126,6 @@ class WhatsappController {
 					gupshupAppId: appId
 				}
 			});
-
 
 			switch (type) {
 				case "message":
