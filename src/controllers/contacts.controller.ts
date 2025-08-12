@@ -95,11 +95,12 @@ class ContactsController {
 
 	private async updateContact(req: Request, res: Response) {
 		const contactId = Number(req.params["contactId"]);
-		const { name, phone } = req.body;
+		const { name, phone, customerId } = req.body;
 
 		const updatedContact = await contactsService.updateContact(contactId, {
 			name,
-			phone
+			phone,
+			customerId
 		});
 
 		res.status(200).send({
