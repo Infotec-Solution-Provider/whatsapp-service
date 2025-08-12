@@ -95,13 +95,7 @@ class ContactsController {
 
 	private async updateContact(req: Request, res: Response) {
 		const contactId = Number(req.params["contactId"]);
-		const { name, phone, customerId } = req.body;
-
-		const updatedContact = await contactsService.updateContact(contactId, {
-			name,
-			phone,
-			customerId
-		});
+		const updatedContact = await contactsService.updateContact(contactId, req.body);
 
 		res.status(200).send({
 			message: "Contact updated successfully!",
