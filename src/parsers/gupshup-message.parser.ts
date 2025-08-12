@@ -51,6 +51,9 @@ class GUPSHUPMessageParser {
 				fileUrl = data.audio.url;
 				fileType = data.audio.mime_type;
 				break;
+			case "sticker":
+				console.log(data);
+				break;
 			default:
 				break;
 		}
@@ -114,7 +117,9 @@ class GUPSHUPMessageParser {
 				// We treat it as "SENT" for now, but it should be updated to "SENT" once the message is actually sent.
 				break;
 			default:
-				throw new BadRequestError(`${data.status} status is not expected`);
+				throw new BadRequestError(
+					`${data.status} status is not expected`
+				);
 		}
 	}
 }

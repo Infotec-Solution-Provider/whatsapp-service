@@ -9,7 +9,8 @@ export type MessageType =
 	| "location"
 	| "contacts"
 	| "interactive"
-	| "document";
+	| "document"
+	| "sticker";
 
 export type GSMessageData =
 	| GSTextMessageData
@@ -17,7 +18,8 @@ export type GSMessageData =
 	| GSVideoMessageData
 	| GSImageMessageData
 	| GSDocumentMessageData
-	| GSContactsMessageData;
+	| GSContactsMessageData
+	| GSStickerMessageData;
 
 export type MessageStatus = "read" | "delivered" | "sent" | "enqueued";
 
@@ -88,6 +90,14 @@ export interface GSDocumentMessageData extends GSBaseMessageData {
 		url: string;
 		filename: string;
 		caption?: string;
+	};
+}
+
+export interface GSStickerMessageData extends GSBaseMessageData {
+	type: "sticker";
+	sticker: {
+		id: string;
+		url: string;
 	};
 }
 
