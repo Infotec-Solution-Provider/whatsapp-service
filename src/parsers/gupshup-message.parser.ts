@@ -52,7 +52,8 @@ class GUPSHUPMessageParser {
 				fileType = data.audio.mime_type;
 				break;
 			case "sticker":
-				console.log(data);
+				fileUrl = data.sticker.url;
+				fileType = data.sticker.mime_type
 				break;
 			default:
 				break;

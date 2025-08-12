@@ -96,6 +96,9 @@ export interface GSDocumentMessageData extends GSBaseMessageData {
 export interface GSStickerMessageData extends GSBaseMessageData {
 	type: "sticker";
 	sticker: {
+		animated: boolean;
+		mime_type: string;
+		sha256: string;
 		id: string;
 		url: string;
 	};
