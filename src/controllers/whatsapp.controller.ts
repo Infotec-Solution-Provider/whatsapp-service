@@ -24,18 +24,21 @@ async function validateWebhookEntry(instance: string, data: any) {
 	}
 
 	if (data.entry[0].changes[0].value?.messages?.[0]) {
+		const message = data.entry[0].changes[0].value.messages[0];
 		const recipient =
 			data.entry[0].changes[0].value.metadata.display_phone_number;
 
-		const message = await GUPSHUPMessageParser.parse(
+		console.log(message);
+
+		const parsedMsg = await GUPSHUPMessageParser.parse(
 			recipient,
 			instance,
-			data.entry[0].changes[0].value.messages[0]
+			message
 		);
 
 		return {
 			type: "message" as const,
-			data: message,
+			data: parsedMsg,
 			appId: data.gs_app_id
 		};
 	}
