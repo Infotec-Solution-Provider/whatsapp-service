@@ -6,6 +6,7 @@ import ProcessingLogger from "../utils/processing-logger";
 import CreateMessageDto from "../dtos/create-message.dto";
 import prismaService from "../services/prisma.service";
 import filesService from "../services/files.service";
+import parseVCard from "../utils/parse-wwebjs-vcard";
 
 class WWEBJSMessageParser {
 	public static async parse(
@@ -14,7 +15,7 @@ class WWEBJSMessageParser {
 		message: WAWebJS.Message,
 		skipParsingFile = false,
 		skipParsingQuoted = false,
-		isInternal = false,
+		isInternal = false
 	) {
 		logger.log(`Sanitizando mensagem...`);
 
@@ -24,12 +25,14 @@ class WWEBJSMessageParser {
 			wwebjsIdStanza: message.id.id,
 			from: `${(message.fromMe ? "me:" : "") + message.from.split("@")[0]}`,
 			to: `${(message.fromMe ? "" : "me:") + message.to.split("@")[0]}`,
-			body: message.body,
+			body:
+				message.type === "vcard"
+					? parseVCard(message.body)
+					: message.body,
 			type: message.type,
 			timestamp: String(message.timestamp * 1000),
 			status: WWEBJSMessageParser.getMessageStatus(message.ack),
 			isForwarded: true
-
 		};
 		if (!skipParsingFile && message.hasMedia) {
 			logger.log(
