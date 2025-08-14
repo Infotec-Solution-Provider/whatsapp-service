@@ -171,7 +171,9 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			}
 		});
 
-		executeWwebjsLoadMessagesRoutine(this.wwebjs);
+		if (this.instance === "nunes") {
+			executeWwebjsLoadMessagesRoutine(this.wwebjs);
+		}
 	}
 
 	private async handleMessage(msg: WAWebJS.Message) {
