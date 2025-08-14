@@ -24,12 +24,17 @@ async function executeWwebjsLoadMessagesRoutine(client: WAWebJS.Client) {
 				(m) => m.timestamp >= sevenDaysAgo
 			);
 
-			if (recentMessages.length === 0) continue;
-
 			// Determina tipo de chat
 			const isGroup = !!chat.isGroup;
 			const sigla = isGroup ? "G" : "P";
 			const chatName = chat.name || chat.id.user;
+
+			if (recentMessages.length === 0) {
+				console.log(`[${sigla}] ${chatName}`);
+				console.log(`Nenhuma mensagem recuperada nos últimos 7 dias.`);
+				console.log("---------------------------------------------------------------------");
+				continue;
+			}
 
 			// Período das mensagens
 			const timestamps = recentMessages
