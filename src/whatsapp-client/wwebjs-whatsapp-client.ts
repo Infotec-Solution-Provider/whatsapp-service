@@ -12,6 +12,7 @@ import messagesService from "../services/messages.service";
 import messagesDistributionService from "../services/messages-distribution.service";
 import { SendMessageOptions } from "../types/whatsapp-instance.types";
 import internalChatsService from "../services/internal-chats.service";
+import executeWwebjsLoadMessagesRoutine from "../routines/wwebjs-load-messages.routine";
 
 const PUPPETEER_ARGS = {
 	headless: true,
@@ -169,6 +170,8 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				phone: this.wwebjs.info.wid.user
 			}
 		});
+
+		executeWwebjsLoadMessagesRoutine(this.wwebjs);
 	}
 
 	private async handleMessage(msg: WAWebJS.Message) {
