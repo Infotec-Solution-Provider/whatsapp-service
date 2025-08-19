@@ -167,8 +167,7 @@ class ChatsService {
 	public async getChatsMonitor(
 		session: SessionData,
 		includeMessages = true,
-		includeCustomer = true,
-		includeFinished = false
+		includeCustomer = true
 	) {
 		const isTI = session.sectorId === 3 || session.instance !== "nunes";
 
