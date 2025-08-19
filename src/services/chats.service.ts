@@ -172,11 +172,11 @@ class ChatsService {
 	) {
 		const isTI = session.sectorId === 3 || session.instance !== "nunes";
 
-		const foundChats = await prismaService.wppChat.findMany({
+		const ongoingChats = await prismaService.wppChat.findMany({
 			where: {
 				instance: session.instance,
-				...(isTI ? {} : { sectorId: session.sectorId }),
-				...(includeFinished ? {} : { isFinished: false })
+				isFinished: false,
+				...(isTI ? {} : { sectorId: session.sectorId })
 			},
 			include: {
 				contact: {
@@ -188,12 +188,24 @@ class ChatsService {
 			}
 		});
 
+		const finishedChats = await prismaService.wppChat.findMany({
+			where: {
+				instance: session.instance,
+				...(isTI ? {} : { sectorId: session.sectorId }),
+				isFinished: true
+			},
+			include: {
+				contact: true,
+				schedule: true
+			}
+		});
+
 		const chats: Array<
 			WppChat & { customer: Customer | null; contact: WppContact | null }
 		> = [];
 		const messages: Array<WppMessage> = [];
 		const customerIds = includeCustomer
-			? foundChats
+			? ongoingChats
 					.filter(
 						(chat) => typeof chat.contact?.customerId === "number"
 					)
@@ -205,7 +217,7 @@ class ChatsService {
 					session.instance,
 					FETCH_CUSTOMERS_QUERY,
 					[
-						foundChats
+						ongoingChats
 							.filter(
 								(chat) =>
 									typeof chat.contact?.customerId === "number"
@@ -215,7 +227,7 @@ class ChatsService {
 				)
 			: [];
 
-		for (const foundChat of foundChats) {
+		for (const foundChat of ongoingChats) {
 			const { contact, ...chat } = foundChat;
 
 			let customer: Customer | null = null;
@@ -248,6 +260,20 @@ class ChatsService {
 
 				messages.push(...decodedMessages);
 			}
+		}
+
+		for (const foundChat of finishedChats) {
+			const { contact, ...chat } = foundChat;
+
+			let customer: Customer | null = null;
+
+			if (includeCustomer && typeof contact?.customerId == "number") {
+				customer =
+					customers.find((c) => c.CODIGO === contact.customerId) ||
+					null;
+			}
+
+			chats.push({ ...chat, customer, contact: contact || null });
 		}
 
 		return { chats, messages };
