@@ -112,7 +112,7 @@ class WhatsappController {
 		}
 	}
 
-	private async receiveMessage(req: Request, res: Response) {
+	/* 	private async receiveMessage(req: Request, res: Response) {
 		try {
 			const instance = req.params["instance"] as string;
 			const entry = await validateWebhookEntry(instance, req.body);
@@ -164,7 +164,7 @@ class WhatsappController {
 		console.log("challenge headers", req.headers);
 
 		res.status(200).send();
-	}
+	} */
 }
 
 export default new WhatsappController(Router());
