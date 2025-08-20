@@ -60,11 +60,11 @@ class WhatsappController {
 			this.getTemplates
 		);
 
-		this.router.post(
+		/* this.router.post(
 			"/api/whatsapp/meta/:instance/webhooks",
 			this.receiveMessage
 		);
-		this.router.get("/api/whatsapp/meta/:instance/webhooks", this.webhook);
+		this.router.get("/api/whatsapp/meta/:instance/webhooks", this.webhook); */
 		this.router.post(
 			"/api/whatsapp/templates/send",
 			isAuthenticated,

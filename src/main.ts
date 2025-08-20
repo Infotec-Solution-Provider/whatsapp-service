@@ -18,6 +18,7 @@ import readyMessagesController from "./controllers/ready-messages.controller";
 import notificationsController from "./controllers/notifications.controller";
 import monitorController from "./controllers/monitor.controller";
 import parametersController from "./controllers/parameters.controller";
+import gupshupController from "./controllers/gupshup.controller";
 
 whatsappService.buildClients();
 const app = express();
@@ -46,6 +47,7 @@ app.use(logRoute(readyMessagesController.router));
 app.use(logRoute(notificationsController.router));
 app.use(logRoute(monitorController.router));
 app.use(logRoute(parametersController.router));
+app.use(logRoute(gupshupController.router));
 
 logRoutes("", routesToLog);
 
