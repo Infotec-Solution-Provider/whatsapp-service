@@ -23,6 +23,11 @@ class MessagesController {
 			isAuthenticated,
 			this.sendMessage
 		);
+		this.router.post(
+            "/api/whatsapp/messages/forward",
+            isAuthenticated,
+            this.forwardMessages.bind(this)
+        );
 	}
 
 	private async getMessageById(req: Request, res: Response) {
@@ -81,6 +86,31 @@ class MessagesController {
 			data: message
 		});
 	}
+    private async forwardMessages(req: Request, res: Response) {
+        const { messageIds, whatsappTargets, internalTargets } = req.body;
+
+        if (!Array.isArray(messageIds) || messageIds.length === 0) {
+            throw new BadRequestError("O campo 'messageIds' deve ser um array com pelo menos um ID de mensagem.");
+        }
+
+        const hasWhatsappTargets = Array.isArray(whatsappTargets) && whatsappTargets.length > 0;
+        const hasInternalTargets = Array.isArray(internalTargets) && internalTargets.length > 0;
+
+        if (!hasWhatsappTargets && !hasInternalTargets) {
+            throw new BadRequestError("É necessário fornecer ao menos um alvo de destino (whatsappTargets ou internalTargets).");
+        }
+
+        await whatsappService.forwardMessages(
+            req.session,
+            messageIds,
+            whatsappTargets,
+            internalTargets
+        );
+
+        res.status(200).send({
+            message: "Mensagens enviadas para a fila de encaminhamento com sucesso!",
+        });
+    }
 }
 
 export default new MessagesController(Router());

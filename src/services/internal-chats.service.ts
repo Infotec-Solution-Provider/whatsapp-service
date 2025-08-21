@@ -634,6 +634,77 @@ class InternalChatsService {
 			}
 		});
 	}
+   public async forwardWppMessagesToInternal(
+        session: SessionData,
+        originalMessageIds: number[],
+        internalTargetChatIds: number[]
+    ): Promise<void> {
+        const process = new ProcessingLogger(
+            session.instance,
+            "forward-wpp-to-internal",
+            `user:${session.userId}-${Date.now()}`,
+            {
+                messageCount: originalMessageIds.length,
+                targetCount: internalTargetChatIds.length,
+            }
+        );
+
+        try {
+            process.log(`Buscando ${originalMessageIds.length} mensagem(ns) original(is) do WhatsApp.`);
+            const originalMessages = await prismaService.wppMessage.findMany({
+                where: { id: { in: originalMessageIds } },
+                include: { WppContact: { select: { name: true } } }
+            });
+
+            if (originalMessages.length === 0) {
+                process.log("Nenhuma mensagem original encontrada no DB. Encerrando.");
+                return;
+            }
+
+            for (const chatId of internalTargetChatIds) {
+                for (const originalMsg of originalMessages) {
+
+
+                    const senderInfo = originalMsg.WppContact?.name || originalMsg.from;
+                    const formattedBody = `> *Mensagem encaminhada de ${senderInfo} (WhatsApp)*\n\n${originalMsg.body || ''}`;
+
+                    const messageData: Prisma.InternalMessageCreateInput = {
+                        instance: session.instance,
+                        from: `user:${session.userId}`,
+                        type: originalMsg.type,
+                        body: formattedBody,
+                        timestamp: Date.now().toString(),
+                        status: "RECEIVED",
+                        isForwarded: true,
+                        chat: {
+                            connect: { id: chatId }
+                        },
+                        fileId: originalMsg.fileId,
+                        fileName: originalMsg.fileName,
+                        fileType: originalMsg.fileType,
+                        fileSize: originalMsg.fileSize,
+                    };
+
+                    const savedMsg = await prismaService.internalMessage.create({
+                        data: messageData
+                    });
+
+                    process.log(`Mensagem ID:${originalMsg.id} encaminhada para Chat Interno ID:${chatId}. Nova msg ID:${savedMsg.id}`);
+
+                    const room: SocketServerInternalChatRoom = `${session.instance}:internal-chat:${chatId}`;
+                    await socketService.emit(SocketEventType.InternalMessage, room, {
+                        message: savedMsg
+                    });
+                }
+            }
+            process.success("Todas as mensagens foram encaminhadas com sucesso para os chats internos.");
+
+        } catch (err) {
+            const msg = sanitizeErrorMessage(err) || "null";
+            process.failed(`Erro ao encaminhar mensagens para chats internos: ${msg}`);
+            throw new BadRequestError(`Erro ao encaminhar para chat interno: ${msg}`);
+        }
+    }
 }
 
 export default new InternalChatsService();
