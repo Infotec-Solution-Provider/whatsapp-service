@@ -636,7 +636,7 @@ class InternalChatsService {
 	}
    public async forwardWppMessagesToInternal(
         session: SessionData,
-        originalMessageIds: number[],
+        originalMessages: any[],
         internalTargetChatIds: number[]
     ): Promise<void> {
         const process = new ProcessingLogger(
@@ -644,16 +644,13 @@ class InternalChatsService {
             "forward-wpp-to-internal",
             `user:${session.userId}-${Date.now()}`,
             {
-                messageCount: originalMessageIds.length,
+                messageCount: originalMessages.length,
                 targetCount: internalTargetChatIds.length,
             }
         );
 
         try {
-            process.log(`Buscando ${originalMessageIds.length} mensagem(ns) original(is) do WhatsApp.`);
-            const originalMessages  = await prismaService.internalMessage.findMany({
-					where: { id: { in: originalMessageIds } }
-				});
+            process.log(`Buscando ${originalMessages.length} mensagem(ns) original(is) do WhatsApp.`);
 
             if (originalMessages.length === 0) {
                 process.log("Nenhuma mensagem original encontrada no DB. Encerrando.");

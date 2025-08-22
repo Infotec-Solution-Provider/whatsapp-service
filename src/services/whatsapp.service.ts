@@ -693,7 +693,7 @@ class WhatsappService {
 				);
 				await internalChatsService.forwardWppMessagesToInternal(
 					session,
-					messageIds,
+					originalMessages,
 					internalTargets.map((t) => t.id)
 				);
 				process.log(
