@@ -19,8 +19,6 @@ import CreateMessageDto from "../dtos/create-message.dto";
 import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 import { Mention, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
 import OpusAudioConverter from "../utils/opus-audio-converter";
-import messagesService from "./messages.service";
-import messagesDistributionService from "./messages-distribution.service";
 
 interface ChatsFilters {
 	userId?: string;
@@ -746,10 +744,6 @@ public async forwardWppMessagesToInternal(
                             fileType: originalMsg.fileType,
                             fileSize: originalMsg.fileSize
                         };
-                        const savedWppMsg = await messagesService.insertMessage(
-                            messageToSave
-                        );
-                        messagesDistributionService.notifyMessage(process, savedWppMsg);
 
 						if (sourceType === "internal") {
 							const options: SendMessageOptions | SendFileOptions = {
