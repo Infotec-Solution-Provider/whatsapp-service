@@ -651,10 +651,9 @@ class InternalChatsService {
 
         try {
             process.log(`Buscando ${originalMessageIds.length} mensagem(ns) original(is) do WhatsApp.`);
-            const originalMessages = await prismaService.wppMessage.findMany({
-                where: { id: { in: originalMessageIds } },
-                include: { WppContact: { select: { name: true } } }
-            });
+            const originalMessages  = await prismaService.internalMessage.findMany({
+					where: { id: { in: originalMessageIds } }
+				});
 
             if (originalMessages.length === 0) {
                 process.log("Nenhuma mensagem original encontrada no DB. Encerrando.");
@@ -664,9 +663,7 @@ class InternalChatsService {
             for (const chatId of internalTargetChatIds) {
                 for (const originalMsg of originalMessages) {
 
-
-                    const senderInfo = originalMsg.WppContact?.name || originalMsg.from;
-                    const formattedBody = `> *Mensagem encaminhada de ${senderInfo} (WhatsApp)*\n\n${originalMsg.body || ''}`;
+                    const formattedBody = originalMsg.body;
 
                     const messageData: Prisma.InternalMessageCreateInput = {
                         instance: session.instance,

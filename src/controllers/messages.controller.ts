@@ -87,7 +87,7 @@ class MessagesController {
 		});
 	}
     private async forwardMessages(req: Request, res: Response) {
-        const { messageIds, whatsappTargets, internalTargets } = req.body;
+        const { messageIds, whatsappTargets, internalTargets,sourceType } = req.body;
 
         if (!Array.isArray(messageIds) || messageIds.length === 0) {
             throw new BadRequestError("O campo 'messageIds' deve ser um array com pelo menos um ID de mensagem.");
@@ -103,8 +103,9 @@ class MessagesController {
         await whatsappService.forwardMessages(
             req.session,
             messageIds,
+			sourceType,
             whatsappTargets,
-            internalTargets
+            internalTargets,
         );
 
         res.status(200).send({
