@@ -19,6 +19,8 @@ import CreateMessageDto from "../dtos/create-message.dto";
 import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 import { Mention } from "../types/whatsapp-instance.types";
 import OpusAudioConverter from "../utils/opus-audio-converter";
+import messagesService from "./messages.service";
+import messagesDistributionService from "./messages-distribution.service";
 
 interface ChatsFilters {
 	userId?: string;
@@ -643,87 +645,142 @@ class InternalChatsService {
 			}
 		});
 	}
-	public async forwardWppMessagesToInternal(
-		session: SessionData,
-		originalMessages: any[],
-		internalTargetChatIds: number[]
-	): Promise<void> {
-		const process = new ProcessingLogger(
-			session.instance,
-			"forward-wpp-to-internal",
-			`user:${session.userId}-${Date.now()}`,
-			{
-				messageCount: originalMessages.length,
-				targetCount: internalTargetChatIds.length
-			}
-		);
 
-		try {
-			process.log(
-				`Buscando ${originalMessages.length} mensagem(ns) original(is) do WhatsApp.`
-			);
+public async forwardWppMessagesToInternal(
+    session: SessionData,
+    originalMessages: any[],
+    internalTargetChatIds: number[]
+): Promise<void> {
+    const process = new ProcessingLogger(
+        session.instance,
+        "forward-wpp-to-internal",
+        `user:${session.userId}-${Date.now()}`,
+        {
+            messageCount: originalMessages.length,
+            targetCount: internalTargetChatIds.length
+        }
+    );
 
-			if (originalMessages.length === 0) {
-				process.log(
-					"Nenhuma mensagem original encontrada no DB. Encerrando."
-				);
-				return;
-			}
+    try {
+        process.log(
+            `Buscando ${originalMessages.length} mensagem(ns) original(is) do WhatsApp.`
+        );
 
-			for (const chatId of internalTargetChatIds) {
-				for (const originalMsg of originalMessages) {
-					const formattedBody = originalMsg.body;
+        if (originalMessages.length === 0) {
+            process.log(
+                "Nenhuma mensagem original encontrada no DB. Encerrando."
+            );
+            return;
+        }
 
-					const messageData: Prisma.InternalMessageCreateInput = {
-						instance: session.instance,
-						from: `user:${session.userId}`,
-						type: originalMsg.type,
-						body: formattedBody,
-						timestamp: Date.now().toString(),
-						status: "RECEIVED",
-						isForwarded: true,
-						chat: {
-							connect: { id: chatId }
-						},
-						fileId: originalMsg.fileId,
-						fileName: originalMsg.fileName,
-						fileType: originalMsg.fileType,
-						fileSize: originalMsg.fileSize
-					};
+        const client = await whatsappService.getClientBySector(
+            session.instance,
+            session.sectorId
+        );
 
-					const savedMsg = await prismaService.internalMessage.create(
-						{
-							data: messageData
-						}
-					);
+        for (const chatId of internalTargetChatIds) {
+            const internalChat = await prismaService.internalChat.findUnique({
+                where: { id: chatId },
+                select: { isGroup: true, wppGroupId: true }
+            });
 
-					process.log(
-						`Mensagem ID:${originalMsg.id} encaminhada para Chat Interno ID:${chatId}. Nova msg ID:${savedMsg.id}`
-					);
+            for (const originalMsg of originalMessages) {
+                const messageData: Prisma.InternalMessageCreateInput = {
+                    instance: session.instance,
+                    from: `user:${session.userId}`,
+                    type: originalMsg.type,
+                    body: originalMsg.body,
+                    timestamp: Date.now().toString(),
+                    status: "RECEIVED",
+                    isForwarded: true,
+                    chat: {
+                        connect: { id: chatId }
+                    },
+                    fileId: originalMsg.fileId,
+                    fileName: originalMsg.fileName,
+                    fileType: originalMsg.fileType,
+                    fileSize: originalMsg.fileSize
+                };
 
-					const room: SocketServerInternalChatRoom = `${session.instance}:internal-chat:${chatId}`;
-					await socketService.emit(
-						SocketEventType.InternalMessage,
-						room,
-						{
-							message: savedMsg
-						}
-					);
-				}
-			}
-			process.success(
-				"Todas as mensagens foram encaminhadas com sucesso para os chats internos."
-			);
-		} catch (err) {
-			const msg = sanitizeErrorMessage(err) || "null";
-			process.failed(
-				`Erro ao encaminhar mensagens para chats internos: ${msg}`
-			);
-			throw new BadRequestError(
-				`Erro ao encaminhar para chat interno: ${msg}`
-			);
-		}
-	}
+                const savedInternalMsg =
+                    await prismaService.internalMessage.create({
+                        data: messageData
+                    });
+
+                process.log(
+                    `Mensagem ID:${originalMsg.id} encaminhada para Chat Interno ID:${chatId}. Nova msg ID:${savedInternalMsg.id}`
+                );
+
+                const room: SocketServerInternalChatRoom = `${session.instance}:internal-chat:${chatId}`;
+                await socketService.emit(
+                    SocketEventType.InternalMessage,
+                    room,
+                    {
+                        message: savedInternalMsg
+                    }
+                );
+
+                // ETAPA 2: Se for um grupo, encaminha também para o WhatsApp
+                if (internalChat?.isGroup && internalChat.wppGroupId) {
+                    try {
+                         if (!(client instanceof WWEBJSWhatsappClient)) {
+                            process.log(`Cliente não suporta encaminhamento nativo para o grupo wppId:${internalChat.wppGroupId}`);
+                            continue; // Pula para a próxima mensagem
+                        }
+
+                        // Salva o registro da mensagem no banco de dados do wpp
+                        const now = new Date();
+                        const messageToSave: CreateMessageDto = {
+                            instance: session.instance,
+                            status: "SENT",
+                            timestamp: now.getTime().toString(),
+                            sentAt: now,
+                            from: `me:${client.phone}`,
+                            to: internalChat.wppGroupId,
+                            type: originalMsg.type,
+                            body: originalMsg.body,
+                            isForwarded: true,
+                            chatId: null, // O chat pode ser encontrado/criado pelo listener de mensagens
+                            contactId: null,
+                            fileId: originalMsg.fileId,
+                            fileName: originalMsg.fileName,
+                            fileType: originalMsg.fileType,
+                            fileSize: originalMsg.fileSize
+                        };
+                        const savedWppMsg = await messagesService.insertMessage(
+                            messageToSave
+                        );
+                        messagesDistributionService.notifyMessage(process, savedWppMsg);
+
+                        await client.forwardMessage(
+                            internalChat.wppGroupId,
+                            originalMsg.wwebjsId!,
+                            true
+                        );
+                        process.log(
+                            `Mensagem ID:${originalMsg.id} também encaminhada para o grupo de WhatsApp ID:${internalChat.wppGroupId}`
+                        );
+                    } catch (err) {
+                        process.failed(
+                            `Falha ao encaminhar msg ID:${originalMsg.id} para o grupo de WhatsApp ${internalChat.wppGroupId}: ${sanitizeErrorMessage(err)}`
+                        );
+                    }
+                }
+            }
+        }
+        process.success(
+            "Todas as mensagens foram processadas para os chats internos."
+        );
+    } catch (err) {
+        const msg = sanitizeErrorMessage(err) || "null";
+        process.failed(
+            `Erro ao encaminhar mensagens para chats internos: ${msg}`
+        );
+        throw new BadRequestError(
+            `Erro ao encaminhar para chat interno: ${msg}`
+        );
+    }
+}
 }
 
 export default new InternalChatsService();
