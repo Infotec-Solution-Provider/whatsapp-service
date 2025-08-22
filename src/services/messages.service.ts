@@ -1,4 +1,4 @@
-import { WppMessage } from "@prisma/client";
+import { WppContact, WppMessage } from "@prisma/client";
 import prismaService from "./prisma.service";
 import {
 	SessionData,
@@ -9,6 +9,11 @@ import { NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
 import CreateMessageDto from "../dtos/create-message.dto";
 import socketService from "./socket.service";
 
+interface FetchMessagesFilter {
+	minDate: string;
+	maxDate: string;
+	userId?: number | null;
+}
 class MessagesService {
 	public async insertMessage(data: CreateMessageDto) {
 		return await prismaService.wppMessage.create({ data });
@@ -76,6 +81,27 @@ class MessagesService {
 		}
 
 		return message;
+	}
+
+	public async fetchMessages(
+		session: SessionData,
+		filters: FetchMessagesFilter
+	) {
+		const messages = await prismaService.wppMessage.findMany({
+			where: {
+				instance: session.instance,
+				sentAt: {
+					gte: new Date(filters.minDate),
+					lte: new Date(filters.maxDate)
+				},
+				...(filters.userId ? { userId: Number(filters.userId) } : {})
+			},
+			include: {
+				WppContact: true
+			}
+		});
+
+		return messages;
 	}
 }
 

@@ -53,12 +53,12 @@ class GupshupWhatsappClient implements WhatsappClient {
 				return "text";
 			}
 
-			if ((!options.fileType) || options.fileType === "document") {
+			if (!options.fileType || options.fileType === "document") {
 				return "file";
 			}
 
 			return options.fileType;
-		})()
+		})();
 
 		if ("fileUrl" in options) {
 			const urlKey = options.fileType === "image" ? "originalUrl" : "url";
@@ -100,13 +100,16 @@ class GupshupWhatsappClient implements WhatsappClient {
 				throw new Error("F");
 			});
 
+		const now = new Date();
+
 		const message: CreateMessageDto = {
 			instance: this.instance,
 			from: `me:${this.phone}`,
 			to: options.to,
 			body: options.text || "",
 			status: "PENDING",
-			timestamp: Date.now().toString(),
+			timestamp: now.getTime().toString(),
+			sentAt: now,
 			type: msgType,
 			wabaId: response.data["messageId"] || null
 		};
@@ -149,6 +152,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 		const text = options.templateText.replace(/{{(\d+)}}/g, (_, index) => {
 			return options.parameters[parseInt(index, 10)] || "";
 		});
+		const now = new Date();
 
 		const message: CreateMessageDto = {
 			instance: this.instance,
@@ -156,7 +160,8 @@ class GupshupWhatsappClient implements WhatsappClient {
 			to: options.to,
 			body: text,
 			status: "SENT",
-			timestamp: Date.now().toString(),
+			timestamp: now.getTime().toString(),
+			sentAt: now,
 			type: "template",
 			wabaId: response.data["messageId"] || null,
 			chatId,

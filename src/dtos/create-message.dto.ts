@@ -7,6 +7,7 @@ export default interface CreateMessageDto {
 	body: string;
 	type: string;
 	timestamp: string;
+	sentAt: Date;
 	status: WppMessageStatus;
 	quotedId?: null | number;
 	chatId?: null | number;

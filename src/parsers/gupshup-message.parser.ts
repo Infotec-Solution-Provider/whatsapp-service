@@ -20,6 +20,7 @@ class GUPSHUPMessageParser {
 			to: `me:${recipient}`,
 			type: data.type,
 			timestamp: String(+data.timestamp * 1000),
+			sentAt: new Date(+data.timestamp * 1000),
 			status: "RECEIVED",
 			body: ""
 		};
@@ -53,7 +54,7 @@ class GUPSHUPMessageParser {
 				break;
 			case "sticker":
 				fileUrl = data.sticker.url;
-				fileType = data.sticker.mime_type
+				fileType = data.sticker.mime_type;
 				break;
 			default:
 				break;

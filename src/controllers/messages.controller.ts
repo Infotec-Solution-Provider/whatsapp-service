@@ -24,10 +24,15 @@ class MessagesController {
 			this.sendMessage
 		);
 		this.router.post(
-            "/api/whatsapp/messages/forward",
-            isAuthenticated,
-            this.forwardMessages.bind(this)
-        );
+			"/api/whatsapp/messages/forward",
+			isAuthenticated,
+			this.forwardMessages.bind(this)
+		);
+		this.router.get(
+			"/api/whatsapp/messages",
+			isAuthenticated,
+			this.fetchMessages
+		);
 	}
 
 	private async getMessageById(req: Request, res: Response) {
@@ -86,32 +91,63 @@ class MessagesController {
 			data: message
 		});
 	}
-    private async forwardMessages(req: Request, res: Response) {
-        const { messageIds, whatsappTargets, internalTargets,sourceType } = req.body;
+	private async forwardMessages(req: Request, res: Response) {
+		const { messageIds, whatsappTargets, internalTargets, sourceType } =
+			req.body;
 
-        if (!Array.isArray(messageIds) || messageIds.length === 0) {
-            throw new BadRequestError("O campo 'messageIds' deve ser um array com pelo menos um ID de mensagem.");
-        }
+		if (!Array.isArray(messageIds) || messageIds.length === 0) {
+			throw new BadRequestError(
+				"O campo 'messageIds' deve ser um array com pelo menos um ID de mensagem."
+			);
+		}
 
-        const hasWhatsappTargets = Array.isArray(whatsappTargets) && whatsappTargets.length > 0;
-        const hasInternalTargets = Array.isArray(internalTargets) && internalTargets.length > 0;
+		const hasWhatsappTargets =
+			Array.isArray(whatsappTargets) && whatsappTargets.length > 0;
+		const hasInternalTargets =
+			Array.isArray(internalTargets) && internalTargets.length > 0;
 
-        if (!hasWhatsappTargets && !hasInternalTargets) {
-            throw new BadRequestError("É necessário fornecer ao menos um alvo de destino (whatsappTargets ou internalTargets).");
-        }
+		if (!hasWhatsappTargets && !hasInternalTargets) {
+			throw new BadRequestError(
+				"É necessário fornecer ao menos um alvo de destino (whatsappTargets ou internalTargets)."
+			);
+		}
 
-        await whatsappService.forwardMessages(
-            req.session,
-            messageIds,
+		await whatsappService.forwardMessages(
+			req.session,
+			messageIds,
 			sourceType,
-            whatsappTargets,
-            internalTargets,
-        );
+			whatsappTargets,
+			internalTargets
+		);
 
-        res.status(200).send({
-            message: "Mensagens enviadas para a fila de encaminhamento com sucesso!",
-        });
-    }
+		res.status(200).send({
+			message:
+				"Mensagens enviadas para a fila de encaminhamento com sucesso!"
+		});
+	}
+
+	private fetchMessages = async (req: Request, res: Response) => {
+		const { minDate, maxDate, userId } = req.query;
+
+		if (!minDate || !maxDate) {
+			throw new BadRequestError("Min and Max date are required!");
+		}
+
+		if (typeof minDate !== "string" || typeof maxDate !== "string") {
+			throw new BadRequestError("Min and Max date must be strings!");
+		}
+
+		const messages = await messagesService.fetchMessages(req.session, {
+			minDate: String(minDate),
+			maxDate: String(maxDate),
+			userId: userId ? Number(userId) : null
+		});
+
+		res.status(200).send({
+			message: "Messages retrieved successfully!",
+			data: messages
+		});
+	};
 }
 
 export default new MessagesController(Router());

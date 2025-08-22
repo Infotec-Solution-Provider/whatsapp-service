@@ -31,7 +31,8 @@ class WWEBJSMessageParser {
 					: message.body,
 			type: message.type,
 			timestamp: String(message.timestamp * 1000),
-			status: WWEBJSMessageParser.getMessageStatus(message.ack),
+			sentAt: new Date(message.timestamp * 1000),
+			status: WWEBJSMessageParser.getMessageStatus(message.ack)
 		};
 		if (!skipParsingFile && message.hasMedia) {
 			logger.log(

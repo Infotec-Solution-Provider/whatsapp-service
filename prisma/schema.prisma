@@ -61,6 +61,7 @@ model WppMessage {
     isForwarded    Boolean?         @map("is_forwarded")
     body           String
     timestamp      String
+    sentAt         DateTime         @map("sent_at")
     status         WppMessageStatus
     fileId         Int?             @map("file_id")
     fileName       String?          @map("file_name")

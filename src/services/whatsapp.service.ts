@@ -31,12 +31,12 @@ interface SendBotMessageData {
 	quotedId?: number | null;
 }
 interface WhatsappForwardTarget {
-    id: string;
-    isGroup: boolean;
+	id: string;
+	isGroup: boolean;
 }
 
 interface InternalForwardTarget {
-    id: number;
+	id: number;
 }
 interface SendMessageData {
 	sendAsChatOwner?: boolean;
@@ -159,15 +159,17 @@ class WhatsappService {
 			);
 			process.log(`Client obtido para o setor: ${session.sectorId}`);
 			const text = `*${session.name}*: ${data.text || ""}`;
+			const now = new Date();
 
 			let message = {
 				instance: session.instance,
 				status: "PENDING",
-				timestamp: Date.now().toString(),
+				timestamp: now.getTime().toString(),
+				sentAt: now,
 				from: `me:${client.phone}`,
 				to: `${to}`,
 				type: "chat",
-				body: data.text || "",
+				body: data.text || ""
 			} as CreateMessageDto;
 
 			let options = { to, text: text } as SendMessageOptions;
@@ -349,10 +351,13 @@ class WhatsappService {
 			process.log(
 				`Client obtido para o setor: ${data.chat.sectorId || 1}`
 			);
+			const now = new Date();
+
 			let message = {
 				instance: data.chat.instance,
 				status: "PENDING",
-				timestamp: Date.now().toString(),
+				timestamp: now.getTime().toString(),
+				sentAt: now,
 				from: `bot:${client.phone}`,
 				to: `${to}`,
 				type: "chat",
@@ -556,64 +561,84 @@ class WhatsappService {
 	}
 
 	public async forwardMessages(
-			session: SessionData,
-			messageIds: number[],
-			sourceType: 'whatsapp' | 'internal',
-			whatsappTargets?: WhatsappForwardTarget[],
-			internalTargets?: InternalForwardTarget[],
-		): Promise<void> {
-			const process = new ProcessingLogger(
-				session.instance,
-				"forward-messages-service",
-				`user:${session.userId}-${Date.now()}`,
-				{
-					messageCount: messageIds.length,
-					whatsappTargetCount: whatsappTargets?.length || 0,
-					internalTargetCount: internalTargets?.length || 0,
-				}
-			);
-
-
-		process.log("Iniciando processo de encaminhamento nativo com salvamento no banco.");
-
-			let originalMessages: any[] = [];
-			if (sourceType === 'whatsapp') {
-				originalMessages = await prismaService.wppMessage.findMany({
-					where: { id: { in: messageIds } }
-				});
-			} else if (sourceType === 'internal') {
-				originalMessages = await prismaService.internalMessage.findMany({
-					where: { id: { in: messageIds } }
-				});
+		session: SessionData,
+		messageIds: number[],
+		sourceType: "whatsapp" | "internal",
+		whatsappTargets?: WhatsappForwardTarget[],
+		internalTargets?: InternalForwardTarget[]
+	): Promise<void> {
+		const process = new ProcessingLogger(
+			session.instance,
+			"forward-messages-service",
+			`user:${session.userId}-${Date.now()}`,
+			{
+				messageCount: messageIds.length,
+				whatsappTargetCount: whatsappTargets?.length || 0,
+				internalTargetCount: internalTargets?.length || 0
 			}
+		);
+
+		process.log(
+			"Iniciando processo de encaminhamento nativo com salvamento no banco."
+		);
+
+		let originalMessages: any[] = [];
+		if (sourceType === "whatsapp") {
+			originalMessages = await prismaService.wppMessage.findMany({
+				where: { id: { in: messageIds } }
+			});
+		} else if (sourceType === "internal") {
+			originalMessages = await prismaService.internalMessage.findMany({
+				where: { id: { in: messageIds } }
+			});
+		}
 		if (originalMessages.length === 0) {
-			process.log("Nenhuma mensagem original foi encontrada para encaminhar.");
+			process.log(
+				"Nenhuma mensagem original foi encontrada para encaminhar."
+			);
 			return;
 		}
 
 		if (whatsappTargets && whatsappTargets.length > 0) {
 			try {
-				const client = await this.getClientBySector(session.instance, session.sectorId);
+				const client = await this.getClientBySector(
+					session.instance,
+					session.sectorId
+				);
 
 				if (!(client instanceof WWEBJSWhatsappClient)) {
-					throw new BadRequestError("O encaminhamento nativo só é suportado por conexões do tipo QR Code (WWEBJS).");
+					throw new BadRequestError(
+						"O encaminhamento nativo só é suportado por conexões do tipo QR Code (WWEBJS)."
+					);
 				}
 
 				for (const target of whatsappTargets) {
 					try {
-						const contact = await prismaService.wppContact.findUnique({
-							where: { instance_phone: { instance: session.instance, phone: target.id } }
-						});
-						const chat = contact ? await prismaService.wppChat.findFirst({
-							where: { instance: session.instance, contactId: contact.id }
-						}) : null;
+						const contact =
+							await prismaService.wppContact.findUnique({
+								where: {
+									instance_phone: {
+										instance: session.instance,
+										phone: target.id
+									}
+								}
+							});
+						const chat = contact
+							? await prismaService.wppChat.findFirst({
+									where: {
+										instance: session.instance,
+										contactId: contact.id
+									}
+								})
+							: null;
 
 						for (const originalMsg of originalMessages) {
-
+							const now = new Date();
 							const messageToSave: CreateMessageDto = {
 								instance: session.instance,
 								status: "SENT",
-								timestamp: Date.now().toString(),
+								timestamp: now.getTime().toString(),
+								sentAt: now,
 								from: `me:${client.phone}`,
 								to: target.id,
 								type: originalMsg.type,
@@ -624,43 +649,65 @@ class WhatsappService {
 								fileId: originalMsg.fileId,
 								fileName: originalMsg.fileName,
 								fileType: originalMsg.fileType,
-								fileSize: originalMsg.fileSize,
+								fileSize: originalMsg.fileSize
 							};
 
-							const savedMsg = await messagesService.insertMessage(messageToSave);
-							messagesDistributionService.notifyMessage(process, savedMsg);
-							process.log(`Registro da mensagem ID:${originalMsg.id} salvo no banco para o alvo: ${target.id}. Novo ID: ${savedMsg.id}`);
+							const savedMsg =
+								await messagesService.insertMessage(
+									messageToSave
+								);
+							messagesDistributionService.notifyMessage(
+								process,
+								savedMsg
+							);
+							process.log(
+								`Registro da mensagem ID:${originalMsg.id} salvo no banco para o alvo: ${target.id}. Novo ID: ${savedMsg.id}`
+							);
 
-							await client.forwardMessage(target.id, originalMsg.wwebjsId!, target.isGroup);
-							process.log(`Mensagem ID:${originalMsg.id} encaminhada com sucesso via WhatsApp para: ${target.id}`);
+							await client.forwardMessage(
+								target.id,
+								originalMsg.wwebjsId!,
+								target.isGroup
+							);
+							process.log(
+								`Mensagem ID:${originalMsg.id} encaminhada com sucesso via WhatsApp para: ${target.id}`
+							);
 						}
 					} catch (err) {
-						process.failed(`Falha ao processar encaminhamento para o alvo ${target.id}: ${sanitizeErrorMessage(err)}`);
+						process.failed(
+							`Falha ao processar encaminhamento para o alvo ${target.id}: ${sanitizeErrorMessage(err)}`
+						);
 					}
 				}
 			} catch (error) {
-				process.failed(`Erro no bloco de encaminhamento para o WhatsApp: ${sanitizeErrorMessage(error)}`);
+				process.failed(
+					`Erro no bloco de encaminhamento para o WhatsApp: ${sanitizeErrorMessage(error)}`
+				);
 			}
 		}
 
-			if (internalTargets && internalTargets.length > 0) {
-				try {
-					process.log(`Iniciando encaminhamento para ${internalTargets.length} alvo(s) internos.`);
-					await internalChatsService.forwardWppMessagesToInternal(
-						session,
-						messageIds,
-						internalTargets.map(t => t.id)
-					);
-					process.log("Encaminhamento para alvos internos delegado com sucesso.");
-				} catch (error) {
-					process.failed(`Erro no bloco de encaminhamento para chats internos: ${sanitizeErrorMessage(error)}`);
-				}
+		if (internalTargets && internalTargets.length > 0) {
+			try {
+				process.log(
+					`Iniciando encaminhamento para ${internalTargets.length} alvo(s) internos.`
+				);
+				await internalChatsService.forwardWppMessagesToInternal(
+					session,
+					messageIds,
+					internalTargets.map((t) => t.id)
+				);
+				process.log(
+					"Encaminhamento para alvos internos delegado com sucesso."
+				);
+			} catch (error) {
+				process.failed(
+					`Erro no bloco de encaminhamento para chats internos: ${sanitizeErrorMessage(error)}`
+				);
 			}
+		}
 
-			process.success("Processo de encaminhamento concluído.");
+		process.success("Processo de encaminhamento concluído.");
 	}
-
-
 }
 
 export default new WhatsappService();
