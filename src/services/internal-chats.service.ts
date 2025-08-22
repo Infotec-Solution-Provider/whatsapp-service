@@ -369,7 +369,9 @@ class InternalChatsService {
 					try {
 						mentions = JSON.parse(mentions);
 					} catch (err) {
-						throw new BadRequestError("mentions não é um JSON válido");
+						throw new BadRequestError(
+							"mentions não é um JSON válido"
+						);
 					}
 				}
 
@@ -377,9 +379,8 @@ class InternalChatsService {
 					throw new BadRequestError("mentions precisa ser um array");
 				}
 
-
 				mentions
-					.map(user => {
+					.map((user) => {
 						const phone = user.phone?.replace(/\D/g, "");
 						if (!phone) {
 							process.log("Telefone inválido em menção:", user);
@@ -390,7 +391,7 @@ class InternalChatsService {
 					.filter((id): id is string => id !== null);
 
 				mentionsText = mentions
-					.map(user => `@${user.name || user.phone}`)
+					.map((user) => `@${user.name || user.phone}`)
 					.join(" ");
 			}
 
@@ -404,7 +405,8 @@ class InternalChatsService {
 				from: `user:${session.userId}`,
 				type: "chat",
 				body: usarMentionsText
-					? texto.replace(/@\s*$/, mentionsText) : data.text,
+					? texto.replace(/@\s*$/, mentionsText)
+					: data.text,
 				quotedId: data.quotedId ? Number(data.quotedId) : null,
 				chat: {
 					connect: {
@@ -449,15 +451,23 @@ class InternalChatsService {
 			});
 			process.log("Mensagem salva no banco de dados.", savedMsg);
 			if (data.mentions?.length) {
-				const mentionsParsed = typeof data.mentions === "string" ? JSON.parse(data.mentions) : data.mentions || [];
+				const mentionsParsed =
+					typeof data.mentions === "string"
+						? JSON.parse(data.mentions)
+						: data.mentions || [];
 
 				const mentionData = mentionsParsed.map((mention: any) => ({
-					userId: typeof mention === "object" ? mention.userId ?? mention.id : mention,
-					messageId: savedMsg.id,
+					userId:
+						typeof mention === "object"
+							? (mention.userId ?? mention.id)
+							: mention,
+					messageId: savedMsg.id
 				}));
 
 				if (mentionData.length > 0) {
-					await prismaService.internalMention.createMany({ data: mentionData });
+					await prismaService.internalMention.createMany({
+						data: mentionData
+					});
 				}
 			}
 			const room =
@@ -508,7 +518,7 @@ class InternalChatsService {
 		});
 
 		if (chat) {
-			const { to, ...rest } = msg;
+			const { to, sentAt, ...rest } = msg;
 			const savedMsg = await prismaService.internalMessage.create({
 				data: {
 					...rest,
@@ -550,12 +560,11 @@ class InternalChatsService {
 				mentions = data.mentions;
 			}
 
-			waMentions = mentions.map(m => ({
+			waMentions = mentions.map((m) => ({
 				userId: m.userId ?? "",
 				phone: m.phone ?? "",
 				name: m.name || m.phone || ""
 			}));
-
 		}
 
 		const text = `*${session.name}*: ${message.body}`;
@@ -634,71 +643,87 @@ class InternalChatsService {
 			}
 		});
 	}
-   public async forwardWppMessagesToInternal(
-        session: SessionData,
-        originalMessages: any[],
-        internalTargetChatIds: number[]
-    ): Promise<void> {
-        const process = new ProcessingLogger(
-            session.instance,
-            "forward-wpp-to-internal",
-            `user:${session.userId}-${Date.now()}`,
-            {
-                messageCount: originalMessages.length,
-                targetCount: internalTargetChatIds.length,
-            }
-        );
+	public async forwardWppMessagesToInternal(
+		session: SessionData,
+		originalMessages: any[],
+		internalTargetChatIds: number[]
+	): Promise<void> {
+		const process = new ProcessingLogger(
+			session.instance,
+			"forward-wpp-to-internal",
+			`user:${session.userId}-${Date.now()}`,
+			{
+				messageCount: originalMessages.length,
+				targetCount: internalTargetChatIds.length
+			}
+		);
 
-        try {
-            process.log(`Buscando ${originalMessages.length} mensagem(ns) original(is) do WhatsApp.`);
+		try {
+			process.log(
+				`Buscando ${originalMessages.length} mensagem(ns) original(is) do WhatsApp.`
+			);
 
-            if (originalMessages.length === 0) {
-                process.log("Nenhuma mensagem original encontrada no DB. Encerrando.");
-                return;
-            }
+			if (originalMessages.length === 0) {
+				process.log(
+					"Nenhuma mensagem original encontrada no DB. Encerrando."
+				);
+				return;
+			}
 
-            for (const chatId of internalTargetChatIds) {
-                for (const originalMsg of originalMessages) {
+			for (const chatId of internalTargetChatIds) {
+				for (const originalMsg of originalMessages) {
+					const formattedBody = originalMsg.body;
 
-                    const formattedBody = originalMsg.body;
+					const messageData: Prisma.InternalMessageCreateInput = {
+						instance: session.instance,
+						from: `user:${session.userId}`,
+						type: originalMsg.type,
+						body: formattedBody,
+						timestamp: Date.now().toString(),
+						status: "RECEIVED",
+						isForwarded: true,
+						chat: {
+							connect: { id: chatId }
+						},
+						fileId: originalMsg.fileId,
+						fileName: originalMsg.fileName,
+						fileType: originalMsg.fileType,
+						fileSize: originalMsg.fileSize
+					};
 
-                    const messageData: Prisma.InternalMessageCreateInput = {
-                        instance: session.instance,
-                        from: `user:${session.userId}`,
-                        type: originalMsg.type,
-                        body: formattedBody,
-                        timestamp: Date.now().toString(),
-                        status: "RECEIVED",
-                        isForwarded: true,
-                        chat: {
-                            connect: { id: chatId }
-                        },
-                        fileId: originalMsg.fileId,
-                        fileName: originalMsg.fileName,
-                        fileType: originalMsg.fileType,
-                        fileSize: originalMsg.fileSize,
-                    };
+					const savedMsg = await prismaService.internalMessage.create(
+						{
+							data: messageData
+						}
+					);
 
-                    const savedMsg = await prismaService.internalMessage.create({
-                        data: messageData
-                    });
+					process.log(
+						`Mensagem ID:${originalMsg.id} encaminhada para Chat Interno ID:${chatId}. Nova msg ID:${savedMsg.id}`
+					);
 
-                    process.log(`Mensagem ID:${originalMsg.id} encaminhada para Chat Interno ID:${chatId}. Nova msg ID:${savedMsg.id}`);
-
-                    const room: SocketServerInternalChatRoom = `${session.instance}:internal-chat:${chatId}`;
-                    await socketService.emit(SocketEventType.InternalMessage, room, {
-                        message: savedMsg
-                    });
-                }
-            }
-            process.success("Todas as mensagens foram encaminhadas com sucesso para os chats internos.");
-
-        } catch (err) {
-            const msg = sanitizeErrorMessage(err) || "null";
-            process.failed(`Erro ao encaminhar mensagens para chats internos: ${msg}`);
-            throw new BadRequestError(`Erro ao encaminhar para chat interno: ${msg}`);
-        }
-    }
+					const room: SocketServerInternalChatRoom = `${session.instance}:internal-chat:${chatId}`;
+					await socketService.emit(
+						SocketEventType.InternalMessage,
+						room,
+						{
+							message: savedMsg
+						}
+					);
+				}
+			}
+			process.success(
+				"Todas as mensagens foram encaminhadas com sucesso para os chats internos."
+			);
+		} catch (err) {
+			const msg = sanitizeErrorMessage(err) || "null";
+			process.failed(
+				`Erro ao encaminhar mensagens para chats internos: ${msg}`
+			);
+			throw new BadRequestError(
+				`Erro ao encaminhar para chat interno: ${msg}`
+			);
+		}
+	}
 }
 
 export default new InternalChatsService();
