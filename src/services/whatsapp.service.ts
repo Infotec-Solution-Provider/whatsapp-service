@@ -663,12 +663,31 @@ class WhatsappService {
 							process.log(
 								`Registro da mensagem ID:${originalMsg.id} salvo no banco para o alvo: ${target.id}. Novo ID: ${savedMsg.id}`
 							);
+							if (sourceType === "internal") {
+								const options: SendMessageOptions | SendFileOptions = {
+									to: target.id,
+									text: originalMsg.body || undefined,
+								};
 
-							await client.forwardMessage(
-								target.id,
-								originalMsg.wwebjsId!,
-								target.isGroup
-							);
+								if (originalMsg.fileId) {
+									(options as SendFileOptions).fileUrl = filesService.getFileDownloadUrl(
+										originalMsg.fileId
+									);
+									(options as SendFileOptions).fileName = originalMsg.fileName;
+									(options as SendFileOptions).fileType = originalMsg.fileType;
+									(options as SendFileOptions).sendAsAudio = originalMsg.type === "ptt";
+									(options as SendFileOptions).sendAsDocument = originalMsg.type === "document";
+								}
+
+								await client.sendMessage(options);
+							} else {
+								await client.forwardMessage(
+									target.id,
+									originalMsg.wwebjsId!,
+									target.isGroup
+								);
+							}
+
 							process.log(
 								`Mensagem ID:${originalMsg.id} encaminhada com sucesso via WhatsApp para: ${target.id}`
 							);
