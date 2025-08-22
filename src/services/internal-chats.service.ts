@@ -767,7 +767,7 @@ public async forwardWppMessagesToInternal(
 								(options as SendFileOptions).sendAsDocument = originalMsg.type === "document";
 							}
 
-							await client.sendMessage(options);
+							await client.sendMessage(options,true);
 						} else {
 							await client.forwardMessage(
 								internalChat.wppGroupId,
