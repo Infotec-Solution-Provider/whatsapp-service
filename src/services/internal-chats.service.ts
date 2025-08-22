@@ -17,7 +17,7 @@ import prismaService from "./prisma.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
 import CreateMessageDto from "../dtos/create-message.dto";
 import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
-import { Mention } from "../types/whatsapp-instance.types";
+import { Mention, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
 import OpusAudioConverter from "../utils/opus-audio-converter";
 import messagesService from "./messages.service";
 import messagesDistributionService from "./messages-distribution.service";
@@ -649,6 +649,7 @@ class InternalChatsService {
 public async forwardWppMessagesToInternal(
     session: SessionData,
     originalMessages: any[],
+	sourceType: "whatsapp" | "internal",
     internalTargetChatIds: number[]
 ): Promise<void> {
     const process = new ProcessingLogger(
@@ -720,15 +721,13 @@ public async forwardWppMessagesToInternal(
                     }
                 );
 
-                // ETAPA 2: Se for um grupo, encaminha também para o WhatsApp
                 if (internalChat?.isGroup && internalChat.wppGroupId) {
                     try {
                          if (!(client instanceof WWEBJSWhatsappClient)) {
                             process.log(`Cliente não suporta encaminhamento nativo para o grupo wppId:${internalChat.wppGroupId}`);
-                            continue; // Pula para a próxima mensagem
+                            continue;
                         }
 
-                        // Salva o registro da mensagem no banco de dados do wpp
                         const now = new Date();
                         const messageToSave: CreateMessageDto = {
                             instance: session.instance,
@@ -740,7 +739,7 @@ public async forwardWppMessagesToInternal(
                             type: originalMsg.type,
                             body: originalMsg.body,
                             isForwarded: true,
-                            chatId: null, // O chat pode ser encontrado/criado pelo listener de mensagens
+                            chatId: null,
                             contactId: null,
                             fileId: originalMsg.fileId,
                             fileName: originalMsg.fileName,
@@ -752,11 +751,30 @@ public async forwardWppMessagesToInternal(
                         );
                         messagesDistributionService.notifyMessage(process, savedWppMsg);
 
-                        await client.forwardMessage(
-                            internalChat.wppGroupId,
-                            originalMsg.wwebjsId!,
-                            true
-                        );
+						if (sourceType === "internal") {
+							const options: SendMessageOptions | SendFileOptions = {
+								to: internalChat.wppGroupId,
+								text: originalMsg.body || undefined,
+							};
+
+							if (originalMsg.fileId) {
+								(options as SendFileOptions).fileUrl = filesService.getFileDownloadUrl(
+									originalMsg.fileId
+								);
+								(options as SendFileOptions).fileName = originalMsg.fileName;
+								(options as SendFileOptions).fileType = originalMsg.fileType;
+								(options as SendFileOptions).sendAsAudio = originalMsg.type === "ptt";
+								(options as SendFileOptions).sendAsDocument = originalMsg.type === "document";
+							}
+
+							await client.sendMessage(options);
+						} else {
+							await client.forwardMessage(
+								internalChat.wppGroupId,
+								originalMsg.wwebjsId!,
+								true
+							);
+						}
                         process.log(
                             `Mensagem ID:${originalMsg.id} também encaminhada para o grupo de WhatsApp ID:${internalChat.wppGroupId}`
                         );

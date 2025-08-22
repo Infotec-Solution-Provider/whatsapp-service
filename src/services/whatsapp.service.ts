@@ -713,6 +713,7 @@ class WhatsappService {
 				await internalChatsService.forwardWppMessagesToInternal(
 					session,
 					originalMessages,
+					sourceType,
 					internalTargets.map((t) => t.id)
 				);
 				process.log(
