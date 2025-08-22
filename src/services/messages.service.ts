@@ -1,12 +1,12 @@
-import { WppContact, WppMessage } from "@prisma/client";
-import prismaService from "./prisma.service";
 import {
 	SessionData,
 	SocketEventType,
 	SocketServerChatRoom
 } from "@in.pulse-crm/sdk";
+import { WppMessage } from "@prisma/client";
 import { NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
 import CreateMessageDto from "../dtos/create-message.dto";
+import prismaService from "./prisma.service";
 import socketService from "./socket.service";
 
 interface FetchMessagesFilter {

@@ -410,13 +410,15 @@ class MessagesDistributionService {
 		text: string,
 		notify: boolean = true
 	) {
+		const now = new Date();
 		const message = await messagesService.insertMessage({
 			body: text,
 			from: "system",
 			to: "system",
 			instance: chat.instance,
 			status: "RECEIVED",
-			timestamp: Date.now().toString(),
+			timestamp: now.getTime().toString(),
+			sentAt: now,
 			type: "chat",
 			chatId: chat.id,
 			contactId: chat.contactId
