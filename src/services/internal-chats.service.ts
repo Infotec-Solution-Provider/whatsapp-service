@@ -726,25 +726,6 @@ public async forwardWppMessagesToInternal(
                             continue;
                         }
 
-                        const now = new Date();
-                        const messageToSave: CreateMessageDto = {
-                            instance: session.instance,
-                            status: "SENT",
-                            timestamp: now.getTime().toString(),
-                            sentAt: now,
-                            from: `me:${client.phone}`,
-                            to: internalChat.wppGroupId,
-                            type: originalMsg.type,
-                            body: originalMsg.body,
-                            isForwarded: true,
-                            chatId: null,
-                            contactId: null,
-                            fileId: originalMsg.fileId,
-                            fileName: originalMsg.fileName,
-                            fileType: originalMsg.fileType,
-                            fileSize: originalMsg.fileSize
-                        };
-
 						if (sourceType === "internal") {
 							const options: SendMessageOptions | SendFileOptions = {
 								to: internalChat.wppGroupId,
