@@ -1,4 +1,4 @@
-import { InternalChat, Prisma } from "@prisma/client";
+import { InternalChat, Prisma, WppMessage } from "@prisma/client";
 import {
 	FileDirType,
 	InternalChatMember,
@@ -685,18 +685,18 @@ class InternalChatsService {
 				});
 
 				for (const originalMsg of originalMessages) {
-					const userId = originalMsg.from.split(':')[1];
-					const user = await usersService.getUserById(Number(userId));
-					console.log("user no encaminhar interno", user);
+					let wppMessage: WppMessage | null = null;
+					if(originalMsg.isGroup){
+						wppMessage = await prismaService.wppMessage.findFirst({
+						where: { wwebjsId: originalMsg.wwebjs_id }
+						});
+					}
 
-					const messageBody = originalMsg.isGroup
-					? `${user?.NOME ? `*${user.NOME}*:` : ''}${originalMsg.body}`
-					: originalMsg.body;
 					const messageData: Prisma.InternalMessageCreateInput = {
 						instance: session.instance,
 						from: `user:${session.userId}`,
 						type: originalMsg.type,
-						body: messageBody,
+						body: wppMessage? wppMessage.body: originalMsg.body,
 						timestamp: Date.now().toString(),
 						status: "RECEIVED",
 						isForwarded: true,
