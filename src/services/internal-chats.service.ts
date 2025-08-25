@@ -685,11 +685,13 @@ class InternalChatsService {
 				});
 
 				for (const originalMsg of originalMessages) {
-					const user = await usersService.getUserById(originalMsg.userId);
-					console.log("user no encaminhar interno", user)
+					const userId = originalMsg.from.split(':')[1];
+					const user = await usersService.getUserById(Number(userId));
+					console.log("user no encaminhar interno", user);
+
 					const messageBody = originalMsg.isGroup
-						? `${user?.NOME ? `*${user.NOME}*:` : ''}${originalMsg.body}`
-						: originalMsg.body;
+					? `${user?.NOME ? `*${user.NOME}*:` : ''}${originalMsg.body}`
+					: originalMsg.body;
 					const messageData: Prisma.InternalMessageCreateInput = {
 						instance: session.instance,
 						from: `user:${session.userId}`,
