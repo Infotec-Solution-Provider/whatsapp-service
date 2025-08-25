@@ -19,7 +19,6 @@ import CreateMessageDto from "../dtos/create-message.dto";
 import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 import { Mention, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
 import OpusAudioConverter from "../utils/opus-audio-converter";
-import usersService from "./users.service";
 
 interface ChatsFilters {
 	userId?: string;
