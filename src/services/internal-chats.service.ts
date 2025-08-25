@@ -690,11 +690,18 @@ class InternalChatsService {
 					let userOrContact: any;
 
 					if (originalMsg.from.startsWith("user:")) {
-						userOrContact = await instancesService.executeQuery<User>(
+						const  result = await instancesService.executeQuery<User>(
 							session.instance,
 							"SELECT * FROM operadores WHERE CODIGO = ?",
 							[Number(phoneOrUserId)]
 						);
+						if (Array.isArray(result) && result.length > 0) {
+								userOrContact = result[0];
+							} else if (result && typeof result === "object") {
+								userOrContact = result;
+							} else {
+								userOrContact = null;
+							}
 					} else if (originalMsg.from.startsWith("external:")) {
 						if (phoneOrUserId) {
 						userOrContact = await prismaService.wppContact.findFirst({
