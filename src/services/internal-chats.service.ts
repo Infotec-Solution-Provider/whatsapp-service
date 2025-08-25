@@ -760,9 +760,9 @@ class InternalChatsService {
 							}
 
 							if (sourceType === "internal") {
-								const options: SendMessageOptions | SendFileOptions = {
+								const options: SendMessageOptions = {
 									to: internalChat.wppGroupId,
-									text: originalMsg.body || undefined,
+    								text: `_→ Encaminhada_\n${messageBody}`,
 								};
 
 								if (originalMsg.fileId) {
