@@ -19,6 +19,7 @@ import CreateMessageDto from "../dtos/create-message.dto";
 import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 import { Mention, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
 import OpusAudioConverter from "../utils/opus-audio-converter";
+import usersService from "./users.service";
 
 interface ChatsFilters {
 	userId?: string;
@@ -684,22 +685,28 @@ public async forwardWppMessagesToInternal(
             });
 
             for (const originalMsg of originalMessages) {
-                const messageData: Prisma.InternalMessageCreateInput = {
-                    instance: session.instance,
-                    from: `user:${session.userId}`,
-                    type: originalMsg.type,
-                    body: originalMsg.body,
-                    timestamp: Date.now().toString(),
-                    status: "RECEIVED",
-                    isForwarded: true,
-                    chat: {
-                        connect: { id: chatId }
-                    },
-                    fileId: originalMsg.fileId,
-                    fileName: originalMsg.fileName,
-                    fileType: originalMsg.fileType,
-                    fileSize: originalMsg.fileSize
-                };
+			const user = await usersService.getUserById(originalMsg.userId);
+
+			const messageBody = originalMsg.isGroup
+				? `${user?.NOME ? `*${user.NOME}*:` : ''}${originalMsg.body}`
+				: originalMsg.body;
+
+			const messageData: Prisma.InternalMessageCreateInput = {
+						instance: session.instance,
+						from: `user:${session.userId}`,
+						type: originalMsg.type,
+        				body: messageBody,
+						timestamp: Date.now().toString(),
+						status: "RECEIVED",
+						isForwarded: true,
+						chat: {
+							connect: { id: chatId }
+						},
+						fileId: originalMsg.fileId,
+						fileName: originalMsg.fileName,
+						fileType: originalMsg.fileType,
+						fileSize: originalMsg.fileSize
+					};
 
                 const savedInternalMsg =
                     await prismaService.internalMessage.create({
