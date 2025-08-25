@@ -1,4 +1,4 @@
-import { InternalChat, Prisma, WppMessage } from "@prisma/client";
+import { InternalChat, Prisma } from "@prisma/client";
 import {
 	FileDirType,
 	InternalChatMember,
@@ -6,7 +6,8 @@ import {
 	SessionData,
 	SocketEventType,
 	SocketServerInternalChatRoom,
-	SocketServerUserRoom
+	SocketServerUserRoom,
+	User
 } from "@in.pulse-crm/sdk";
 import socketService from "./socket.service";
 import ProcessingLogger from "../utils/processing-logger";
@@ -19,6 +20,7 @@ import CreateMessageDto from "../dtos/create-message.dto";
 import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 import { Mention, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
 import OpusAudioConverter from "../utils/opus-audio-converter";
+import instancesService from "./instances.service";
 
 interface ChatsFilters {
 	userId?: string;
@@ -684,18 +686,35 @@ class InternalChatsService {
 				});
 
 				for (const originalMsg of originalMessages) {
-					let wppMessage: WppMessage | null = null;
-					if(originalMsg.isGroup){
-						wppMessage = await prismaService.wppMessage.findFirst({
-						where: { wwebjsId: originalMsg.wwebjs_id }
-						});
-					}
+					const phoneOrUserId = this.extractPhone(originalMsg.from);
+					let userOrContact: any;
 
+					if (originalMsg.from.startsWith("user:")) {
+						userOrContact = await instancesService.executeQuery<User>(
+							session.instance,
+							"SELECT * FROM operadores WHERE CODIGO = ?",
+							[Number(phoneOrUserId)]
+						);
+					} else if (originalMsg.from.startsWith("external:")) {
+						if (phoneOrUserId) {
+						userOrContact = await prismaService.wppContact.findFirst({
+							where: { phone: phoneOrUserId }
+						});
+						} else {
+						userOrContact = null;
+						}
+					}
+					console.log("userOrContact",userOrContact)
+
+					const messageBody = internalChat?.isGroup
+						? `${userOrContact?.NOME || userOrContact?.name ? `*${userOrContact.NOME || userOrContact.name}*:` : ''} ${originalMsg.body}`
+						: originalMsg.body;
+					console.log("messageBody",messageBody)
 					const messageData: Prisma.InternalMessageCreateInput = {
 						instance: session.instance,
 						from: `user:${session.userId}`,
 						type: originalMsg.type,
-						body: wppMessage? wppMessage.body: originalMsg.body,
+						body: messageBody,
 						timestamp: Date.now().toString(),
 						status: "RECEIVED",
 						isForwarded: true,
@@ -781,6 +800,20 @@ class InternalChatsService {
 			);
 		}
 	}
+
+	extractPhone(from: string): string | null {
+		if (from.startsWith("user:")) {
+			return from.replace("user:", "");
+		}
+
+		if (from.startsWith("external:")) {
+			return from.match(/:(\d+)@c\.us$/)?.[1] ?? null;
+		}
+
+		return null;
+	}
+
+
 }
 
 export default new InternalChatsService();
