@@ -2,11 +2,14 @@ import { Request, Response, Router } from "express";
 import gupshupService from "../services/gupshup.service";
 
 const ENDPOINT = "/api/whatsapp/meta/:instance";
+const ENDPOINT_NEW = "/api/whatsapp/gupshup/:instance";
 
 class GupshupController {
 	constructor(public readonly router: Router) {
 		router.post(ENDPOINT + "/webhooks", this.webhookEntry);
 		router.get(ENDPOINT + "/webhooks", this.webhookChallenge);
+		router.post(ENDPOINT_NEW + "/webhooks", this.webhookEntry);
+		router.get(ENDPOINT_NEW + "/webhooks", this.webhookChallenge);
 	}
 
 	private webhookEntry = async (req: Request, res: Response) => {
