@@ -8,11 +8,7 @@ import { WppMessageStatus } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 
 class GUPSHUPMessageParser {
-	public static async parse(
-		recipient: string,
-		instance: string,
-		data: GSMessageData
-	) {
+	public static async parse(recipient: string, instance: string, data: GSMessageData) {
 		const parsedMessage: CreateMessageDto = {
 			instance,
 			wabaId: data.id,
@@ -57,16 +53,11 @@ class GUPSHUPMessageParser {
 				fileType = data.sticker.mime_type;
 				break;
 			default:
-				break;
+				throw new Error("Unsupported message type");
 		}
 
 		if (fileUrl && fileType) {
-			const file = await GUPSHUPMessageParser.processMediaFile(
-				instance,
-				fileUrl,
-				fileType,
-				fileName
-			);
+			const file = await GUPSHUPMessageParser.processMediaFile(instance, fileUrl, fileType, fileName);
 
 			parsedMessage.fileId = file.id;
 			parsedMessage.fileName = file.name;
@@ -77,12 +68,7 @@ class GUPSHUPMessageParser {
 		return parsedMessage;
 	}
 
-	public static async processMediaFile(
-		instance: string,
-		url: string,
-		fileType: string,
-		fileName?: string | null
-	) {
+	public static async processMediaFile(instance: string, url: string, fileType: string, fileName?: string | null) {
 		const response = await axios.get(url, { responseType: "arraybuffer" });
 		const buffer = Buffer.from(response.data);
 
@@ -114,14 +100,10 @@ class GUPSHUPMessageParser {
 				return WppMessageStatus.READ;
 				break;
 			case "enqueued":
-				return WppMessageStatus.SENT; /// This is a temporary status, it will be updated later
-				// In Gupshup, "enqueued" means the message is queued for sending, not yet sent.
-				// We treat it as "SENT" for now, but it should be updated to "SENT" once the message is actually sent.
+				return WppMessageStatus.PENDING;
 				break;
 			default:
-				throw new BadRequestError(
-					`${data.status} status is not expected`
-				);
+				throw new BadRequestError(`${data.status} status is not expected`);
 		}
 	}
 }
