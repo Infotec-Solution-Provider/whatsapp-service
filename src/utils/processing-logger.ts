@@ -16,18 +16,18 @@ export default class ProcessingLogger {
 	private readonly logEntries: Array<string> = new Array<string>();
 	private readonly startTime: Date = new Date();
 	private endTime: Date | null = null;
-	private output: unknown = null;
+	private output: Array<any> = [];
 	private error: unknown = null;
 
 	public log(entry: string, output?: unknown): void {
 		this.logEntries.push(`${new Date().toISOString()}: ${entry}`);
 		if (output) {
-			this.output = output;
+			this.output.push(output);
 		}
 	}
 
 	public success(result: unknown): void {
-		this.output = result;
+		this.output.push(result);
 		this.endTime = new Date();
 		this.save();
 	}
@@ -52,12 +52,7 @@ export default class ProcessingLogger {
 			};
 
 			const logDir = this.error
-				? path.join(
-						LOGS_PATH,
-						this.instance,
-						this.processName,
-						"errors"
-					)
+				? path.join(LOGS_PATH, this.instance, this.processName, "errors")
 				: path.join(LOGS_PATH, this.instance, this.processName);
 
 			const logFileName = `${this.processId}.json`;
