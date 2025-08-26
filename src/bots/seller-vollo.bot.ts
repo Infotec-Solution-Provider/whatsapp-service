@@ -3,158 +3,188 @@ import whatsappService from "../services/whatsapp.service";
 import messagesDistributionService from "../services/messages-distribution.service";
 import prismaService from "../services/prisma.service";
 import { User } from "@in.pulse-crm/sdk";
+import ProcessingLogger from "../utils/processing-logger";
+import CheckAvailableUsersStep from "../message-flow/steps/check-available-users.step";
+import instancesService from "../services/instances.service";
 
 const OPERATORS: Record<string, { name: string; id: number }> = {
-  aline: { name: "Aline", id: 13 },
-  hellen: { name: "Hellen", id: 12 },
-  nathalia: { name: "Nathalia", id: 4 }
+	"1": { name: "Aline", id: 13 },
+	"2": { name: "Hellen", id: 12 },
+	"3": { name: "Nathalia", id: 4 }
 };
 
 class ChooseSellerBot {
-  private running: Array<{ contact: string; step: number }> = [];
+	private running: Array<{
+		contact: string;
+		step: number;
+		stepCount: number;
+		prevStep: () => void;
+		nextStep: () => void;
+		countStep: () => void;
+	}> = [];
 
-  private getOrCreate(contact: string) {
-    let session = this.running.find((s) => s.contact === contact);
-    if (!session) {
-      session = { contact, step: 1 };
-      this.running.push(session);
-    }
-    return session;
-  }
+	private getOrCreate(contact: string) {
+		let session = this.running.find((s) => s.contact === contact);
+		if (!session) {
+			session = {
+				contact,
+				step: 1,
+				stepCount: 0,
+				prevStep: function () {
+					this.stepCount = 0;
+					this.step--;
+				},
+				nextStep: function () {
+					this.stepCount = 0;
+					this.step++;
+				},
+				countStep: function () {
+					this.stepCount++;
+				}
+			};
+			this.running.push(session);
+		}
+		return session;
+	}
 
-  private remove(contact: string) {
-    this.running = this.running.filter((s) => s.contact !== contact);
-  }
+	private remove(contact: string) {
+		this.running = this.running.filter((s) => s.contact !== contact);
+	}
 
-  public async processMessage(
-    chat: WppChat,
-    contact: WppContact,
-    message: WppMessage
-  ) {
-    const session = this.getOrCreate(chat.id.toString());
-    const msg = message.body.trim().toLowerCase();
+	public async processMessage(
+		chat: WppChat,
+		contact: WppContact,
+		message: WppMessage
+	) {
+		const session = this.getOrCreate(chat.id.toString());
+		const msg = message.body.trim().toLowerCase();
+		session.countStep();
 
-    switch (session.step) {
-      case 1: {
-        const welcome = `Olá! 😊\n\nCom qual das nossas vendedoras você gostaria de falar?\n\nAline, Hellen ou Nathalia?\n\nCaso ainda não tenha sido atendido(a) por nenhuma delas, é só responder com: "Nova vendedora" que vamos te direcionar para o próximo atendimento disponível.\n\nFico no aguardo da sua escolha!`;
-        await whatsappService.sendBotMessage(message.from, {
-          chat,
-          text: welcome,
-          quotedId: message.id
-        });
-        session.step = 2;
-        break;
-      }
+		switch (session.step) {
+			case 1: {
+				const welcome =
+					"Olá! 😊\n\nCom qual das nossas vendedoras você gostaria de falar?\n\n1 - Aline\n2 - Hellen\n3 - Nathalia\n\nFico no aguardo da sua escolha!";
 
-      case 2: {
-        if (msg === "nova vendedora") {
-          // Buscar setor no banco para usar na transferência
-          const sector = await prismaService.wppSector.findUnique({
-            where: { id: chat.sectorId! }
-          });
+				await whatsappService.sendBotMessage(message.from, {
+					chat,
+					text: welcome,
+					quotedId: message.id
+				});
+				session.nextStep();
+				break;
+			}
 
-          if (!sector) {
-            await whatsappService.sendBotMessage(message.from, {
-              chat,
-              text: "Setor não encontrado. Por favor, tente novamente mais tarde.",
-              quotedId: message.id
-            });
-            this.remove(chat.id.toString());
-            break;
-          }
+			case 2: {
+				const validOption = msg
+					.split(" ")
+					.find((s) => ["1", "2", "3"].includes(s));
 
-			const operatorKeys = Object.keys(OPERATORS);
-			const randomKey = operatorKeys[Math.floor(Math.random() * operatorKeys.length)]!;
-			const defaultOperator = OPERATORS[randomKey];
+				const op = validOption && OPERATORS[validOption];
 
-			const fakeUser = { NOME: defaultOperator?.name, CODIGO: defaultOperator?.id } as User;
+				if (op) {
+					const user = { NOME: op.name, CODIGO: op.id } as User;
 
+					const sector = await prismaService.wppSector.findUnique({
+						where: { id: chat.sectorId! }
+					});
 
-          await whatsappService.sendBotMessage(message.from, {
-            chat,
-            text: `Perfeito! Vamos direcionar você para o próximo atendimento disponível.`,
-            quotedId: message.id
-          });
+					if (!sector) {
+						await whatsappService.sendBotMessage(message.from, {
+							chat,
+							text: "Setor não encontrado. Por favor, tente novamente mais tarde.",
+							quotedId: message.id
+						});
+						this.remove(chat.id.toString());
+						break;
+					}
 
-          await messagesDistributionService.transferChatOperator(
-            {
-              id: sector.id,
-              instance: sector.instance,
-              name: sector.name,
-              wppInstanceId: sector.wppInstanceId,
-              receiveChats: sector.receiveChats,
-              startChats: sector.startChats
-            },
-            fakeUser,
-            contact,
-            chat
-          );
+					await whatsappService.sendBotMessage(message.from, {
+						chat,
+						text: `Estamos transferindo você para ${op?.name}...\nVocê será atendido em instantes.`,
+						quotedId: message.id
+					});
 
-          this.remove(chat.id.toString());
-          break;
-        }
+					await messagesDistributionService.transferChatOperator(
+						sector,
+						user,
+						contact,
+						chat
+					);
 
-        const found = Object.keys(OPERATORS).find((key) =>
-          msg.includes(key)
-        );
+					this.remove(chat.id.toString());
+					break;
+				} else if (!validOption && session.stepCount === 2) {
+					const repeat =
+						"Por gentileza, escolha uma das vendedoras abaixo:\n\n1 - Aline\n2 - Hellen\n3 - Nathalia";
 
-        if (found) {
-          const op = OPERATORS[found];
-          const user = { NOME: op?.name, CODIGO: op?.id } as User;
+					await whatsappService.sendBotMessage(message.from, {
+						chat,
+						text: repeat,
+						quotedId: message.id
+					});
+					break;
+				} else {
+					const logger = new ProcessingLogger(
+						"vollo",
+						"bot-flow",
+						chat.id.toString(),
+						message
+					);
+					const step = new CheckAvailableUsersStep({
+						instance: message.instance,
+						sectorId: chat.sectorId!,
+						stepId: 1,
+						nextStepId: 1
+					});
 
-          const sector = await prismaService.wppSector.findUnique({
-            where: { id: chat.sectorId! }
-          });
+					const result = await step.run({ contact, logger });
+					const users = await instancesService.executeQuery<User[]>(
+						chat.instance,
+						`SELECT * FROM users`,
+						[]
+					);
+					const sector =
+						await prismaService.wppSector.findUniqueOrThrow({
+							where: {
+								id: chat.sectorId!
+							}
+						});
 
-          if (!sector) {
-            await whatsappService.sendBotMessage(message.from, {
-              chat,
-              text: "Setor não encontrado. Por favor, tente novamente mais tarde.",
-              quotedId: message.id
-            });
-            this.remove(chat.id.toString());
-            break;
-          }
+					if (!sector) {
+						await whatsappService.sendBotMessage(message.from, {
+							chat,
+							text: "Setor não encontrado. Por favor, tente novamente mais tarde.",
+							quotedId: message.id
+						});
+						this.remove(chat.id.toString());
+						break;
+					}
 
-          await whatsappService.sendBotMessage(message.from, {
-            chat,
-            text: `Você escolheu falar com ${op?.name}.`,
-            quotedId: message.id
-          });
+					const user = result.isFinal
+						? users.find(
+								(u) => u.CODIGO === result.chatData.userId
+							) || ({ NOME: "Supervisão", CODIGO: -1 } as User)
+						: ({ NOME: "Supervisão", CODIGO: -1 } as User);
 
-          await whatsappService.sendBotMessage(message.from, {
-            chat,
-            text: `*${op?.name}*: Olá! Em que posso te ajudar?`,
-            quotedId: message.id
-          });
+					await whatsappService.sendBotMessage(message.from, {
+						chat,
+						text: `Estamos transferindo você para um atendente...\nVocê será atendido em instantes.`,
+						quotedId: message.id
+					});
 
-          await messagesDistributionService.transferChatOperator(
-            {
-              id: sector.id,
-              instance: sector.instance,
-              name: sector.name,
-              wppInstanceId: sector.wppInstanceId,
-              receiveChats: sector.receiveChats,
-              startChats: sector.startChats
-            },
-            user,
-            contact,
-            chat
-          );
+					await messagesDistributionService.transferChatOperator(
+						sector,
+						user,
+						contact,
+						chat
+					);
 
-          this.remove(chat.id.toString());
-          break;
-        }
-
-        await whatsappService.sendBotMessage(message.from, {
-          chat,
-          text: `Por gentileza, escolha uma das vendedoras abaixo:\nAline, Hellen ou Nathalia?`,
-          quotedId: message.id
-        });
-        break;
-      }
-    }
-  }
+					this.remove(chat.id.toString());
+					break;
+				}
+			}
+		}
+	}
 }
 
 export default new ChooseSellerBot();
