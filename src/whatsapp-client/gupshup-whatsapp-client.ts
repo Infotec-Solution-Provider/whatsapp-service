@@ -1,9 +1,6 @@
 import axios from "axios";
 import CreateMessageDto from "../dtos/create-message.dto";
-import {
-	SendMessageOptions,
-	SendTemplateOptions
-} from "../types/whatsapp-instance.types";
+import { SendMessageOptions, SendTemplateOptions } from "../types/whatsapp-instance.types";
 import WhatsappClient from "./whatsapp-client";
 import { GSRecoverTemplatesResponse } from "../types/gupshup-api.types";
 
@@ -37,10 +34,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 		throw new Error("Method not implemented.");
 	}
 
-	public async sendMessage(
-		options: SendMessageOptions
-	): Promise<CreateMessageDto> {
-		//const response = await this.api.post("/wa/api/v1/msg");
+	public async sendMessage(options: SendMessageOptions): Promise<CreateMessageDto> {
 		const data = new URLSearchParams();
 
 		data.append("channel", "whatsapp");
@@ -59,13 +53,13 @@ class GupshupWhatsappClient implements WhatsappClient {
 
 			return options.fileType;
 		})();
+		if (options.quotedId) {
+			data.append("context", JSON.stringify({ messageId: options.quotedId }));
+		}
 
 		if ("fileUrl" in options) {
 			const urlKey = options.fileType === "image" ? "originalUrl" : "url";
-			const updatedFileUrl = options.fileUrl.replace(
-				"http://localhost:8003",
-				"https://inpulse.infotecrs.inf.br"
-			);
+			const updatedFileUrl = options.fileUrl.replace("http://localhost:8003", "https://inpulse.infotecrs.inf.br");
 
 			let message = {
 				type: msgType,
@@ -124,11 +118,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 		return message;
 	}
 
-	public async sendTemplate(
-		options: SendTemplateOptions,
-		chatId: number,
-		contactId: number
-	) {
+	public async sendTemplate(options: SendTemplateOptions, chatId: number, contactId: number) {
 		const data = new URLSearchParams();
 
 		data.append("channel", "whatsapp");
