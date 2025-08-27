@@ -7,6 +7,7 @@ import { extension } from "mime-types";
 import { WppMessageStatus } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import parseGSVcard from "../utils/parse-gupshup-vcard";
+import prismaService from "../services/prisma.service";
 
 class GUPSHUPMessageParser {
 	public static async parse(recipient: string, instance: string, data: GSMessageData) {
@@ -24,6 +25,12 @@ class GUPSHUPMessageParser {
 		let fileUrl: string | null = null;
 		let fileType: string | null = null;
 		let fileName: string | null = null;
+
+		if (data.context) {
+			const quotedMsg = await prismaService.wppMessage.findUnique({ where: { wabaId: data.context.id } });
+
+			quotedMsg && (parsedMessage.quotedId = quotedMsg.id);
+		}
 
 		switch (data.type) {
 			case "text":
