@@ -51,11 +51,7 @@ class ChooseSellerBot {
 		this.running = this.running.filter((s) => s.contact !== contact);
 	}
 
-	public async processMessage(
-		chat: WppChat,
-		contact: WppContact,
-		message: WppMessage
-	) {
+	public async processMessage(chat: WppChat, contact: WppContact, message: WppMessage) {
 		const session = this.getOrCreate(chat.id.toString());
 		const msg = message.body.trim().toLowerCase();
 		session.countStep();
@@ -75,9 +71,7 @@ class ChooseSellerBot {
 			}
 
 			case 2: {
-				const validOption = msg
-					.split(" ")
-					.find((s) => ["1", "2", "3"].includes(s));
+				const validOption = msg.split(" ").find((s) => ["1", "2", "3"].includes(s));
 
 				const op = validOption && OPERATORS[validOption];
 
@@ -104,16 +98,11 @@ class ChooseSellerBot {
 						quotedId: message.id
 					});
 
-					await messagesDistributionService.transferChatOperator(
-						sector,
-						user,
-						contact,
-						chat
-					);
+					await messagesDistributionService.transferChatOperator(sector, user, contact, chat);
 
 					this.remove(chat.id.toString());
 					break;
-				} else if (!validOption && session.stepCount === 2) {
+				} else if (!validOption && session.stepCount === 1) {
 					const repeat =
 						"Por gentileza, escolha uma das vendedoras abaixo:\n\n1 - Aline\n2 - Hellen\n3 - Nathalia";
 
@@ -124,12 +113,7 @@ class ChooseSellerBot {
 					});
 					break;
 				} else {
-					const logger = new ProcessingLogger(
-						"vollo",
-						"bot-flow",
-						chat.id.toString(),
-						message
-					);
+					const logger = new ProcessingLogger("vollo", "bot-flow", chat.id.toString(), message);
 					const step = new CheckAvailableUsersStep({
 						instance: message.instance,
 						sectorId: chat.sectorId!,
@@ -138,17 +122,12 @@ class ChooseSellerBot {
 					});
 
 					const result = await step.run({ contact, logger });
-					const users = await instancesService.executeQuery<User[]>(
-						chat.instance,
-						`SELECT * FROM users`,
-						[]
-					);
-					const sector =
-						await prismaService.wppSector.findUniqueOrThrow({
-							where: {
-								id: chat.sectorId!
-							}
-						});
+					const users = await instancesService.executeQuery<User[]>(chat.instance, `SELECT * FROM users`, []);
+					const sector = await prismaService.wppSector.findUniqueOrThrow({
+						where: {
+							id: chat.sectorId!
+						}
+					});
 
 					if (!sector) {
 						await whatsappService.sendBotMessage(message.from, {
@@ -161,9 +140,8 @@ class ChooseSellerBot {
 					}
 
 					const user = result.isFinal
-						? users.find(
-								(u) => u.CODIGO === result.chatData.userId
-							) || ({ NOME: "Supervisão", CODIGO: -1 } as User)
+						? users.find((u) => u.CODIGO === result.chatData.userId) ||
+							({ NOME: "Supervisão", CODIGO: -1 } as User)
 						: ({ NOME: "Supervisão", CODIGO: -1 } as User);
 
 					await whatsappService.sendBotMessage(message.from, {
@@ -172,12 +150,7 @@ class ChooseSellerBot {
 						quotedId: message.id
 					});
 
-					await messagesDistributionService.transferChatOperator(
-						sector,
-						user,
-						contact,
-						chat
-					);
+					await messagesDistributionService.transferChatOperator(sector, user, contact, chat);
 
 					this.remove(chat.id.toString());
 					break;
