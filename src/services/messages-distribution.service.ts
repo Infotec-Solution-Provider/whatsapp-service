@@ -30,7 +30,7 @@ import chooseSellerBot from "../bots/seller-vollo.bot";
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
 
-	private async getFlow(
+	public async getFlow(
 		instance: string,
 		sectorId: number
 	): Promise<MessageFlow> {
