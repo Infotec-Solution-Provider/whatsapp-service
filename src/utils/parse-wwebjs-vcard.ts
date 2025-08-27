@@ -11,10 +11,7 @@ function parseVCard(vCardText: string) {
 		line = line.trim();
 		if (line.length > 0) {
 			line = line.trim();
-			if (
-				(line.startsWith("TEL;") || line.startsWith("item1.TEL;")) &&
-				line.includes("waid=")
-			) {
+			if ((line.startsWith("TEL;") || line.startsWith("item1.TEL;")) && line.includes("waid=")) {
 				// Verifica se a linha contém "TEL;" e "waid="
 				const phoneNumberIndex = line.indexOf("waid=") + 5; // Obtém o índice do início do número de telefone
 				phoneNumber = line.substring(phoneNumberIndex).trim(); // Extrai o número de telefone

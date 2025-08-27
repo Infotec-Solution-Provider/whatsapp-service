@@ -6,6 +6,7 @@ import { FileDirType } from "@in.pulse-crm/sdk";
 import { extension } from "mime-types";
 import { WppMessageStatus } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
+import parseGSVcard from "../utils/parse-gupshup-vcard";
 
 class GUPSHUPMessageParser {
 	public static async parse(recipient: string, instance: string, data: GSMessageData) {
@@ -51,6 +52,13 @@ class GUPSHUPMessageParser {
 			case "sticker":
 				fileUrl = data.sticker.url;
 				fileType = data.sticker.mime_type;
+				break;
+			case "contacts":
+				parsedMessage.type = "vcard";
+
+				if (data.contacts[0]) {
+					parsedMessage.body = parseGSVcard(data.contacts[0]);
+				}
 				break;
 			default:
 				throw new Error("Unsupported message type");

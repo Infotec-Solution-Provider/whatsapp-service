@@ -11,6 +11,7 @@ interface ValidateEntryProps {
 	logger: ProcessingLogger;
 	input: any;
 }
+
 class GupshupService {
 	private async validateEntry({ instance, logger, input }: ValidateEntryProps) {
 		logger.log("Validando webhook entry", {
