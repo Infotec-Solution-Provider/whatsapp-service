@@ -26,12 +26,14 @@ class GUPSHUPMessageParser {
 		let fileType: string | null = null;
 		let fileName: string | null = null;
 
-		if (data.context) {
-			console.log("mensagem citada encontrada", data.context);
+		if (data.context && data.context.id) {
 			const quotedMsg = await prismaService.wppMessage.findUnique({ where: { wabaId: data.context.id } });
-			console.log("quotedMsg", quotedMsg);
 
 			quotedMsg && (parsedMessage.quotedId = quotedMsg.id);
+		}
+
+		if (data.context && data.context.forwarded === true) {
+			parsedMessage.isForwarded = true;
 		}
 
 		switch (data.type) {

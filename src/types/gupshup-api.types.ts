@@ -36,8 +36,9 @@ export interface GSBaseMessageData {
 	timestamp: string;
 	type: MessageType;
 	context?: {
-		id: string;
-		from: string;
+		id?: string;
+		from?: string;
+		forwarded?: boolean;
 	};
 }
 
