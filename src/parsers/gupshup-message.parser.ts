@@ -36,6 +36,10 @@ class GUPSHUPMessageParser {
 			parsedMessage.isForwarded = true;
 		}
 
+		if (data.context && data.context.frequently_forwarded === true) {
+			parsedMessage.isForwarded = true;
+		}
+
 		switch (data.type) {
 			case "text":
 				parsedMessage.body = data.text.body;
