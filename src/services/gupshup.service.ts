@@ -1,6 +1,5 @@
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import ProcessingLogger from "../utils/processing-logger";
-import { WABAMessageStatusData } from "../types/whatsapp-api.types";
 import GUPSHUPMessageParser from "../parsers/gupshup-message.parser";
 import prismaService from "./prisma.service";
 import messagesService from "./messages.service";
