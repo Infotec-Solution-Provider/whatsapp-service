@@ -50,6 +50,7 @@ export interface GSBaseMessageData {
 		id?: string;
 		from?: string;
 		forwarded?: boolean;
+		frequently_forwarded?: boolean;
 	};
 }
 
@@ -181,6 +182,21 @@ export interface GSMessageTemplate {
 	buttonSupported?: string;
 }
 
+export interface GSBillingEvent {
+	deductions: {
+		billable: boolean;
+		category: string;
+		model: string;
+		source: string;
+		type: string;
+	};
+	references: {
+		destination: string;
+		gs_id: string;
+		id: string;
+	};
+}
+
 export interface GSRecoverTemplatesResponse {
 	templates: GSMessageTemplate[];
 	status: string;
@@ -210,6 +226,20 @@ export interface ReceiveMessageChangeValue {
 	contacts?: Array<ReceiveMessageChangeValueContact>;
 	messages?: Array<GSMessageData>;
 	statuses?: Array<GSMessageStatusData>;
+	billing: {
+		deductions: {
+			billable: false;
+			category: "service";
+			model: "PMP";
+			source: "whatsapp";
+			type: "free_customer_service";
+		};
+		references: {
+			destination: "555195186831";
+			gs_id: "895e39d4-9f90-497f-a261-6ffe335207a8";
+			id: "2ac13ead-0d18-4f82-853b-73b2d43b8cb3";
+		};
+	};
 }
 
 export interface ReceiveMessageChangeValueContact {
