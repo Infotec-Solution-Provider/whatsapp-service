@@ -5,6 +5,7 @@ import GUPSHUPMessageParser from "../parsers/gupshup-message.parser";
 import prismaService from "./prisma.service";
 import messagesService from "./messages.service";
 import mdservice from "./messages-distribution.service";
+import { GSMessageStatusData } from "../types/gupshup-api.types";
 
 interface ValidateEntryProps {
 	instance: string;
@@ -30,20 +31,22 @@ class GupshupService {
 			throw new BadRequestError("invalid webhook entry.");
 		}
 
-		if (input.entry[0].changes[0].value?.statuses?.[0]) {
-			const statusChange = input.entry[0].changes[0].value.statuses[0];
+		const change = input.entry[0].changes[0];
+
+		if (change.value.statuses) {
+			const statusChange = change.value.statuses[0];
 			logger.log("Recebido status de mensagem", statusChange);
 
 			return {
 				type: "status" as const,
-				data: statusChange as WABAMessageStatusData,
+				data: statusChange as GSMessageStatusData,
 				appId: input.gs_app_id
 			};
 		}
 
-		if (input.entry[0].changes[0].value?.messages?.[0]) {
-			const message = input.entry[0].changes[0].value.messages[0];
-			const recipient = input.entry[0].changes[0].value.metadata.display_phone_number;
+		if (change.value.messages) {
+			const message = change.value.messages[0];
+			const recipient = change.value.metadata.display_phone_number;
 
 			logger.log("Mensagem recebida");
 			const parsedMsg = await GUPSHUPMessageParser.parse(recipient, instance, message);
@@ -54,6 +57,9 @@ class GupshupService {
 				data: parsedMsg,
 				appId: input.gs_app_id
 			};
+		}
+
+		if (change.field === "billing-event") {
 		}
 
 		throw new BadRequestError("Unexpected webhook entry");

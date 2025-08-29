@@ -24,9 +24,6 @@ export interface WABAMessageStatusData {
 	status: MessageStatus;
 	timestamp: string;
 	recipient_id: string;
-	biz_opaque_callback_data: string;
-	gs_id: string;
-	meta_msg_id: string;
 }
 
 export interface WABAMessageData {

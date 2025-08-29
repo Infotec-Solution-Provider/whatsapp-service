@@ -28,8 +28,19 @@ export interface GSMessageStatusData {
 	status: MessageStatus;
 	timestamp: string;
 	recipient_id: string;
+	biz_opaque_callback_data: string;
+	gs_id: string;
+	meta_msg_id: string;
+	errors?: Array<GSMessageStatusError>;
 }
-
+export interface GSMessageStatusError {
+	code: number;
+	error_data: {
+		details: string;
+	};
+	message: string;
+	title: string;
+}
 export interface GSBaseMessageData {
 	from: string;
 	id: string;
