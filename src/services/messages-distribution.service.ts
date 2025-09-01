@@ -1,4 +1,6 @@
 import {
+	AutomaticResponseRule,
+	AutomaticResponseSchedule,
 	WppChat,
 	WppContact,
 	WppMessage,
@@ -91,7 +93,8 @@ class MessagesDistributionService {
 				clientId,
 				contact
 			);
-
+			console.log('currChat', currChat);
+			await this.checkAndSendAutoResponseMessage(instance, contact, currChat, logger);
 			if (currChat) {
 				logger.log(
 					"Chat anterior encontrado para o contato.",
@@ -431,6 +434,82 @@ class MessagesDistributionService {
 			});
 		}
 	}
+  private async checkAndSendAutoResponseMessage(
+        instance: string,
+        contact: WppContact,
+        currChat: WppChat | null,
+        logger: ProcessingLogger
+    ) {
+        type RuleWithIncludes = AutomaticResponseRule & { schedules: AutomaticResponseSchedule[] };
+		console.log('checkAndSendAutoResponseMessage contact', contact);
+        // 1. Busca todas as regras potenciais (Específica do usuário E Global) em uma única consulta eficiente.
+        const potentialRules = await prismaService.automaticResponseRule.findMany({
+            where: {
+                instance,
+                isEnabled: true,
+                OR: [
+                    // Regra global
+                    { isGlobal: true },
+                    // Regra específica para o usuário do chat (se houver)
+                    { userAssignments: { some: { userId: currChat?.userId ?? -1 } } } // Usa -1 para não encontrar nada se userId for nulo
+                ]
+            },
+            include: { schedules: true }
+        });
+
+        // 2. Prioriza a regra do usuário sobre a global
+        const userRule = potentialRules.find(r => !r.isGlobal);
+        const globalRule = potentialRules.find(r => r.isGlobal);
+        const ruleToApply: RuleWithIncludes | undefined = userRule || globalRule;
+
+        if (!ruleToApply || ruleToApply.schedules.length === 0) {
+            return; // Nenhuma regra aplicável encontrada
+        }
+
+        logger.log(`[AutoResponse] Verificando regra: "${ruleToApply.name}"`);
+
+        // 3. Verifica o cooldown para evitar spam
+        if (contact.lastOutOfHoursReplySentAt) {
+            const now = new Date();
+            const lastSent = new Date(contact.lastOutOfHoursReplySentAt);
+            const secondsSinceLastSent = (now.getTime() - lastSent.getTime()) / 1000;
+
+            if (secondsSinceLastSent < ruleToApply.cooldownSeconds) {
+                logger.log(`[AutoResponse] Cooldown ativo para o contato ${contact.id}.`);
+                return;
+            }
+        }
+
+        // 4. Verifica se a hora atual está dentro de algum dos horários agendados na regra
+        const now = new Date();
+        const currentDay = now.getDay(); // 0 = Domingo, 1 = Segunda...
+        const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
+        // CORREÇÃO: A tipagem do schedule está correta agora (startTime e endTime são strings)
+        const isTimeToSend = ruleToApply.schedules.some(schedule =>
+            schedule.dayOfWeek === currentDay &&
+            currentTime >= schedule.startTime &&
+            currentTime <= schedule.endTime
+        );
+		console.log('isTimeToSend', isTimeToSend);
+        if (isTimeToSend) {
+            logger.log(`[AutoResponse] Regra "${ruleToApply.name}" acionada para o contato ${contact.id}. Enviando mensagem.`);
+
+            // 5. Envia a mensagem (com ou sem anexo) usando o serviço de WhatsApp
+            await whatsappService.sendAutoReplyMessage(
+                instance,
+                contact.phone,
+                ruleToApply.message,
+                ruleToApply.fileId
+            );
+
+            // Atualiza a data do último envio para o controle de cooldown
+            await prismaService.wppContact.update({
+                where: { id: contact.id },
+                data: { lastOutOfHoursReplySentAt: new Date() }
+            });
+        }
+    }
 }
 
 export default new MessagesDistributionService();

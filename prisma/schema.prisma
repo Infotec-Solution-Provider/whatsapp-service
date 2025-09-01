@@ -36,6 +36,10 @@ model WppContact {
     isDeleted   Boolean @default(false) @map("is_deleted")
     isBlocked   Boolean @default(false) @map("is_blocked")
     isOnlyAdmin Boolean @default(false) @map("is_only_admin")
+	avatarUrl  	String? @map("avatar_url") @db.Text
+	createdAt   DateTime @default(now()) @map("created_at")
+	updatedAt   DateTime? @updatedAt @map("updated_at")
+  	lastOutOfHoursReplySentAt DateTime? @map("last_out_of_hours_reply_sent_at")
 
     WppChat     WppChat[]
     WppMessage  WppMessage[]
@@ -239,6 +243,43 @@ model WppMessageFlowStep {
     @@map("message_flows_steps")
 }
 
+model AutomaticResponseRule {
+  id        Int      @id @default(autoincrement())
+  instance  String
+  name      String
+
+  isGlobal  Boolean  @default(false)
+  message   String   @db.Text
+  fileId    Int?
+  isEnabled Boolean  @default(true)
+
+  cooldownSeconds Int  @default(3600)
+  userAssignments AutomaticResponseRuleUser[]
+  schedules       AutomaticResponseSchedule[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("automatic_response_rules")
+}
+model AutomaticResponseRuleUser {
+  ruleId    Int    @map("rule_id")
+  userId    Int    @map("user_id")
+  rule      AutomaticResponseRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@id([ruleId, userId])
+  @@map("automatic_response_rule_users")
+}
+
+model AutomaticResponseSchedule {
+  id      Int      @id @default(autoincrement())
+  ruleId  Int
+  rule    AutomaticResponseRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  dayOfWeek Int
+  startTime String
+  endTime   String
+  @@map("automatic_response_schedules")
+}
 model WppWallet {
     instance      String          @map("instance")
     id            Int             @id @default(autoincrement())

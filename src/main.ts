@@ -19,6 +19,7 @@ import notificationsController from "./controllers/notifications.controller";
 import monitorController from "./controllers/monitor.controller";
 import parametersController from "./controllers/parameters.controller";
 import gupshupController from "./controllers/gupshup.controller";
+import autoResponseController from "./controllers/auto-response.controller";
 
 whatsappService.buildClients();
 const app = express();

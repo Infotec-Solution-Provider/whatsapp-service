@@ -728,6 +728,101 @@ class WhatsappService {
 
 		process.success("Processo de encaminhamento concluído.");
 	}
+
+    private async _getPrimaryClientForInstance(instance: string): Promise<WhatsappClient> {
+        const dbClient = await prismaService.wppClient.findFirstOrThrow({
+            where: {
+                instance,
+                isActive: true,
+            },
+        });
+
+        const client = this.getClient(dbClient.id);
+        if (!client) {
+            throw new BadRequestError(`Nenhum cliente de WhatsApp ativo encontrado para a instância: ${instance}`);
+        }
+        return client;
+    }
+
+ public async sendAutoReplyMessage(
+        instance: string,
+        to: string,
+        text: string,
+        fileId?: number | null
+    ) {
+        const process = new ProcessingLogger(
+            instance,
+            "send-auto-reply",
+            `${to}-${Date.now()}`,
+			{ to, text, fileId }
+        );
+
+        try {
+            process.log(`Iniciando envio de resposta automática para ${to}`);
+            const client = await this._getPrimaryClientForInstance(instance);
+            const contact = await prismaService.wppContact.findUnique({
+                where: { instance_phone: { instance, phone: to } },
+            });
+            const chat = contact ? await prismaService.wppChat.findFirst({
+                where: { contactId: contact.id, isFinished: false }
+            }) : null;
+
+            // Prepara as opções de envio (texto ou arquivo)
+            let options: SendMessageOptions | SendFileOptions = { to, text };
+            let messageType = "chat";
+            let fileData;
+
+            if (fileId) {
+                fileData = await filesService.fetchFileMetadata(fileId);
+                const fileUrl = filesService.getFileDownloadUrl(fileId);
+
+                messageType = getMessageType(fileData.mime_type, false, false);
+
+                (options as SendFileOptions).fileUrl = fileUrl;
+                (options as SendFileOptions).fileName = fileData.name;
+                (options as SendFileOptions).fileType = messageType as "image" | "video" | "audio" | "document";
+            }
+
+            // Envia a mensagem (texto ou mídia) pelo client
+            const sentMsgInfo = await client.sendMessage(options);
+
+            // Cria o objeto para salvar no histórico do banco de dados
+            const now = new Date();
+            const messageToSave: CreateMessageDto = {
+                instance,
+                from: "system:auto-reply",
+                to: to,
+                body: text,
+                status: "SENT",
+                type: messageType,
+                timestamp: now.getTime().toString(),
+                sentAt: now,
+                contactId: contact?.id ?? null,
+                chatId: chat?.id ?? null,
+                fileId: fileId || null,
+                fileName: fileId ? (options as SendFileOptions).fileName : null,
+                fileType: fileId && fileData ? fileData.mime_type : null,
+                wwebjsId: sentMsgInfo.wwebjsId || null,
+                wabaId: sentMsgInfo.wabaId || null,
+            };
+
+            const savedMsg = await messagesService.insertMessage(messageToSave);
+            process.log("Resposta automática salva no histórico.", savedMsg);
+
+            if (savedMsg.chatId) {
+                messagesDistributionService.notifyMessage(process, savedMsg);
+            }
+            process.success("Resposta automática enviada com sucesso.");
+
+            return savedMsg;
+
+        } catch (err) {
+            process.failed(`Erro ao enviar resposta automática: ${sanitizeErrorMessage(err)}`);
+            console.error("Falha ao enviar resposta automática:", err);
+            return undefined;
+        }
+    }
+
 }
 
 export default new WhatsappService();
