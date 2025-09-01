@@ -49,6 +49,7 @@ app.use(logRoute(notificationsController.router));
 app.use(logRoute(monitorController.router));
 app.use(logRoute(parametersController.router));
 app.use(logRoute(gupshupController.router));
+app.use(logRoute(autoResponseController.router));
 
 logRoutes("", routesToLog);
 
