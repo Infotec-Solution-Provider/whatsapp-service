@@ -29,7 +29,7 @@ async function fixMessagesUserId(instance: string) {
 			const text = message.body.split(":")[0] || "";
 			const userName = text.replaceAll("*", "");
 			const possibleUsers = users.filter((user) => user.NOME === userName);
-			const user = possibleUsers.length > 0 ? possibleUsers[0] : null;
+			const user = possibleUsers.length == 1 ? possibleUsers[0] : null;
 
 			if (user) {
 				Logger.info(`Sucesso: Encontrou o usuário ${user.NOME} pela mensagem ${text} ...`);
