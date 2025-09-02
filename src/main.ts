@@ -20,6 +20,7 @@ import monitorController from "./controllers/monitor.controller";
 import parametersController from "./controllers/parameters.controller";
 import gupshupController from "./controllers/gupshup.controller";
 import autoResponseController from "./controllers/auto-response.controller";
+import fixMessagesUserIdAllInstances from "./routines/fix-messages-user-id.routine";
 
 whatsappService.buildClients();
 const app = express();
@@ -63,6 +64,7 @@ app.use(handleRequestError);
 
 const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;
 
+fixMessagesUserIdAllInstances();
 app.listen(serverPort, () => {
 	Logger.info("Server listening on port " + serverPort);
 });
