@@ -3,10 +3,7 @@ import prismaService from "./prisma.service";
 import { FileDirType, SessionData } from "@in.pulse-crm/sdk";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import OpusAudioConverter from "../utils/opus-audio-converter";
-import {
-	SendFileOptions,
-	SendMessageOptions
-} from "../types/whatsapp-instance.types";
+import { SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
 import filesService from "./files.service";
 import CreateMessageDto from "../dtos/create-message.dto";
 import messagesService from "./messages.service";
@@ -51,11 +48,7 @@ interface SendMessageData {
 	isForwarded?: boolean;
 }
 
-export function getMessageType(
-	fileType: string,
-	isAudio: boolean,
-	isDocument: boolean
-) {
+export function getMessageType(fileType: string, isAudio: boolean, isDocument: boolean) {
 	if (isDocument) {
 		return "document";
 	}
@@ -83,11 +76,7 @@ class WhatsappService {
 		for (const client of clients) {
 			switch (client.type) {
 				case WppClientType.WWEBJS:
-					const WWEBJSClient = new WWEBJSWhatsappClient(
-						client.id,
-						client.instance,
-						client.name
-					);
+					const WWEBJSClient = new WWEBJSWhatsappClient(client.id, client.instance, client.name);
 					this.clients.set(client.id, WWEBJSClient);
 					break;
 				case WppClientType.WABA:
@@ -137,26 +126,14 @@ class WhatsappService {
 		return client;
 	}
 
-	public async sendMessage(
-		session: SessionData,
-		to: string,
-		data: SendMessageData
-	) {
+	public async sendMessage(session: SessionData, to: string, data: SendMessageData) {
 		const { file, ...logData } = data;
-		const process = new ProcessingLogger(
-			session.instance,
-			"send-message",
-			`${to}-${Date.now()}`,
-			logData
-		);
+		const process = new ProcessingLogger(session.instance, "send-message", `${to}-${Date.now()}`, logData);
 
 		process.log("Iniciando o envio da mensagem.");
 		try {
 			process.log("Obtendo client do whatsapp...");
-			const client = await this.getClientBySector(
-				session.instance,
-				session.sectorId
-			);
+			const client = await this.getClientBySector(session.instance, session.sectorId);
 			process.log(`Client obtido para o setor: ${session.sectorId}`);
 			const text = `*${session.name}*: ${data.text || ""}`;
 			const now = new Date();
@@ -169,7 +146,8 @@ class WhatsappService {
 				from: `me:${client.phone}`,
 				to: `${to}`,
 				type: "chat",
-				body: data.text || ""
+				body: data.text || "",
+				userId: session.userId
 			} as CreateMessageDto;
 
 			let options = { to, text: text } as SendMessageOptions;
@@ -179,12 +157,11 @@ class WhatsappService {
 
 			if (data.quotedId) {
 				process.log(`Mensagem citada encontrada: ${data.quotedId}`);
-				const quotedMsg =
-					await prismaService.wppMessage.findUniqueOrThrow({
-						where: {
-							id: +data.quotedId
-						}
-					});
+				const quotedMsg = await prismaService.wppMessage.findUniqueOrThrow({
+					where: {
+						id: +data.quotedId
+					}
+				});
 
 				options.quotedId = (quotedMsg.wwebjsId || quotedMsg.wabaId)!;
 				message.quotedId = quotedMsg.id;
@@ -193,9 +170,7 @@ class WhatsappService {
 			if ("fileId" in data && !!data.fileId) {
 				process.log(`Processando arquivo com ID: ${data.fileId}`);
 
-				const fileData = await filesService.fetchFileMetadata(
-					data.fileId
-				);
+				const fileData = await filesService.fetchFileMetadata(data.fileId);
 
 				process.log(`Arquivo encontrado: ${fileData.name}`);
 				let fileType = "document";
@@ -224,27 +199,17 @@ class WhatsappService {
 				message.fileName = fileData.name;
 				message.fileType = fileData.mime_type;
 				message.fileSize = String(fileData.size);
-				message.type = getMessageType(
-					fileData.mime_type,
-					!!data.sendAsAudio,
-					!!data.sendAsDocument
-				);
+				message.type = getMessageType(fileData.mime_type, !!data.sendAsAudio, !!data.sendAsDocument);
 				process.log("Arquivo processado com sucesso.", message);
 			}
 			if ("file" in data && !!data.file) {
-				process.log(
-					`Processando arquivo enviado diretamente: ${data.file.originalname}`
-				);
+				process.log(`Processando arquivo enviado diretamente: ${data.file.originalname}`);
 
 				if (data.sendAsAudio) {
-					process.log(
-						"Mensagem de audio, convertendo arquivo para mp3."
-					);
+					process.log("Mensagem de audio, convertendo arquivo para mp3.");
 				}
 
-				const buffer = data.sendAsAudio
-					? await OpusAudioConverter.convert(data.file.buffer)
-					: data.file.buffer;
+				const buffer = data.sendAsAudio ? await OpusAudioConverter.convert(data.file.buffer) : data.file.buffer;
 
 				if (data.sendAsAudio) {
 					process.log("Mensagem convertida com sucesso.");
@@ -286,11 +251,7 @@ class WhatsappService {
 				message.fileType = savedFile.mime_type;
 				message.fileSize = String(savedFile.size);
 
-				message.type = getMessageType(
-					data.file.mimetype,
-					!!data.sendAsAudio,
-					!!data.sendAsDocument
-				);
+				message.type = getMessageType(data.file.mimetype, !!data.sendAsAudio, !!data.sendAsDocument);
 				process.log("Arquivo processado com sucesso.", message);
 			}
 
@@ -314,10 +275,7 @@ class WhatsappService {
 							: false
 			} as CreateMessageDto;
 
-			const savedMsg = await messagesService.updateMessage(
-				pendingMsg.id,
-				message
-			);
+			const savedMsg = await messagesService.updateMessage(pendingMsg.id, message);
 
 			messagesDistributionService.notifyMessage(process, savedMsg);
 			process.log("Mensagem salva no banco de dados.", savedMsg);
@@ -326,31 +284,19 @@ class WhatsappService {
 			return savedMsg;
 		} catch (err) {
 			console.error(err);
-			process.failed(
-				"Erro ao enviar mensagem: " + sanitizeErrorMessage(err)
-			);
+			process.failed("Erro ao enviar mensagem: " + sanitizeErrorMessage(err));
 			throw new BadRequestError("Erro ao enviar mensagem.", err);
 		}
 	}
 
 	public async sendBotMessage(to: string, data: SendBotMessageData) {
-		const process = new ProcessingLogger(
-			data.chat.instance,
-			"send-bot-message",
-			`${to}-${Date.now()}`,
-			data
-		);
+		const process = new ProcessingLogger(data.chat.instance, "send-bot-message", `${to}-${Date.now()}`, data);
 
 		process.log("Iniciando o envio da mensagem.");
 		try {
 			process.log("Obtendo client do whatsapp...");
-			const client = await this.getClientBySector(
-				data.chat.instance,
-				data.chat.sectorId || 1
-			);
-			process.log(
-				`Client obtido para o setor: ${data.chat.sectorId || 1}`
-			);
+			const client = await this.getClientBySector(data.chat.instance, data.chat.sectorId || 1);
+			process.log(`Client obtido para o setor: ${data.chat.sectorId || 1}`);
 			const now = new Date();
 
 			let message = {
@@ -370,12 +316,11 @@ class WhatsappService {
 
 			if (data.quotedId) {
 				process.log(`Mensagem citada encontrada: ${data.quotedId}`);
-				const quotedMsg =
-					await prismaService.wppMessage.findUniqueOrThrow({
-						where: {
-							id: +data.quotedId
-						}
-					});
+				const quotedMsg = await prismaService.wppMessage.findUniqueOrThrow({
+					where: {
+						id: +data.quotedId
+					}
+				});
 
 				options.quotedId = (quotedMsg.wwebjsId || quotedMsg.wabaId)!;
 				message.quotedId = quotedMsg.id;
@@ -399,10 +344,7 @@ class WhatsappService {
 							: false // <- garante que nunca será null
 			} as CreateMessageDto;
 
-			const savedMsg = await messagesService.updateMessage(
-				pendingMsg.id,
-				message
-			);
+			const savedMsg = await messagesService.updateMessage(pendingMsg.id, message);
 			process.log("Mensagem salva no banco de dados.", savedMsg);
 
 			messagesDistributionService.notifyMessage(process, savedMsg);
@@ -411,25 +353,19 @@ class WhatsappService {
 			return savedMsg;
 		} catch (err) {
 			console.error(err);
-			process.failed(
-				"Erro ao enviar mensagem: " + sanitizeErrorMessage(err)
-			);
+			process.failed("Erro ao enviar mensagem: " + sanitizeErrorMessage(err));
 			throw new BadRequestError("Erro ao enviar mensagem.", err);
 		}
 	}
 
 	public async getResults(instance: string) {
 		const query = "SELECT CODIGO AS id, NOME AS name FROM resultados";
-		const result = await instancesService.executeQuery<
-			{ id: number; name: string }[]
-		>(instance, query, []);
+		const result = await instancesService.executeQuery<{ id: number; name: string }[]>(instance, query, []);
 
 		return result;
 	}
 
-	private unsafeGetWwebjsClient(
-		instance: string
-	): WWEBJSWhatsappClient | null {
+	private unsafeGetWwebjsClient(instance: string): WWEBJSWhatsappClient | null {
 		const correctClient = this.getWwebjsClient(instance);
 
 		if (correctClient) {
@@ -439,8 +375,7 @@ class WhatsappService {
 		const clients = this.clients.values();
 		const wwebjsClient: WWEBJSWhatsappClient =
 			(Array.from(clients).find(
-				(client) =>
-					client instanceof WWEBJSWhatsappClient && client.isReady
+				(client) => client instanceof WWEBJSWhatsappClient && client.isReady
 			) as WWEBJSWhatsappClient) || null;
 
 		return wwebjsClient;
@@ -450,10 +385,7 @@ class WhatsappService {
 		const clients = this.clients.values();
 		const wwebjsClient: WWEBJSWhatsappClient =
 			(Array.from(clients).find(
-				(client) =>
-					client instanceof WWEBJSWhatsappClient &&
-					client.instance === instance &&
-					client.isReady
+				(client) => client instanceof WWEBJSWhatsappClient && client.instance === instance && client.isReady
 			) as WWEBJSWhatsappClient) || null;
 
 		return wwebjsClient;
@@ -461,9 +393,7 @@ class WhatsappService {
 
 	public async getValidWhatsappPhone(instance: string, phone: string) {
 		const wwebjs = this.unsafeGetWwebjsClient(instance);
-		const validPhone = wwebjs
-			? await wwebjs?.getValidWhatsapp(phone)
-			: null;
+		const validPhone = wwebjs ? await wwebjs?.getValidWhatsapp(phone) : null;
 
 		return validPhone;
 	}
@@ -471,9 +401,7 @@ class WhatsappService {
 	public async getProfilePictureUrl(instance: string, phone: string) {
 		try {
 			const wwebjs = this.unsafeGetWwebjsClient(instance);
-			const url = wwebjs
-				? await wwebjs?.getProfilePictureUrl(phone)
-				: null;
+			const url = wwebjs ? await wwebjs?.getProfilePictureUrl(phone) : null;
 
 			return url;
 		} catch {
@@ -493,15 +421,10 @@ class WhatsappService {
 	}
 
 	private async getGupshupClient(session: SessionData) {
-		const client = await this.getClientBySector(
-			session.instance,
-			session.sectorId
-		);
+		const client = await this.getClientBySector(session.instance, session.sectorId);
 
 		if (!(client instanceof GupshupWhatsappClient)) {
-			throw new Error(
-				"Invalid WhatsApp client type for Gupshup service."
-			);
+			throw new Error("Invalid WhatsApp client type for Gupshup service.");
 		}
 
 		return client;
@@ -514,12 +437,7 @@ class WhatsappService {
 		chatId: number,
 		contactId: number
 	) {
-		const process = new ProcessingLogger(
-			session.instance,
-			"send-template",
-			`${to}-${Date.now()}`,
-			data
-		);
+		const process = new ProcessingLogger(session.instance, "send-template", `${to}-${Date.now()}`, data);
 
 		try {
 			const client = await this.getGupshupClient(session);
@@ -541,10 +459,7 @@ class WhatsappService {
 			messagesDistributionService.notifyMessage(process, savedMsg);
 			process.success("Mensagem de template enviada com sucesso.");
 		} catch (error) {
-			process.failed(
-				"Erro ao enviar mensagem de template.\n" +
-					sanitizeErrorMessage(error)
-			);
+			process.failed("Erro ao enviar mensagem de template.\n" + sanitizeErrorMessage(error));
 		}
 	}
 
@@ -578,9 +493,7 @@ class WhatsappService {
 			}
 		);
 
-		process.log(
-			"Iniciando processo de encaminhamento nativo com salvamento no banco."
-		);
+		process.log("Iniciando processo de encaminhamento nativo com salvamento no banco.");
 
 		let originalMessages: any[] = [];
 		if (sourceType === "whatsapp") {
@@ -593,18 +506,13 @@ class WhatsappService {
 			});
 		}
 		if (originalMessages.length === 0) {
-			process.log(
-				"Nenhuma mensagem original foi encontrada para encaminhar."
-			);
+			process.log("Nenhuma mensagem original foi encontrada para encaminhar.");
 			return;
 		}
 
 		if (whatsappTargets && whatsappTargets.length > 0) {
 			try {
-				const client = await this.getClientBySector(
-					session.instance,
-					session.sectorId
-				);
+				const client = await this.getClientBySector(session.instance, session.sectorId);
 
 				if (!(client instanceof WWEBJSWhatsappClient)) {
 					throw new BadRequestError(
@@ -614,15 +522,14 @@ class WhatsappService {
 
 				for (const target of whatsappTargets) {
 					try {
-						const contact =
-							await prismaService.wppContact.findUnique({
-								where: {
-									instance_phone: {
-										instance: session.instance,
-										phone: target.id
-									}
+						const contact = await prismaService.wppContact.findUnique({
+							where: {
+								instance_phone: {
+									instance: session.instance,
+									phone: target.id
 								}
-							});
+							}
+						});
 						const chat = contact
 							? await prismaService.wppChat.findFirst({
 									where: {
@@ -652,21 +559,15 @@ class WhatsappService {
 								fileSize: originalMsg.fileSize
 							};
 
-							const savedMsg =
-								await messagesService.insertMessage(
-									messageToSave
-								);
-							messagesDistributionService.notifyMessage(
-								process,
-								savedMsg
-							);
+							const savedMsg = await messagesService.insertMessage(messageToSave);
+							messagesDistributionService.notifyMessage(process, savedMsg);
 							process.log(
 								`Registro da mensagem ID:${originalMsg.id} salvo no banco para o alvo: ${target.id}. Novo ID: ${savedMsg.id}`
 							);
 							if (sourceType === "internal") {
 								const options: SendMessageOptions | SendFileOptions = {
 									to: target.id,
-									text: originalMsg.body || undefined,
+									text: originalMsg.body || undefined
 								};
 
 								if (originalMsg.fileId) {
@@ -681,11 +582,7 @@ class WhatsappService {
 
 								await client.sendMessage(options);
 							} else {
-								await client.forwardMessage(
-									target.id,
-									originalMsg.wwebjsId!,
-									target.isGroup
-								);
+								await client.forwardMessage(target.id, originalMsg.wwebjsId!, target.isGroup);
 							}
 
 							process.log(
@@ -699,130 +596,112 @@ class WhatsappService {
 					}
 				}
 			} catch (error) {
-				process.failed(
-					`Erro no bloco de encaminhamento para o WhatsApp: ${sanitizeErrorMessage(error)}`
-				);
+				process.failed(`Erro no bloco de encaminhamento para o WhatsApp: ${sanitizeErrorMessage(error)}`);
 			}
 		}
 
 		if (internalTargets && internalTargets.length > 0) {
 			try {
-				process.log(
-					`Iniciando encaminhamento para ${internalTargets.length} alvo(s) internos.`
-				);
+				process.log(`Iniciando encaminhamento para ${internalTargets.length} alvo(s) internos.`);
 				await internalChatsService.forwardWppMessagesToInternal(
 					session,
 					originalMessages,
 					sourceType,
 					internalTargets.map((t) => t.id)
 				);
-				process.log(
-					"Encaminhamento para alvos internos delegado com sucesso."
-				);
+				process.log("Encaminhamento para alvos internos delegado com sucesso.");
 			} catch (error) {
-				process.failed(
-					`Erro no bloco de encaminhamento para chats internos: ${sanitizeErrorMessage(error)}`
-				);
+				process.failed(`Erro no bloco de encaminhamento para chats internos: ${sanitizeErrorMessage(error)}`);
 			}
 		}
 
 		process.success("Processo de encaminhamento concluído.");
 	}
 
-    private async _getPrimaryClientForInstance(instance: string): Promise<WhatsappClient> {
-        const dbClient = await prismaService.wppClient.findFirstOrThrow({
-            where: {
-                instance,
-                isActive: true,
-            },
-        });
+	private async _getPrimaryClientForInstance(instance: string): Promise<WhatsappClient> {
+		const dbClient = await prismaService.wppClient.findFirstOrThrow({
+			where: {
+				instance,
+				isActive: true
+			}
+		});
 
-        const client = this.getClient(dbClient.id);
-        if (!client) {
-            throw new BadRequestError(`Nenhum cliente de WhatsApp ativo encontrado para a instância: ${instance}`);
-        }
-        return client;
-    }
+		const client = this.getClient(dbClient.id);
+		if (!client) {
+			throw new BadRequestError(`Nenhum cliente de WhatsApp ativo encontrado para a instância: ${instance}`);
+		}
+		return client;
+	}
 
- public async sendAutoReplyMessage(
-        instance: string,
-        to: string,
-        text: string,
-        fileId?: number | null
-    ) {
-        const process = new ProcessingLogger(
-            instance,
-            "send-auto-reply",
-            `${to}-${Date.now()}`,
-			{ to, text, fileId }
-        );
+	public async sendAutoReplyMessage(instance: string, to: string, text: string, fileId?: number | null) {
+		const process = new ProcessingLogger(instance, "send-auto-reply", `${to}-${Date.now()}`, { to, text, fileId });
 
-        try {
-            process.log(`Iniciando envio de resposta automática para ${to}`);
-            const client = await this._getPrimaryClientForInstance(instance);
-            const contact = await prismaService.wppContact.findUnique({
-                where: { instance_phone: { instance, phone: to } },
-            });
-            const chat = contact ? await prismaService.wppChat.findFirst({
-                where: { contactId: contact.id, isFinished: false }
-            }) : null;
+		try {
+			process.log(`Iniciando envio de resposta automática para ${to}`);
+			const client = await this._getPrimaryClientForInstance(instance);
+			const contact = await prismaService.wppContact.findUnique({
+				where: { instance_phone: { instance, phone: to } }
+			});
+			const chat = contact
+				? await prismaService.wppChat.findFirst({
+						where: { contactId: contact.id, isFinished: false }
+					})
+				: null;
 
-            // Prepara as opções de envio (texto ou arquivo)
-            let options: SendMessageOptions | SendFileOptions = { to, text };
-            let messageType = "chat";
-            let fileData;
+			// Prepara as opções de envio (texto ou arquivo)
+			let options: SendMessageOptions | SendFileOptions = { to, text };
+			let messageType = "chat";
+			let fileData;
 
-            if (fileId) {
-                fileData = await filesService.fetchFileMetadata(fileId);
-                const fileUrl = filesService.getFileDownloadUrl(fileId);
+			if (fileId) {
+				fileData = await filesService.fetchFileMetadata(fileId);
+				const fileUrl = filesService.getFileDownloadUrl(fileId);
 
-                messageType = getMessageType(fileData.mime_type, false, false);
+				messageType = getMessageType(fileData.mime_type, false, false);
 
-                (options as SendFileOptions).fileUrl = fileUrl;
-                (options as SendFileOptions).fileName = fileData.name;
-                (options as SendFileOptions).fileType = messageType as "image" | "video" | "audio" | "document";
-            }
+				(options as SendFileOptions).fileUrl = fileUrl;
+				(options as SendFileOptions).fileName = fileData.name;
+				(options as SendFileOptions).fileType = messageType as "image" | "video" | "audio" | "document";
+			}
 
-            // Envia a mensagem (texto ou mídia) pelo client
-            const sentMsgInfo = await client.sendMessage(options);
+			// Envia a mensagem (texto ou mídia) pelo client
+			const sentMsgInfo = await client.sendMessage(options);
 
-            // Cria o objeto para salvar no histórico do banco de dados
-            const now = new Date();
-            const messageToSave: CreateMessageDto = {
-                instance,
-                from: "system:auto-reply",
-                to: to,
-                body: text,
-                status: "SENT",
-                type: messageType,
-                timestamp: now.getTime().toString(),
-                sentAt: now,
-                contactId: contact?.id ?? null,
-                chatId: chat?.id ?? null,
-                fileId: fileId || null,
-                fileName: fileId ? (options as SendFileOptions).fileName : null,
-                fileType: fileId && fileData ? fileData.mime_type : null,
-                wwebjsId: sentMsgInfo.wwebjsId || null,
-                wabaId: sentMsgInfo.wabaId || null,
-            };
+			// Cria o objeto para salvar no histórico do banco de dados
+			const now = new Date();
+			const messageToSave: CreateMessageDto = {
+				instance,
+				from: "system:auto-reply",
+				to: to,
+				body: text,
+				status: "SENT",
+				type: messageType,
+				timestamp: now.getTime().toString(),
+				sentAt: now,
+				contactId: contact?.id ?? null,
+				chatId: chat?.id ?? null,
+				fileId: fileId || null,
+				fileName: fileId ? (options as SendFileOptions).fileName : null,
+				fileType: fileId && fileData ? fileData.mime_type : null,
+				wwebjsId: sentMsgInfo.wwebjsId || null,
+				wabaId: sentMsgInfo.wabaId || null
+			};
 
-            const savedMsg = await messagesService.insertMessage(messageToSave);
-            process.log("Resposta automática salva no histórico.", savedMsg);
+			const savedMsg = await messagesService.insertMessage(messageToSave);
+			process.log("Resposta automática salva no histórico.", savedMsg);
 
-            if (savedMsg.chatId) {
-                messagesDistributionService.notifyMessage(process, savedMsg);
-            }
-            process.success("Resposta automática enviada com sucesso.");
+			if (savedMsg.chatId) {
+				messagesDistributionService.notifyMessage(process, savedMsg);
+			}
+			process.success("Resposta automática enviada com sucesso.");
 
-            return savedMsg;
-
-        } catch (err) {
-            process.failed(`Erro ao enviar resposta automática: ${sanitizeErrorMessage(err)}`);
-            console.error("Falha ao enviar resposta automática:", err);
-            return undefined;
-        }
-    }
-
+			return savedMsg;
+		} catch (err) {
+			process.failed(`Erro ao enviar resposta automática: ${sanitizeErrorMessage(err)}`);
+			console.error("Falha ao enviar resposta automática:", err);
+			return undefined;
+		}
+	}
 }
 
 export default new WhatsappService();

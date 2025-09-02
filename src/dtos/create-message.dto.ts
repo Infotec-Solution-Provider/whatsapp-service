@@ -12,6 +12,7 @@ export default interface CreateMessageDto {
 	quotedId?: null | number;
 	chatId?: null | number;
 	contactId?: null | number;
+	userId?: number;
 	wwebjsId?: null | string;
 	wwebjsIdStanza?: null | string;
 	wabaId?: null | string;
