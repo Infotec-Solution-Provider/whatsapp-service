@@ -4,7 +4,12 @@ import GUPSHUPMessageParser from "../parsers/gupshup-message.parser";
 import prismaService from "./prisma.service";
 import messagesService from "./messages.service";
 import mdservice from "./messages-distribution.service";
-import { GSBillingEvent, GSMessageStatusData, GSMessageStatusError } from "../types/gupshup-api.types";
+import {
+	GSBillingEvent,
+	GSConversationState,
+	GSMessageStatusData,
+	GSMessageStatusError
+} from "../types/gupshup-api.types";
 import messagesDistributionService from "./messages-distribution.service";
 import chatsService from "./chats.service";
 import { WppClient } from "@prisma/client";
@@ -23,6 +28,13 @@ interface ProcessBillingEventProps {
 interface ProcessFailedStatusProps {
 	logger: ProcessingLogger;
 	error: GSMessageStatusError;
+	messageId: string;
+	client: WppClient;
+}
+
+interface ProcessConversationStateProps {
+	logger: ProcessingLogger;
+	conversation: GSConversationState;
 	messageId: string;
 	client: WppClient;
 }
@@ -121,6 +133,16 @@ class GupshupService {
 						await this.processFailedStatus({ logger, error, messageId: entry.data.gs_id, client });
 					}
 
+					if ("conversation" in entry.data && entry.data.conversation) {
+						const conversation = entry.data.conversation;
+						await this.processConversationState({
+							logger,
+							conversation,
+							messageId: entry.data.gs_id,
+							client
+						});
+					}
+
 					logger.log("status de mensagem processado com sucesso");
 					break;
 				case "billing":
@@ -196,6 +218,41 @@ class GupshupService {
 			);
 		} catch (err: any) {
 			logger.log("Erro ao processar status de falha");
+			throw err;
+		}
+	}
+
+	private async processConversationState({ logger, conversation, messageId }: ProcessConversationStateProps) {
+		try {
+			logger.log("Processando estado da conversa");
+			const message = await prismaService.wppMessage.findUniqueOrThrow({
+				where: {
+					wabaId: messageId
+				},
+				include: {
+					WppContact: true
+				}
+			});
+			logger.log("Mensagem encontrada, enviando mensagem de erro para o contato");
+
+			if (!message.WppContact) {
+				logger.log("Mensagem não tem contato associado, não é possível enviar mensagem de erro");
+				throw new Error("Message has no associated contact");
+			}
+
+			await prismaService.wppContact.update({
+				where: {
+					id: message.WppContact.id
+				},
+				data: {
+					conversationExpiration: conversation.expiration_timestamp + "000"
+				}
+			});
+
+			// Lógica para processar o estado da conversa
+			logger.log("Estado da conversa processado com sucesso");
+		} catch (err: any) {
+			logger.log("Erro ao processar estado da conversa");
 			throw err;
 		}
 	}

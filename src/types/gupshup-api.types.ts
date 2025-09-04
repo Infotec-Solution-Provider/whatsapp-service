@@ -32,6 +32,15 @@ export interface GSMessageStatusData {
 	gs_id: string;
 	meta_msg_id: string;
 	errors?: Array<GSMessageStatusError>;
+	conversation?: GSConversationState;
+}
+
+export interface GSConversationState {
+	expiration_timestamp: string;
+	id: string;
+	origin: {
+		type: string;
+	};
 }
 export interface GSMessageStatusError {
 	code: number;

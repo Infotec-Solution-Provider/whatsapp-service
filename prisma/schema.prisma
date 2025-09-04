@@ -40,6 +40,7 @@ model WppContact {
     createdAt                 DateTime  @default(now()) @map("created_at")
     updatedAt                 DateTime? @updatedAt @map("updated_at")
     lastOutOfHoursReplySentAt DateTime? @map("last_out_of_hours_reply_sent_at")
+    conversationExpiration    String?   @map("conversation_expiration")
 
     WppChat     WppChat[]
     WppMessage  WppMessage[]
