@@ -183,7 +183,7 @@ class GupshupService {
 			const contact = message.WppContact;
 			const chat = await chatsService.getChatForContact(client.id, contact);
 
-			const systemMessage = `Ocorreu um erro ao enviar a mensagem para o número do WhatsApp.\nCódigo do erro: ${error.code}.\nDescrição: ${error}.\nDetalhes: ${error.href}`;
+			const systemMessage = `Ocorreu um erro ao enviar a mensagem para o número do WhatsApp.\nCódigo do erro: ${error.code}.\nDescrição: ${error.error_data.details}.\nDetalhes: ${error.href}`;
 
 			await messagesDistributionService.addThirdpartyMessage(
 				client.instance,
