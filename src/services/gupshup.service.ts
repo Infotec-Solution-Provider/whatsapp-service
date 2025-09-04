@@ -133,7 +133,11 @@ class GupshupService {
 						await this.processFailedStatus({ logger, error, messageId: entry.data.gs_id, client });
 					}
 
-					if ("conversation" in entry.data && entry.data.conversation) {
+					if (
+						"conversation" in entry.data &&
+						entry.data.conversation &&
+						entry.data.conversation.expiration_timestamp
+					) {
 						const conversation = entry.data.conversation;
 						await this.processConversationState({
 							logger,
