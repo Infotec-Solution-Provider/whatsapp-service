@@ -349,7 +349,8 @@ class MessagesDistributionService {
 		origin: string,
 		notify: boolean = true,
 		contact: WppContact,
-		chat?: WppChat | null
+		chat?: WppChat | null,
+		quoteMessageId?: number
 	) {
 		const now = new Date();
 
@@ -363,7 +364,8 @@ class MessagesDistributionService {
 			sentAt: now,
 			type: "error",
 			chatId: chat?.id || null,
-			contactId: contact.id
+			contactId: contact.id,
+			quotedId: quoteMessageId || null
 		});
 
 		if (notify && chat) {
