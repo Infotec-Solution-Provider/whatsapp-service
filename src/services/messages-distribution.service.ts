@@ -32,18 +32,12 @@ import chooseSellerBot from "../bots/seller-vollo.bot";
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
 
-	public async getFlow(
-		instance: string,
-		sectorId: number
-	): Promise<MessageFlow> {
+	public async getFlow(instance: string, sectorId: number): Promise<MessageFlow> {
 		const flowKey = `${instance}:${sectorId}`;
 		const flow = this.flows.get(flowKey);
 
 		if (!flow) {
-			const newFlow = await MessageFlowFactory.createMessageFlow(
-				instance,
-				sectorId
-			);
+			const newFlow = await MessageFlowFactory.createMessageFlow(instance, sectorId);
 
 			this.flows.set(flowKey, newFlow);
 			return newFlow;
@@ -67,54 +61,27 @@ class MessagesDistributionService {
 		return sectors;
 	}
 
-	public async processMessage(
-		instance: string,
-		clientId: number,
-		msg: WppMessage
-	) {
-		const logger = new ProcessingLogger(
-			instance,
-			"message-distribution",
-			`WppMessage-${msg.id}`,
-			msg
-		);
+	public async processMessage(instance: string, clientId: number, msg: WppMessage) {
+		const logger = new ProcessingLogger(instance, "message-distribution", `WppMessage-${msg.id}`, msg);
 
 		try {
 			logger.log("Buscando contato para a mensagem.");
-			const contact = await contactsService.getOrCreateContact(
-				instance,
-				Formatter.phone(msg.from),
-				msg.from
-			);
+			const contact = await contactsService.getOrCreateContact(instance, Formatter.phone(msg.from), msg.from);
 			logger.log("Contato encontrado!", contact);
 
 			logger.log("Buscando chat para o contato.");
-			const currChat = await chatsService.getChatForContact(
-				clientId,
-				contact
-			);
-			console.log('currChat', currChat);
+			const currChat = await chatsService.getChatForContact(clientId, contact);
+			console.log("currChat", currChat);
 			await this.checkAndSendAutoResponseMessage(instance, contact, currChat, logger);
 			if (currChat) {
-				logger.log(
-					"Chat anterior encontrado para o contato.",
-					currChat
-				);
+				logger.log("Chat anterior encontrado para o contato.", currChat);
 				await this.insertAndNotify(logger, currChat, msg);
 
 				if (currChat.botId === 1) {
 					if (currChat.instance === "vollo") {
-						await chooseSellerBot.processMessage(
-							currChat,
-							contact,
-							msg
-						);
+						await chooseSellerBot.processMessage(currChat, contact, msg);
 					} else {
-						await chooseSectorBot.processMessage(
-							currChat,
-							contact,
-							msg
-						);
+						await chooseSectorBot.processMessage(currChat, contact, msg);
 					}
 				}
 				return;
@@ -126,9 +93,7 @@ class MessagesDistributionService {
 
 			const sectors = await this.getSectors(clientId);
 			if (sectors.length > 1) {
-				logger.log(
-					"Mais de um setor encontrado, iniciando o fluxo de escolha de setor."
-				);
+				logger.log("Mais de um setor encontrado, iniciando o fluxo de escolha de setor.");
 				newChat = await prismaService.wppChat.create({
 					data: {
 						instance,
@@ -140,9 +105,7 @@ class MessagesDistributionService {
 					}
 				});
 			} else {
-				logger.log(
-					"Um setor encontrado, iniciando o fluxo de atendimento."
-				);
+				logger.log("Um setor encontrado, iniciando o fluxo de atendimento.");
 				const flow = await this.getFlow(instance, sectors[0]!.id);
 				const data = await flow.getChatPayload(logger, contact);
 				newChat = await prismaService.wppChat.create({
@@ -169,10 +132,7 @@ class MessagesDistributionService {
 			logger.log("Novo chat encontrado!", newChat);
 
 			logger.log("Buscando foto de perfil do cliente.");
-			const avatarUrl = await whatsappService.getProfilePictureUrl(
-				instance,
-				msg.from
-			);
+			const avatarUrl = await whatsappService.getProfilePictureUrl(instance, msg.from);
 			if (avatarUrl) {
 				await prismaService.wppChat.update({
 					data: { avatarUrl },
@@ -180,11 +140,7 @@ class MessagesDistributionService {
 				});
 			}
 
-			await this.addSystemMessage(
-				newChat,
-				"Atendimento iniciado pelo cliente!",
-				true
-			);
+			await this.addSystemMessage(newChat, "Atendimento iniciado pelo cliente!", true);
 			logger.log("Chat criado com sucesso!", newChat);
 
 			await this.insertAndNotify(logger, newChat, msg, true);
@@ -195,11 +151,7 @@ class MessagesDistributionService {
 		}
 	}
 
-	public async transferChatSector(
-		sector: WppSector,
-		contact: WppContact,
-		chat: WppChat
-	) {
+	public async transferChatSector(sector: WppSector, contact: WppContact, chat: WppChat) {
 		const logger = new ProcessingLogger(
 			sector.instance,
 			"transfer-chat-sector",
@@ -215,10 +167,7 @@ class MessagesDistributionService {
 				data: { ...data, botId: null }
 			});
 
-			await this.addSystemMessage(
-				updatedChat,
-				`Transferido para o setor ${sector.name}!`
-			);
+			await this.addSystemMessage(updatedChat, `Transferido para o setor ${sector.name}!`);
 
 			await this.notifyChatStarted(logger, updatedChat);
 			logger.success(updatedChat);
@@ -228,12 +177,7 @@ class MessagesDistributionService {
 			logger.failed(err);
 		}
 	}
-	public async transferChatOperator(
-		sector: WppSector,
-		operador: User,
-		contact: WppContact,
-		chat: WppChat
-	) {
+	public async transferChatOperator(sector: WppSector, operador: User, contact: WppContact, chat: WppChat) {
 		const logger = new ProcessingLogger(
 			sector.instance,
 			"transfer-chat-operator",
@@ -250,10 +194,7 @@ class MessagesDistributionService {
 				data: { ...data, userId: operador.CODIGO, botId: null }
 			});
 
-			await this.addSystemMessage(
-				updatedChat,
-				`Transferido para o setor ${sector.name}!`
-			);
+			await this.addSystemMessage(updatedChat, `Transferido para o setor ${sector.name}!`);
 
 			await this.notifyChatStarted(logger, updatedChat);
 			logger.success(updatedChat);
@@ -268,43 +209,25 @@ class MessagesDistributionService {
 			const data = { chatId: chat.id };
 			const monitorRoom: SocketServerMonitorRoom = `${chat.instance}:${chat.sectorId!}:monitor`;
 
-			await socketService.emit(
-				SocketEventType.WppChatStarted,
-				monitorRoom,
-				data
-			);
+			await socketService.emit(SocketEventType.WppChatStarted, monitorRoom, data);
 
 			process.log(`Chat enviado para o socket: /${monitorRoom}/ room!`);
 
 			if (chat.walletId) {
 				const walletRoom: SocketServerWalletRoom = `${chat.instance}:wallet:${chat.walletId}`;
-				await socketService.emit(
-					SocketEventType.WppChatStarted,
-					walletRoom,
-					data
-				);
-				process.log(
-					`Chat enviado para o socket: /${walletRoom}/ room!`
-				);
+				await socketService.emit(SocketEventType.WppChatStarted, walletRoom, data);
+				process.log(`Chat enviado para o socket: /${walletRoom}/ room!`);
 			}
 
 			if (chat.userId === -1) {
 				const adminRoom: SocketServerAdminRoom = `${chat.instance}:${chat.sectorId!}:admin`;
-				await socketService.emit(
-					SocketEventType.WppChatStarted,
-					adminRoom,
-					data
-				);
+				await socketService.emit(SocketEventType.WppChatStarted, adminRoom, data);
 				process.log(`Chat enviado para o socket: /${adminRoom}/ room!`);
 			}
 
 			if (chat.userId) {
 				const userRoom: SocketServerUserRoom = `${chat.instance}:user:${chat.userId}`;
-				await socketService.emit(
-					SocketEventType.WppChatStarted,
-					userRoom,
-					data
-				);
+				await socketService.emit(SocketEventType.WppChatStarted, userRoom, data);
 				process.log(`Chat enviado para o socket: /${userRoom}/ room!`);
 			}
 		} catch (err) {
@@ -314,10 +237,7 @@ class MessagesDistributionService {
 		}
 	}
 
-	public async notifyMessage(
-		process: ProcessingLogger | null,
-		message: WppMessage
-	) {
+	public async notifyMessage(process: ProcessingLogger | null, message: WppMessage) {
 		try {
 			process?.log("Transmitindo mensagem via socket.");
 			const instance = message.instance;
@@ -338,11 +258,7 @@ class MessagesDistributionService {
 		}
 	}
 
-	private async insertMessageOnChat(
-		logger: ProcessingLogger,
-		message: WppMessage,
-		chat: WppChat
-	) {
+	private async insertMessageOnChat(logger: ProcessingLogger, message: WppMessage, chat: WppChat) {
 		try {
 			const insertedMessage = await prismaService.wppMessage.update({
 				where: {
@@ -378,11 +294,7 @@ class MessagesDistributionService {
 		logger.success(insertedMsg);
 	}
 
-	public async processMessageStatus(
-		type: "wwebjs" | "waba",
-		id: string,
-		status: WppMessageStatus
-	) {
+	public async processMessageStatus(type: "wwebjs" | "waba", id: string, status: WppMessageStatus) {
 		try {
 			const message = await prismaService.wppMessage.update({
 				where: {
@@ -408,11 +320,7 @@ class MessagesDistributionService {
 		}
 	}
 
-	public async addSystemMessage(
-		chat: WppChat,
-		text: string,
-		notify: boolean = true
-	) {
+	public async addSystemMessage(chat: WppChat, text: string, notify: boolean = true) {
 		const now = new Date();
 		const message = await messagesService.insertMessage({
 			body: text,
@@ -434,82 +342,117 @@ class MessagesDistributionService {
 			});
 		}
 	}
-  private async checkAndSendAutoResponseMessage(
-        instance: string,
-        contact: WppContact,
-        currChat: WppChat | null,
-        logger: ProcessingLogger
-    ) {
-        type RuleWithIncludes = AutomaticResponseRule & { schedules: AutomaticResponseSchedule[] };
-		console.log('checkAndSendAutoResponseMessage contact', contact);
-        // 1. Busca todas as regras potenciais (Específica do usuário E Global) em uma única consulta eficiente.
-        const potentialRules = await prismaService.automaticResponseRule.findMany({
-            where: {
-                instance,
-                isEnabled: true,
-                OR: [
-                    // Regra global
-                    { isGlobal: true },
-                    // Regra específica para o usuário do chat (se houver)
-                    { userAssignments: { some: { userId: currChat?.userId ?? -1 } } } // Usa -1 para não encontrar nada se userId for nulo
-                ]
-            },
-            include: { schedules: true }
-        });
 
-        // 2. Prioriza a regra do usuário sobre a global
-        const userRule = potentialRules.find(r => !r.isGlobal);
-        const globalRule = potentialRules.find(r => r.isGlobal);
-        const ruleToApply: RuleWithIncludes | undefined = userRule || globalRule;
+	public async addThirdpartyMessage(
+		instance: string,
+		text: string,
+		origin: string,
+		notify: boolean = true,
+		contact: WppContact,
+		chat?: WppChat | null
+	) {
+		const now = new Date();
 
-        if (!ruleToApply || ruleToApply.schedules.length === 0) {
-            return; // Nenhuma regra aplicável encontrada
-        }
+		const message = await messagesService.insertMessage({
+			body: text,
+			from: `thirdparty:${origin}`,
+			to: "system",
+			instance,
+			status: "RECEIVED",
+			timestamp: now.getTime().toString(),
+			sentAt: now,
+			type: "error",
+			chatId: chat?.id || null,
+			contactId: contact.id
+		});
 
-        logger.log(`[AutoResponse] Verificando regra: "${ruleToApply.name}"`);
+		if (notify && chat) {
+			const chatRoom: SocketServerChatRoom = `${instance}:chat:${chat.id}`;
+			socketService.emit(SocketEventType.WppMessage, chatRoom, {
+				message
+			});
+		}
+	}
 
-        // 3. Verifica o cooldown para evitar spam
-        if (contact.lastOutOfHoursReplySentAt) {
-            const now = new Date();
-            const lastSent = new Date(contact.lastOutOfHoursReplySentAt);
-            const secondsSinceLastSent = (now.getTime() - lastSent.getTime()) / 1000;
+	private async checkAndSendAutoResponseMessage(
+		instance: string,
+		contact: WppContact,
+		currChat: WppChat | null,
+		logger: ProcessingLogger
+	) {
+		type RuleWithIncludes = AutomaticResponseRule & { schedules: AutomaticResponseSchedule[] };
+		console.log("checkAndSendAutoResponseMessage contact", contact);
+		// 1. Busca todas as regras potenciais (Específica do usuário E Global) em uma única consulta eficiente.
+		const potentialRules = await prismaService.automaticResponseRule.findMany({
+			where: {
+				instance,
+				isEnabled: true,
+				OR: [
+					// Regra global
+					{ isGlobal: true },
+					// Regra específica para o usuário do chat (se houver)
+					{ userAssignments: { some: { userId: currChat?.userId ?? -1 } } } // Usa -1 para não encontrar nada se userId for nulo
+				]
+			},
+			include: { schedules: true }
+		});
 
-            if (secondsSinceLastSent < ruleToApply.cooldownSeconds) {
-                logger.log(`[AutoResponse] Cooldown ativo para o contato ${contact.id}.`);
-                return;
-            }
-        }
+		// 2. Prioriza a regra do usuário sobre a global
+		const userRule = potentialRules.find((r) => !r.isGlobal);
+		const globalRule = potentialRules.find((r) => r.isGlobal);
+		const ruleToApply: RuleWithIncludes | undefined = userRule || globalRule;
 
-        // 4. Verifica se a hora atual está dentro de algum dos horários agendados na regra
-        const now = new Date();
-        const currentDay = now.getDay(); // 0 = Domingo, 1 = Segunda...
-        const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+		if (!ruleToApply || ruleToApply.schedules.length === 0) {
+			return; // Nenhuma regra aplicável encontrada
+		}
 
-        // CORREÇÃO: A tipagem do schedule está correta agora (startTime e endTime são strings)
-        const isTimeToSend = ruleToApply.schedules.some(schedule =>
-            schedule.dayOfWeek === currentDay &&
-            currentTime >= schedule.startTime &&
-            currentTime <= schedule.endTime
-        );
-		console.log('isTimeToSend', isTimeToSend);
-        if (isTimeToSend) {
-            logger.log(`[AutoResponse] Regra "${ruleToApply.name}" acionada para o contato ${contact.id}. Enviando mensagem.`);
+		logger.log(`[AutoResponse] Verificando regra: "${ruleToApply.name}"`);
 
-            // 5. Envia a mensagem (com ou sem anexo) usando o serviço de WhatsApp
-            await whatsappService.sendAutoReplyMessage(
-                instance,
-                contact.phone,
-                ruleToApply.message,
-                ruleToApply.fileId
-            );
+		// 3. Verifica o cooldown para evitar spam
+		if (contact.lastOutOfHoursReplySentAt) {
+			const now = new Date();
+			const lastSent = new Date(contact.lastOutOfHoursReplySentAt);
+			const secondsSinceLastSent = (now.getTime() - lastSent.getTime()) / 1000;
 
-            // Atualiza a data do último envio para o controle de cooldown
-            await prismaService.wppContact.update({
-                where: { id: contact.id },
-                data: { lastOutOfHoursReplySentAt: new Date() }
-            });
-        }
-    }
+			if (secondsSinceLastSent < ruleToApply.cooldownSeconds) {
+				logger.log(`[AutoResponse] Cooldown ativo para o contato ${contact.id}.`);
+				return;
+			}
+		}
+
+		// 4. Verifica se a hora atual está dentro de algum dos horários agendados na regra
+		const now = new Date();
+		const currentDay = now.getDay(); // 0 = Domingo, 1 = Segunda...
+		const currentTime = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`;
+
+		// CORREÇÃO: A tipagem do schedule está correta agora (startTime e endTime são strings)
+		const isTimeToSend = ruleToApply.schedules.some(
+			(schedule) =>
+				schedule.dayOfWeek === currentDay &&
+				currentTime >= schedule.startTime &&
+				currentTime <= schedule.endTime
+		);
+		console.log("isTimeToSend", isTimeToSend);
+		if (isTimeToSend) {
+			logger.log(
+				`[AutoResponse] Regra "${ruleToApply.name}" acionada para o contato ${contact.id}. Enviando mensagem.`
+			);
+
+			// 5. Envia a mensagem (com ou sem anexo) usando o serviço de WhatsApp
+			await whatsappService.sendAutoReplyMessage(
+				instance,
+				contact.phone,
+				ruleToApply.message,
+				ruleToApply.fileId
+			);
+
+			// Atualiza a data do último envio para o controle de cooldown
+			await prismaService.wppContact.update({
+				where: { id: contact.id },
+				data: { lastOutOfHoursReplySentAt: new Date() }
+			});
+		}
+	}
 }
 
 export default new MessagesDistributionService();

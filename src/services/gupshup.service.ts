@@ -4,7 +4,10 @@ import GUPSHUPMessageParser from "../parsers/gupshup-message.parser";
 import prismaService from "./prisma.service";
 import messagesService from "./messages.service";
 import mdservice from "./messages-distribution.service";
-import { GSBillingEvent, GSMessageStatusData } from "../types/gupshup-api.types";
+import { GSBillingEvent, GSMessageStatusData, GSMessageStatusError } from "../types/gupshup-api.types";
+import messagesDistributionService from "./messages-distribution.service";
+import chatsService from "./chats.service";
+import { WppClient } from "@prisma/client";
 
 interface ValidateEntryProps {
 	instance: string;
@@ -15,6 +18,13 @@ interface ValidateEntryProps {
 interface ProcessBillingEventProps {
 	logger: ProcessingLogger;
 	event: GSBillingEvent;
+}
+
+interface ProcessFailedStatusProps {
+	logger: ProcessingLogger;
+	error: GSMessageStatusError;
+	messageId: string;
+	client: WppClient;
 }
 
 class GupshupService {
@@ -105,6 +115,12 @@ class GupshupService {
 					logger.log("processando status de mensagem recebida");
 					const status = GUPSHUPMessageParser.parseStatus(entry.data);
 					await mdservice.processMessageStatus("waba", entry.data.gs_id, status);
+
+					if ("errors" in entry.data && entry.data.errors[0]) {
+						const error = entry.data.errors[0];
+						await this.processFailedStatus({ logger, error, messageId: entry.data.gs_id, client });
+					}
+
 					logger.log("status de mensagem processado com sucesso");
 					break;
 				case "billing":
@@ -115,7 +131,6 @@ class GupshupService {
 					logger.failed("entrada desconhecida");
 					break;
 			}
-
 			logger.success("webhook entry processado com sucesso");
 		} catch (err: any) {
 			logger.failed(err);
@@ -143,7 +158,43 @@ class GupshupService {
 			}
 		} catch (err: any) {
 			logger.log("Erro ao processar evento de cobrança");
-			logger.failed(err);
+			throw err;
+		}
+	}
+
+	private async processFailedStatus({ logger, error, messageId, client }: ProcessFailedStatusProps) {
+		try {
+			logger.log("Processando status de falha para a mensagem");
+			const message = await prismaService.wppMessage.findUniqueOrThrow({
+				where: {
+					wabaId: messageId
+				},
+				include: {
+					WppContact: true
+				}
+			});
+			logger.log("Mensagem encontrada, enviando mensagem de erro para o contato");
+
+			if (!message.WppContact) {
+				logger.log("Mensagem não tem contato associado, não é possível enviar mensagem de erro");
+				throw new Error("Message has no associated contact");
+			}
+
+			const contact = message.WppContact;
+			const chat = await chatsService.getChatForContact(client.id, contact);
+
+			const systemMessage = `Ocorreu um erro ao enviar a mensagem para o número do WhatsApp.\nCódigo do erro: ${error.code}.\nDescrição: ${error.message}.\nDetalhes: ${error.href}`;
+
+			await messagesDistributionService.addThirdpartyMessage(
+				client.instance,
+				systemMessage,
+				"META",
+				true,
+				contact,
+				chat
+			);
+		} catch (err: any) {
+			logger.log("Erro ao processar status de falha");
 			throw err;
 		}
 	}

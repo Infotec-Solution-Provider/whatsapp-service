@@ -21,7 +21,7 @@ export type GSMessageData =
 	| GSContactsMessageData
 	| GSStickerMessageData;
 
-export type MessageStatus = "read" | "delivered" | "sent" | "enqueued";
+export type MessageStatus = "read" | "delivered" | "sent" | "enqueued" | "failed";
 
 export interface GSMessageStatusData {
 	id: string;
@@ -40,6 +40,7 @@ export interface GSMessageStatusError {
 	};
 	message: string;
 	title: string;
+	href: string;
 }
 export interface GSBaseMessageData {
 	from: string;

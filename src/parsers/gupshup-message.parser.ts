@@ -125,6 +125,8 @@ class GUPSHUPMessageParser {
 			case "enqueued":
 				return WppMessageStatus.PENDING;
 				break;
+			case "failed":
+				return WppMessageStatus.ERROR;
 			default:
 				throw new BadRequestError(`${data.status} status is not expected`);
 		}
