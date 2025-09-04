@@ -4,12 +4,17 @@ import GUPSHUPMessageParser from "../parsers/gupshup-message.parser";
 import prismaService from "./prisma.service";
 import messagesService from "./messages.service";
 import mdservice from "./messages-distribution.service";
-import { GSMessageStatusData } from "../types/gupshup-api.types";
+import { GSBillingEvent, GSMessageStatusData } from "../types/gupshup-api.types";
 
 interface ValidateEntryProps {
 	instance: string;
 	logger: ProcessingLogger;
 	input: any;
+}
+
+interface ProcessBillingEventProps {
+	logger: ProcessingLogger;
+	event: GSBillingEvent;
 }
 
 class GupshupService {
@@ -59,6 +64,12 @@ class GupshupService {
 		}
 
 		if (change.field === "billing-event") {
+			logger.log("Recebido evento de cobrança");
+			return {
+				type: "billing" as const,
+				data: change.value as GSBillingEvent,
+				appId: input.gs_app_id
+			};
 		}
 
 		throw new BadRequestError("Unexpected webhook entry");
@@ -96,6 +107,10 @@ class GupshupService {
 					await mdservice.processMessageStatus("waba", entry.data.gs_id, status);
 					logger.log("status de mensagem processado com sucesso");
 					break;
+				case "billing":
+					logger.log("Processando evento de cobrança");
+					await this.processBillingEvent({ logger, event: data });
+					break;
 				default:
 					logger.failed("entrada desconhecida");
 					break;
@@ -103,6 +118,31 @@ class GupshupService {
 
 			logger.success("webhook entry processado com sucesso");
 		} catch (err: any) {
+			logger.failed(err);
+			throw err;
+		}
+	}
+
+	private async processBillingEvent({ logger, event }: ProcessBillingEventProps) {
+		try {
+			logger.log("Verificando se o evento é faturável...");
+
+			if (event.deductions.billable) {
+				logger.log("Evento é faturável, inserindo na base de dados...");
+				await prismaService.wppMessage.update({
+					where: {
+						wabaId: event.references.id
+					},
+					data: {
+						billingCategory: event.deductions.category
+					}
+				});
+				logger.success("Evento de cobrança processado com sucesso!");
+			} else {
+				logger.log("Evento não é faturável, ignorando.");
+			}
+		} catch (err: any) {
+			logger.log("Erro ao processar evento de cobrança");
 			logger.failed(err);
 			throw err;
 		}

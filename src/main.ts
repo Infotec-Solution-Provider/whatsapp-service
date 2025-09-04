@@ -64,7 +64,6 @@ app.use(handleRequestError);
 
 const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;
 
-fixMessagesUserIdAllInstances();
 app.listen(serverPort, () => {
 	Logger.info("Server listening on port " + serverPort);
 });
