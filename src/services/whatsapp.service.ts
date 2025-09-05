@@ -1,20 +1,20 @@
-import { WppChat, WppClientType } from "@prisma/client";
-import prismaService from "./prisma.service";
 import { FileDirType, SessionData } from "@in.pulse-crm/sdk";
-import { BadRequestError } from "@rgranatodutra/http-errors";
-import OpusAudioConverter from "../utils/opus-audio-converter";
-import { SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
-import filesService from "./files.service";
-import CreateMessageDto from "../dtos/create-message.dto";
-import messagesService from "./messages.service";
-import messagesDistributionService from "./messages-distribution.service";
-import ProcessingLogger from "../utils/processing-logger";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
-import instancesService from "./instances.service";
+import { WppChat, WppClientType } from "@prisma/client";
+import { BadRequestError } from "@rgranatodutra/http-errors";
+import CreateMessageDto from "../dtos/create-message.dto";
+import { SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
+import OpusAudioConverter from "../utils/opus-audio-converter";
+import ProcessingLogger from "../utils/processing-logger";
+import GupshupWhatsappClient from "../whatsapp-client/gupshup-whatsapp-client";
 import WhatsappClient from "../whatsapp-client/whatsapp-client";
 import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
-import GupshupWhatsappClient from "../whatsapp-client/gupshup-whatsapp-client";
+import filesService from "./files.service";
+import instancesService from "./instances.service";
 import internalChatsService from "./internal-chats.service";
+import messagesDistributionService from "./messages-distribution.service";
+import messagesService from "./messages.service";
+import prismaService from "./prisma.service";
 
 export interface SendTemplateData {
 	templateId: string;
