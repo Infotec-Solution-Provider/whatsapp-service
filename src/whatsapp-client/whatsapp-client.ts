@@ -1,5 +1,5 @@
 import CreateMessageDto from "../dtos/create-message.dto";
-import { SendMessageOptions } from "../types/whatsapp-instance.types";
+import { EditMessageOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
 
 /**
  * Abstract class representing a WhatsApp instance.
@@ -55,9 +55,17 @@ abstract class WhatsappClient {
 	 * @param props - An object containing message details.
 	 * @returns - A promise resolved when the message is sent.
 	 */
-	public abstract sendMessage(
-		props: SendMessageOptions
-	): Promise<CreateMessageDto>;
+	public abstract sendMessage(props: SendMessageOptions): Promise<CreateMessageDto>;
+
+	/**
+	 * Edits a previously sent message.
+	 * @example
+	 * editMessage({ messageId: "msg123", newContent: "Updated message" });
+	 *
+	 * @param props - An object containing edit message details.
+	 * @returns - A promise resolved when the message is edited.
+	 */
+	public abstract editMessage(props: EditMessageOptions): Promise<CreateMessageDto>;
 }
 
 export default WhatsappClient;

@@ -65,7 +65,8 @@ model WppMessage {
     quotedId         Int?             @map("quoted_id")
     chatId           Int?             @map("chat_id")
     contactId        Int?             @map("contact_id")
-    isForwarded      Boolean?         @map("is_forwarded")
+    isForwarded      Boolean          @default(false) @map("is_forwarded")
+    isEdited         Boolean          @default(false) @map("is_edited")
     body             String
     timestamp        String
     sentAt           DateTime         @map("sent_at")
