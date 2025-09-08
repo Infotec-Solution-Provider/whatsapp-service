@@ -85,11 +85,11 @@ class GupshupService {
 			};
 		}
 
-		if (change.field === "billing-event") {
+		if (change.field === "billing-event" && "billing" in change.value) {
 			logger.log("Recebido evento de cobrança");
 			return {
 				type: "billing" as const,
-				data: change.value as GSBillingEvent,
+				data: change.value.billing as GSBillingEvent,
 				appId: input.gs_app_id
 			};
 		}
