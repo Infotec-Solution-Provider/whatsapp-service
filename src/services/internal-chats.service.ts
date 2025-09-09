@@ -374,6 +374,7 @@ class InternalChatsService {
 				type: "chat",
 				body: usarMentionsText ? texto.replace(/@\s*$/, mentionsText) : data.text,
 				quotedId: data.quotedId ? Number(data.quotedId) : null,
+				isForwarded: false,
 				chat: {
 					connect: {
 						id: +data.chatId
