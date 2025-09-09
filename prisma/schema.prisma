@@ -1,420 +1,420 @@
 generator client {
-    provider = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-    provider = "mysql"
-    url      = env("WHATSAPP_DATABASE_URL")
+  provider = "mysql"
+  url      = env("WHATSAPP_DATABASE_URL")
 }
 
 model WppClient {
-    id             Int           @id @default(autoincrement())
-    name           String
-    phone          String?
-    instance       String        @map("instance")
-    type           WppClientType
-    isActive       Boolean       @map("is_active")
-    WABAPhoneId    String?       @map("waba_phone_id")
-    WABAAccountId  String?       @map("waba_account_id")
-    WABAToken      String?       @map("waba_token")
-    gupshupToken   String?       @map("gupshup_token")
-    gupshupAppName String?       @map("gupshup_app_name")
-    gupshupAppId   String?       @map("gupshup_app_id")
-    WppSector      WppSector[]
+  id             Int           @id @default(autoincrement())
+  name           String
+  phone          String?
+  instance       String        @map("instance")
+  type           WppClientType
+  isActive       Boolean       @map("is_active")
+  WABAPhoneId    String?       @map("waba_phone_id")
+  WABAAccountId  String?       @map("waba_account_id")
+  WABAToken      String?       @map("waba_token")
+  gupshupToken   String?       @map("gupshup_token")
+  gupshupAppName String?       @map("gupshup_app_name")
+  gupshupAppId   String?       @map("gupshup_app_id")
+  WppSector      WppSector[]
 
-    @@unique([instance, name])
-    @@index([isActive])
-    @@map("clients")
+  @@unique([instance, name])
+  @@index([isActive])
+  @@map("clients")
 }
 
 model WppContact {
-    id                        Int       @id @default(autoincrement())
-    name                      String
-    phone                     String
-    customerId                Int?      @map("customer_id")
-    instance                  String    @map("instance")
-    isDeleted                 Boolean   @default(false) @map("is_deleted")
-    isBlocked                 Boolean   @default(false) @map("is_blocked")
-    isOnlyAdmin               Boolean   @default(false) @map("is_only_admin")
-    avatarUrl                 String?   @map("avatar_url") @db.Text
-    createdAt                 DateTime  @default(now()) @map("created_at")
-    updatedAt                 DateTime? @updatedAt @map("updated_at")
-    lastOutOfHoursReplySentAt DateTime? @map("last_out_of_hours_reply_sent_at")
-    conversationExpiration    String?   @map("conversation_expiration")
+  id                        Int       @id @default(autoincrement())
+  name                      String
+  phone                     String
+  customerId                Int?      @map("customer_id")
+  instance                  String    @map("instance")
+  isDeleted                 Boolean   @default(false) @map("is_deleted")
+  isBlocked                 Boolean   @default(false) @map("is_blocked")
+  isOnlyAdmin               Boolean   @default(false) @map("is_only_admin")
+  avatarUrl                 String?   @map("avatar_url") @db.Text
+  createdAt                 DateTime  @default(now()) @map("created_at")
+  updatedAt                 DateTime? @updatedAt @map("updated_at")
+  lastOutOfHoursReplySentAt DateTime? @map("last_out_of_hours_reply_sent_at")
+  conversationExpiration    String?   @map("conversation_expiration")
 
-    WppChat     WppChat[]
-    WppMessage  WppMessage[]
-    WppSchedule WppSchedule[]
+  WppChat     WppChat[]
+  WppMessage  WppMessage[]
+  WppSchedule WppSchedule[]
 
-    @@unique([instance, phone])
-    @@index([customerId, instance])
-    @@map("contacts")
+  @@unique([instance, phone])
+  @@index([customerId, instance])
+  @@map("contacts")
 }
 
 model WppMessage {
-    id               Int              @id @default(autoincrement())
-    instance         String           @map("instance")
-    wwebjsId         String?          @unique @map("wwebjs_id")
-    wwebjsIdStanza   String?          @unique @map("wwebjs_id_stanza")
-    wabaId           String?          @unique @map("waba_id")
-    gupshupId        String?          @unique @map("gupshup_id")
-    gupshupRequestId String?          @map("gupshup_request_id")
-    from             String
-    to               String
-    type             String
-    quotedId         Int?             @map("quoted_id")
-    chatId           Int?             @map("chat_id")
-    contactId        Int?             @map("contact_id")
-    isForwarded      Boolean          @default(false) @map("is_forwarded")
-    isEdited         Boolean          @default(false) @map("is_edited")
-    body             String
-    timestamp        String
-    sentAt           DateTime         @map("sent_at")
-    status           WppMessageStatus
-    fileId           Int?             @map("file_id")
-    fileName         String?          @map("file_name")
-    fileType         String?          @map("file_type")
-    fileSize         String?          @map("file_size")
-    userId           Int?             @map("user_id")
-    billingCategory  String?          @map("billing_category")
-    WppChat          WppChat?         @relation(fields: [chatId], references: [id])
-    WppContact       WppContact?      @relation(fields: [contactId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  id               Int              @id @default(autoincrement())
+  instance         String           @map("instance")
+  wwebjsId         String?          @unique @map("wwebjs_id")
+  wwebjsIdStanza   String?          @unique @map("wwebjs_id_stanza")
+  wabaId           String?          @unique @map("waba_id")
+  gupshupId        String?          @unique @map("gupshup_id")
+  gupshupRequestId String?          @map("gupshup_request_id")
+  from             String
+  to               String
+  type             String
+  quotedId         Int?             @map("quoted_id")
+  chatId           Int?             @map("chat_id")
+  contactId        Int?             @map("contact_id")
+  isForwarded      Boolean          @default(false) @map("is_forwarded")
+  isEdited         Boolean          @default(false) @map("is_edited")
+  body             String
+  timestamp        String
+  sentAt           DateTime         @map("sent_at")
+  status           WppMessageStatus
+  fileId           Int?             @map("file_id")
+  fileName         String?          @map("file_name")
+  fileType         String?          @map("file_type")
+  fileSize         String?          @map("file_size")
+  userId           Int?             @map("user_id")
+  billingCategory  String?          @map("billing_category")
+  WppChat          WppChat?         @relation(fields: [chatId], references: [id])
+  WppContact       WppContact?      @relation(fields: [contactId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
-    @@index([from, to, chatId])
-    @@index([chatId, userId])
-    @@index([contactId], map: "messages_contact_id_fkey")
-    @@map("messages")
+  @@index([from, to, chatId])
+  @@index([chatId, userId])
+  @@index([contactId], map: "messages_contact_id_fkey")
+  @@map("messages")
 }
 
 model WppChat {
-    id         Int             @id @default(autoincrement())
-    instance   String          @map("instance")
-    contactId  Int?            @map("contact_id")
-    userId     Int?            @map("user_id")
-    walletId   Int?            @map("wallet_id")
-    botId      Int?            @map("bot_id")
-    resultId   Int?            @map("result_id")
-    sectorId   Int?            @map("sector_id")
-    scheduleId Int?            @unique @map("schedule_id")
-    type       WppChatType
-    priority   WppChatPriority @default(NORMAL)
-    avatarUrl  String?         @map("avatar_url") @db.Text
-    isFinished Boolean         @default(false) @map("is_finished")
-    startedAt  DateTime?       @map("started_at")
-    finishedAt DateTime?       @map("finished_at")
-    finishedBy Int?            @map("finished_by")
-    isSchedule Boolean         @default(false) @map("is_schedule")
-    wppTags    WppTag[]
+  id         Int             @id @default(autoincrement())
+  instance   String          @map("instance")
+  contactId  Int?            @map("contact_id")
+  userId     Int?            @map("user_id")
+  walletId   Int?            @map("wallet_id")
+  botId      Int?            @map("bot_id")
+  resultId   Int?            @map("result_id")
+  sectorId   Int?            @map("sector_id")
+  scheduleId Int?            @unique @map("schedule_id")
+  type       WppChatType
+  priority   WppChatPriority @default(NORMAL)
+  avatarUrl  String?         @map("avatar_url") @db.Text
+  isFinished Boolean         @default(false) @map("is_finished")
+  startedAt  DateTime?       @map("started_at")
+  finishedAt DateTime?       @map("finished_at")
+  finishedBy Int?            @map("finished_by")
+  isSchedule Boolean         @default(false) @map("is_schedule")
+  wppTags    WppTag[]
 
-    contact  WppContact?  @relation(fields: [contactId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-    wallet   WppWallet?   @relation(fields: [walletId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-    sector   WppSector?   @relation(fields: [sectorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-    schedule WppSchedule? @relation("ChatSchedule")
+  contact  WppContact?  @relation(fields: [contactId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  wallet   WppWallet?   @relation(fields: [walletId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  sector   WppSector?   @relation(fields: [sectorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  schedule WppSchedule? @relation("ChatSchedule")
 
-    messages      WppMessage[]
-    notifications Notification[]
+  messages      WppMessage[]
+  notifications Notification[]
 
-    @@index([userId])
-    @@map("chats")
+  @@index([userId])
+  @@map("chats")
 }
 
 model InternalMessage {
-    id          Int      @id @default(autoincrement())
-    instance    String   @map("instance")
-    from        String
-    type        String
-    quotedId    Int?     @map("quoted_id")
-    isForwarded Boolean? @map("is_forwarded")
+  id          Int     @id @default(autoincrement())
+  instance    String  @map("instance")
+  from        String
+  type        String
+  quotedId    Int?    @map("quoted_id")
+  isForwarded Boolean @map("is_forwarded")
 
-    wwebjsId       String?           @unique @map("wwebjs_id")
-    wwebjsIdStanza String?           @unique @map("wwebjs_id_stanza")
-    internalChatId Int               @map("internalchat_id")
-    body           String
-    timestamp      String            @map("timestamp")
-    status         WppMessageStatus
-    fileId         Int?              @map("file_id")
-    fileName       String?           @map("file_name")
-    fileType       String?           @map("file_type")
-    fileSize       String?           @map("file_size")
-    mentions       InternalMention[]
+  wwebjsId       String?           @unique @map("wwebjs_id")
+  wwebjsIdStanza String?           @unique @map("wwebjs_id_stanza")
+  internalChatId Int               @map("internalchat_id")
+  body           String
+  timestamp      String            @map("timestamp")
+  status         WppMessageStatus
+  fileId         Int?              @map("file_id")
+  fileName       String?           @map("file_name")
+  fileType       String?           @map("file_type")
+  fileSize       String?           @map("file_size")
+  mentions       InternalMention[]
 
-    // Relações
-    chat InternalChat? @relation(fields: [internalChatId], references: [id])
+  // Relações
+  chat InternalChat? @relation(fields: [internalChatId], references: [id])
 
-    @@index([from, internalChatId])
-    @@map("internalmessages")
+  @@index([from, internalChatId])
+  @@map("internalmessages")
 }
 
 model InternalChat {
-    id         Int       @id @default(autoincrement())
-    instance   String    @map("instance")
-    creatorId  Int?      @map("user_id")
-    sectorId   Int?      @map("sector_id")
-    isFinished Boolean   @default(false) @map("is_finished")
-    startedAt  DateTime  @default(now()) @map("started_at")
-    finishedAt DateTime? @map("finished_at")
-    finishedBy Int?      @map("finished_by")
+  id         Int       @id @default(autoincrement())
+  instance   String    @map("instance")
+  creatorId  Int?      @map("user_id")
+  sectorId   Int?      @map("sector_id")
+  isFinished Boolean   @default(false) @map("is_finished")
+  startedAt  DateTime  @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  finishedBy Int?      @map("finished_by")
 
-    isGroup          Boolean @default(false) @map("is_group")
-    groupName        String? @map("group_name")
-    groupDescription String? @map("group_description")
-    groupImageFileId Int?    @map("group_image_file_id")
-    wppGroupId       String? @unique @map("wpp_group_id")
+  isGroup          Boolean @default(false) @map("is_group")
+  groupName        String? @map("group_name")
+  groupDescription String? @map("group_description")
+  groupImageFileId Int?    @map("group_image_file_id")
+  wppGroupId       String? @unique @map("wpp_group_id")
 
-    sector       WppSector?           @relation(fields: [sectorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-    messages     InternalMessage[]
-    participants InternalChatMember[]
+  sector       WppSector?           @relation(fields: [sectorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  messages     InternalMessage[]
+  participants InternalChatMember[]
 
-    @@index([creatorId])
-    @@map("internalchats")
+  @@index([creatorId])
+  @@map("internalchats")
 }
 
 model InternalChatMember {
-    internalChatId Int       @map("internalchatId")
-    userId         Int       @map("internalcontactId")
-    joinedAt       DateTime  @default(now()) @map("joined_at")
-    lastReadAt     DateTime? @map("last_read_at")
+  internalChatId Int       @map("internalchatId")
+  userId         Int       @map("internalcontactId")
+  joinedAt       DateTime  @default(now()) @map("joined_at")
+  lastReadAt     DateTime? @map("last_read_at")
 
-    chat InternalChat @relation(fields: [internalChatId], references: [id], onDelete: Cascade)
+  chat InternalChat @relation(fields: [internalChatId], references: [id], onDelete: Cascade)
 
-    @@id([internalChatId, userId])
-    @@map("internal_chat_members")
+  @@id([internalChatId, userId])
+  @@map("internal_chat_members")
 }
 
 model InternalMention {
-    id        Int             @id @default(autoincrement())
-    messageId Int             @map("internalmessage_id")
-    userId    Int             @map("user_id")
-    message   InternalMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  id        Int             @id @default(autoincrement())
+  messageId Int             @map("internalmessage_id")
+  userId    Int             @map("user_id")
+  message   InternalMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
-    @@index([messageId])
-    @@index([userId])
-    @@map("internal_mentions")
+  @@index([messageId])
+  @@index([userId])
+  @@map("internal_mentions")
 }
 
 model WppTag {
-    id       Int       @id @default(autoincrement())
-    instance String    @map("instance")
-    name     String
-    color    String    @map("bg_color")
-    wppChats WppChat[]
+  id       Int       @id @default(autoincrement())
+  instance String    @map("instance")
+  name     String
+  color    String    @map("bg_color")
+  wppChats WppChat[]
 
-    @@unique([name])
-    @@map("tags")
+  @@unique([name])
+  @@map("tags")
 }
 
 model WppSector {
-    id            Int     @id @default(autoincrement())
-    name          String
-    instance      String  @map("instance")
-    wppInstanceId Int?    @map("wpp_instance_id")
-    startChats    Boolean @map("start_chats")
-    receiveChats  Boolean @map("receive_chats")
+  id            Int     @id @default(autoincrement())
+  name          String
+  instance      String  @map("instance")
+  wppInstanceId Int?    @map("wpp_instance_id")
+  startChats    Boolean @map("start_chats")
+  receiveChats  Boolean @map("receive_chats")
 
-    WppInstance  WppClient?     @relation(fields: [wppInstanceId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-    WppChat      WppChat[]
-    WppSchedule  WppSchedule[]
-    InternalChat InternalChat[]
+  WppInstance  WppClient?     @relation(fields: [wppInstanceId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  WppChat      WppChat[]
+  WppSchedule  WppSchedule[]
+  InternalChat InternalChat[]
 
-    @@unique([instance, name])
-    @@map("sectors")
+  @@unique([instance, name])
+  @@map("sectors")
 }
 
 model WppMessageFlow {
-    id          Int      @id @default(autoincrement())
-    instance    String   @map("instance")
-    sectorId    Int      @map("sector_id")
-    description String?
-    createdAt   DateTime @default(now()) @map("created_at")
-    updatedAt   DateTime @updatedAt @map("updated_at")
+  id          Int      @id @default(autoincrement())
+  instance    String   @map("instance")
+  sectorId    Int      @map("sector_id")
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
-    WppMessageFlowStep WppMessageFlowStep[]
+  WppMessageFlowStep WppMessageFlowStep[]
 
-    @@unique([instance, sectorId])
-    @@map("message_flows")
+  @@unique([instance, sectorId])
+  @@map("message_flows")
 }
 
 model WppMessageFlowStep {
-    id            Int                    @id @default(autoincrement())
-    type          WppMessageFlowStepType
-    messageFlowId Int                    @map("message_flow_id")
-    stepNumber    Int                    @map("step_number")
-    createdAt     DateTime               @default(now()) @map("created_at")
-    updatedAt     DateTime               @updatedAt @map("updated_at")
+  id            Int                    @id @default(autoincrement())
+  type          WppMessageFlowStepType
+  messageFlowId Int                    @map("message_flow_id")
+  stepNumber    Int                    @map("step_number")
+  createdAt     DateTime               @default(now()) @map("created_at")
+  updatedAt     DateTime               @updatedAt @map("updated_at")
 
-    WppMessageFlow WppMessageFlow @relation(fields: [messageFlowId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  WppMessageFlow WppMessageFlow @relation(fields: [messageFlowId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
-    @@unique([messageFlowId, stepNumber])
-    @@map("message_flows_steps")
+  @@unique([messageFlowId, stepNumber])
+  @@map("message_flows_steps")
 }
 
 model AutomaticResponseRule {
-    id       Int    @id @default(autoincrement())
-    instance String
-    name     String
+  id       Int    @id @default(autoincrement())
+  instance String
+  name     String
 
-    isGlobal  Boolean @default(false)
-    message   String  @db.Text
-    fileId    Int?
-    isEnabled Boolean @default(true)
+  isGlobal  Boolean @default(false)
+  message   String  @db.Text
+  fileId    Int?
+  isEnabled Boolean @default(true)
 
-    cooldownSeconds Int                         @default(3600)
-    userAssignments AutomaticResponseRuleUser[]
-    schedules       AutomaticResponseSchedule[]
+  cooldownSeconds Int                         @default(3600)
+  userAssignments AutomaticResponseRuleUser[]
+  schedules       AutomaticResponseSchedule[]
 
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-    @@map("automatic_response_rules")
+  @@map("automatic_response_rules")
 }
 
 model AutomaticResponseRuleUser {
-    ruleId Int                   @map("rule_id")
-    userId Int                   @map("user_id")
-    rule   AutomaticResponseRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  ruleId Int                   @map("rule_id")
+  userId Int                   @map("user_id")
+  rule   AutomaticResponseRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
 
-    @@id([ruleId, userId])
-    @@map("automatic_response_rule_users")
+  @@id([ruleId, userId])
+  @@map("automatic_response_rule_users")
 }
 
 model AutomaticResponseSchedule {
-    id        Int                   @id @default(autoincrement())
-    ruleId    Int
-    rule      AutomaticResponseRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
-    dayOfWeek Int
-    startTime String
-    endTime   String
+  id        Int                   @id @default(autoincrement())
+  ruleId    Int
+  rule      AutomaticResponseRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  dayOfWeek Int
+  startTime String
+  endTime   String
 
-    @@map("automatic_response_schedules")
+  @@map("automatic_response_schedules")
 }
 
 model WppWallet {
-    instance      String          @map("instance")
-    id            Int             @id @default(autoincrement())
-    name          String
-    WppChat       WppChat[]
-    WppWalletUser WppWalletUser[]
+  instance      String          @map("instance")
+  id            Int             @id @default(autoincrement())
+  name          String
+  WppChat       WppChat[]
+  WppWalletUser WppWalletUser[]
 
-    @@map("wallets")
+  @@map("wallets")
 }
 
 model WppSchedule {
-    instance     String
-    id           Int      @id @default(autoincrement())
-    description  String?
-    contactId    Int      @map("contact_id")
-    chatId       Int?     @unique @map("chat_id")
-    scheduledAt  DateTime @map("scheduled_at")
-    scheduleDate DateTime @map("schedule_date")
-    scheduledBy  Int      @map("scheduled_by")
-    scheduledFor Int      @map("scheduled_for")
-    sectorId     Int?     @map("sector_id")
+  instance     String
+  id           Int      @id @default(autoincrement())
+  description  String?
+  contactId    Int      @map("contact_id")
+  chatId       Int?     @unique @map("chat_id")
+  scheduledAt  DateTime @map("scheduled_at")
+  scheduleDate DateTime @map("schedule_date")
+  scheduledBy  Int      @map("scheduled_by")
+  scheduledFor Int      @map("scheduled_for")
+  sectorId     Int?     @map("sector_id")
 
-    chat    WppChat?   @relation("ChatSchedule", fields: [chatId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-    contact WppContact @relation(fields: [contactId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-    sector  WppSector? @relation(fields: [sectorId], references: [id])
+  chat    WppChat?   @relation("ChatSchedule", fields: [chatId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  contact WppContact @relation(fields: [contactId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  sector  WppSector? @relation(fields: [sectorId], references: [id])
 
-    @@map("schedules")
+  @@map("schedules")
 }
 
 model WppWalletUser {
-    walletId  Int        @map("wallet_id")
-    userId    Int        @map("user_id")
-    WppWallet WppWallet? @relation(fields: [walletId], references: [id])
+  walletId  Int        @map("wallet_id")
+  userId    Int        @map("user_id")
+  WppWallet WppWallet? @relation(fields: [walletId], references: [id])
 
-    @@unique([walletId, userId])
-    @@map("wallets_users")
+  @@unique([walletId, userId])
+  @@map("wallets_users")
 }
 
 model Parameter {
-    id       Int            @id @default(autoincrement())
-    scope    ParameterScope
-    key      String
-    value    String
-    instance String? // se escopo = INSTANCE ou USER
-    sectorId Int? // se escopo = SECTOR ou USER
-    userId   Int? // se escopo = USER
+  id       Int            @id @default(autoincrement())
+  scope    ParameterScope
+  key      String
+  value    String
+  instance String? // se escopo = INSTANCE ou USER
+  sectorId Int? // se escopo = SECTOR ou USER
+  userId   Int? // se escopo = USER
 
-    @@unique([scope, instance, sectorId, userId, key])
-    @@map("parameters")
+  @@unique([scope, instance, sectorId, userId, key])
+  @@map("parameters")
 }
 
 enum ParameterScope {
-    INSTANCE
-    SECTOR
-    USER
+  INSTANCE
+  SECTOR
+  USER
 }
 
 model Notification {
-    id          Int              @id @default(autoincrement())
-    instance    String           @map("instance")
-    title       String
-    description String
-    chatId      Int?             @map("chat_id")
-    userId      Int?             @map("user_id") // 👈 Aqui é só ID, sem relação
-    type        NotificationType
-    read        Boolean          @default(false)
-    createdAt   DateTime         @default(now()) @map("created_at")
+  id          Int              @id @default(autoincrement())
+  instance    String           @map("instance")
+  title       String
+  description String
+  chatId      Int?             @map("chat_id")
+  userId      Int?             @map("user_id") // 👈 Aqui é só ID, sem relação
+  type        NotificationType
+  read        Boolean          @default(false)
+  createdAt   DateTime         @default(now()) @map("created_at")
 
-    chat WppChat? @relation(fields: [chatId], references: [id], onDelete: SetNull)
+  chat WppChat? @relation(fields: [chatId], references: [id], onDelete: SetNull)
 
-    @@map("notifications")
+  @@map("notifications")
 }
 
 enum NotificationType {
-    CHAT_AUTO_FINISHED
-    CHAT_TRANSFERRED
-    CHAT_REASSIGNED
-    ALERT
-    INFO
-    WARNING
-    ERROR
+  CHAT_AUTO_FINISHED
+  CHAT_TRANSFERRED
+  CHAT_REASSIGNED
+  ALERT
+  INFO
+  WARNING
+  ERROR
 
-    @@map("notification_type")
+  @@map("notification_type")
 }
 
 enum WppMessageStatus {
-    PENDING
-    SENT
-    RECEIVED
-    READ
-    DOWNLOADED
-    ERROR
-    REVOKED
+  PENDING
+  SENT
+  RECEIVED
+  READ
+  DOWNLOADED
+  ERROR
+  REVOKED
 
-    @@map("message_status")
+  @@map("message_status")
 }
 
 enum WppClientType {
-    WABA
-    WWEBJS
-    GUPSHUP
+  WABA
+  WWEBJS
+  GUPSHUP
 
-    @@map("client_type")
+  @@map("client_type")
 }
 
 enum WppChatType {
-    RECEPTIVE
-    ACTIVE
+  RECEPTIVE
+  ACTIVE
 
-    @@map("chat_type")
+  @@map("chat_type")
 }
 
 enum WppChatPriority {
-    LOW
-    NORMAL
-    HIGH
-    VERY_HIGH
-    URGENCY
+  LOW
+  NORMAL
+  HIGH
+  VERY_HIGH
+  URGENCY
 
-    @@map("chat_priority")
+  @@map("chat_priority")
 }
 
 enum WppMessageFlowStepType {
-    CHECK_AVAILABLE_USERS
-    CHECK_LOALTY
-    CHECK_ONLY_ADMIN
-    SEND_TO_ADMIN
+  CHECK_AVAILABLE_USERS
+  CHECK_LOALTY
+  CHECK_ONLY_ADMIN
+  SEND_TO_ADMIN
 
-    @@map("message_flow_step_type")
+  @@map("message_flow_step_type")
 }

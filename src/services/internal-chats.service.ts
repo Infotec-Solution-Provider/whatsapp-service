@@ -468,7 +468,8 @@ class InternalChatsService {
 				data: {
 					...rest,
 					from: `external:${msg.from}:${authorName}`,
-					internalChatId: chat.id
+					internalChatId: chat.id,
+					isForwarded: !!msg.isForwarded,
 				}
 			});
 

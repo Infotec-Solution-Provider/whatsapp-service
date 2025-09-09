@@ -12,7 +12,6 @@ import messagesService from "../services/messages.service";
 import messagesDistributionService from "../services/messages-distribution.service";
 import { EditMessageOptions, Mentions, SendMessageOptions } from "../types/whatsapp-instance.types";
 import internalChatsService from "../services/internal-chats.service";
-import executeWwebjsLoadMessagesRoutine from "../routines/wwebjs-load-messages.routine";
 
 const PUPPETEER_ARGS = {
 	headless: true,
