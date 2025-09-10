@@ -87,7 +87,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 				logger.log("[Gupshup] Payload de texto pronto.");
 			}
 
-			logger.log("[Gupshup] Enviando requisição para Gupshup.", data);
+			logger.log("[Gupshup] Enviando requisição para Gupshup.", data.toString());
 			const response = await this.api.post("/wa/api/v1/msg", data, {
 				headers: { "Content-Type": "application/x-www-form-urlencoded" }
 			});
