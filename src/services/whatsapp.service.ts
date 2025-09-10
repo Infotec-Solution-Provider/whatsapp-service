@@ -356,7 +356,7 @@ class WhatsappService {
 			}
 			process.log("Salvando mensagem no banco de dados.", message);
 			const pendingMsg = await messagesService.insertMessage(message);
-			process.log("Enviando mensagem para o cliente.");
+			process.log("Enviando mensagem para o cliente.", options);
 
 			const sentMsg = await client.sendMessage(options);
 			process.log("Atualizando mensagem no banco de dados.", sentMsg);
