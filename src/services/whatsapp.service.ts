@@ -3,7 +3,7 @@ import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { WppChat, WppClientType } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import CreateMessageDto from "../dtos/create-message.dto";
-import { SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
+import { EditMessageOptions, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
 import OpusAudioConverter from "../utils/opus-audio-converter";
 import ProcessingLogger from "../utils/processing-logger";
 import GupshupWhatsappClient from "../whatsapp-client/gupshup-whatsapp-client";
@@ -46,6 +46,12 @@ interface SendMessageData {
 	file?: Express.Multer.File;
 	fileId?: number;
 	isForwarded?: boolean;
+}
+
+interface EditMessageData {
+	options: EditMessageOptions;
+	session: SessionData;
+	logger: ProcessingLogger;
 }
 
 export function getMessageType(fileType: string, isAudio: boolean, isDocument: boolean) {
@@ -124,6 +130,29 @@ class WhatsappService {
 		}
 
 		return client;
+	}
+
+	public async editMessage({ session, options }: EditMessageData) {
+		const process = new ProcessingLogger(
+			session.instance,
+			"edit-message",
+			`${session.userId}-${Date.now()}`,
+			options
+		);
+		process.log("Iniciando o processo de edição de mensagem.");
+		try {
+			process.log("Obtendo client do whatsapp...");
+			const client = await this.getClientBySector(session.instance, session.sectorId);
+
+			process.log(`Client obtido para o setor: ${session.sectorId}`);
+			const editedMsg = await client.editMessage(options);
+
+			return editedMsg;
+		} catch (err) {
+			process.log("Erro ao editar mensagem no WhatsApp.", err);
+			process.failed("Erro ao editar mensagem: " + sanitizeErrorMessage(err));
+			throw new BadRequestError("Erro ao editar mensagem.", err);
+		}
 	}
 
 	public async sendMessage(session: SessionData, to: string, data: SendMessageData) {

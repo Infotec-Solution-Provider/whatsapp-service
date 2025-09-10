@@ -22,6 +22,12 @@ export interface SendTextOptions extends BaseSendMessageOptions {
 
 export type SendMessageOptions = SendTextOptions | SendFileOptions;
 
+export interface EditMessageOptions {
+	messageId: number;
+	text: string;
+	mentions?: Mentions;
+}
+
 export interface SendTemplateOptions extends BaseSendMessageOptions {
 	templateId: string;
 	templateText: string;

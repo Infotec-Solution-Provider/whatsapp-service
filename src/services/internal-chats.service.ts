@@ -98,39 +98,27 @@ class InternalChatsService {
 		for (const id of uniqueIds) {
 			const room: SocketServerUserRoom = `${session.instance}:user:${id}`;
 
-			await socketService.emit(
-				SocketEventType.InternalChatStarted,
-				room,
-				{
-					chat: result as unknown as InternalChat & {
-						participants: InternalChatMember[];
-						messages: InternalMessage[];
-					}
+			await socketService.emit(SocketEventType.InternalChatStarted, room, {
+				chat: result as unknown as InternalChat & {
+					participants: InternalChatMember[];
+					messages: InternalMessage[];
 				}
-			);
+			});
 		}
 
 		return result;
 	}
 
 	// Sobrescreve os participantes de um grupo interno
-	public async updateInternalGroup(
-		groupId: number,
-		data: UpdateInternalGroupData
-	) {
-		const currentParticipants =
-			await prismaService.internalChatMember.findMany({
-				where: {
-					internalChatId: groupId
-				}
-			});
+	public async updateInternalGroup(groupId: number, data: UpdateInternalGroupData) {
+		const currentParticipants = await prismaService.internalChatMember.findMany({
+			where: {
+				internalChatId: groupId
+			}
+		});
 
-		const idsToAdd = data.participants.filter(
-			(p) => !currentParticipants.some((c) => c.userId === p)
-		);
-		const idsToRemove = currentParticipants.filter(
-			(p) => !data.participants.includes(p.userId)
-		);
+		const idsToAdd = data.participants.filter((p) => !currentParticipants.some((c) => c.userId === p));
+		const idsToRemove = currentParticipants.filter((p) => !data.participants.includes(p.userId));
 
 		const group = await prismaService.internalChat.update({
 			where: { id: groupId },
@@ -157,37 +145,25 @@ class InternalChatsService {
 
 		for (const id of idsToAdd) {
 			const room: SocketServerUserRoom = `${group.instance}:user:${id}`;
-			await socketService.emit(
-				SocketEventType.InternalChatStarted,
-				room,
-				{
-					chat: group as unknown as InternalChat & {
-						participants: InternalChatMember[];
-						messages: InternalMessage[];
-					}
+			await socketService.emit(SocketEventType.InternalChatStarted, room, {
+				chat: group as unknown as InternalChat & {
+					participants: InternalChatMember[];
+					messages: InternalMessage[];
 				}
-			);
+			});
 		}
 
 		for (const id of idsToRemove) {
 			const room: SocketServerUserRoom = `${group.instance}:user:${id.userId}`;
-			await socketService.emit(
-				SocketEventType.InternalChatFinished,
-				room,
-				{
-					chatId: groupId
-				}
-			);
+			await socketService.emit(SocketEventType.InternalChatFinished, room, {
+				chatId: groupId
+			});
 		}
 
 		return group;
 	}
 
-	public async updateGroupImage(
-		session: SessionData,
-		groupId: number,
-		file: Express.Multer.File
-	) {
+	public async updateGroupImage(session: SessionData, groupId: number, file: Express.Multer.File) {
 		const fileData = await filesService.uploadFile({
 			instance: session.instance,
 			fileName: file.originalname,
@@ -250,8 +226,7 @@ class InternalChatsService {
 			}
 		});
 
-		const chats: (InternalChat & { participants: InternalChatMember[] })[] =
-			[];
+		const chats: (InternalChat & { participants: InternalChatMember[] })[] = [];
 		const messages: InternalMessage[] = [];
 
 		result.forEach((c) => {
@@ -282,8 +257,7 @@ class InternalChatsService {
 			}
 		});
 
-		const chats: (InternalChat & { participants: InternalChatMember[] })[] =
-			[];
+		const chats: (InternalChat & { participants: InternalChatMember[] })[] = [];
 		const messages: InternalMessage[] = [];
 
 		result.forEach((c) => {
@@ -331,8 +305,7 @@ class InternalChatsService {
 		}
 
 		if (filters.isFinished) {
-			whereClause.isFinished =
-				filters.isFinished === "true" ? true : false;
+			whereClause.isFinished = filters.isFinished === "true" ? true : false;
 		}
 
 		const chats = await prismaService.internalChat.findMany({
@@ -346,10 +319,7 @@ class InternalChatsService {
 	}
 
 	// Envia uma mensagem no chat interno
-	public async sendMessage(
-		session: SessionData,
-		data: InternalSendMessageData
-	) {
+	public async sendMessage(session: SessionData, data: InternalSendMessageData) {
 		const { file, ...logData } = data;
 
 		const process = new ProcessingLogger(
@@ -371,9 +341,7 @@ class InternalChatsService {
 					try {
 						mentions = JSON.parse(mentions);
 					} catch (err) {
-						throw new BadRequestError(
-							"mentions não é um JSON válido"
-						);
+						throw new BadRequestError("mentions não é um JSON válido");
 					}
 				}
 
@@ -392,9 +360,7 @@ class InternalChatsService {
 					})
 					.filter((id): id is string => id !== null);
 
-				mentionsText = mentions
-					.map((user) => `@${user.name || user.phone}`)
-					.join(" ");
+				mentionsText = mentions.map((user) => `@${user.name || user.phone}`).join(" ");
 			}
 
 			const texto = data.text?.trim() ?? "";
@@ -406,10 +372,9 @@ class InternalChatsService {
 				timestamp: Date.now().toString(),
 				from: `user:${session.userId}`,
 				type: "chat",
-				body: usarMentionsText
-					? texto.replace(/@\s*$/, mentionsText)
-					: data.text,
+				body: usarMentionsText ? texto.replace(/@\s*$/, mentionsText) : data.text,
 				quotedId: data.quotedId ? Number(data.quotedId) : null,
+				isForwarded: false,
 				chat: {
 					connect: {
 						id: +data.chatId
@@ -422,9 +387,7 @@ class InternalChatsService {
 			}
 
 			if ("file" in data && !!data.file) {
-				const buffer = data.sendAsAudio
-					? await OpusAudioConverter.convert(data.file.buffer)
-					: data.file.buffer;
+				const buffer = data.sendAsAudio ? await OpusAudioConverter.convert(data.file.buffer) : data.file.buffer;
 
 				if (data.sendAsAudio) {
 					process.log("Mensagem convertida com sucesso.");
@@ -441,11 +404,7 @@ class InternalChatsService {
 				message.fileName = file.name;
 				message.fileType = file.mime_type;
 				message.fileSize = String(file.size);
-				message.type = getMessageType(
-					file.mime_type,
-					!!data.sendAsAudio,
-					!!data.sendAsDocument
-				);
+				message.type = getMessageType(file.mime_type, !!data.sendAsAudio, !!data.sendAsDocument);
 			}
 
 			const savedMsg = await prismaService.internalMessage.create({
@@ -454,15 +413,10 @@ class InternalChatsService {
 			process.log("Mensagem salva no banco de dados.", savedMsg);
 			if (data.mentions?.length) {
 				const mentionsParsed =
-					typeof data.mentions === "string"
-						? JSON.parse(data.mentions)
-						: data.mentions || [];
+					typeof data.mentions === "string" ? JSON.parse(data.mentions) : data.mentions || [];
 
 				const mentionData = mentionsParsed.map((mention: any) => ({
-					userId:
-						typeof mention === "object"
-							? (mention.userId ?? mention.id)
-							: mention,
+					userId: typeof mention === "object" ? (mention.userId ?? mention.id) : mention,
 					messageId: savedMsg.id
 				}));
 
@@ -472,8 +426,7 @@ class InternalChatsService {
 					});
 				}
 			}
-			const room =
-				`${session.instance}:internal-chat:${data.chatId}` as SocketServerInternalChatRoom;
+			const room = `${session.instance}:internal-chat:${data.chatId}` as SocketServerInternalChatRoom;
 			await socketService.emit(SocketEventType.InternalMessage, room, {
 				message: savedMsg
 			});
@@ -484,12 +437,7 @@ class InternalChatsService {
 			});
 
 			if (chat?.wppGroupId) {
-				const sentMsg = await this.sendMessageToWppGroup(
-					session,
-					chat.wppGroupId,
-					data,
-					savedMsg
-				);
+				const sentMsg = await this.sendMessageToWppGroup(session, chat.wppGroupId, data, savedMsg);
 
 				sentMsg?.wwebjsId &&
 					(await prismaService.internalMessage.update({
@@ -508,11 +456,7 @@ class InternalChatsService {
 		}
 	}
 
-	public async receiveMessage(
-		groupId: string,
-		msg: CreateMessageDto,
-		authorName: string
-	) {
+	public async receiveMessage(groupId: string, msg: CreateMessageDto, authorName: string) {
 		const chat = await prismaService.internalChat.findUnique({
 			where: {
 				wppGroupId: groupId
@@ -525,12 +469,12 @@ class InternalChatsService {
 				data: {
 					...rest,
 					from: `external:${msg.from}:${authorName}`,
-					internalChatId: chat.id
+					internalChatId: chat.id,
+					isForwarded: !!msg.isForwarded,
 				}
 			});
 
-			const room =
-				`${msg.instance}:internal-chat:${chat.id}` as SocketServerInternalChatRoom;
+			const room = `${msg.instance}:internal-chat:${chat.id}` as SocketServerInternalChatRoom;
 			await socketService.emit(SocketEventType.InternalMessage, room, {
 				message: savedMsg
 			});
@@ -543,10 +487,7 @@ class InternalChatsService {
 		data: InternalSendMessageData,
 		message: InternalMessage
 	) {
-		const client = await whatsappService.getClientBySector(
-			session.instance,
-			session.sectorId
-		);
+		const client = await whatsappService.getClientBySector(session.instance, session.sectorId);
 
 		if (!(client instanceof WWEBJSWhatsappClient)) {
 			return;
@@ -633,9 +574,7 @@ class InternalChatsService {
 
 		await prismaService.internalChatMember.update({
 			data: {
-				lastReadAt: lastMsg?.timestamp
-					? new Date(+lastMsg.timestamp)
-					: new Date()
+				lastReadAt: lastMsg?.timestamp ? new Date(+lastMsg.timestamp) : new Date()
 			},
 			where: {
 				internalChatId_userId: {
@@ -663,21 +602,14 @@ class InternalChatsService {
 		);
 
 		try {
-			process.log(
-				`Buscando ${originalMessages.length} mensagem(ns) original(is) do WhatsApp.`
-			);
+			process.log(`Buscando ${originalMessages.length} mensagem(ns) original(is) do WhatsApp.`);
 
 			if (originalMessages.length === 0) {
-				process.log(
-					"Nenhuma mensagem original encontrada no DB. Encerrando."
-				);
+				process.log("Nenhuma mensagem original encontrada no DB. Encerrando.");
 				return;
 			}
 
-			const client = await whatsappService.getClientBySector(
-				session.instance,
-				session.sectorId
-			);
+			const client = await whatsappService.getClientBySector(session.instance, session.sectorId);
 
 			for (const chatId of internalTargetChatIds) {
 				const internalChat = await prismaService.internalChat.findUnique({
@@ -690,33 +622,33 @@ class InternalChatsService {
 					let userOrContact: any;
 
 					if (originalMsg.from.startsWith("user:")) {
-						const  result = await instancesService.executeQuery<User>(
+						const result = await instancesService.executeQuery<User>(
 							session.instance,
 							"SELECT * FROM operadores WHERE CODIGO = ?",
 							[Number(phoneOrUserId)]
 						);
 						if (Array.isArray(result) && result.length > 0) {
-								userOrContact = result[0];
-							} else if (result && typeof result === "object") {
-								userOrContact = result;
-							} else {
-								userOrContact = null;
-							}
+							userOrContact = result[0];
+						} else if (result && typeof result === "object") {
+							userOrContact = result;
+						} else {
+							userOrContact = null;
+						}
 					} else if (originalMsg.from.startsWith("external:")) {
 						if (phoneOrUserId) {
-						userOrContact = await prismaService.wppContact.findFirst({
-							where: { phone: phoneOrUserId }
-						});
+							userOrContact = await prismaService.wppContact.findFirst({
+								where: { phone: phoneOrUserId }
+							});
 						} else {
-						userOrContact = null;
+							userOrContact = null;
 						}
 					}
-					console.log("userOrContact",userOrContact)
+					console.log("userOrContact", userOrContact);
 
 					const messageBody = internalChat?.isGroup
-						? `${userOrContact?.NOME || userOrContact?.name ? `*${userOrContact.NOME || userOrContact.name}*:` : ''} ${originalMsg.body}`
+						? `${userOrContact?.NOME || userOrContact?.name ? `*${userOrContact.NOME || userOrContact.name}*:` : ""} ${originalMsg.body}`
 						: originalMsg.body;
-					console.log("messageBody",messageBody)
+					console.log("messageBody", messageBody);
 					const messageData: Prisma.InternalMessageCreateInput = {
 						instance: session.instance,
 						from: `user:${session.userId}`,
@@ -733,36 +665,33 @@ class InternalChatsService {
 						fileType: originalMsg.fileType,
 						fileSize: originalMsg.fileSize
 					};
-					console.log("messageData dentro do encaminhar interno",messageData)
-					const savedInternalMsg =
-						await prismaService.internalMessage.create({
-							data: messageData
-						});
+					console.log("messageData dentro do encaminhar interno", messageData);
+					const savedInternalMsg = await prismaService.internalMessage.create({
+						data: messageData
+					});
 
 					process.log(
 						`Mensagem ID:${originalMsg.id} encaminhada para Chat Interno ID:${chatId}. Nova msg ID:${savedInternalMsg.id}`
 					);
 
 					const room: SocketServerInternalChatRoom = `${session.instance}:internal-chat:${chatId}`;
-					await socketService.emit(
-						SocketEventType.InternalMessage,
-						room,
-						{
-							message: savedInternalMsg
-						}
-					);
+					await socketService.emit(SocketEventType.InternalMessage, room, {
+						message: savedInternalMsg
+					});
 
 					if (internalChat?.isGroup && internalChat.wppGroupId) {
 						try {
 							if (!(client instanceof WWEBJSWhatsappClient)) {
-								process.log(`Cliente não suporta encaminhamento nativo para o grupo wppId:${internalChat.wppGroupId}`);
+								process.log(
+									`Cliente não suporta encaminhamento nativo para o grupo wppId:${internalChat.wppGroupId}`
+								);
 								continue;
 							}
 
 							if (sourceType === "internal") {
 								const options: SendMessageOptions = {
 									to: internalChat.wppGroupId,
-    								text: `_→ Encaminhada_\n${messageBody}`,
+									text: `_→ Encaminhada_\n${messageBody}`
 								};
 
 								if (originalMsg.fileId) {
@@ -777,11 +706,7 @@ class InternalChatsService {
 
 								await client.sendMessage(options, true);
 							} else {
-								await client.forwardMessage(
-									internalChat.wppGroupId,
-									originalMsg.wwebjsId!,
-									true
-								);
+								await client.forwardMessage(internalChat.wppGroupId, originalMsg.wwebjsId!, true);
 							}
 							process.log(
 								`Mensagem ID:${originalMsg.id} também encaminhada para o grupo de WhatsApp ID:${internalChat.wppGroupId}`
@@ -794,17 +719,11 @@ class InternalChatsService {
 					}
 				}
 			}
-			process.success(
-				"Todas as mensagens foram processadas para os chats internos."
-			);
+			process.success("Todas as mensagens foram processadas para os chats internos.");
 		} catch (err) {
 			const msg = sanitizeErrorMessage(err) || "null";
-			process.failed(
-				`Erro ao encaminhar mensagens para chats internos: ${msg}`
-			);
-			throw new BadRequestError(
-				`Erro ao encaminhar para chat interno: ${msg}`
-			);
+			process.failed(`Erro ao encaminhar mensagens para chats internos: ${msg}`);
+			throw new BadRequestError(`Erro ao encaminhar para chat interno: ${msg}`);
 		}
 	}
 
@@ -819,8 +738,6 @@ class InternalChatsService {
 
 		return null;
 	}
-
-
 }
 
 export default new InternalChatsService();
