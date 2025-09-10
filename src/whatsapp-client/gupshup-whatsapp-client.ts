@@ -42,7 +42,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 		logger.log("[Gupshup] Iniciando envio de mensagem.");
 		try {
 			const data = new URLSearchParams();
-			logger.log("[Gupshup] Montando parâmetros básicos.", { appName: this.appName, phone: this.phone });
+			logger.log("[Gupshup] Montando parâmetros básicos.");
 
 			data.append("channel", "whatsapp");
 			data.append("src.name", this.appName);
@@ -54,11 +54,12 @@ class GupshupWhatsappClient implements WhatsappClient {
 				if (!options.fileType || options.fileType === "document") return "file";
 				return options.fileType;
 			})();
-			logger.log("[Gupshup] Tipo de mensagem determinado.", { msgType });
+			logger.log("[Gupshup] Tipo de mensagem determinado: " + msgType);
 
 			let msg: any = {};
+
 			if (options.quotedId) {
-				logger.log("[Gupshup] Aplicando quotedId no contexto.", { quotedId: options.quotedId });
+				logger.log("[Gupshup] Aplicando quotedId no contexto.");
 				msg.context = { msgId: options.quotedId };
 			}
 
@@ -68,7 +69,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 					"http://localhost:8003",
 					"https://inpulse.infotecrs.inf.br"
 				);
-				logger.log("[Gupshup] Montando payload de mídia.", { urlKey });
+				logger.log("[Gupshup] Montando payload de mídia.", updatedFileUrl);
 
 				msg = { type: msgType, [urlKey]: updatedFileUrl };
 				if (options.text && !options.sendAsAudio && msgType !== "file") {
@@ -86,7 +87,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 				logger.log("[Gupshup] Payload de texto pronto.");
 			}
 
-			logger.log("[Gupshup] Enviando requisição para Gupshup.");
+			logger.log("[Gupshup] Enviando requisição para Gupshup.", data);
 			const response = await this.api.post("/wa/api/v1/msg", data, {
 				headers: { "Content-Type": "application/x-www-form-urlencoded" }
 			});
