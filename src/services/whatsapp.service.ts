@@ -194,6 +194,7 @@ class WhatsappService {
 
 				options.quotedId = (quotedMsg.wwebjsId || quotedMsg.wabaId)!;
 				message.quotedId = quotedMsg.id;
+				process.log(`ID enviado: ${options.quotedId}`);
 			}
 
 			if ("fileId" in data && !!data.fileId) {
@@ -289,6 +290,9 @@ class WhatsappService {
 			process.log("Enviando mensagem para o cliente.");
 
 			messagesDistributionService.notifyMessage(process, pendingMsg);
+			process.log("Mensagem pendente notificada via socket.", pendingMsg);
+
+			process.log("Enviando mensagem para o WhatsApp.", options);
 			const sentMsg = await client.sendMessage(options);
 			process.log("Atualizando mensagem no banco de dados.", sentMsg);
 
@@ -561,11 +565,11 @@ class WhatsappService {
 						});
 						const chat = contact
 							? await prismaService.wppChat.findFirst({
-									where: {
-										instance: session.instance,
-										contactId: contact.id
-									}
-								})
+								where: {
+									instance: session.instance,
+									contactId: contact.id
+								}
+							})
 							: null;
 
 						for (const originalMsg of originalMessages) {
@@ -673,8 +677,8 @@ class WhatsappService {
 			});
 			const chat = contact
 				? await prismaService.wppChat.findFirst({
-						where: { contactId: contact.id, isFinished: false }
-					})
+					where: { contactId: contact.id, isFinished: false }
+				})
 				: null;
 
 			// Prepara as opções de envio (texto ou arquivo)
