@@ -53,34 +53,41 @@ class GupshupWhatsappClient implements WhatsappClient {
 
 			return options.fileType;
 		})();
+
+
+
+		let msg: any = {};
+
 		if (options.quotedId) {
-			data.append("context", JSON.stringify({ messageId: options.quotedId }));
+			msg.context = {
+				msgId: options.quotedId
+			}
 		}
 
 		if ("fileUrl" in options) {
 			const urlKey = options.fileType === "image" ? "originalUrl" : "url";
 			const updatedFileUrl = options.fileUrl.replace("http://localhost:8003", "https://inpulse.infotecrs.inf.br");
 
-			let message = {
+			msg = {
 				type: msgType,
 				[urlKey]: updatedFileUrl
 			};
 
-			if (options.text && !options.sendAsAudio) {
-				message["caption"] = options.text;
+			if (options.text && !options.sendAsAudio && msgType !== "file") {
+				msg["caption"] = options.text;
 			}
 
-			data.append("message", JSON.stringify(message));
+			data.append("msg", JSON.stringify(msg));
 		} else {
 			if (!("text" in options)) {
-				throw new Error("Text is required for text messages");
+				throw new Error("Text is required for text msgs");
 			}
 
-			let message = {
+			msg = {
 				type: "text",
 				text: options.text
 			};
-			data.append("message", JSON.stringify(message));
+			data.append("message", JSON.stringify(msg));
 		}
 
 		const response = await this.api
