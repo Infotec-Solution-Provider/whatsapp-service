@@ -78,7 +78,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 					msg["caption"] = options.text;
 				}
 
-				data.append("msg", JSON.stringify(msg));
+				data.append("message", JSON.stringify(msg));
 				logger.log("[Gupshup] Payload de mídia pronto.");
 			} else {
 				if (!("text" in options)) {
