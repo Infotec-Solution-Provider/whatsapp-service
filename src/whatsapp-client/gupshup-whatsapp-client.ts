@@ -3,6 +3,8 @@ import CreateMessageDto from "../dtos/create-message.dto";
 import { EditMessageOptions, SendMessageOptions, SendTemplateOptions } from "../types/whatsapp-instance.types";
 import WhatsappClient from "./whatsapp-client";
 import { GSRecoverTemplatesResponse } from "../types/gupshup-api.types";
+import ProcessingLogger from "../utils/processing-logger";
+import { randomUUID } from "crypto";
 
 const GUP_URL = "https://api.gupshup.io";
 
@@ -35,94 +37,92 @@ class GupshupWhatsappClient implements WhatsappClient {
 	}
 
 	public async sendMessage(options: SendMessageOptions): Promise<CreateMessageDto> {
-		const data = new URLSearchParams();
+		const logger = new ProcessingLogger(this.instance, "gs-send-message", randomUUID(), options);
 
-		data.append("channel", "whatsapp");
-		data.append("src.name", this.appName);
-		data.append("source", this.phone);
-		data.append("destination", options.to);
+		logger.log("[Gupshup] Iniciando envio de mensagem.");
+		try {
+			const data = new URLSearchParams();
+			logger.log("[Gupshup] Montando parâmetros básicos.", { appName: this.appName, phone: this.phone });
 
-		const msgType = (() => {
-			if (!("fileUrl" in options)) {
-				return "text";
+			data.append("channel", "whatsapp");
+			data.append("src.name", this.appName);
+			data.append("source", this.phone);
+			data.append("destination", options.to);
+
+			const msgType = (() => {
+				if (!("fileUrl" in options)) return "text";
+				if (!options.fileType || options.fileType === "document") return "file";
+				return options.fileType;
+			})();
+			logger.log("[Gupshup] Tipo de mensagem determinado.", { msgType });
+
+			let msg: any = {};
+			if (options.quotedId) {
+				logger.log("[Gupshup] Aplicando quotedId no contexto.", { quotedId: options.quotedId });
+				msg.context = { msgId: options.quotedId };
 			}
 
-			if (!options.fileType || options.fileType === "document") {
-				return "file";
-			}
+			if ("fileUrl" in options) {
+				const urlKey = options.fileType === "image" ? "originalUrl" : "url";
+				const updatedFileUrl = options.fileUrl.replace(
+					"http://localhost:8003",
+					"https://inpulse.infotecrs.inf.br"
+				);
+				logger.log("[Gupshup] Montando payload de mídia.", { urlKey });
 
-			return options.fileType;
-		})();
-
-
-
-		let msg: any = {};
-
-		if (options.quotedId) {
-			msg.context = {
-				msgId: options.quotedId
-			}
-		}
-
-		if ("fileUrl" in options) {
-			const urlKey = options.fileType === "image" ? "originalUrl" : "url";
-			const updatedFileUrl = options.fileUrl.replace("http://localhost:8003", "https://inpulse.infotecrs.inf.br");
-
-			msg = {
-				type: msgType,
-				[urlKey]: updatedFileUrl
-			};
-
-			if (options.text && !options.sendAsAudio && msgType !== "file") {
-				msg["caption"] = options.text;
-			}
-
-			data.append("msg", JSON.stringify(msg));
-		} else {
-			if (!("text" in options)) {
-				throw new Error("Text is required for text msgs");
-			}
-
-			msg = {
-				type: "text",
-				text: options.text
-			};
-			data.append("message", JSON.stringify(msg));
-		}
-
-		const response = await this.api
-			.post("/wa/api/v1/msg", data, {
-				headers: {
-					"Content-Type": "application/x-www-form-urlencoded"
+				msg = { type: msgType, [urlKey]: updatedFileUrl };
+				if (options.text && !options.sendAsAudio && msgType !== "file") {
+					msg["caption"] = options.text;
 				}
-			})
-			.catch((err) => {
-				console.error(err.response.data);
-				throw new Error("F");
+				data.append("msg", JSON.stringify(msg));
+				logger.log("[Gupshup] Payload de mídia pronto.");
+			} else {
+				if (!("text" in options)) {
+					logger.failed("Texto é obrigatório para mensagens de texto.");
+					throw new Error("Text is required for text msgs");
+				}
+				msg = { type: "text", text: options.text };
+				data.append("message", JSON.stringify(msg));
+				logger.log("[Gupshup] Payload de texto pronto.");
+			}
+
+			logger.log("[Gupshup] Enviando requisição para Gupshup.");
+			const response = await this.api.post("/wa/api/v1/msg", data, {
+				headers: { "Content-Type": "application/x-www-form-urlencoded" }
 			});
+			logger.log("[Gupshup] Resposta recebida da Gupshup.", { status: response.status });
 
-		const now = new Date();
+			const now = new Date();
+			const message: CreateMessageDto = {
+				instance: this.instance,
+				from: `me:${this.phone}`,
+				to: options.to,
+				body: options.text || "",
+				status: "PENDING",
+				timestamp: now.getTime().toString(),
+				sentAt: now,
+				type: msgType,
+				wabaId: (response as any).data["messageId"] || null
+			};
 
-		const message: CreateMessageDto = {
-			instance: this.instance,
-			from: `me:${this.phone}`,
-			to: options.to,
-			body: options.text || "",
-			status: "PENDING",
-			timestamp: now.getTime().toString(),
-			sentAt: now,
-			type: msgType,
-			wabaId: response.data["messageId"] || null
-		};
+			if ("file" in options) {
+				message.fileId = options.file.id;
+				message.fileName = options.file.name;
+				message.fileType = options.file.mime_type;
+				message.fileSize = options.file.size?.toString() || null;
+				logger.log("[Gupshup] Metadados de arquivo aplicados ao retorno.");
+			}
 
-		if ("file" in options) {
-			message.fileId = options.file.id;
-			message.fileName = options.file.name;
-			message.fileType = options.file.mime_type;
-			message.fileSize = options.file.size?.toString() || null;
+			logger.log("[Gupshup] Mensagem preparada com sucesso.", message);
+			logger.success(message);
+			return message;
+		} catch (err: any) {
+			const details = err?.response?.data || err?.message || String(err);
+			logger.log("[Gupshup] Erro ao enviar mensagem.", details);
+			logger.failed(details);
+			console.error(details);
+			throw err;
 		}
-
-		return message;
 	}
 
 	public async sendTemplate(options: SendTemplateOptions, chatId: number, contactId: number) {
@@ -160,7 +160,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 			timestamp: now.getTime().toString(),
 			sentAt: now,
 			type: "template",
-			wabaId: response.data["messageId"] || null,
+			wabaId: (response as any).data["messageId"] || null,
 			chatId,
 			contactId
 		};
@@ -180,7 +180,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 		return response.data.templates || [];
 	}
 
-	public async editMessage({}: EditMessageOptions): Promise<CreateMessageDto> {
+	public async editMessage({ }: EditMessageOptions): Promise<CreateMessageDto> {
 		throw new Error("Method not implemented.");
 	}
 }
