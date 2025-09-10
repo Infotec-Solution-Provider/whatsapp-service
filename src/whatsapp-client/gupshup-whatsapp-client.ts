@@ -71,10 +71,13 @@ class GupshupWhatsappClient implements WhatsappClient {
 				);
 				logger.log("[Gupshup] Montando payload de mídia.", updatedFileUrl);
 
-				msg = { type: msgType, [urlKey]: updatedFileUrl };
+				msg.type = msgType;
+				msg[urlKey] = updatedFileUrl;
+
 				if (options.text && !options.sendAsAudio && msgType !== "file") {
 					msg["caption"] = options.text;
 				}
+
 				data.append("msg", JSON.stringify(msg));
 				logger.log("[Gupshup] Payload de mídia pronto.");
 			} else {
@@ -82,7 +85,10 @@ class GupshupWhatsappClient implements WhatsappClient {
 					logger.failed("Texto é obrigatório para mensagens de texto.");
 					throw new Error("Text is required for text msgs");
 				}
-				msg = { type: "text", text: options.text };
+
+				msg.type = "text";
+				msg.text = options.text;
+
 				data.append("message", JSON.stringify(msg));
 				logger.log("[Gupshup] Payload de texto pronto.");
 			}
