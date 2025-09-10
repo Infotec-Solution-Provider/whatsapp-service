@@ -1,5 +1,5 @@
 import CreateMessageDto from "../dtos/create-message.dto";
-import { SendMessageOptions } from "../types/whatsapp-instance.types";
+import { EditMessageOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
 import WhatsappClient from "./whatsapp-client";
 
 class WABAWhatsappClient implements WhatsappClient {
@@ -18,6 +18,10 @@ class WABAWhatsappClient implements WhatsappClient {
 	}
 
 	public async sendMessage({}: SendMessageOptions): Promise<CreateMessageDto> {
+		throw new Error("Method not implemented.");
+	}
+
+	public async editMessage({}: EditMessageOptions): Promise<CreateMessageDto> {
 		throw new Error("Method not implemented.");
 	}
 }

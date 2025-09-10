@@ -7,32 +7,13 @@ import upload from "../middlewares/multer.middleware";
 
 class MessagesController {
 	constructor(public readonly router: Router) {
-		this.router.get(
-			"/api/whatsapp/messages/:id",
-			isAuthenticated,
-			this.getMessageById
-		);
-		this.router.patch(
-			"/api/whatsapp/messages/mark-as-read",
-			isAuthenticated,
-			this.readContactMessages
-		);
-		this.router.post(
-			"/api/whatsapp/messages",
-			upload.single("file"),
-			isAuthenticated,
-			this.sendMessage
-		);
-		this.router.post(
-			"/api/whatsapp/messages/forward",
-			isAuthenticated,
-			this.forwardMessages.bind(this)
-		);
-		this.router.get(
-			"/api/whatsapp/messages",
-			isAuthenticated,
-			this.fetchMessages
-		);
+		this.router.get("/api/whatsapp/messages/:id", isAuthenticated, this.getMessageById);
+		this.router.patch("/api/whatsapp/messages/mark-as-read", isAuthenticated, this.readContactMessages);
+		this.router.post("/api/whatsapp/messages", upload.single("file"), isAuthenticated, this.sendMessage);
+		this.router.post("/api/whatsapp/messages/forward", isAuthenticated, this.forwardMessages.bind(this));
+		this.router.get("/api/whatsapp/messages", isAuthenticated, this.fetchMessages);
+
+		this.router.put("/api/whatsapp/messages/:id", isAuthenticated, this.editMessage);
 	}
 
 	private async getMessageById(req: Request, res: Response) {
@@ -61,10 +42,7 @@ class MessagesController {
 			throw new BadRequestError("Contact ID is required!");
 		}
 
-		const updatedData = await messagesService.markContactMessagesAsRead(
-			req.session.instance,
-			contactId
-		);
+		const updatedData = await messagesService.markContactMessagesAsRead(req.session.instance, contactId);
 
 		res.status(200).send({
 			message: "Messages marked as read successfully!",
@@ -80,11 +58,7 @@ class MessagesController {
 			data.file = file;
 		}
 
-		const message = await whatsappService.sendMessage(
-			req.session,
-			to,
-			data
-		);
+		const message = await whatsappService.sendMessage(req.session, to, data);
 
 		res.status(201).send({
 			message: "Message sent successfully!",
@@ -92,19 +66,14 @@ class MessagesController {
 		});
 	}
 	private async forwardMessages(req: Request, res: Response) {
-		const { messageIds, whatsappTargets, internalTargets, sourceType } =
-			req.body;
+		const { messageIds, whatsappTargets, internalTargets, sourceType } = req.body;
 
 		if (!Array.isArray(messageIds) || messageIds.length === 0) {
-			throw new BadRequestError(
-				"O campo 'messageIds' deve ser um array com pelo menos um ID de mensagem."
-			);
+			throw new BadRequestError("O campo 'messageIds' deve ser um array com pelo menos um ID de mensagem.");
 		}
 
-		const hasWhatsappTargets =
-			Array.isArray(whatsappTargets) && whatsappTargets.length > 0;
-		const hasInternalTargets =
-			Array.isArray(internalTargets) && internalTargets.length > 0;
+		const hasWhatsappTargets = Array.isArray(whatsappTargets) && whatsappTargets.length > 0;
+		const hasInternalTargets = Array.isArray(internalTargets) && internalTargets.length > 0;
 
 		if (!hasWhatsappTargets && !hasInternalTargets) {
 			throw new BadRequestError(
@@ -112,17 +81,10 @@ class MessagesController {
 			);
 		}
 
-		await whatsappService.forwardMessages(
-			req.session,
-			messageIds,
-			sourceType,
-			whatsappTargets,
-			internalTargets
-		);
+		await whatsappService.forwardMessages(req.session, messageIds, sourceType, whatsappTargets, internalTargets);
 
 		res.status(200).send({
-			message:
-				"Mensagens enviadas para a fila de encaminhamento com sucesso!"
+			message: "Mensagens enviadas para a fila de encaminhamento com sucesso!"
 		});
 	}
 
@@ -148,6 +110,31 @@ class MessagesController {
 			data: messages
 		});
 	};
+
+	private async editMessage(req: Request, res: Response) {
+		const { id } = req.params;
+		const { newText } = req.body;
+
+		if (!id) {
+			throw new BadRequestError("Message ID is required!");
+		}
+		if (!newText || typeof newText !== "string" || newText.trim() === "") {
+			throw new BadRequestError("New message body is required!");
+		}
+
+		const updatedMessage = await messagesService.editMessage({
+			options: {
+				messageId: Number(id),
+				text: newText
+			},
+			session: req.session
+		});
+
+		res.status(200).send({
+			message: "Message edited successfully!",
+			data: updatedMessage
+		});
+	}
 }
 
 export default new MessagesController(Router());

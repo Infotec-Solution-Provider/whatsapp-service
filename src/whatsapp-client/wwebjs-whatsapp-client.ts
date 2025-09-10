@@ -10,9 +10,8 @@ import socketService from "../services/socket.service";
 import ProcessingLogger from "../utils/processing-logger";
 import messagesService from "../services/messages.service";
 import messagesDistributionService from "../services/messages-distribution.service";
-import { SendMessageOptions } from "../types/whatsapp-instance.types";
+import { EditMessageOptions, Mentions, SendMessageOptions } from "../types/whatsapp-instance.types";
 import internalChatsService from "../services/internal-chats.service";
-import executeWwebjsLoadMessagesRoutine from "../routines/wwebjs-load-messages.routine";
 
 const PUPPETEER_ARGS = {
 	headless: true,
@@ -27,8 +26,7 @@ const PUPPETEER_ARGS = {
 	]
 };
 
-const IGNORED_MESSAGE_TYPES =
-	process.env["WWEBJS_IGNORED_MESSAGE_TYPES"]?.split(",") || [];
+const IGNORED_MESSAGE_TYPES = process.env["WWEBJS_IGNORED_MESSAGE_TYPES"]?.split(",") || [];
 const BROWSER_PATH = process.env["WWEBJS_BROWSER_PATH"]!;
 
 class WWEBJSWhatsappClient implements WhatsappClient {
@@ -54,9 +52,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		this.buildEvents(instance, id);
 
 		this.wwebjs.initialize().catch((err) => {
-			Logger.error(
-				`Error initializing client: ${sanitizeErrorMessage(err)}`
-			);
+			Logger.error(`Error initializing client: ${sanitizeErrorMessage(err)}`);
 		});
 	}
 
@@ -87,14 +83,8 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		this.wwebjs.on("message", this.handleMessage.bind(this));
 		this.wwebjs.on("message_edit", this.handleMessageEdit.bind(this));
 		this.wwebjs.on("message_ack", this.handleMessageAck.bind(this));
-		this.wwebjs.on(
-			"message_reaction",
-			this.handleMessageReaction.bind(this)
-		);
-		this.wwebjs.on(
-			"message_revoke_everyone",
-			this.handleMessageRevoked.bind(this)
-		);
+		this.wwebjs.on("message_reaction", this.handleMessageReaction.bind(this));
+		this.wwebjs.on("message_revoke_everyone", this.handleMessageRevoked.bind(this));
 	}
 
 	private async handleQr(qr: string) {
@@ -128,9 +118,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				});
 			}
 		} catch (err) {
-			Logger.error(
-				"Error handling QR code: " + sanitizeErrorMessage(err)
-			);
+			Logger.error("Error handling QR code: " + sanitizeErrorMessage(err));
 		}
 	}
 
@@ -170,20 +158,11 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				phone: this.wwebjs.info.wid.user
 			}
 		});
-
-		if (this.instance === "nunes") {
-			executeWwebjsLoadMessagesRoutine(this.wwebjs);
-		}
 	}
 
 	private async handleMessage(msg: WAWebJS.Message) {
 		Logger.debug("Message received: " + msg.id._serialized);
-		const process = new ProcessingLogger(
-			this.instance,
-			"wwebjs-message-receive",
-			msg.id._serialized,
-			msg
-		);
+		const process = new ProcessingLogger(this.instance, "wwebjs-message-receive", msg.id._serialized, msg);
 
 		try {
 			const chat = await msg.getChat();
@@ -203,38 +182,21 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			if (msg.from === "status@broadcast") {
 				return process.log("Message ignored: it is broadcast.");
 			}
-			const parsedMsg = await MessageParser.parse(
-				process,
-				this.instance,
-				msg,
-				false,
-				false,
-				chat.isGroup
-			);
+			const parsedMsg = await MessageParser.parse(process, this.instance, msg, false, false, chat.isGroup);
 			process.log(`Message is successfully parsed!`, parsedMsg);
 
 			if (!chat.isGroup) {
 				const savedMsg = await messagesService.insertMessage(parsedMsg);
 				process.log(`Message is successfully saved!`);
-				messagesDistributionService.processMessage(
-					this.instance,
-					this.id,
-					savedMsg
-				);
+				messagesDistributionService.processMessage(this.instance, this.id, savedMsg);
 				process.log(`Message sent to distribution service!`);
 				process.success(savedMsg);
 			}
 			if (chat.isGroup) {
-				internalChatsService.receiveMessage(
-					chat.id.user,
-					parsedMsg,
-					msg.author || msg.from.split("@")[0]!
-				);
+				internalChatsService.receiveMessage(chat.id.user, parsedMsg, msg.author || msg.from.split("@")[0]!);
 			}
 		} catch (err) {
-			process.log(
-				`Error while processing message: ${sanitizeErrorMessage(err)}`
-			);
+			process.log(`Error while processing message: ${sanitizeErrorMessage(err)}`);
 			process.failed(err);
 		}
 	}
@@ -247,11 +209,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		Logger.info("Message ack: " + ack + " | " + id._serialized + "!");
 		const status = MessageParser.getMessageStatus(ack);
 
-		messagesDistributionService.processMessageStatus(
-			"wwebjs",
-			id._serialized,
-			status
-		);
+		messagesDistributionService.processMessageStatus("wwebjs", id._serialized, status);
 	}
 
 	private handleMessageReaction(_reaction: WAWebJS.Reaction) {}
@@ -277,17 +235,9 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		return result ? result.user : null;
 	}
 
-	public async sendMessage(
-		options: SendMessageOptions,
-		isGroup: boolean = false
-	) {
+	public async sendMessage(options: SendMessageOptions, isGroup: boolean = false) {
 		const id = randomUUID();
-		const process = new ProcessingLogger(
-			this.instance,
-			"wwebjs-send-message",
-			id,
-			options
-		);
+		const process = new ProcessingLogger(this.instance, "wwebjs-send-message", id, options);
 
 		process.log("Iniciando envio de mensagem.", options);
 
@@ -311,9 +261,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				})
 				.filter((id): id is string => id !== null);
 
-			mentionsText = options.mentions
-				.map((user) => `@${user.name || user.phone}`)
-				.join(" ");
+			mentionsText = options.mentions.map((user) => `@${user.name || user.phone}`).join(" ");
 
 			params.mentions = mentionIds;
 		}
@@ -326,9 +274,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			if (options.sendAsAudio) {
 				params.sendAudioAsVoice = true;
 			}
-			if (
-				options.sendAsDocument /* || options.fileType?.includes("video") */
-			) {
+			if (options.sendAsDocument /* || options.fileType?.includes("video") */) {
 				params.sendMediaAsDocument = true;
 			}
 			if (!options.sendAsAudio) {
@@ -336,9 +282,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 				//const usarMentionsText = !!mentionsText && /@\s*$/.test(texto);
 
-				params.caption = options.mentions?.length
-					? texto.replace(/@\s*$/, mentionsText)
-					: texto;
+				params.caption = options.mentions?.length ? texto.replace(/@\s*$/, mentionsText) : texto;
 			}
 
 			try {
@@ -354,9 +298,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			const texto = options.text?.trim() ?? "";
 			//const usarMentionsText = !!mentionsText && /@\s*$/.test(texto);
 
-			content = options.mentions?.length
-				? texto.replace(/@\s*$/, mentionsText)
-				: texto;
+			content = options.mentions?.length ? texto.replace(/@\s*$/, mentionsText) : texto;
 		}
 
 		process.log("Conteúdo final:", { content, params });
@@ -365,18 +307,68 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			const sentMsg = await this.wwebjs.sendMessage(to, content, params);
 			process.log("Mensagem enviada com sucesso.", sentMsg);
 
-			const parsedMsg = await MessageParser.parse(
-				process,
-				this.instance,
-				sentMsg,
-				true,
-				true
-			);
+			const parsedMsg = await MessageParser.parse(process, this.instance, sentMsg, true, true);
 
 			process.success(parsedMsg);
 			return parsedMsg;
 		} catch (err) {
 			process.log("Erro ao enviar mensagem.", err);
+			process.failed(err);
+			throw err;
+		}
+	}
+
+	public async editMessage(options: EditMessageOptions) {
+		const process = new ProcessingLogger(
+			this.instance,
+			"wwebjs-edit-message",
+			String(options.messageId + "_" + Date.now()),
+			options
+		);
+
+		try {
+			process.log("Buscando mensagem pelo ID...", options.messageId);
+			const originalMsg = await prismaService.wppMessage.findUniqueOrThrow({
+				where: {
+					id: options.messageId
+				}
+			});
+
+			if (!originalMsg.wwebjsId) {
+				process.log("Mensagem não pode ser editada: wwebjsId não está definido.");
+				throw new Error("Message cannot be edited: wwebjsId is not defined.");
+			}
+
+			process.log("Mensagem original encontrada:", originalMsg);
+			const wwebjsMsg = await this.wwebjs.getMessageById(originalMsg.wwebjsId);
+
+			if (!wwebjsMsg) {
+				process.log("Mensagem não encontrada.");
+				throw new Error("Message not found");
+			}
+
+			process.log("Mensagem encontrada:", wwebjsMsg);
+
+			process.log("Gerando texto e menções...");
+			const { text, mentions } = await this.getTextWithMentions(options.text, options.mentions || []);
+			process.log("Texto gerado:", text);
+			process.log("IDs das menções:", mentions);
+
+			process.log("Editando mensagem...");
+			const editedMsg = await wwebjsMsg.edit(text, { mentions });
+
+			if (!editedMsg) {
+				process.log("Falha ao editar mensagem.");
+				throw new Error("Message not edited");
+			}
+
+			process.log("Mensagem editada com sucesso.");
+			const updatedMessage = await MessageParser.parse(process, this.instance, editedMsg, true, true);
+
+			process.success(updatedMessage);
+			return updatedMessage;
+		} catch (err) {
+			process.log("Erro ao editar mensagem: " + sanitizeErrorMessage(err));
 			process.failed(err);
 			throw err;
 		}
@@ -388,17 +380,12 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		return chats.filter((c) => c.isGroup);
 	}
 
-	public async forwardMessage(
-		to: string,
-		messageId: string,
-		isGroup: boolean = false
-	) {
-		const process = new ProcessingLogger(
-			this.instance,
-			"wwebjs-forward-message",
+	public async forwardMessage(to: string, messageId: string, isGroup: boolean = false) {
+		const process = new ProcessingLogger(this.instance, "wwebjs-forward-message", messageId, {
+			to,
 			messageId,
-			{ to, messageId, isGroup }
-		);
+			isGroup
+		});
 
 		try {
 			process.log("Buscando mensagem original...");
@@ -418,6 +405,35 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			process.failed("Erro ao encaminhar mensagem.");
 			throw err;
 		}
+	}
+
+	/**
+	 * Retorna o texto com as menções inseridas e o array de mentions para WAWebJS.MessageSendOptions
+	 */
+	public async getTextWithMentions(text: string, mentions?: Mentions): Promise<{ text: string; mentions: string[] }> {
+		if (!mentions?.length) {
+			return { text, mentions: [] };
+		}
+		const mentionIds = mentions
+			.map((user) => {
+				const phone = user.phone?.replace(/\D/g, "");
+				if (!phone) {
+					return null;
+				}
+				return `${phone}@c.us`;
+			})
+			.filter((id): id is string => id !== null);
+
+		const mentionsText = mentions.map((user) => `@${user.name || user.phone}`).join(" ");
+
+		let newText: string;
+		if (/@\s*$/.test(text)) {
+			newText = text.replace(/@\s*$/, mentionsText);
+		} else {
+			newText = `${text} ${mentionsText}`;
+		}
+
+		return { text: newText, mentions: mentionIds };
 	}
 }
 
