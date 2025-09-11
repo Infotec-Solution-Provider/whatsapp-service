@@ -125,6 +125,7 @@ model InternalMessage {
   type        String
   quotedId    Int?    @map("quoted_id")
   isForwarded Boolean @map("is_forwarded")
+  isEdited    Boolean @map("is_edited")
 
   wwebjsId       String?           @unique @map("wwebjs_id")
   wwebjsIdStanza String?           @unique @map("wwebjs_id_stanza")

@@ -4,7 +4,7 @@ import { NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
 import CreateMessageDto from "../dtos/create-message.dto";
 import prismaService from "./prisma.service";
 import socketService from "./socket.service";
-import { EditMessageOptions } from "../types/whatsapp-instance.types";
+import { Mentions } from "../types/whatsapp-instance.types";
 import whatsappService from "./whatsapp.service";
 import ProcessingLogger from "../utils/processing-logger";
 
@@ -13,6 +13,13 @@ interface FetchMessagesFilter {
 	maxDate: string;
 	userId?: number | null;
 }
+
+interface EditMessageOptions {
+	messageId: number;
+	text: string;
+	mentions?: Mentions;
+}
+
 class MessagesService {
 	public async insertMessage(data: CreateMessageDto) {
 		return await prismaService.wppMessage.create({ data });
@@ -107,11 +114,27 @@ class MessagesService {
 		);
 
 		try {
-			const newMsg = await whatsappService.editMessage({ options, session, logger: process });
-			process.log("Mensagem editada com sucesso.", newMsg);
+			process.log("Procurando mensagem no banco de dados...");
+			const originalMessage = await prismaService.wppMessage.findUniqueOrThrow({
+				where: { id: options.messageId },
+				include: { WppChat: true }
+			});
+			process.log("Mensagem encontrada:", originalMessage);
+			if (!originalMessage.wwebjsId) {
+				throw new Error("Original message does not have a wwebjsId.");
+			}
+			await whatsappService.editMessage({
+				options: {
+					messageId: originalMessage.wwebjsId,
+					text: options.text,
+					mentions: options.mentions || null
+				}, session, logger: process
+			});
+			process.log("Mensagem editada com sucesso.");
 
-			const updatedMsg = await this.updateMessage(options.messageId, {
-				body: newMsg.body
+			const updatedMsg = await this.updateMessage(originalMessage.id, {
+				body: options.text,
+				isEdited: true
 			});
 			process.log("Mensagem atualizada no banco de dados.", updatedMsg);
 

@@ -87,9 +87,23 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		this.wwebjs.on("message_revoke_everyone", this.handleMessageRevoked.bind(this));
 	}
 
+	private log(type: "info" | "error" | "debug", message: string, err?: Error) {
+		switch (type) {
+			case "info":
+				Logger.info(`[${this.instance}:${this.id}] ${message}`);
+				break;
+			case "error":
+				Logger.error(`[${this.instance}:${this.id}] ${message} - ${sanitizeErrorMessage(err)}`);
+				break;
+			case "debug":
+				Logger.debug(`[${this.instance}:${this.id}] ${message}`);
+				break;
+		}
+	}
+
 	private async handleQr(qr: string) {
 		try {
-			Logger.info(`[${this.instance}:${this.id}] QR Generated!`);
+			this.log("info", "QR Generated!");
 			const client = await prismaService.wppClient.findUnique({
 				where: {
 					id: this.id
@@ -118,12 +132,12 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				});
 			}
 		} catch (err) {
-			Logger.error("Error handling QR code: " + sanitizeErrorMessage(err));
+			this.log("error", "Error handling QR code: " + sanitizeErrorMessage(err));
 		}
 	}
 
 	private async handleAuth() {
-		Logger.info(`[${this.instance}:${this.id}] Authenticated!`);
+		this.log("info", `[${this.instance}:${this.id}] Authenticated!`);
 
 		const client = await prismaService.wppClient.findUnique({
 			where: {
@@ -147,7 +161,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 	}
 
 	private async handleReady() {
-		Logger.info(`[${this.instance} - ${this.name}] Ready!`);
+		this.log("info", `[${this.instance} - ${this.name}] Ready!`);
 		this.isReady = true;
 
 		await prismaService.wppClient.update({
@@ -161,7 +175,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 	}
 
 	private async handleMessage(msg: WAWebJS.Message) {
-		Logger.debug("Message received: " + msg.id._serialized);
+		this.log("info", "Message received: " + msg.id._serialized);
 		const process = new ProcessingLogger(this.instance, "wwebjs-message-receive", msg.id._serialized, msg);
 
 		try {
@@ -201,15 +215,30 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		}
 	}
 
-	private handleMessageEdit(message: WAWebJS.Message) {
-		Logger.debug("Message edit: " + message.id._serialized);
+	private async handleMessageEdit(message: WAWebJS.Message) {
+		this.log("info", "Message edited! " + message.id._serialized);
+		const process = new ProcessingLogger(this.instance, "wwebjs-message-edit", message.id._serialized, message);
+		try {
+			const chat = await message.getChat();
 
-		// Processa a edição da mensagem usando o service de distribuição
-		messagesDistributionService.processMessageEdit("wwebjs", message.id._serialized, message.body);
+			process.log("Chat info:", { id: chat.id._serialized, isGroup: chat.isGroup });
+			if (message && chat) {
+				if (chat.isGroup) {
+					process.log("Message is in a group chat. Processing message edit...");
+					await internalChatsService.receiveMessageEdit(chat.id.user, message.id.id, message.body);
+					return;
+				} else {
+					process.log("Message is in a private chat. Processing message edit...");
+					await messagesDistributionService.processMessageEdit("wwebjs", message.id._serialized, message.body);
+				}
+			}
+		} catch (err: any) {
+			process.failed(err);
+		}
 	}
 
 	private handleMessageAck({ id }: WAWebJS.Message, ack: WAWebJS.MessageAck) {
-		Logger.info("Message ack: " + ack + " | " + id._serialized + "!");
+		this.log("info", "Message ack: " + ack + " | " + id._serialized + "!");
 		if (typeof ack === 'number') {
 			const status = MessageParser.getMessageStatus(ack);
 			messagesDistributionService.processMessageStatus("wwebjs", id._serialized, status);
@@ -219,7 +248,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 	private handleMessageReaction(_reaction: WAWebJS.Reaction) { }
 
 	private handleMessageRevoked({ id }: WAWebJS.Message) {
-		Logger.info("Message revoked! " + id._serialized);
+		this.log("info", "Message revoked! " + id._serialized);
 	}
 
 	public async getProfilePictureUrl(phone: string) {
@@ -332,32 +361,17 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 		try {
 			process.log("Buscando mensagem pelo ID...", options.messageId);
-			const originalMsg = await prismaService.wppMessage.findUniqueOrThrow({
-				where: {
-					id: options.messageId
-				}
-			});
-
-			if (!originalMsg.wwebjsId) {
-				process.log("Mensagem não pode ser editada: wwebjsId não está definido.");
-				throw new Error("Message cannot be edited: wwebjsId is not defined.");
-			}
-
-			process.log("Mensagem original encontrada:", originalMsg);
-			const wwebjsMsg = await this.wwebjs.getMessageById(originalMsg.wwebjsId);
+			const wwebjsMsg = await this.wwebjs.getMessageById(options.messageId);
 
 			if (!wwebjsMsg) {
 				process.log("Mensagem não encontrada.");
 				throw new Error("Message not found");
 			}
 
-			process.log("Mensagem encontrada:", wwebjsMsg);
-
 			process.log("Gerando texto e menções...");
 			const { text, mentions } = await this.getTextWithMentions(options.text, options.mentions || []);
 			process.log("Texto gerado:", text);
 			process.log("IDs das menções:", mentions);
-
 			process.log("Editando mensagem...");
 			const editedMsg = await wwebjsMsg.edit(text, { mentions });
 
@@ -367,10 +381,6 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			}
 
 			process.log("Mensagem editada com sucesso.");
-			const updatedMessage = await MessageParser.parse(process, this.instance, editedMsg, true, true);
-
-			process.success(updatedMessage);
-			return updatedMessage;
 		} catch (err) {
 			process.log("Erro ao editar mensagem: " + sanitizeErrorMessage(err));
 			process.failed(err);
