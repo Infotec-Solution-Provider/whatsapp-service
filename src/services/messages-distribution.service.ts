@@ -29,6 +29,7 @@ import messagesService from "./messages.service";
 import whatsappService from "./whatsapp.service";
 import chooseSectorBot from "../bots/choose-sector.bot";
 import chooseSellerBot from "../bots/seller-vollo.bot";
+import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
 
@@ -71,8 +72,8 @@ class MessagesDistributionService {
 
 			logger.log("Buscando chat para o contato.");
 			const currChat = await chatsService.getChatForContact(clientId, contact);
-			console.log("currChat", currChat);
 			await this.checkAndSendAutoResponseMessage(instance, contact, currChat, logger);
+
 			if (currChat) {
 				logger.log("Chat anterior encontrado para o contato.", currChat);
 				await this.insertAndNotify(logger, currChat, msg);
@@ -83,6 +84,10 @@ class MessagesDistributionService {
 					} else {
 						await chooseSectorBot.processMessage(currChat, contact, msg);
 					}
+				}
+
+				if (currChat.botId === 2) {
+					await exatronSatisfactionBot.processMessage(currChat, contact, msg);
 				}
 				return;
 			}
@@ -317,6 +322,73 @@ class MessagesDistributionService {
 			});
 		} catch (err) {
 			console.log("Não foi possível atualizar a mensagem de id: " + id);
+		}
+	}
+
+	/**
+	 * Processa eventos de edição de mensagem do WhatsApp
+	 * @param type - Tipo do cliente WhatsApp ('wwebjs' ou 'waba')
+	 * @param id - ID da mensagem no sistema correspondente
+	 * @param newBody - Novo conteúdo da mensagem editada
+	 * @returns A mensagem atualizada ou undefined se não encontrada
+	 */
+	public async processMessageEdit(type: "wwebjs" | "waba", id: string, newBody: string) {
+		const logger = new ProcessingLogger("", "message-edit", `${type}-${id}`, { id, newBody });
+
+		try {
+			logger.log("Processando edição de mensagem.");
+
+			// Busca a mensagem original
+			const originalMessage = await prismaService.wppMessage.findUnique({
+				where: {
+					[(type + "Id") as "wwebjsId"]: id
+				},
+				include: {
+					WppChat: true,
+					WppContact: true
+				}
+			});
+
+			if (!originalMessage) {
+				logger.log("Mensagem original não encontrada.");
+				return;
+			}
+
+			logger.log("Mensagem original encontrada.", originalMessage);
+
+			// Atualiza a mensagem com o novo conteúdo e marca como editada
+			const updatedMessage = await prismaService.wppMessage.update({
+				where: {
+					[(type + "Id") as "wwebjsId"]: id
+				},
+				data: {
+					body: newBody,
+					isEdited: true
+				}
+			});
+
+			logger.log("Mensagem atualizada com sucesso.", updatedMessage);
+
+			// Se a mensagem pertence a um chat, notifica via socket
+			if (updatedMessage.chatId) {
+				const chatRoom: SocketServerChatRoom = `${updatedMessage.instance}:chat:${updatedMessage.chatId}`;
+
+				await socketService.emit(SocketEventType.WppMessageEdit, chatRoom, {
+					messageId: updatedMessage.id,
+					contactId: updatedMessage.contactId || 0,
+					newText: updatedMessage.body
+				});
+
+				logger.log(`Edição da mensagem notificada para a sala: /${chatRoom}/`);
+			}
+
+			logger.success(updatedMessage);
+			return updatedMessage;
+		} catch (err) {
+			const msg = sanitizeErrorMessage(err);
+			logger.log(`Erro ao processar edição da mensagem: ${msg}`);
+			logger.failed(err);
+			throw err;
 		}
 	}
 
