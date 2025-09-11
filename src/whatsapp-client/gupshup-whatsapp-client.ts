@@ -187,7 +187,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 		return response.data.templates || [];
 	}
 
-	public async editMessage({ }: EditMessageOptions): Promise<CreateMessageDto> {
+	public async editMessage({ }: EditMessageOptions): Promise<void> {
 		throw new Error("Method not implemented.");
 	}
 }

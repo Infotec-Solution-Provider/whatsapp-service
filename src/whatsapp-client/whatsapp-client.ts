@@ -65,7 +65,7 @@ abstract class WhatsappClient {
 	 * @param props - An object containing edit message details.
 	 * @returns - A promise resolved when the message is edited.
 	 */
-	public abstract editMessage(props: EditMessageOptions): Promise<CreateMessageDto>;
+	public abstract editMessage(props: EditMessageOptions): Promise<void>;
 }
 
 export default WhatsappClient;

@@ -23,9 +23,9 @@ export interface SendTextOptions extends BaseSendMessageOptions {
 export type SendMessageOptions = SendTextOptions | SendFileOptions;
 
 export interface EditMessageOptions {
-	messageId: number;
+	messageId: string;
 	text: string;
-	mentions?: Mentions;
+	mentions?: Mentions | null;
 }
 
 export interface SendTemplateOptions extends BaseSendMessageOptions {

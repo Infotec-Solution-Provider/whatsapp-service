@@ -12,7 +12,7 @@ import {
 import socketService from "./socket.service";
 import ProcessingLogger from "../utils/processing-logger";
 import filesService from "./files.service";
-import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import prismaService from "./prisma.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
@@ -494,18 +494,21 @@ class InternalChatsService {
 				wppGroupId: groupId
 			}
 		});
+
 		if (chat) {
 			const message = await prismaService.internalMessage.findFirst({
 				where: {
 					internalChatId: chat.id,
-					wwebjsId: msgId
+					wwebjsIdStanza: msgId
 				}
 			});
+
 			if (message) {
 				const updatedMsg = await this.updateMessage(message.id, {
 					body: newText,
 					isEdited: true
 				});
+
 				const room = `${chat.instance}:internal-chat:${chat.id}` as SocketServerInternalChatRoom;
 				await socketService.emit(SocketEventType.InternalMessageEdit, room, {
 					chatId: chat.id,
@@ -637,16 +640,19 @@ class InternalChatsService {
 				throw new Error("You can only edit your own messages!");
 			}
 
+
 			// Se a mensagem pertence a um grupo do WhatsApp, edita lá também
-			if (originalMsg.chat && originalMsg.chat?.wppGroupId && originalMsg.chat.sectorId) {
-				const client = await whatsappService.getClientBySector(session.instance, originalMsg.chat.sectorId);
+			if (originalMsg.chat && originalMsg.chat?.wppGroupId && session.sectorId) {
+				process.log("Mensagem pertence a um grupo do WhatsApp, tentando editar lá também.");
+				const client = await whatsappService.getClientBySector(session.instance, session.sectorId);
 
 				if (client && originalMsg.wwebjsId) {
+					process.log("Editando mensagem no grupo do WhatsApp.");
 					await client.editMessage({
-						messageId: originalMsg.id,
+						messageId: originalMsg.wwebjsId,
 						text: options.text
 					});
-					process.log("Mensagem editada no grupo do WhatsApp.");
+					process.log("Mensagem editada com sucesso no WhatsApp.");
 				} else {
 					process.log("Cliente WhatsApp não disponível ou mensagem não possui wwebjsId, pulando edição no WhatsApp.");
 				}
@@ -658,8 +664,6 @@ class InternalChatsService {
 				isEdited: true
 			});
 			process.log("Mensagem atualizada no banco de dados.", updatedMsg);
-
-
 
 			// Emite evento via socket para notificar os participantes do chat
 			if (updatedMsg.internalChatId) {
