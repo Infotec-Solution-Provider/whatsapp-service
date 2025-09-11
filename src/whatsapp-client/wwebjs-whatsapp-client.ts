@@ -201,11 +201,31 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		}
 	}
 
-	private handleMessageEdit(message: WAWebJS.Message) {
-		Logger.debug("Message edit: " + message.id._serialized);
+	private async handleMessageEdit(message: WAWebJS.Message) {
+		const process = new ProcessingLogger(this.instance, "wwebjs-message-edit", message.id._serialized, message);
+		try {
+			process.log("Message edit event received.");
+			process.log("Fetching chat for the message...");
+			const chat = await message.getChat();
 
-		// Processa a edição da mensagem usando o service de distribuição
-		messagesDistributionService.processMessageEdit("wwebjs", message.id._serialized, message.body);
+			if (message && chat) {
+				process.log("Chat fetched:", chat.id._serialized);
+
+				if (chat.isGroup) {
+					process.log("Message is in a group chat. Calling internalChatsService...");
+					await internalChatsService.receiveMessageEdit(chat.id.user, message.id.id, message.body);
+					return;
+				} else {
+					process.log("Message is in a private chat. Processing message edit...");
+					await messagesDistributionService.processMessageEdit("wwebjs", message.id._serialized, message.body);
+				}
+			}
+
+			process.success("Message edit processed successfully.");
+		} catch (err: any) {
+			process.log("Error processing message edit: " + sanitizeErrorMessage(err));
+			process.failed(err);
+		}
 	}
 
 	private handleMessageAck({ id }: WAWebJS.Message, ack: WAWebJS.MessageAck) {

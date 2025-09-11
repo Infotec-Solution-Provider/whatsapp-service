@@ -43,6 +43,11 @@ interface UpdateInternalGroupData {
 	participants: number[];
 	wppGroupId: string | null;
 }
+
+interface EditInternalMessageOptions {
+	messageId: number;
+	text: string;
+}
 class InternalChatsService {
 	// Cria um grupo interno com um nome e participantes
 	public async createInternalChat(
@@ -471,6 +476,7 @@ class InternalChatsService {
 					from: `external:${msg.from}:${authorName}`,
 					internalChatId: chat.id,
 					isForwarded: !!msg.isForwarded,
+					isEdited: false
 				}
 			});
 
@@ -478,6 +484,34 @@ class InternalChatsService {
 			await socketService.emit(SocketEventType.InternalMessage, room, {
 				message: savedMsg
 			});
+		}
+	}
+
+	public async receiveMessageEdit(groupId: string, msgId: string, newText: string) {
+		const chat = await prismaService.internalChat.findUnique({
+			where: {
+				wppGroupId: groupId
+			}
+		});
+		if (chat) {
+			const message = await prismaService.internalMessage.findFirst({
+				where: {
+					internalChatId: chat.id,
+					wwebjsId: msgId
+				}
+			});
+			if (message) {
+				const updatedMsg = await this.updateMessage(message.id, {
+					body: newText,
+					isEdited: true
+				});
+				const room = `${chat.instance}:internal-chat:${chat.id}` as SocketServerInternalChatRoom;
+				await socketService.emit(SocketEventType.InternalMessageEdit, room, {
+					chatId: chat.id,
+					internalMessageId: updatedMsg.id,
+					newText: updatedMsg.body
+				});
+			}
 		}
 	}
 
@@ -560,6 +594,94 @@ class InternalChatsService {
 			where: { id },
 			data
 		});
+	}
+
+	public async getInternalMessageById(session: SessionData, id: number) {
+		const message = await prismaService.internalMessage.findUnique({
+			where: { id },
+			include: {
+				chat: true
+			}
+		});
+
+		if (!message) {
+			throw new Error("Internal message not found!");
+		}
+
+		if (message.instance !== session.instance) {
+			throw new Error("This message does not belong to your instance!");
+		}
+
+		return message;
+	}
+
+	public async editInternalMessage({ options, session }: { options: EditInternalMessageOptions; session: SessionData }) {
+		const process = new ProcessingLogger(
+			session.instance,
+			"internal-message-edit",
+			`${options.messageId}_${Date.now()}`,
+			options
+		);
+
+		try {
+			process.log("Iniciando edição de mensagem interna.");
+
+			// Verifica se a mensagem existe e pertence à instância do usuário
+			const originalMsg = await this.getInternalMessageById(session, options.messageId);
+			process.log("Mensagem original encontrada.", originalMsg);
+
+			// Verifica se o usuário que está tentando editar é o autor da mensagem
+			const authorId = originalMsg.from.startsWith("user:") ? originalMsg.from.replace("user:", "") : null;
+			if (authorId !== session.userId.toString()) {
+				throw new Error("You can only edit your own messages!");
+			}
+
+			// Se a mensagem pertence a um grupo do WhatsApp, edita lá também
+			if (originalMsg.chat && originalMsg.chat?.wppGroupId && originalMsg.chat.sectorId) {
+				const client = await whatsappService.getClientBySector(session.instance, originalMsg.chat.sectorId);
+
+				if (client && originalMsg.wwebjsId) {
+					await client.editMessage({
+						messageId: originalMsg.id,
+						text: options.text
+					});
+					process.log("Mensagem editada no grupo do WhatsApp.");
+				} else {
+					process.log("Cliente WhatsApp não disponível ou mensagem não possui wwebjsId, pulando edição no WhatsApp.");
+				}
+			}
+
+			// Atualiza a mensagem no banco
+			const updatedMsg = await this.updateMessage(options.messageId, {
+				body: options.text,
+				isEdited: true
+			});
+			process.log("Mensagem atualizada no banco de dados.", updatedMsg);
+
+
+
+			// Emite evento via socket para notificar os participantes do chat
+			if (updatedMsg.internalChatId) {
+				const room: SocketServerInternalChatRoom = `${session.instance}:internal-chat:${updatedMsg.internalChatId}`;
+
+				// Notifica sobre a edição da mensagem
+				socketService.emit(SocketEventType.InternalMessageEdit, room, {
+					chatId: updatedMsg.internalChatId,
+					internalMessageId: updatedMsg.id,
+					newText: updatedMsg.body
+				});
+				process.log("Notificação via socket enviada.", room);
+			} else {
+				process.log("A mensagem não pertence a um chat interno, pulando notificação via socket.");
+			}
+
+			process.success("Mensagem interna editada com sucesso.");
+			return updatedMsg;
+		} catch (err) {
+			process.log("Erro ao editar a mensagem interna.", (err as Error).message);
+			process.failed(err);
+			throw new Error("Failed to edit internal message: " + (err as Error).message);
+		}
 	}
 
 	public async markChatMessagesAsRead(chatId: number, userId: number) {
@@ -657,6 +779,7 @@ class InternalChatsService {
 						timestamp: Date.now().toString(),
 						status: "RECEIVED",
 						isForwarded: true,
+						isEdited: false,
 						chat: {
 							connect: { id: chatId }
 						},

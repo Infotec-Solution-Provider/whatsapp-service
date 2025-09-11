@@ -45,6 +45,13 @@ class InternalChatsController {
 			this.sendMessageToChat
 		);
 
+		// Edita uma mensagem de chat interno
+		this.router.put(
+			"/api/internal/messages/:id",
+			isAuthenticated,
+			this.editInternalMessage
+		);
+
 		// Atualiza grupo interno
 		this.router.put(
 			"/api/internal/groups/:id",
@@ -154,6 +161,31 @@ class InternalChatsController {
 		await internalChatsService.sendMessage(req.session, data);
 
 		res.status(201).send({ message: "Message sent successfully!" });
+	}
+
+	private async editInternalMessage(req: Request, res: Response) {
+		const { id } = req.params;
+		const { newText } = req.body;
+
+		if (!id) {
+			throw new BadRequestError("Message ID is required!");
+		}
+		if (!newText || typeof newText !== "string" || newText.trim() === "") {
+			throw new BadRequestError("New message body is required!");
+		}
+
+		const updatedMessage = await internalChatsService.editInternalMessage({
+			options: {
+				messageId: Number(id),
+				text: newText
+			},
+			session: req.session
+		});
+
+		res.status(200).send({
+			message: "Internal message edited successfully!",
+			data: updatedMessage
+		});
 	}
 
 	private async updateInternalGroup(req: Request, res: Response) {
