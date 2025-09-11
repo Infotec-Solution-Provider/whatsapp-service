@@ -12,7 +12,7 @@ import {
 import socketService from "./socket.service";
 import ProcessingLogger from "../utils/processing-logger";
 import filesService from "./files.service";
-import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import prismaService from "./prisma.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";

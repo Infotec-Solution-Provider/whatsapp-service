@@ -14,7 +14,6 @@ import messagesDistributionService from "./messages-distribution.service";
 import usersService from "./users.service";
 import whatsappService, { SendTemplateData } from "./whatsapp.service";
 import ProcessingLogger from "../utils/processing-logger";
-import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
 
 interface InpulseResult {
 	NOME: string;

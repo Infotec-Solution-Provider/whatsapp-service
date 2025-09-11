@@ -7,7 +7,7 @@ class WABAWhatsappClient implements WhatsappClient {
 		public readonly instance: string,
 		public readonly name: string,
 		public readonly phone: string
-	) {}
+	) { }
 
 	public async getProfilePictureUrl(_: string): Promise<string | null> {
 		throw new Error("Method not implemented.");
@@ -17,11 +17,11 @@ class WABAWhatsappClient implements WhatsappClient {
 		throw new Error("Method not implemented.");
 	}
 
-	public async sendMessage({}: SendMessageOptions): Promise<CreateMessageDto> {
+	public async sendMessage({ }: SendMessageOptions): Promise<CreateMessageDto> {
 		throw new Error("Method not implemented.");
 	}
 
-	public async editMessage({}: EditMessageOptions): Promise<CreateMessageDto> {
+	public async editMessage({ }: EditMessageOptions): Promise<void> {
 		throw new Error("Method not implemented.");
 	}
 }
