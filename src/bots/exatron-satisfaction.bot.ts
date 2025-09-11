@@ -7,6 +7,7 @@ import instancesService from "../services/instances.service";
 import messagesDistributionService from "../services/messages-distribution.service";
 import { SocketEventType } from "@in.pulse-crm/sdk";
 import ProcessingLogger from "../utils/processing-logger";
+import "dotenv/config";
 
 /**
  * ExatronSatisfactionBot
@@ -44,7 +45,8 @@ const INVALID_RATING_MSG = "Resposta inválida, por favor digite uma opção vá
 const THANKS_MSG = "Obrigado pela sua avaliação! Se precisar de algo mais, estou à disposição.";
 const FINISH_MSG = "Atendimento finalizado, pesquisa respondida.";
 const TIMEOUT_MSG = "Atendimento finalizado por inatividade na pesquisa.";
-const INACTIVITY_TIMEOUT_MS = 1 * 60 * 1000; // 30 minutos
+
+const INACTIVITY_TIMEOUT_MS = process.env["EXATRON_PESQUISA_TIMEOUT_MS"] ? parseInt(process.env["EXATRON_PESQUISA_TIMEOUT_MS"]) : 30 * 60 * 1000;
 
 // Persistência local dos estados do bot
 const store = new JsonSessionStore<RunningSession>({ filename: "exatron-satisfaction.sessions.json" });
