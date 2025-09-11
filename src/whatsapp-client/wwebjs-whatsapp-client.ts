@@ -203,16 +203,20 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 	private handleMessageEdit(message: WAWebJS.Message) {
 		Logger.debug("Message edit: " + message.id._serialized);
+
+		// Processa a edição da mensagem usando o service de distribuição
+		messagesDistributionService.processMessageEdit("wwebjs", message.id._serialized, message.body);
 	}
 
 	private handleMessageAck({ id }: WAWebJS.Message, ack: WAWebJS.MessageAck) {
 		Logger.info("Message ack: " + ack + " | " + id._serialized + "!");
-		const status = MessageParser.getMessageStatus(ack);
-
-		messagesDistributionService.processMessageStatus("wwebjs", id._serialized, status);
+		if (typeof ack === 'number') {
+			const status = MessageParser.getMessageStatus(ack);
+			messagesDistributionService.processMessageStatus("wwebjs", id._serialized, status);
+		}
 	}
 
-	private handleMessageReaction(_reaction: WAWebJS.Reaction) {}
+	private handleMessageReaction(_reaction: WAWebJS.Reaction) { }
 
 	private handleMessageRevoked({ id }: WAWebJS.Message) {
 		Logger.info("Message revoked! " + id._serialized);

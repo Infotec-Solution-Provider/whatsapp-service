@@ -325,6 +325,73 @@ class MessagesDistributionService {
 		}
 	}
 
+	/**
+	 * Processa eventos de edição de mensagem do WhatsApp
+	 * @param type - Tipo do cliente WhatsApp ('wwebjs' ou 'waba')
+	 * @param id - ID da mensagem no sistema correspondente
+	 * @param newBody - Novo conteúdo da mensagem editada
+	 * @returns A mensagem atualizada ou undefined se não encontrada
+	 */
+	public async processMessageEdit(type: "wwebjs" | "waba", id: string, newBody: string) {
+		const logger = new ProcessingLogger("", "message-edit", `${type}-${id}`, { id, newBody });
+
+		try {
+			logger.log("Processando edição de mensagem.");
+
+			// Busca a mensagem original
+			const originalMessage = await prismaService.wppMessage.findUnique({
+				where: {
+					[(type + "Id") as "wwebjsId"]: id
+				},
+				include: {
+					WppChat: true,
+					WppContact: true
+				}
+			});
+
+			if (!originalMessage) {
+				logger.log("Mensagem original não encontrada.");
+				return;
+			}
+
+			logger.log("Mensagem original encontrada.", originalMessage);
+
+			// Atualiza a mensagem com o novo conteúdo e marca como editada
+			const updatedMessage = await prismaService.wppMessage.update({
+				where: {
+					[(type + "Id") as "wwebjsId"]: id
+				},
+				data: {
+					body: newBody,
+					isEdited: true
+				}
+			});
+
+			logger.log("Mensagem atualizada com sucesso.", updatedMessage);
+
+			// Se a mensagem pertence a um chat, notifica via socket
+			if (updatedMessage.chatId) {
+				const chatRoom: SocketServerChatRoom = `${updatedMessage.instance}:chat:${updatedMessage.chatId}`;
+
+				await socketService.emit(SocketEventType.WppMessageEdit, chatRoom, {
+					messageId: updatedMessage.id,
+					contactId: updatedMessage.contactId || 0,
+					newText: updatedMessage.body
+				});
+
+				logger.log(`Edição da mensagem notificada para a sala: /${chatRoom}/`);
+			}
+
+			logger.success(updatedMessage);
+			return updatedMessage;
+		} catch (err) {
+			const msg = sanitizeErrorMessage(err);
+			logger.log(`Erro ao processar edição da mensagem: ${msg}`);
+			logger.failed(err);
+			throw err;
+		}
+	}
+
 	public async addSystemMessage(chat: WppChat, text: string, notify: boolean = true) {
 		const now = new Date();
 		const message = await messagesService.insertMessage({
