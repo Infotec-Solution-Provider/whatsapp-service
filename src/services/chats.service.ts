@@ -14,6 +14,7 @@ import messagesDistributionService from "./messages-distribution.service";
 import usersService from "./users.service";
 import whatsappService, { SendTemplateData } from "./whatsapp.service";
 import ProcessingLogger from "../utils/processing-logger";
+import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
 
 interface InpulseResult {
 	NOME: string;
@@ -106,25 +107,25 @@ class ChatsService {
 		const messages: Array<WppMessage> = [];
 		const customerIds = includeContact
 			? foundChats
-					.filter(
-						(chat) => typeof chat.contact?.customerId === "number"
-					)
-					.map((c) => c.contact!.customerId!)
+				.filter(
+					(chat) => typeof chat.contact?.customerId === "number"
+				)
+				.map((c) => c.contact!.customerId!)
 			: [];
 
 		const customers = customerIds.length
 			? await instancesService.executeQuery<Array<Customer>>(
-					session.instance,
-					FETCH_CUSTOMERS_QUERY,
-					[
-						foundChats
-							.filter(
-								(chat) =>
-									typeof chat.contact?.customerId === "number"
-							)
-							.map((c) => c.contact!.customerId!)
-					]
-				)
+				session.instance,
+				FETCH_CUSTOMERS_QUERY,
+				[
+					foundChats
+						.filter(
+							(chat) =>
+								typeof chat.contact?.customerId === "number"
+						)
+						.map((c) => c.contact!.customerId!)
+				]
+			)
 			: [];
 
 		for (const foundChat of foundChats) {
@@ -205,25 +206,25 @@ class ChatsService {
 		const messages: Array<WppMessage> = [];
 		const customerIds = includeCustomer
 			? ongoingChats
-					.filter(
-						(chat) => typeof chat.contact?.customerId === "number"
-					)
-					.map((c) => c.contact!.customerId!)
+				.filter(
+					(chat) => typeof chat.contact?.customerId === "number"
+				)
+				.map((c) => c.contact!.customerId!)
 			: [];
 
 		const customers = customerIds.length
 			? await instancesService.executeQuery<Array<Customer>>(
-					session.instance,
-					FETCH_CUSTOMERS_QUERY,
-					[
-						ongoingChats
-							.filter(
-								(chat) =>
-									typeof chat.contact?.customerId === "number"
-							)
-							.map((c) => c.contact!.customerId!)
-					]
-				)
+				session.instance,
+				FETCH_CUSTOMERS_QUERY,
+				[
+					ongoingChats
+						.filter(
+							(chat) =>
+								typeof chat.contact?.customerId === "number"
+						)
+						.map((c) => c.contact!.customerId!)
+				]
+			)
 			: [];
 
 		for (const foundChat of ongoingChats) {
@@ -312,9 +313,9 @@ class ChatsService {
 
 		const messages = chat?.contactId
 			? await prismaService.wppMessage.findMany({
-					where: { contactId: chat?.contactId },
-					orderBy: { timestamp: "asc" }
-				})
+				where: { contactId: chat?.contactId },
+				orderBy: { timestamp: "asc" }
+			})
 			: [];
 
 		if (chat?.contact?.customerId) {
@@ -405,6 +406,9 @@ class ChatsService {
 				finishedAt: new Date(),
 				finishedBy: userId,
 				resultId
+			},
+			include: {
+				contact: true
 			}
 		});
 		const event = SocketEventType.WppChatFinished;
@@ -422,6 +426,10 @@ class ChatsService {
 		await socketService.emit(event, `${instance}:chat:${chat.id}`, {
 			chatId: chat.id
 		});
+
+		if (session.sectorId === 16 || session.instance === 'develop') {
+			await exatronSatisfactionBot.startBot(chat, chat.contact!, chat.contact!.phone,)
+		}
 	}
 
 	public async startChatByContactId(

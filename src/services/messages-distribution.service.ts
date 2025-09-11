@@ -29,6 +29,7 @@ import messagesService from "./messages.service";
 import whatsappService from "./whatsapp.service";
 import chooseSectorBot from "../bots/choose-sector.bot";
 import chooseSellerBot from "../bots/seller-vollo.bot";
+import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
 
@@ -71,8 +72,8 @@ class MessagesDistributionService {
 
 			logger.log("Buscando chat para o contato.");
 			const currChat = await chatsService.getChatForContact(clientId, contact);
-			console.log("currChat", currChat);
 			await this.checkAndSendAutoResponseMessage(instance, contact, currChat, logger);
+
 			if (currChat) {
 				logger.log("Chat anterior encontrado para o contato.", currChat);
 				await this.insertAndNotify(logger, currChat, msg);
@@ -83,6 +84,10 @@ class MessagesDistributionService {
 					} else {
 						await chooseSectorBot.processMessage(currChat, contact, msg);
 					}
+				}
+
+				if (currChat.botId === 2) {
+					await exatronSatisfactionBot.processMessage(currChat, contact, msg);
 				}
 				return;
 			}
