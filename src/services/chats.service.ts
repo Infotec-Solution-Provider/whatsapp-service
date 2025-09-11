@@ -427,9 +427,9 @@ class ChatsService {
 			chatId: chat.id
 		});
 
-		if (session.sectorId === 16 || session.instance === 'develop') {
+		/* if (session.sectorId === 16 || session.instance === 'develop') {
 			await exatronSatisfactionBot.startBot(chat, chat.contact!, chat.contact!.phone,)
-		}
+		} */
 	}
 
 	public async startChatByContactId(
