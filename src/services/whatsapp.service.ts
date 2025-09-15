@@ -332,6 +332,7 @@ class WhatsappService {
 			process.log(`Client obtido para o setor: ${data.chat.sectorId || 1}`);
 			const now = new Date();
 
+
 			let message = {
 				instance: data.chat.instance,
 				status: "PENDING",
@@ -362,6 +363,9 @@ class WhatsappService {
 			const pendingMsg = await messagesService.insertMessage(message);
 			process.log("Enviando mensagem para o cliente.", options);
 
+			const delay = Math.floor(Math.random() * (5000 - 500 + 1)) + 500;
+			process.log(`Aguardando ${delay}ms antes de enviar a mensagem...`);
+			await new Promise((resolve) => setTimeout(resolve, delay));
 			const sentMsg = await client.sendMessage(options);
 			process.log("Atualizando mensagem no banco de dados.", sentMsg);
 
