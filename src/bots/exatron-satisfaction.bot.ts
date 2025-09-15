@@ -34,13 +34,16 @@ type RunningSession = {
     step: number; // 0 -> espera nota inicial; 1 -> respondendo perguntas; 2 -> finalização
     questionIndex: number;
     lastActivity: number; // timestamp (ms) da última interação
-}; const QUESTIONS: readonly string[] = [
+};
+
+const QUESTIONS: readonly string[] = [
     "Os produtos da Exatron atendem às suas expectativas em termos de qualidade, inovação e clareza nas informações de instalação e uso?\n- Avalie com um número de 1 a 10.",
     "Caso tenha utilizado nossa Assistência Técnica, como avalia a experiência em relação ao atendimento, esclarecimento de dúvidas e tempo de resposta?\n- Avalie com um número de 1 a 10.",
     "O atendimento da nossa equipe (funcionários e representantes) atendeu suas necessidades de forma satisfatória?\n- Avalie com um número de 1 a 10.",
     "De forma geral, quão satisfeito está com a Exatron?\n- Avalie com um número de 1 a 10."
 ];
 
+const INITIAL_QUESTION = "Como foi sua experiência? Por favor, avalie nosso atendimento de 1 a 10.\n\nPara avaliar, basta responder com a sua nota.";
 const INVALID_RATING_MSG = "Resposta inválida, por favor digite uma opção válida (um número de 1 a 10).";
 const THANKS_MSG = "Obrigado pela sua avaliação! Se precisar de algo mais, estou à disposição.";
 const FINISH_MSG = "Atendimento finalizado, pesquisa respondida.";
@@ -256,8 +259,7 @@ class ExatronSatisfactionBot {
             store.scheduleSave(() => this.sessions.values());
 
             logger.log("Disparando mensagem para coleta de nota inicial (Step 0)");
-            const intro = "Para iniciarmos, por favor, avalie nosso atendimento de 1 a 10.";
-            await this.sendBotText(to, chat, intro, quotedId);
+            await this.sendBotText(to, chat, INITIAL_QUESTION, quotedId);
             logger.success({ step: session.step });
         } catch (err) {
             logger.failed(err);
