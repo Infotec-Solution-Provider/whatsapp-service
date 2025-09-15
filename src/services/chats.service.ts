@@ -14,6 +14,7 @@ import messagesDistributionService from "./messages-distribution.service";
 import usersService from "./users.service";
 import whatsappService, { SendTemplateData } from "./whatsapp.service";
 import ProcessingLogger from "../utils/processing-logger";
+import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
 
 interface InpulseResult {
 	NOME: string;
@@ -386,7 +387,8 @@ class ChatsService {
 		token: string | null,
 		session: SessionData,
 		id: number,
-		resultId: number
+		resultId: number,
+		triggerSatisfactionBot = false
 	) {
 		const results = await instancesService.executeQuery<InpulseResult[]>(
 			session.instance,
@@ -426,9 +428,9 @@ class ChatsService {
 			chatId: chat.id
 		});
 
-		/* if (session.sectorId === 16 || session.instance === 'develop') {
-			await exatronSatisfactionBot.startBot(chat, chat.contact!, chat.contact!.phone,)
-		} */
+		if (triggerSatisfactionBot && (session.sectorId === 16 || session.instance === 'develop')) {
+			await exatronSatisfactionBot.startBot(chat, chat.contact!, chat.contact!.phone);
+		}
 	}
 
 	public async startChatByContactId(

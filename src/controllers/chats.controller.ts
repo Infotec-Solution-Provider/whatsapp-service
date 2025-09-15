@@ -108,6 +108,7 @@ class ChatsController {
 	private async finishChatById(req: Request, res: Response) {
 		const { id } = req.params;
 		const resultId = req.body.resultId;
+		const triggerSatisfactionBot = req.body.triggerSatisfactionBot === true;
 
 		if (!id || isNaN(Number(id))) {
 			throw new BadRequestError("Chat ID is required!");
@@ -123,7 +124,8 @@ class ChatsController {
 			req.headers["authorization"] as string,
 			session,
 			Number(id),
-			+resultId
+			+resultId,
+			triggerSatisfactionBot
 		);
 
 		res.status(200).send({
