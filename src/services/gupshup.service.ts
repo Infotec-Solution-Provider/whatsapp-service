@@ -75,7 +75,7 @@ class GupshupService {
 			const recipient = change.value.metadata.display_phone_number;
 
 			logger.log("Mensagem recebida");
-			const parsedMsg = await GUPSHUPMessageParser.parse(recipient, instance, message);
+			const parsedMsg = await GUPSHUPMessageParser.parse(recipient, instance, message, logger);
 			logger.log("Mensagem parseada com sucesso");
 
 			return {
