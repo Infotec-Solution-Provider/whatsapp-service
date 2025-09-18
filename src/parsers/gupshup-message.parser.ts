@@ -8,9 +8,10 @@ import { WppMessageStatus } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import parseGSVcard from "../utils/parse-gupshup-vcard";
 import prismaService from "../services/prisma.service";
+import ProcessingLogger from "../utils/processing-logger";
 
 class GUPSHUPMessageParser {
-	public static async parse(recipient: string, instance: string, data: GSMessageData) {
+	public static async parse(recipient: string, instance: string, data: GSMessageData, process?: ProcessingLogger) {
 		const parsedMessage: CreateMessageDto = {
 			instance,
 			wabaId: data.id,
@@ -27,7 +28,9 @@ class GUPSHUPMessageParser {
 		let fileName: string | null = null;
 
 		if (data.context && data.context.id) {
+			process?.log("Mensagem é resposta a outra mensagem, buscando mensagem original", { contextId: data.context.id });
 			const quotedMsg = await prismaService.wppMessage.findFirst({ where: { OR: [{ wabaId: data.context.id }, { gupshupId: data.context.id }] } });
+			process?.log("Mensagem original buscada", quotedMsg);
 
 			quotedMsg && (parsedMessage.quotedId = quotedMsg.id);
 		}
