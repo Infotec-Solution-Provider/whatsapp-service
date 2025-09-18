@@ -109,7 +109,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 				timestamp: now.getTime().toString(),
 				sentAt: now,
 				type: msgType,
-				wabaId: (response as any).data["messageId"] || null
+				gupshupId: (response as any).data["messageId"] || null
 			};
 
 			if ("file" in options) {

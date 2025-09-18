@@ -327,24 +327,39 @@ class MessagesDistributionService {
 
 	public async processMessageStatusGS(gs_id: string, id: string, status: WppMessageStatus) {
 		try {
-			const message = await prismaService.wppMessage.update({
+			const findMsg = await prismaService.wppMessage.findFirst({
 				where: {
-					gupshupId: gs_id
-				},
-				data: {
-					status,
-					wabaId: id
+					OR: [
+						{ gupshupId: gs_id },
+						{ wabaId: gs_id }
+					]
 				}
 			});
 
-			if (message.chatId === null) {
+			if (!findMsg) {
+				console.log("Mensagem não encontrada para atualizar o status, gs_id: " + gs_id);
 				return;
 			}
 
-			const chatRoom: SocketServerChatRoom = `${message.instance}:chat:${message.chatId}`;
+			const updatedMsg = await prismaService.wppMessage.update({
+				where: {
+					id: findMsg.id
+				},
+				data: {
+					status,
+					wabaId: id,
+					gupshupId: gs_id
+				}
+			});
+
+			if (updatedMsg.chatId === null) {
+				return;
+			}
+
+			const chatRoom: SocketServerChatRoom = `${updatedMsg.instance}:chat:${updatedMsg.chatId}`;
 			socketService.emit(SocketEventType.WppMessageStatus, chatRoom, {
-				messageId: message.id,
-				contactId: message.contactId!,
+				messageId: updatedMsg.id,
+				contactId: updatedMsg.contactId!,
 				status
 			});
 		} catch (err) {
