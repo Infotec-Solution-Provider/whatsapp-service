@@ -126,7 +126,7 @@ class GupshupService {
 				case "status":
 					logger.log("processando status de mensagem recebida");
 					const status = GUPSHUPMessageParser.parseStatus(entry.data);
-					await mdservice.processMessageStatus("waba", entry.data.gs_id, status);
+					await mdservice.processMessageStatusGS(entry.data.gs_id, entry.data.meta_msg_id, status);
 
 					if ("errors" in entry.data && entry.data.errors[0]) {
 						const error = entry.data.errors[0];

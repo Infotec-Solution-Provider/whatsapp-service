@@ -325,6 +325,33 @@ class MessagesDistributionService {
 		}
 	}
 
+	public async processMessageStatusGS(gs_id: string, id: string, status: WppMessageStatus) {
+		try {
+			const message = await prismaService.wppMessage.update({
+				where: {
+					gupshupId: gs_id
+				},
+				data: {
+					status,
+					wabaId: id
+				}
+			});
+
+			if (message.chatId === null) {
+				return;
+			}
+
+			const chatRoom: SocketServerChatRoom = `${message.instance}:chat:${message.chatId}`;
+			socketService.emit(SocketEventType.WppMessageStatus, chatRoom, {
+				messageId: message.id,
+				contactId: message.contactId!,
+				status
+			});
+		} catch (err) {
+			console.log("Não foi possível atualizar a mensagem de id: " + id);
+		}
+	}
+
 	/**
 	 * Processa eventos de edição de mensagem do WhatsApp
 	 * @param type - Tipo do cliente WhatsApp ('wwebjs' ou 'waba')

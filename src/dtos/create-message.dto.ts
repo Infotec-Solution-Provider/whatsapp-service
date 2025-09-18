@@ -15,6 +15,7 @@ export default interface CreateMessageDto {
 	userId?: number;
 	wwebjsId?: null | string;
 	wwebjsIdStanza?: null | string;
+	gupshupId?: null | string;
 	wabaId?: null | string;
 	fileId?: null | number;
 	fileName?: null | string;

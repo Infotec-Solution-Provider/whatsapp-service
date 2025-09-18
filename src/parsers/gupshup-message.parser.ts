@@ -27,7 +27,7 @@ class GUPSHUPMessageParser {
 		let fileName: string | null = null;
 
 		if (data.context && data.context.id) {
-			const quotedMsg = await prismaService.wppMessage.findUnique({ where: { wabaId: data.context.id } });
+			const quotedMsg = await prismaService.wppMessage.findFirst({ where: { OR: [{ wabaId: data.context.id }, { gupshupId: data.context.id }] } });
 
 			quotedMsg && (parsedMessage.quotedId = quotedMsg.id);
 		}
