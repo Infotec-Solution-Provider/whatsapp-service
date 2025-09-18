@@ -58,6 +58,7 @@ export interface GSBaseMessageData {
 	type: MessageType;
 	context?: {
 		id?: string;
+		meta_msg_id?: string;
 		from?: string;
 		forwarded?: boolean;
 		frequently_forwarded?: boolean;

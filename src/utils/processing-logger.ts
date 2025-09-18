@@ -21,7 +21,7 @@ export default class ProcessingLogger {
 
 	public log(entry: string, output?: unknown): void {
 		this.logEntries.push(`${new Date().toISOString()}: ${entry}`);
-		if (output) {
+		if (output !== undefined) {
 			this.output.push(output);
 		}
 	}

@@ -27,9 +27,13 @@ class GUPSHUPMessageParser {
 		let fileType: string | null = null;
 		let fileName: string | null = null;
 
-		if (data.context && data.context.id) {
-			process?.log("Mensagem é resposta a outra mensagem, buscando mensagem original", { contextId: data.context.id });
-			const quotedMsg = await prismaService.wppMessage.findFirst({ where: { OR: [{ wabaId: data.context.id }, { gupshupId: data.context.id }] } });
+		if (data.context && data.context.meta_msg_id) {
+			process?.log("Mensagem é resposta a outra mensagem, buscando mensagem original", { contextId: data.context.meta_msg_id });
+			const quotedMsg = await prismaService.wppMessage.findFirst({
+				where: {
+					wabaId: data.context.meta_msg_id
+				}
+			});
 			process?.log("Mensagem original buscada", quotedMsg);
 
 			quotedMsg && (parsedMessage.quotedId = quotedMsg.id);
