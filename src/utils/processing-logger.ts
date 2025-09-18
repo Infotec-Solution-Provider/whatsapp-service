@@ -8,10 +8,10 @@ const LOGS_PATH = process.env["LOGS_PATH"] || "./logs";
 export default class ProcessingLogger {
 	constructor(
 		private readonly instance: string,
-		private readonly processName: string,
+		public processName: string,
 		private readonly processId: string,
 		private readonly input: unknown
-	) {}
+	) { }
 
 	private readonly logEntries: Array<string> = new Array<string>();
 	private readonly startTime: Date = new Date();
