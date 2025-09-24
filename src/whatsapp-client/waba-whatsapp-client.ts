@@ -5,6 +5,7 @@ import { EditMessageOptions, SendFileOptions, SendMessageOptions } from "../type
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
 import FormData from 'form-data';
+import { Logger } from "@in.pulse-crm/utils";
 
 const GRAPH_API_URL = "https://graph.facebook.com/v16.0/";
 
@@ -17,7 +18,9 @@ class WABAWhatsappClient implements WhatsappClient {
 		private readonly wabaPhoneId: string,
 		private readonly wabaAccountId: string,
 		private readonly wabaToken: string
-	) { }
+	) {
+		Logger.info(`WABA Client initialized for instance ${instance}, phone ${phone}, WABA Account ID ${this.wabaAccountId}, WABA Phone ID ${this.wabaPhoneId}`);
+	}
 
 	public async getProfilePictureUrl(_: string): Promise<string | null> {
 		throw new Error("Method not implemented.");

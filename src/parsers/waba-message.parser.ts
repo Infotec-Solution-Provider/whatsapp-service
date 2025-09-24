@@ -101,7 +101,7 @@ export default class WABAMessageParser {
     }
 
     if (mediaId) {
-      await this.downloadAndStoreMedia(instance, mediaId, recipient, logger);
+      await this.downloadAndStoreMedia();
     }
 
     return parsed;
@@ -130,7 +130,7 @@ export default class WABAMessageParser {
     return isNaN(asDate) ? Date.now() : asDate;
   }
 
-  private static async downloadAndStoreMedia(instance: string, mediaId: string, phoneId: string, logger?: ProcessingLogger) {
+  private static async downloadAndStoreMedia() {
     throw new Error("Método downloadAndStoreMedia não implementado");
   }
 
