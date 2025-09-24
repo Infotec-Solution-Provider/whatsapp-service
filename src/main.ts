@@ -1,25 +1,27 @@
-import "dotenv/config";
-import "express-async-errors";
-import express, { NextFunction, Request, Response } from "express";
-import cors from "cors";
-import { handleRequestError } from "@rgranatodutra/http-errors";
 import { Logger, logRoutes } from "@in.pulse-crm/utils";
-import whatsappService from "./services/whatsapp.service";
-import chatsController from "./controllers/chats.controller";
-import messagesController from "./controllers/messages.controller";
-import walletsController from "./controllers/wallets.controller";
-import resultsController from "./controllers/results.controller";
-import contactsController from "./controllers/contacts.controller";
-import sectorsController from "./controllers/sectors.controller";
-import schedulesController from "./controllers/schedules.controller";
-import internalchatsController from "./controllers/internal-chats.controller";
-import whatsappController from "./controllers/whatsapp.controller";
-import readyMessagesController from "./controllers/ready-messages.controller";
-import notificationsController from "./controllers/notifications.controller";
-import monitorController from "./controllers/monitor.controller";
-import parametersController from "./controllers/parameters.controller";
-import gupshupController from "./controllers/gupshup.controller";
+import * as ngrok from "@ngrok/ngrok";
+import { handleRequestError } from "@rgranatodutra/http-errors";
+import cors from "cors";
+import "dotenv/config";
+import express, { NextFunction, Request, Response } from "express";
+import "express-async-errors";
 import autoResponseController from "./controllers/auto-response.controller";
+import chatsController from "./controllers/chats.controller";
+import contactsController from "./controllers/contacts.controller";
+import gupshupController from "./controllers/gupshup.controller";
+import internalchatsController from "./controllers/internal-chats.controller";
+import messagesController from "./controllers/messages.controller";
+import monitorController from "./controllers/monitor.controller";
+import notificationsController from "./controllers/notifications.controller";
+import parametersController from "./controllers/parameters.controller";
+import readyMessagesController from "./controllers/ready-messages.controller";
+import resultsController from "./controllers/results.controller";
+import schedulesController from "./controllers/schedules.controller";
+import sectorsController from "./controllers/sectors.controller";
+import wabaController from "./controllers/waba.controller";
+import walletsController from "./controllers/wallets.controller";
+import whatsappController from "./controllers/whatsapp.controller";
+import whatsappService from "./services/whatsapp.service";
 
 whatsappService.buildClients();
 const app = express();
@@ -50,6 +52,7 @@ app.use(logRoute(monitorController.router));
 app.use(logRoute(parametersController.router));
 app.use(logRoute(gupshupController.router));
 app.use(logRoute(autoResponseController.router));
+app.use(logRoute(wabaController.router));
 
 logRoutes("", routesToLog);
 
@@ -62,7 +65,18 @@ app.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
 app.use(handleRequestError);
 
 const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;
+const ngrokToken = process.env["NGROK_TOKEN"] || "";
+const enableNgrok = (process.env["ENABLE_NGROK"] || "false").toLowerCase() === "true";
 
 app.listen(serverPort, () => {
 	Logger.info("Server listening on port " + serverPort);
 });
+
+
+if (enableNgrok) {
+	ngrok.consoleLog();
+
+	ngrok.connect({ addr: 8080, authtoken: ngrokToken, subdomain: "inpulse-whatsapp" })
+		.then(listener => console.log(`Ingress established at: ${listener.url()}`));
+
+}

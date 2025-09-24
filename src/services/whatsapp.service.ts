@@ -15,6 +15,7 @@ import internalChatsService from "./internal-chats.service";
 import messagesDistributionService from "./messages-distribution.service";
 import messagesService from "./messages.service";
 import prismaService from "./prisma.service";
+import WABAWhatsappClient from "../whatsapp-client/waba-whatsapp-client";
 
 export interface SendTemplateData {
 	templateId: string;
@@ -86,7 +87,16 @@ class WhatsappService {
 					this.clients.set(client.id, WWEBJSClient);
 					break;
 				case WppClientType.WABA:
-					throw new Error("WABA client not supported yet!");
+					const WABAClient = new WABAWhatsappClient(
+						client.id,
+						client.instance,
+						client.name,
+						client.phone || "",
+						client.WABAPhoneId || "",
+						client.WABAAccountId || "",
+						client.WABAToken || ""
+					);
+					this.clients.set(client.id, WABAClient);
 					break;
 				case WppClientType.GUPSHUP:
 					const GUPSHUPClient = new GupshupWhatsappClient(
@@ -426,6 +436,27 @@ class WhatsappService {
 			) as WWEBJSWhatsappClient) || null;
 
 		return wwebjsClient;
+	}
+
+	public async getWabaClientByRecipient(phoneId: string): Promise<WABAWhatsappClient | null> {
+		const findClient = await prismaService.wppClient.findFirst({
+			where: {
+				type: "WABA",
+				WABAPhoneId: phoneId,
+			}
+		})
+
+		if (!findClient) {
+			return null;
+		}
+
+		const instancedClient = this.getClient(findClient.id);
+
+		if (instancedClient instanceof WABAWhatsappClient) {
+			return instancedClient;
+		}
+
+		return null;
 	}
 
 	public async getValidWhatsappPhone(instance: string, phone: string) {
