@@ -510,12 +510,11 @@ private async checkAndSendAutoResponseMessage(
       ]
     },
     include: { schedules: true },
-    orderBy: [{ id: 'desc' }] // está ok escolher a mais recente em empates
+    orderBy: [{ id: 'desc' }]
   });
 
   if (!rules.length) return;
 
-  // ===== Helpers de tempo/fuso =====
   const toLocalInTZ = (d: Date, tz: string) => {
     const fmt = new Intl.DateTimeFormat('en-CA', {
       timeZone: tz,
@@ -529,14 +528,13 @@ private async checkAndSendAutoResponseMessage(
     const da = Number(get('day'));
     const h = Number(get('hour'));
     const mi = Number(get('minute'));
-    // Volta um Date em UTC que representa a "parede" local (evita libs externas)
     return new Date(Date.UTC(y, m - 1, da, h, mi, 0, 0));
   };
 
 const parseHHmm = (s: string) => {
   const [hh = 0, mm = 0] = s.split(':').map(Number);
 
-  return (hh * 60) + mm; // mm já está garantido como number ou 0
+  return (hh * 60) + mm;
 };
 
   const minutesOfDay = (d: Date) => d.getUTCHours() * 60 + d.getUTCMinutes();
@@ -555,8 +553,8 @@ const parseHHmm = (s: string) => {
     const nowMin = minutesOfDay(nowLocal);
     const s = parseHHmm(startTime);
     const e = parseHHmm(endTime);
-    if (s <= e) return (nowMin >= s && nowMin <= e); // janela no mesmo dia
-    return (nowMin >= s || nowMin <= e);             // cruza meia-noite
+    if (s <= e) return (nowMin >= s && nowMin <= e);
+    return (nowMin >= s || nowMin <= e);
   };
 
   const scheduleMatchesNow = (sched: AutomaticResponseSchedule, now: Date) => {
@@ -565,7 +563,6 @@ const parseHHmm = (s: string) => {
 
     if (!sched.startTime || !sched.endTime) return false;
 
-    // janela de vigência (opcional)
     const sDate = sched.startDate ? toLocalInTZ(sched.startDate, tz) : null;
     const eDate = sched.endDate ? toLocalInTZ(sched.endDate, tz) : null;
     if (!inDateWindow(nowLocal, sDate, eDate)) return false;
@@ -573,9 +570,9 @@ const parseHHmm = (s: string) => {
     if (!inTimeWindow(nowLocal, sched.startTime, sched.endTime)) return false;
 
     const y = nowLocal.getUTCFullYear();
-    const m = nowLocal.getUTCMonth() + 1; // 1..12
+    const m = nowLocal.getUTCMonth() + 1;
     const d = nowLocal.getUTCDate();
-    const wd = nowLocal.getUTCDay();      // 0..6  (Dom=0)
+    const wd = nowLocal.getUTCDay();
     const freq = (sched.frequency as any) || 'WEEKLY';
 
     if (freq === 'DAILY') return true;
@@ -583,7 +580,7 @@ const parseHHmm = (s: string) => {
     if (freq === 'WEEKLY') {
       const jsonDays = (sched.daysOfWeek as unknown) as number[] | null | undefined;
       if (jsonDays && jsonDays.length) return jsonDays.includes(wd);
-      if (sched.dayOfWeek !== null && sched.dayOfWeek !== undefined) return wd === sched.dayOfWeek; // legado
+      if (sched.dayOfWeek !== null && sched.dayOfWeek !== undefined) return wd === sched.dayOfWeek;
       return false;
     }
 
@@ -603,7 +600,7 @@ const parseHHmm = (s: string) => {
     }
 
     if (freq === 'ONCE') {
-      return !!sched.startDate; // já passamos por inDateWindow + inTimeWindow
+      return !!sched.startDate;
     }
 
     return false;
@@ -623,8 +620,6 @@ const parseHHmm = (s: string) => {
     if (!activeSched) continue;
 
     // calcula o tamanho da janela (em minutos) para critério de especificidade
-    const tz = activeSched.timezone || 'America/Fortaleza';
-    const nowLocal = toLocalInTZ(now, tz);
     const sMin = parseHHmm(activeSched.startTime);
     const eMin = parseHHmm(activeSched.endTime);
     let width = eMin - sMin;
@@ -654,7 +649,6 @@ const parseHHmm = (s: string) => {
 
   const chosen = chosenPool[0]!;
   const ruleToApply = chosen.rule;
-  const scheduleUsed = chosen.schedule;
 
   logger.log(`[AutoResponse] Regra selecionada: "${ruleToApply.name}" (global=${ruleToApply.isGlobal})`);
 
@@ -693,7 +687,6 @@ const parseHHmm = (s: string) => {
     contact.phone,
     ruleToApply.message,
     ruleToApply.fileId,
-    ruleToApply.id // <<< para gravar billingCategory
   );
 
   await prismaService.wppContact.update({

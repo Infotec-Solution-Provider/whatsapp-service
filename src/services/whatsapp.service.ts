@@ -701,7 +701,7 @@ class WhatsappService {
 		return client;
 	}
 
-	public async sendAutoReplyMessage(instance: string, to: string, text: string, fileId?: number | null, ruleId?: number | null ) {
+	public async sendAutoReplyMessage(instance: string, to: string, text: string, fileId?: number | null, ) {
 		const process = new ProcessingLogger(instance, "send-auto-reply", `${to}-${Date.now()}`, { to, text, fileId });
 
 		try {
