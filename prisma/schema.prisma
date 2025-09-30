@@ -17,6 +17,7 @@ model WppClient {
   WABAPhoneId    String?       @map("waba_phone_id")
   WABAAccountId  String?       @map("waba_account_id")
   WABAToken      String?       @map("waba_token")
+  WABAClientUrl  String?       @map("waba_client_url")
   gupshupToken   String?       @map("gupshup_token")
   gupshupAppName String?       @map("gupshup_app_name")
   gupshupAppId   String?       @map("gupshup_app_id")

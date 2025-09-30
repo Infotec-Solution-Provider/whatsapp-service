@@ -1,5 +1,5 @@
 import { FileDirType, SessionData } from "@in.pulse-crm/sdk";
-import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { WppChat, WppClientType } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import CreateMessageDto from "../dtos/create-message.dto";
@@ -94,7 +94,8 @@ class WhatsappService {
 						client.phone || "",
 						client.WABAPhoneId || "",
 						client.WABAAccountId || "",
-						client.WABAToken || ""
+						client.WABAToken || "",
+						client.WABAClientUrl || ""
 					);
 					this.clients.set(client.id, WABAClient);
 					break;
@@ -438,11 +439,13 @@ class WhatsappService {
 		return wwebjsClient;
 	}
 
-	public async getWabaClientByRecipient(phoneId: string): Promise<WABAWhatsappClient | null> {
+	public async getWabaClientByRecipient(recipient: string): Promise<WABAWhatsappClient | null> {
+		Logger.debug(`Buscando WABA client para o phoneId: ${recipient}`);
+			
 		const findClient = await prismaService.wppClient.findFirst({
 			where: {
 				type: "WABA",
-				WABAPhoneId: phoneId,
+				phone: recipient,
 			}
 		})
 

@@ -1,11 +1,11 @@
+import { Logger } from "@in.pulse-crm/utils";
 import axios from "axios";
+import FormData from 'form-data';
 import CreateMessageDto from "../dtos/create-message.dto";
 import filesService from "../services/files.service";
 import { EditMessageOptions, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
-import FormData from 'form-data';
-import { Logger } from "@in.pulse-crm/utils";
 
 const GRAPH_API_URL = "https://graph.facebook.com/v16.0/";
 
@@ -17,9 +17,10 @@ class WABAWhatsappClient implements WhatsappClient {
 		public readonly phone: string,
 		private readonly wabaPhoneId: string,
 		private readonly wabaAccountId: string,
-		private readonly wabaToken: string
+		private readonly wabaToken: string,
+		private readonly clientUrl: string
 	) {
-		Logger.info(`WABA Client initialized for instance ${instance}, phone ${phone}, WABA Account ID ${this.wabaAccountId}, WABA Phone ID ${this.wabaPhoneId}`);
+		Logger.info(`WABA Client initialized for instance ${instance}, phone ${phone}, WABA Account ID ${this.wabaAccountId}, WABA Phone ID ${this.wabaPhoneId}. Client URL: ${this.clientUrl}`);
 	}
 
 	public async getProfilePictureUrl(_: string): Promise<string | null> {
@@ -31,7 +32,7 @@ class WABAWhatsappClient implements WhatsappClient {
 	}
 
 	public async sendMessage(options: SendMessageOptions): Promise<CreateMessageDto> {
-		const process = new ProcessingLogger(this.instance, "waba-send-message", new Date().toISOString(), options);
+		const process = new ProcessingLogger(this.instance, "waba-send-message", Date.now().toString(), options);
 
 		try {
 			process.log("Iniciando envio de mensagem...", options);
@@ -126,6 +127,7 @@ class WABAWhatsappClient implements WhatsappClient {
 	private async uploadMediaFromFileId(options: SendFileOptions) {
 		const processId = new Date().toISOString();
 		const process = new ProcessingLogger(this.instance, "waba-upload-media", processId, options);
+
 		try {
 			process.log("Iniciando processo de upload de mídia...");
 			const reqUrl = `${GRAPH_API_URL}/${this.wabaPhoneId}/media`;
@@ -149,14 +151,18 @@ class WABAWhatsappClient implements WhatsappClient {
 			process.log("Enviando mídia a Graph API...", { url: reqUrl, options: reqOptions });
 			const response = await axios.post(reqUrl, form, reqOptions);
 			const output = { id: response.data.id };
+
 			process.log("Upload de mídia concluído com sucesso.", output);
+
 			return output;
 		} catch (error) {
 			process.log("Falha ao enviar mídia a Graph API...");
 			process.failed(error);
+
 			throw new Error("Falha ao enviar mídia a Graph API. Processo ID: " + processId);
 		}
 	}
+
 	/* 	private validateSupportedMediaType(mimeType: string, extension: string): void {
 			const supportedTypes = [
 				// Áudio

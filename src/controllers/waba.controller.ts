@@ -12,8 +12,6 @@ class WABAController {
 
     private webhookEntry = async (req: Request, res: Response) => {
         try {
-            console.log("webhook body");
-            console.dir(req.body, { depth: null });
             const instance = req.params["instance"] as string;
             await wabaService.handleWebhookEntry(instance, req.body);
             res.status(200).send();

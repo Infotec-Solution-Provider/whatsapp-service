@@ -1,5 +1,6 @@
 import { Request, Response, Router } from "express";
 import gupshupService from "../services/gupshup.service";
+import { Logger } from "@in.pulse-crm/utils";
 
 const ENDPOINT = "/api/whatsapp/meta/:instance";
 const ENDPOINT_NEW = "/api/whatsapp/gupshup/:instance";
@@ -25,8 +26,8 @@ class GupshupController {
 
 	private webhookChallenge = async (req: Request, res: Response) => {
 		try {
-			console.log("challenge body", req.body);
-			console.log("challenge headers", req.headers);
+			Logger.debug("Gupshup challenge body", req.body);
+			Logger.debug("Gupshup challenge headers", req.headers);
 
 			res.status(200).send();
 		} catch (err: any) {

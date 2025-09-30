@@ -1,21 +1,22 @@
-import prismaService from "../services/prisma.service";
 import { WppMessageStatus } from "@prisma/client";
+import CreateMessageDto from "../dtos/create-message.dto";
+import filesService from "../services/files.service";
+import prismaService from "../services/prisma.service";
 import {
   Message,
-  WABAMessageStatusData,
-  WABATextMessageData,
-  WABAVideoMessageData,
-  WABAImageMessageData,
-  WABADocumentMessageData,
   WABAAudioMessageData,
-  WABAStickerMessageData,
+  WABAContactData,
   WABAContactsMessageData,
-  WABALocationMessageData,
-  WABAReactionMessageData,
+  WABADocumentMessageData,
+  WABAImageMessageData,
   WABAInteractiveMessageData,
-  WABAContactData
+  WABALocationMessageData,
+  WABAMessageStatusData,
+  WABAReactionMessageData,
+  WABAStickerMessageData,
+  WABATextMessageData,
+  WABAVideoMessageData
 } from "../types/whatsapp-api.types";
-import CreateMessageDto from "../dtos/create-message.dto";
 import ProcessingLogger from "../utils/processing-logger";
 
 export default class WABAMessageParser {
@@ -101,7 +102,12 @@ export default class WABAMessageParser {
     }
 
     if (mediaId) {
-      await this.downloadAndStoreMedia();
+      const fileData = await filesService.uploadWabaMedia(instance, mediaId)
+      parsed.fileId = fileData.id;
+      parsed.fileName = fileData.name;
+      parsed.fileType = fileData.mime_type;
+      parsed.fileSize = String(fileData.size);
+      logger?.log("Mídia processada com sucesso", fileData);
     }
 
     return parsed;
@@ -128,10 +134,6 @@ export default class WABAMessageParser {
     }
     const asDate = Date.parse(ts);
     return isNaN(asDate) ? Date.now() : asDate;
-  }
-
-  private static async downloadAndStoreMedia() {
-    throw new Error("Método downloadAndStoreMedia não implementado");
   }
 
   private static formatContact(contact: WABAContactData): string {

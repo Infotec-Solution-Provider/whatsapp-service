@@ -80,7 +80,6 @@ class ChooseSectorBot {
 		}
 
 		let chooseSectorMessage = `Escolha um setor para continuar:\n${sectors.map((s, i) => `${i + 1} - ${s.name}`).join("\n")}`;
-		console.log(chooseSectorMessage);
 
 		if (chat.instance === "nunes") {
 			chooseSectorMessage =

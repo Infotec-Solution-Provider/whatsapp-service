@@ -497,7 +497,7 @@ class MessagesDistributionService {
 		logger: ProcessingLogger
 	) {
 		type RuleWithIncludes = AutomaticResponseRule & { schedules: AutomaticResponseSchedule[] };
-		console.log("checkAndSendAutoResponseMessage contact", contact);
+
 		// 1. Busca todas as regras potenciais (Específica do usuário E Global) em uma única consulta eficiente.
 		const potentialRules = await prismaService.automaticResponseRule.findMany({
 			where: {
@@ -548,7 +548,7 @@ class MessagesDistributionService {
 				currentTime >= schedule.startTime &&
 				currentTime <= schedule.endTime
 		);
-		console.log("isTimeToSend", isTimeToSend);
+
 		if (isTimeToSend) {
 			logger.log(
 				`[AutoResponse] Regra "${ruleToApply.name}" acionada para o contato ${contact.id}. Enviando mensagem.`
