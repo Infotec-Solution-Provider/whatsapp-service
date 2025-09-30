@@ -701,7 +701,7 @@ class WhatsappService {
 		return client;
 	}
 
-	public async sendAutoReplyMessage(instance: string, to: string, text: string, fileId?: number | null) {
+	public async sendAutoReplyMessage(instance: string, to: string, text: string, fileId?: number | null, ruleId?: number | null ) {
 		const process = new ProcessingLogger(instance, "send-auto-reply", `${to}-${Date.now()}`, { to, text, fileId });
 
 		try {
@@ -752,7 +752,8 @@ class WhatsappService {
 				fileName: fileId ? (options as SendFileOptions).fileName : null,
 				fileType: fileId && fileData ? fileData.mime_type : null,
 				wwebjsId: sentMsgInfo.wwebjsId || null,
-				wabaId: sentMsgInfo.wabaId || null
+				wabaId: sentMsgInfo.wabaId || null,
+
 			};
 
 			const savedMsg = await messagesService.insertMessage(messageToSave);
