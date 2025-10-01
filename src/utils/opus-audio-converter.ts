@@ -17,15 +17,19 @@ class OpusAudioConverter {
 		});
 
 		const ffmpeg = spawn("ffmpeg", [
-			"-i",
-			"pipe:0",
-			"-c:a",
-			"libmp3lame",
-			"-b:a",
-			"128k",
-			savePath
+			"-hide_banner",
+			"-y",
+			"-i", "pipe:0",
+			"-vn",
+			"-acodec", "libopus",
+			"-b:a", "24k",
+			"-ar", "48000",
+			"-ac", "1",
+			"-application", "voip",
+			"-compression_level", "10",
+			"-f", "opus",
+			savePath,
 		]);
-
 		readableStream.pipe(ffmpeg.stdin);
 
 		return new Promise((resolve, reject) => {

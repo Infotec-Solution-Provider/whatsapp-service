@@ -1,5 +1,3 @@
-import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
-import prismaService from "./prisma.service";
 import {
 	Customer,
 	SessionData,
@@ -7,14 +5,16 @@ import {
 	SocketServerMonitorRoom,
 	SocketServerUserRoom
 } from "@in.pulse-crm/sdk";
+import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
+import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
+import ProcessingLogger from "../utils/processing-logger";
 import customersService from "./customers.service";
 import instancesService from "./instances.service";
-import socketService from "./socket.service";
 import messagesDistributionService from "./messages-distribution.service";
+import prismaService from "./prisma.service";
+import socketService from "./socket.service";
 import usersService from "./users.service";
 import whatsappService, { SendTemplateData } from "./whatsapp.service";
-import ProcessingLogger from "../utils/processing-logger";
-import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
 
 interface InpulseResult {
 	NOME: string;
@@ -25,15 +25,11 @@ interface ChatsFilters {
 	isFinished?: string;
 }
 
-export const FETCH_CUSTOMERS_QUERY =
-	"SELECT * FROM clientes WHERE CODIGO IN (?)";
+export const FETCH_CUSTOMERS_QUERY = "SELECT * FROM clientes WHERE CODIGO IN (?)";
 const FETCH_RESULT_QUERY = "SELECT * FROM resultados WHERE CODIGO = ?";
 
 class ChatsService {
-	public async getChatForContact(
-		clientId: number,
-		contact: WppContact
-	): Promise<WppChat | null> {
+	public async getChatForContact(clientId: number, contact: WppContact): Promise<WppChat | null> {
 		return await prismaService.wppChat.findFirst({
 			where: {
 				contactId: contact.id,
@@ -47,11 +43,7 @@ class ChatsService {
 		});
 	}
 
-	public async getUserChatsBySession(
-		session: SessionData,
-		includeMessages = true,
-		includeContact = true
-	) {
+	public async getUserChatsBySession(session: SessionData, includeMessages = true, includeContact = true) {
 		const foundChats = await prismaService.wppChat.findMany({
 			where: {
 				isFinished: false,
@@ -101,31 +93,20 @@ class ChatsService {
 			foundChats.push(...foundAdminChats);
 		}
 
-		const chats: Array<
-			WppChat & { customer: Customer | null; contact: WppContact | null }
-		> = [];
+		const chats: Array<WppChat & { customer: Customer | null; contact: WppContact | null }> = [];
 		const messages: Array<WppMessage> = [];
 		const customerIds = includeContact
 			? foundChats
-				.filter(
-					(chat) => typeof chat.contact?.customerId === "number"
-				)
-				.map((c) => c.contact!.customerId!)
+					.filter((chat) => typeof chat.contact?.customerId === "number")
+					.map((c) => c.contact!.customerId!)
 			: [];
 
 		const customers = customerIds.length
-			? await instancesService.executeQuery<Array<Customer>>(
-				session.instance,
-				FETCH_CUSTOMERS_QUERY,
-				[
+			? await instancesService.executeQuery<Array<Customer>>(session.instance, FETCH_CUSTOMERS_QUERY, [
 					foundChats
-						.filter(
-							(chat) =>
-								typeof chat.contact?.customerId === "number"
-						)
+						.filter((chat) => typeof chat.contact?.customerId === "number")
 						.map((c) => c.contact!.customerId!)
-				]
-			)
+				])
 			: [];
 
 		for (const foundChat of foundChats) {
@@ -134,18 +115,13 @@ class ChatsService {
 			let customer: Customer | null = null;
 
 			if (includeContact && typeof contact?.customerId == "number") {
-				customer =
-					customers.find((c) => c.CODIGO === contact.customerId) ||
-					null;
+				customer = customers.find((c) => c.CODIGO === contact.customerId) || null;
 			}
 
 			chats.push({ ...chat, customer, contact: contact || null });
 			if (includeMessages && contact) {
 				const decodedMessages = contact.WppMessage.map((msg) => {
-					if (
-						session.instance === "vollo" &&
-						typeof msg.body === "string"
-					) {
+					if (session.instance === "vollo" && typeof msg.body === "string") {
 						try {
 							return {
 								...msg,
@@ -165,11 +141,7 @@ class ChatsService {
 		return { chats, messages };
 	}
 
-	public async getChatsMonitor(
-		session: SessionData,
-		includeMessages = true,
-		includeCustomer = true
-	) {
+	public async getChatsMonitor(session: SessionData, includeMessages = true, includeCustomer = true) {
 		const isTI = session.sectorId === 3 || session.instance !== "nunes";
 
 		const ongoingChats = await prismaService.wppChat.findMany({
@@ -200,31 +172,20 @@ class ChatsService {
 			}
 		});
 
-		const chats: Array<
-			WppChat & { customer: Customer | null; contact: WppContact | null }
-		> = [];
+		const chats: Array<WppChat & { customer: Customer | null; contact: WppContact | null }> = [];
 		const messages: Array<WppMessage> = [];
 		const customerIds = includeCustomer
 			? ongoingChats
-				.filter(
-					(chat) => typeof chat.contact?.customerId === "number"
-				)
-				.map((c) => c.contact!.customerId!)
+					.filter((chat) => typeof chat.contact?.customerId === "number")
+					.map((c) => c.contact!.customerId!)
 			: [];
 
 		const customers = customerIds.length
-			? await instancesService.executeQuery<Array<Customer>>(
-				session.instance,
-				FETCH_CUSTOMERS_QUERY,
-				[
+			? await instancesService.executeQuery<Array<Customer>>(session.instance, FETCH_CUSTOMERS_QUERY, [
 					ongoingChats
-						.filter(
-							(chat) =>
-								typeof chat.contact?.customerId === "number"
-						)
+						.filter((chat) => typeof chat.contact?.customerId === "number")
 						.map((c) => c.contact!.customerId!)
-				]
-			)
+				])
 			: [];
 
 		for (const foundChat of ongoingChats) {
@@ -233,19 +194,14 @@ class ChatsService {
 			let customer: Customer | null = null;
 
 			if (includeCustomer && typeof contact?.customerId == "number") {
-				customer =
-					customers.find((c) => c.CODIGO === contact.customerId) ||
-					null;
+				customer = customers.find((c) => c.CODIGO === contact.customerId) || null;
 			}
 
 			chats.push({ ...chat, customer, contact: contact || null });
 
 			if (includeMessages && contact) {
 				const decodedMessages = contact.WppMessage.map((msg) => {
-					if (
-						session.instance === "vollo" &&
-						typeof msg.body === "string"
-					) {
+					if (session.instance === "vollo" && typeof msg.body === "string") {
 						try {
 							return {
 								...msg,
@@ -268,9 +224,7 @@ class ChatsService {
 			let customer: Customer | null = null;
 
 			if (includeCustomer && typeof contact?.customerId == "number") {
-				customer =
-					customers.find((c) => c.CODIGO === contact.customerId) ||
-					null;
+				customer = customers.find((c) => c.CODIGO === contact.customerId) || null;
 			}
 
 			chats.push({ ...chat, customer, contact: contact || null });
@@ -287,8 +241,7 @@ class ChatsService {
 		}
 
 		if (filters.isFinished) {
-			whereClause.isFinished =
-				filters.isFinished === "true" ? true : false;
+			whereClause.isFinished = filters.isFinished === "true" ? true : false;
 		}
 
 		const chats = await prismaService.wppChat.findMany({
@@ -313,16 +266,14 @@ class ChatsService {
 
 		const messages = chat?.contactId
 			? await prismaService.wppMessage.findMany({
-				where: { contactId: chat?.contactId },
-				orderBy: { timestamp: "asc" }
-			})
+					where: { contactId: chat?.contactId },
+					orderBy: { timestamp: "asc" }
+				})
 			: [];
 
 		if (chat?.contact?.customerId) {
 			try {
-				const customer = await customersService.getCustomerById(
-					chat.contact.customerId
-				);
+				const customer = await customersService.getCustomerById(chat.contact.customerId);
 
 				return { ...chat, customer, messages };
 			} catch (err) {
@@ -333,12 +284,7 @@ class ChatsService {
 		return { ...chat, messages };
 	}
 
-	public async transferAttendance(
-		token: string,
-		session: SessionData,
-		id: number,
-		userId: number
-	) {
+	public async transferAttendance(token: string, session: SessionData, id: number, userId: number) {
 		const { instance } = session;
 		usersService.setAuth(token);
 
@@ -363,9 +309,7 @@ class ChatsService {
 		const monitorRoom: SocketServerMonitorRoom = `${chat.instance}:${chat.sectorId!}:monitor`;
 
 		if (chat.userId === null || chat.userId === undefined) {
-			throw new Error(
-				"chat.userId is null or undefined, cannot construct userRoom."
-			);
+			throw new Error("chat.userId is null or undefined, cannot construct userRoom.");
 		}
 
 		const userRoom: SocketServerUserRoom = `${chat.instance}:user:${chat.userId}`;
@@ -390,16 +334,16 @@ class ChatsService {
 		resultId: number,
 		triggerSatisfactionBot = false
 	) {
-		const results = await instancesService.executeQuery<InpulseResult[]>(
-			session.instance,
-			FETCH_RESULT_QUERY,
-			[resultId]
-		);
+		const results = await instancesService.executeQuery<InpulseResult[]>(session.instance, FETCH_RESULT_QUERY, [
+			resultId
+		]);
+
+		const result = results[0];
+
 		const { instance, userId } = session;
 		usersService.setAuth(token || "");
 
-		const user =
-			resultId !== -50 && (await usersService.getUserById(userId));
+		const user = resultId !== -50 && (await usersService.getUserById(userId));
 		const chat = await prismaService.wppChat.update({
 			where: { id },
 			data: {
@@ -428,7 +372,7 @@ class ChatsService {
 			chatId: chat.id
 		});
 
-		if (triggerSatisfactionBot && (session.sectorId === 16 || session.instance === 'develop')) {
+		if (result && result.NOME.startsWith("PESQUISA DE SATISF")) {
 			await exatronSatisfactionBot.startBot(chat, chat.contact!, chat.contact!.phone);
 		}
 	}
@@ -467,10 +411,7 @@ class ChatsService {
 				throw new Error("Alguém já está atendendo esse contato!");
 			}
 
-			const profilePicture = await whatsappService.getProfilePictureUrl(
-				session.instance,
-				contact.phone
-			);
+			const profilePicture = await whatsappService.getProfilePictureUrl(session.instance, contact.phone);
 			const newChat = await prismaService.wppChat.create({
 				data: {
 					instance: session.instance,
@@ -495,11 +436,7 @@ class ChatsService {
 			const user = await usersService.getUserById(session.userId);
 
 			const message = `Atendimento iniciado por ${user.NOME}.`;
-			await messagesDistributionService.addSystemMessage(
-				newChat as WppChat,
-				message,
-				true
-			);
+			await messagesDistributionService.addSystemMessage(newChat as WppChat, message, true);
 
 			if (template && newChat.contact) {
 				await whatsappService.sendTemplate(
@@ -511,28 +448,19 @@ class ChatsService {
 				);
 			}
 
-			await messagesDistributionService.notifyChatStarted(
-				process,
-				newChat as WppChat
-			);
+			await messagesDistributionService.notifyChatStarted(process, newChat as WppChat);
 		} catch (err) {
 			process.log("Erro ao iniciar o atendimento ");
 			process.failed(err);
 		}
 	}
 
-	public async startScheduledChat(
-		instance: string,
-		sectorId: number,
-		contactId: number,
-		scheduledFor: number
-	) {
-		const process = new ProcessingLogger(
+	public async startScheduledChat(instance: string, sectorId: number, contactId: number, scheduledFor: number) {
+		const process = new ProcessingLogger(instance, "start-chat", `${scheduledFor}-${contactId}_${Date.now()}`, {
 			instance,
-			"start-chat",
-			`${scheduledFor}-${contactId}_${Date.now()}`,
-			{ instance, contactId, scheduledFor }
-		);
+			contactId,
+			scheduledFor
+		});
 
 		try {
 			const contact = await prismaService.wppContact.findUnique({
@@ -556,10 +484,7 @@ class ChatsService {
 				throw new Error("Alguém já está atendendo esse contato!");
 			}
 
-			const profilePicture = await whatsappService.getProfilePictureUrl(
-				instance,
-				contact.phone
-			);
+			const profilePicture = await whatsappService.getProfilePictureUrl(instance, contact.phone);
 			const newChat = await prismaService.wppChat.create({
 				data: {
 					instance,
@@ -574,11 +499,7 @@ class ChatsService {
 			});
 
 			const message = `Atendimento iniciado pelo sistema.\nMotivo: Retorno agendado.`;
-			await messagesDistributionService.addSystemMessage(
-				newChat,
-				message,
-				true
-			);
+			await messagesDistributionService.addSystemMessage(newChat, message, true);
 
 			const newChatWithDetails = await prismaService.wppChat.findUnique({
 				where: { id: newChat.id },
@@ -595,9 +516,9 @@ class ChatsService {
 
 			if (contact.customerId) {
 				try {
-					const customers = await instancesService.executeQuery<
-						Customer[]
-					>(instance, FETCH_CUSTOMERS_QUERY, [[contact.customerId]]);
+					const customers = await instancesService.executeQuery<Customer[]>(instance, FETCH_CUSTOMERS_QUERY, [
+						[contact.customerId]
+					]);
 
 					customer = customers[0] || null;
 				} catch (err) {
@@ -607,10 +528,7 @@ class ChatsService {
 
 			const chatWithCustomer = { ...newChatWithDetails, customer };
 
-			await messagesDistributionService.notifyChatStarted(
-				process,
-				chatWithCustomer as WppChat
-			);
+			await messagesDistributionService.notifyChatStarted(process, chatWithCustomer as WppChat);
 
 			return newChatWithDetails!.id;
 		} catch (err) {

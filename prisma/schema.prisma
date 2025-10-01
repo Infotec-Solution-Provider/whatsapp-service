@@ -249,7 +249,13 @@ model WppMessageFlowStep {
   @@unique([messageFlowId, stepNumber])
   @@map("message_flows_steps")
 }
-
+enum Frequency {
+  ONCE
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
 model AutomaticResponseRule {
   id       Int    @id @default(autoincrement())
   instance String
@@ -283,7 +289,16 @@ model AutomaticResponseSchedule {
   id        Int                   @id @default(autoincrement())
   ruleId    Int
   rule      AutomaticResponseRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
-  dayOfWeek Int
+
+  frequency  Frequency             @default(WEEKLY)
+  daysOfWeek Json?
+  dayOfMonth Int?
+  month      Int?
+  timezone   String               @default("America/Fortaleza")
+  startDate  DateTime?
+  endDate    DateTime?
+
+  dayOfWeek Int?
   startTime String
   endTime   String
 
