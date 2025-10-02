@@ -4,8 +4,9 @@ import filesService from "../services/files.service";
 import { EditMessageOptions, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
-import FormData from 'form-data';
+import FormData from "form-data";
 import { Logger } from "@in.pulse-crm/utils";
+import generateUID from "../utils/generate-uid";
 
 const GRAPH_API_URL = "https://graph.facebook.com/v16.0/";
 
@@ -19,7 +20,14 @@ class WABAWhatsappClient implements WhatsappClient {
 		private readonly wabaAccountId: string,
 		private readonly wabaToken: string
 	) {
-		Logger.info(`WABA Client initialized for instance ${instance}, phone ${phone}, WABA Account ID ${this.wabaAccountId}, WABA Phone ID ${this.wabaPhoneId}`);
+		Logger.info(
+			[
+				`WABA Client initialized for instance ${instance}!`,
+				`Phone: ${phone}`,
+				`WABA Account ID: ${this.wabaAccountId}`,
+				`WABA Phone ID: ${this.wabaPhoneId}`
+			].join("\n")
+		);
 	}
 
 	public async getProfilePictureUrl(_: string): Promise<string | null> {
@@ -31,16 +39,15 @@ class WABAWhatsappClient implements WhatsappClient {
 	}
 
 	public async sendMessage(options: SendMessageOptions): Promise<CreateMessageDto> {
-		const process = new ProcessingLogger(this.instance, "waba-send-message", new Date().toISOString(), options);
+		const process = new ProcessingLogger(this.instance, "waba-send-message", generateUID(), options);
 
 		try {
 			process.log("Iniciando envio de mensagem...", options);
 			const reqUrl = `${GRAPH_API_URL}/${this.wabaPhoneId}/messages`;
 			const reqBody: any = {
-				recipient_type: 'individual',
-				messaging_product: 'whatsapp',
-				to: options.to,
-
+				recipient_type: "individual",
+				messaging_product: "whatsapp",
+				to: options.to
 			};
 
 			const msgType = this.getSendMessageType(options);
@@ -51,18 +58,16 @@ class WABAWhatsappClient implements WhatsappClient {
 				const uploadedFile = await this.uploadMediaFromFileId(options);
 				process.log("Upload de mídia concluído.", uploadedFile);
 				process.log("Montando corpo da mensagem de mídia...");
-				reqBody['type'] = msgType;
+				reqBody["type"] = msgType;
 				reqBody[msgType] = {
 					id: uploadedFile.id,
 					...(options.text ? { caption: options.text } : {}),
 					...(msgType === "document" ? { filename: options.file.name } : {})
 				};
-
-			}
-			else {
+			} else {
 				process.log("Montando corpo da mensagem de texto...");
-				reqBody['type'] = 'text';
-				reqBody['text'] = { body: options.text };
+				reqBody["type"] = "text";
+				reqBody["text"] = { body: options.text };
 			}
 
 			process.log("Enviando mensagem a Graph API...", { url: reqUrl, body: reqBody, options: this.reqOptions });
@@ -79,8 +84,8 @@ class WABAWhatsappClient implements WhatsappClient {
 				timestamp: now.getTime().toString(),
 				sentAt: now,
 				type: msgType,
-				wabaId: response.data.messages[0].id,
-			}
+				wabaId: response.data.messages[0].id
+			};
 
 			process.log("Processo concluído com sucesso.");
 			process.success(dto);
@@ -93,7 +98,7 @@ class WABAWhatsappClient implements WhatsappClient {
 		}
 	}
 
-	public async editMessage({ }: EditMessageOptions): Promise<void> {
+	public async editMessage({}: EditMessageOptions): Promise<void> {
 		throw new Error("Method not implemented.");
 	}
 
@@ -102,11 +107,11 @@ class WABAWhatsappClient implements WhatsappClient {
 			headers: {
 				Authorization: `Bearer ${this.wabaToken}`
 			}
-		}
+		};
 	}
 
 	private getSendMessageType(options: SendMessageOptions) {
-		if ('file' in options) {
+		if ("file" in options) {
 			return this.getSendFileType(options.file.mime_type, !!options.sendAsAudio, !!options.sendAsDocument);
 		}
 
@@ -136,11 +141,14 @@ class WABAWhatsappClient implements WhatsappClient {
 
 			const form = new FormData();
 
-			form.append('messaging_product', 'whatsapp');
-			form.append('type', this.getSendFileType(options.file.mime_type, !!options.sendAsAudio, !!options.sendAsDocument));
-			form.append('file', fileBuffer, {
+			form.append("messaging_product", "whatsapp");
+			form.append(
+				"type",
+				this.getSendFileType(options.file.mime_type, !!options.sendAsAudio, !!options.sendAsDocument)
+			);
+			form.append("file", fileBuffer, {
 				filename: options.file.name,
-				contentType: options.file.mime_type,
+				contentType: options.file.mime_type
 			});
 
 			const reqOptions = this.reqOptions;
@@ -191,7 +199,6 @@ class WABAWhatsappClient implements WhatsappClient {
 				throw new Error(`Tipo de mídia não suportado: ${mimeType} (${extension})`);
 			}
 		} */
-
 }
 
 export default WABAWhatsappClient;

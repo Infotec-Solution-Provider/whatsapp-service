@@ -342,7 +342,6 @@ class WhatsappService {
 			process.log(`Client obtido para o setor: ${data.chat.sectorId || 1}`);
 			const now = new Date();
 
-
 			let message = {
 				instance: data.chat.instance,
 				status: "PENDING",
@@ -438,13 +437,13 @@ class WhatsappService {
 		return wwebjsClient;
 	}
 
-	public async getWabaClientByRecipient(phoneId: string): Promise<WABAWhatsappClient | null> {
+	public async getWabaClientByRecipient(recipient: string): Promise<WABAWhatsappClient | null> {
 		const findClient = await prismaService.wppClient.findFirst({
 			where: {
 				type: "WABA",
-				WABAPhoneId: phoneId,
+				phone: recipient
 			}
-		})
+		});
 
 		if (!findClient) {
 			return null;
@@ -600,11 +599,11 @@ class WhatsappService {
 						});
 						const chat = contact
 							? await prismaService.wppChat.findFirst({
-								where: {
-									instance: session.instance,
-									contactId: contact.id
-								}
-							})
+									where: {
+										instance: session.instance,
+										contactId: contact.id
+									}
+								})
 							: null;
 
 						for (const originalMsg of originalMessages) {
@@ -701,7 +700,7 @@ class WhatsappService {
 		return client;
 	}
 
-	public async sendAutoReplyMessage(instance: string, to: string, text: string, fileId?: number | null, ) {
+	public async sendAutoReplyMessage(instance: string, to: string, text: string, fileId?: number | null) {
 		const process = new ProcessingLogger(instance, "send-auto-reply", `${to}-${Date.now()}`, { to, text, fileId });
 
 		try {
@@ -712,8 +711,8 @@ class WhatsappService {
 			});
 			const chat = contact
 				? await prismaService.wppChat.findFirst({
-					where: { contactId: contact.id, isFinished: false }
-				})
+						where: { contactId: contact.id, isFinished: false }
+					})
 				: null;
 
 			// Prepara as opções de envio (texto ou arquivo)
@@ -752,8 +751,7 @@ class WhatsappService {
 				fileName: fileId ? (options as SendFileOptions).fileName : null,
 				fileType: fileId && fileData ? fileData.mime_type : null,
 				wwebjsId: sentMsgInfo.wwebjsId || null,
-				wabaId: sentMsgInfo.wabaId || null,
-
+				wabaId: sentMsgInfo.wabaId || null
 			};
 
 			const savedMsg = await messagesService.insertMessage(messageToSave);
