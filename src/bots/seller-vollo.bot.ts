@@ -9,8 +9,7 @@ import instancesService from "../services/instances.service";
 
 const OPERATORS: Record<string, { name: string; id: number }> = {
 	"1": { name: "Aline", id: 13 },
-	"2": { name: "Hellen", id: 12 },
-	"3": { name: "Nathalia", id: 4 }
+	"2": { name: "Nathalia", id: 4 }
 };
 
 class ChooseSellerBot {
@@ -59,7 +58,7 @@ class ChooseSellerBot {
 		switch (session.step) {
 			case 1: {
 				const welcome =
-					"Olá! 😊\n\nCom qual das nossas vendedoras você gostaria de falar?\n\n1 - Aline\n2 - Hellen\n3 - Nathalia\n\nFico no aguardo da sua escolha!";
+					"Olá! 😊\n\nCom qual das nossas vendedoras você gostaria de falar?\n\n1 - Aline\n2 - Nathalia\n\nFico no aguardo da sua escolha!";
 
 				await whatsappService.sendBotMessage(message.from, {
 					chat,
@@ -71,7 +70,7 @@ class ChooseSellerBot {
 			}
 
 			case 2: {
-				const validOption = msg.split(" ").find((s) => ["1", "2", "3"].includes(s));
+				const validOption = msg.split(" ").find((s) => ["1", "2"].includes(s));
 
 				const op = validOption && OPERATORS[validOption];
 
@@ -104,7 +103,7 @@ class ChooseSellerBot {
 					break;
 				} else if (!validOption && session.stepCount === 1) {
 					const repeat =
-						"Por gentileza, escolha uma das vendedoras abaixo:\n\n1 - Aline\n2 - Hellen\n3 - Nathalia";
+						"Por gentileza, escolha uma das vendedoras abaixo:\n\n1 - Aline\n2 - Nathalia";
 
 					await whatsappService.sendBotMessage(message.from, {
 						chat,
