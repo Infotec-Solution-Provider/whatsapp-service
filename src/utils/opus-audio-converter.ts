@@ -1,13 +1,14 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rmdir } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 
 class OpusAudioConverter {
 	public static async convert(file: Buffer): Promise<Buffer> {
 		const tempPath = await mkdtemp(randomUUID());
-		const savePath = path.join(tempPath, `audio.mp3`);
+		// Save with .ogg extension (Opus-in-Ogg container)
+		const savePath = path.join(tempPath, `audio.ogg`);
 
 		const readableStream = new Readable({
 			read() {
@@ -19,16 +20,25 @@ class OpusAudioConverter {
 		const ffmpeg = spawn("ffmpeg", [
 			"-hide_banner",
 			"-y",
-			"-i", "pipe:0",
+			"-i",
+			"pipe:0",
 			"-vn",
-			"-acodec", "libopus",
-			"-b:a", "24k",
-			"-ar", "48000",
-			"-ac", "1",
-			"-application", "voip",
-			"-compression_level", "10",
-			"-f", "opus",
-			savePath,
+			"-acodec",
+			"libopus",
+			"-b:a",
+			"24k",
+			"-ar",
+			"48000",
+			"-ac",
+			"1",
+			"-application",
+			"voip",
+			"-compression_level",
+			"10",
+			// Use Ogg container so Content-Type resolves to audio/ogg
+			"-f",
+			"ogg",
+			savePath
 		]);
 		readableStream.pipe(ffmpeg.stdin);
 
@@ -36,12 +46,10 @@ class OpusAudioConverter {
 			ffmpeg.on("close", async (code: number) => {
 				if (code === 0) {
 					const file = await readFile(savePath);
-					rmdir(tempPath, { recursive: true }).catch(() => {});
+					rm(tempPath, { recursive: true }).catch(() => {});
 					resolve(file);
 				} else {
-					reject(
-						`Erro ao converter para Opus, código de saída: ${code}`
-					);
+					reject(`Erro ao converter para Opus, código de saída: ${code}`);
 				}
 			});
 
