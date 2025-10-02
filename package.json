@@ -13,7 +13,7 @@
 	"license": "ISC",
 	"dependencies": {
 		"@api/gupshup": "file:.api/apis/gupshup",
-		"@in.pulse-crm/sdk": "^2.11.2",
+		"@in.pulse-crm/sdk": "^2.11.5",
 		"@in.pulse-crm/utils": "^1.3.0",
 		"@ngrok/ngrok": "^1.5.2",
 		"@prisma/client": "^6.4.1",
