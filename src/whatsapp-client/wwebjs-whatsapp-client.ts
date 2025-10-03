@@ -207,7 +207,12 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				process.success(savedMsg);
 			}
 			if (chat.isGroup) {
-				internalChatsService.receiveMessage(chat.id.user, parsedMsg, msg.author || msg.from.split("@")[0]!);
+				const contact = await msg.getContact();
+				internalChatsService.receiveMessage(
+					chat.id.user,
+					parsedMsg,
+					msg.author || contact?.name || contact?.pushname || msg.from.split("@")[0]!
+				);
 			}
 		} catch (err) {
 			process.log(`Error while processing message: ${sanitizeErrorMessage(err)}`);
@@ -229,7 +234,11 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 					return;
 				} else {
 					process.log("Message is in a private chat. Processing message edit...");
-					await messagesDistributionService.processMessageEdit("wwebjs", message.id._serialized, message.body);
+					await messagesDistributionService.processMessageEdit(
+						"wwebjs",
+						message.id._serialized,
+						message.body
+					);
 				}
 			}
 		} catch (err: any) {
@@ -239,13 +248,13 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 	private handleMessageAck({ id }: WAWebJS.Message, ack: WAWebJS.MessageAck) {
 		this.log("info", "Message ack: " + ack + " | " + id._serialized + "!");
-		if (typeof ack === 'number') {
+		if (typeof ack === "number") {
 			const status = MessageParser.getMessageStatus(ack);
 			messagesDistributionService.processMessageStatus("wwebjs", id._serialized, status);
 		}
 	}
 
-	private handleMessageReaction(_reaction: WAWebJS.Reaction) { }
+	private handleMessageReaction(_reaction: WAWebJS.Reaction) {}
 
 	private handleMessageRevoked({ id }: WAWebJS.Message) {
 		this.log("info", "Message revoked! " + id._serialized);
