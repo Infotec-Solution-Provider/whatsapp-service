@@ -19,7 +19,7 @@ import whatsappService, { getMessageType } from "./whatsapp.service";
 import CreateMessageDto from "../dtos/create-message.dto";
 import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 import { Mention, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
-import OpusAudioConverter from "../utils/opus-audio-converter";
+import WhatsappAudioConverter from "../utils/whatsapp-audio-converter";
 import instancesService from "./instances.service";
 
 interface ChatsFilters {
@@ -393,7 +393,7 @@ class InternalChatsService {
 			}
 
 			if ("file" in data && !!data.file) {
-				const buffer = data.sendAsAudio ? await OpusAudioConverter.convert(data.file.buffer) : data.file.buffer;
+				const buffer = data.sendAsAudio ? await WhatsappAudioConverter.convert(data.file.buffer) : data.file.buffer;
 
 				if (data.sendAsAudio) {
 					process.log("Mensagem convertida com sucesso.");

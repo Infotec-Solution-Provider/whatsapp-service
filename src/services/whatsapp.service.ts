@@ -1,10 +1,11 @@
+import "dotenv/config";
 import { FileDirType, SessionData } from "@in.pulse-crm/sdk";
-import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { WppChat, WppClientType } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import CreateMessageDto from "../dtos/create-message.dto";
 import { EditMessageOptions, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
-import OpusAudioConverter from "../utils/opus-audio-converter";
+import WhatsappAudioConverter from "../utils/whatsapp-audio-converter";
 import ProcessingLogger from "../utils/processing-logger";
 import GupshupWhatsappClient from "../whatsapp-client/gupshup-whatsapp-client";
 import WABAWhatsappClient from "../whatsapp-client/waba-whatsapp-client";
@@ -246,10 +247,20 @@ class WhatsappService {
 				process.log(`Processando arquivo enviado diretamente: ${data.file.originalname}`);
 
 				if (data.sendAsAudio) {
-					process.log("Mensagem de audio, convertendo arquivo para ogg.");
-					data.file.buffer = await OpusAudioConverter.convert(data.file.buffer);
-					data.file.mimetype = "audio/ogg";
-					data.file.originalname = data.file.originalname.replace(/\.[^/.]+$/, ".ogg");
+					const convertedAudio = await WhatsappAudioConverter.convertToCompatible(
+						data.file.buffer,
+						data.file.mimetype
+					);
+
+					data
+
+					process.log("Mensagem de audio, convertendo arquivo para " + convertedAudio.extension);
+					Logger.debug("Audio original", data.file);
+					Logger.debug("Audio convertido", convertedAudio);
+					data.file.buffer = convertedAudio.buffer;
+					data.file.mimetype = convertedAudio.mimeType;
+					data.file.originalname = data.file.originalname.replace(/\.[^/.]+$/, "." + convertedAudio.extension);
+					data.file.size = convertedAudio.size;
 					process.log("Mensagem convertida com sucesso.");
 				}
 
@@ -274,13 +285,16 @@ class WhatsappService {
 				}
 				if (data.sendAsAudio) {
 					fileType = "audio";
+
+					(options as SendFileOptions).sendAsAudio = false;
+					(options as SendFileOptions).sendAsDocument = true;
 				}
 
 				options = {
 					...options,
 					fileUrl,
 					fileType,
-					sendAsAudio: data.sendAsAudio,
+					sendAsAudio: false,
 					sendAsDocument: data.sendAsDocument,
 					file: savedFile
 				} as SendFileOptions;
