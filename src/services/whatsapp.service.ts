@@ -246,10 +246,7 @@ class WhatsappService {
 				process.log(`Processando arquivo enviado diretamente: ${data.file.originalname}`);
 
 				if (data.sendAsAudio) {
-					process.log("Mensagem de audio, convertendo arquivo para mp3.");
-				}
-
-				if (data.sendAsAudio) {
+					process.log("Mensagem de audio, convertendo arquivo para ogg.");
 					data.file.buffer = await OpusAudioConverter.convert(data.file.buffer);
 					data.file.mimetype = "audio/ogg";
 					data.file.originalname = data.file.originalname.replace(/\.[^/.]+$/, ".ogg");
