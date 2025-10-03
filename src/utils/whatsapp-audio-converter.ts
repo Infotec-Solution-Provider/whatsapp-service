@@ -15,11 +15,10 @@ export interface WhatsappConvertedAudio {
 
 const TARGET_FORMAT = "mp3";
 const TARGET_MIMETYPE = "audio/mpeg";
-const TARGET_AUDIOBITRATE = "64k";       // 32k–64k é bom para voz
-const TARGET_AUDIOFREQUENCY = 44100;     // padrão universal (compatível com Android/iOS)
-const TARGET_CHANNELS = 1;               // mono é suficiente para voz
+const TARGET_AUDIOBITRATE = "64k"; // 32k–64k é bom para voz
+const TARGET_AUDIOFREQUENCY = 44100; // padrão universal (compatível com Android/iOS)
+const TARGET_CHANNELS = 1; // mono é suficiente para voz
 const TARGET_CODEC = "libmp3lame";
-
 
 class WhatsappAudioConverter {
 	/**
@@ -52,8 +51,6 @@ class WhatsappAudioConverter {
 		}
 
 		const stderrLines: string[] = [];
-		let failed = false;
-
 		try {
 			await new Promise<void>((resolve, reject) => {
 				Ffmpeg(tmpInPath)
@@ -70,7 +67,6 @@ class WhatsappAudioConverter {
 					])
 					.on("stderr", (line) => stderrLines.push(line))
 					.on("error", (err) => {
-						failed = true;
 						const streams =
 							probeInfo?.streams?.map(
 								(s: any) => `${s.codec_type}/${s.codec_name}/${s.sample_rate || ""}`

@@ -393,7 +393,25 @@ class InternalChatsService {
 			}
 
 			if ("file" in data && !!data.file) {
-				const buffer = data.sendAsAudio ? await WhatsappAudioConverter.convert(data.file.buffer) : data.file.buffer;
+				if (data.sendAsAudio) {
+					const convertedAudio = await WhatsappAudioConverter.convertToCompatible(
+						data.file.buffer,
+						data.file.mimetype
+					);
+
+					data;
+
+					process.log("Mensagem de audio, convertendo arquivo para " + convertedAudio.extension);
+
+					data.file.buffer = convertedAudio.buffer;
+					data.file.mimetype = convertedAudio.mimeType;
+					data.file.originalname = data.file.originalname.replace(
+						/\.[^/.]+$/,
+						"." + convertedAudio.extension
+					);
+					data.file.size = convertedAudio.size;
+					process.log("Mensagem convertida com sucesso.");
+				}
 
 				if (data.sendAsAudio) {
 					process.log("Mensagem convertida com sucesso.");
@@ -401,7 +419,7 @@ class InternalChatsService {
 				const file = await filesService.uploadFile({
 					instance: session.instance,
 					fileName: data.file!.originalname,
-					buffer,
+					buffer: data.file!.buffer,
 					mimeType: data.file!.mimetype,
 					dirType: FileDirType.PUBLIC
 				});
@@ -619,7 +637,13 @@ class InternalChatsService {
 		return message;
 	}
 
-	public async editInternalMessage({ options, session }: { options: EditInternalMessageOptions; session: SessionData }) {
+	public async editInternalMessage({
+		options,
+		session
+	}: {
+		options: EditInternalMessageOptions;
+		session: SessionData;
+	}) {
 		const process = new ProcessingLogger(
 			session.instance,
 			"internal-message-edit",
@@ -640,7 +664,6 @@ class InternalChatsService {
 				throw new Error("You can only edit your own messages!");
 			}
 
-
 			// Se a mensagem pertence a um grupo do WhatsApp, edita lá também
 			if (originalMsg.chat && originalMsg.chat?.wppGroupId && session.sectorId) {
 				process.log("Mensagem pertence a um grupo do WhatsApp, tentando editar lá também.");
@@ -654,7 +677,9 @@ class InternalChatsService {
 					});
 					process.log("Mensagem editada com sucesso no WhatsApp.");
 				} else {
-					process.log("Cliente WhatsApp não disponível ou mensagem não possui wwebjsId, pulando edição no WhatsApp.");
+					process.log(
+						"Cliente WhatsApp não disponível ou mensagem não possui wwebjsId, pulando edição no WhatsApp."
+					);
 				}
 			}
 
