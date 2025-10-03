@@ -7,6 +7,7 @@ import { EditMessageOptions, SendFileOptions, SendMessageOptions } from "../type
 import OpusAudioConverter from "../utils/opus-audio-converter";
 import ProcessingLogger from "../utils/processing-logger";
 import GupshupWhatsappClient from "../whatsapp-client/gupshup-whatsapp-client";
+import WABAWhatsappClient from "../whatsapp-client/waba-whatsapp-client";
 import WhatsappClient from "../whatsapp-client/whatsapp-client";
 import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 import filesService from "./files.service";
@@ -15,7 +16,6 @@ import internalChatsService from "./internal-chats.service";
 import messagesDistributionService from "./messages-distribution.service";
 import messagesService from "./messages.service";
 import prismaService from "./prisma.service";
-import WABAWhatsappClient from "../whatsapp-client/waba-whatsapp-client";
 
 export interface SendTemplateData {
 	templateId: string;
@@ -249,16 +249,18 @@ class WhatsappService {
 					process.log("Mensagem de audio, convertendo arquivo para mp3.");
 				}
 
-				const buffer = data.sendAsAudio ? await OpusAudioConverter.convert(data.file.buffer) : data.file.buffer;
-
 				if (data.sendAsAudio) {
+					data.file.buffer = await OpusAudioConverter.convert(data.file.buffer);
+					data.file.mimetype = "audio/ogg";
+					data.file.originalname = data.file.originalname.replace(/\.[^/.]+$/, ".ogg");
 					process.log("Mensagem convertida com sucesso.");
 				}
+
 				const savedFile = await filesService.uploadFile({
 					instance: session.instance,
 					fileName: data.file.originalname,
 					mimeType: data.file.mimetype,
-					buffer,
+					buffer: data.file.buffer,
 					dirType: FileDirType.PUBLIC
 				});
 
