@@ -1,5 +1,4 @@
 import { Logger, logRoutes } from "@in.pulse-crm/utils";
-import * as ngrok from "@ngrok/ngrok";
 import { handleRequestError } from "@rgranatodutra/http-errors";
 import cors from "cors";
 import "dotenv/config";
@@ -65,8 +64,6 @@ app.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
 app.use(handleRequestError);
 
 const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;
-const ngrokToken = process.env["NGROK_TOKEN"] || "";
-const enableNgrok = (process.env["ENABLE_NGROK"] || "false").toLowerCase() === "true";
 
 app.listen(serverPort, () => {
 	Logger.info("Server listening on port " + serverPort);

@@ -80,7 +80,7 @@ class WhatsappAudioConverter {
 						reject(err);
 					})
 					.on("end", () => {
-						Ffmpeg.ffprobe(tmpOutPath, (err, data) => {
+						Ffmpeg.ffprobe(tmpOutPath, (_, data) => {
 							duration = data?.format?.duration || null;
 							resolve();
 						});
