@@ -23,11 +23,8 @@ class GupshupController {
 		}
 	};
 
-	private webhookChallenge = async (req: Request, res: Response) => {
+	private webhookChallenge = async (_: Request, res: Response) => {
 		try {
-			console.log("challenge body", req.body);
-			console.log("challenge headers", req.headers);
-
 			res.status(200).send();
 		} catch (err: any) {
 			res.status(500).send({ message: err?.message });

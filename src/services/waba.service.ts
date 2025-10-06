@@ -9,165 +9,193 @@ import { ReceiveMessageBody, WABAMessageStatusData, Message } from "../types/wha
 import WABAMessageParser from "../parsers/waba-message.parser";
 
 interface ValidateEntryResultStatus {
-    type: "status";
-    data: WABAMessageStatusData;
-    appId: string | undefined;
+	type: "status";
+	data: WABAMessageStatusData;
+	appId: string | undefined;
 }
 
 interface ValidateEntryResultMessage {
-    type: "message";
-    data: Message;
-    appId: string | undefined;
-    recipient: string;
+	type: "message";
+	data: Message;
+	appId: string | undefined;
+	recipient: string;
 }
 
 type ValidateEntryResult = ValidateEntryResultStatus | ValidateEntryResultMessage;
 
 class WABAService {
-    private async validateEntry(_instance: string, logger: ProcessingLogger, input: unknown): Promise<ValidateEntryResult> {
-        logger.log("Validando webhook entry");
+	private async validateEntry(
+		_instance: string,
+		logger: ProcessingLogger,
+		input: unknown
+	): Promise<ValidateEntryResult> {
+		logger.log("Validando webhook entry");
 
-        if (typeof input !== "object" || input === null) {
-            throw new BadRequestError("invalid webhook entry.");
-        }
+		if (typeof input !== "object" || input === null) {
+			throw new BadRequestError("invalid webhook entry.");
+		}
 
-        const body = input as ReceiveMessageBody;
-        const entry = body.entry?.[0];
-        const change = entry?.changes?.[0];
-        const value = change?.value as unknown as ReceiveMessageBody["entry"][number]["changes"][number]["value"] | undefined;
+		const body = input as ReceiveMessageBody;
+		const entry = body.entry?.[0];
+		const change = entry?.changes?.[0];
+		const value = change?.value as unknown as
+			| ReceiveMessageBody["entry"][number]["changes"][number]["value"]
+			| undefined;
 
-        if (!value) {
-            throw new BadRequestError("invalid webhook entry.");
-        }
+		if (!value) {
+			throw new BadRequestError("invalid webhook entry.");
+		}
 
-        const recipient = value?.metadata?.display_phone_number;
+		const recipient = value?.metadata?.display_phone_number;
 
-        if (value.statuses && value.statuses[0]) {
-            const statusData = value.statuses[0] as WABAMessageStatusData;
-            logger.log("Identificado como status de mensagem: " + statusData.status);
-            return { type: "status", data: statusData, appId: undefined };
-        }
+		if (value.statuses && value.statuses[0]) {
+			const statusData = value.statuses[0] as WABAMessageStatusData;
+			logger.log("Identificado como status de mensagem: " + statusData.status);
+			return { type: "status", data: statusData, appId: undefined };
+		}
 
-        if (value.messages && value.messages[0]) {
-            const message = value.messages[0] as Message;
-            logger.log("Identificado como mensagem do tipo " + message.type);
-            return { type: "message", data: message, appId: undefined, recipient };
-        }
+		if (value.messages && value.messages[0]) {
+			const message = value.messages[0] as Message;
+			logger.log("Identificado como mensagem do tipo " + message.type);
+			return { type: "message", data: message, appId: undefined, recipient };
+		}
 
-        throw new BadRequestError("Unexpected webhook entry");
-    }
+		throw new BadRequestError("Unexpected webhook entry");
+	}
 
-    public async handleWebhookEntry(instance: string, input: unknown) {
-        const logger = new ProcessingLogger(instance, "waba-webhook-entry", Date.now().toString(), input);
+	public async handleWebhookEntry(instance: string, input: unknown) {
+		const logger = new ProcessingLogger(instance, "waba-webhook-entry", Date.now().toString(), input);
 
-        try {
-            logger.log("Iniciando processamento do webhook WABA");
-            const validated = await this.validateEntry(instance, logger, input);
-            logger.log("Webhook validado", validated);
+		try {
+			logger.log("Iniciando processamento do webhook WABA");
+			const validated = await this.validateEntry(instance, logger, input);
+			logger.log("Webhook validado", validated);
 
-            // Encontrar client WABA pela instance
-            const client = await prismaService.wppClient.findFirstOrThrow({
-                where: {
-                    instance,
-                    type: "WABA"
-                }
-            });
-            logger.log("Client WABA encontrado. id: " + client.id);
+			// Encontrar client WABA pela instance
+			const client = await prismaService.wppClient.findFirstOrThrow({
+				where: {
+					instance,
+					type: "WABA"
+				}
+			});
+			logger.log("Client WABA encontrado. id: " + client.id);
 
-            switch (validated.type) {
-                case "message":
-                    logger.processName += "/message";
-                    logger.log("Processando mensagem WABA");
-                    const parsedMsg = await WABAMessageParser.parse(validated.recipient, instance, validated.data, logger);
-                    const inserted = await messagesService.insertMessage(parsedMsg);
-                    await messagesDistributionService.processMessage(instance, client.id, inserted);
-                    logger.log("Mensagem WABA processada com sucesso");
-                    break;
-                case "status":
-                    logger.processName += "/status";
-                    logger.log("Processando status WABA");
-                    const status = WABAMessageParser.parseStatus(validated.data);
-                    await messagesDistributionService.processMessageStatus("waba", validated.data.id, status);
+			switch (validated.type) {
+				case "message":
+					logger.processName += "/message";
+					logger.log("Processando mensagem WABA");
+					const parsedMsg = await WABAMessageParser.parse(
+						validated.recipient,
+						instance,
+						validated.data,
+						logger
+					);
+					const inserted = await messagesService.insertMessage(parsedMsg);
+					await messagesDistributionService.processMessage(instance, client.id, inserted);
+					logger.log("Mensagem WABA processada com sucesso");
+					break;
+				case "status":
+					logger.processName += "/status";
+					logger.log("Processando status WABA");
+					const status = WABAMessageParser.parseStatus(validated.data);
+					await messagesDistributionService.processMessageStatus("waba", validated.data.id, status);
 
-                    if (validated.data.errors && validated.data.errors[0]) {
-                        const error = validated.data.errors[0];
-                        await this.processFailedStatus({ logger, statusData: validated.data, error, client });
-                    }
+					if (validated.data.errors && validated.data.errors[0]) {
+						const error = validated.data.errors[0];
+						await this.processFailedStatus({ logger, statusData: validated.data, error, client });
+					}
 
-                    if (validated.data.conversation && validated.data.conversation.expiration_timestamp) {
-                        await this.processConversationState({
-                            logger,
-                            statusData: validated.data,
-                            client
-                        });
-                    }
-                    logger.log("Status WABA processado");
-                    break;
-                default:
-                    logger.processName += "/unknown";
-                    logger.failed("Tipo de entrada desconhecido");
-            }
+					if (validated.data.conversation && validated.data.conversation.expiration_timestamp) {
+						await this.processConversationState({
+							logger,
+							statusData: validated.data,
+							client
+						});
+					}
+					logger.log("Status WABA processado");
+					break;
+				default:
+					logger.processName += "/unknown";
+					logger.failed("Tipo de entrada desconhecido");
+			}
 
-            logger.success("Webhook WABA processado com sucesso");
-        } catch (err: any) {
-            logger.failed(err);
-            throw err;
-        }
-    }
+			logger.success("Webhook WABA processado com sucesso");
+		} catch (err: any) {
+			logger.failed(err);
+			throw err;
+		}
+	}
 
+	// private async downloadAndStoreFile(instance: string, url: string, mime: string, filename?: string) {
+	//   // Implementação futura
+	// }
 
+	private async processFailedStatus({
+		logger,
+		statusData,
+		error,
+		client
+	}: {
+		logger: ProcessingLogger;
+		statusData: WABAMessageStatusData;
+		error: { code: number; title: string; message: string; error_data?: { details: string } };
+		client: WppClient;
+	}) {
+		try {
+			logger.log("Processando status de falha WABA", { messageId: statusData.id });
+			const message = await prismaService.wppMessage.findFirst({
+				where: { OR: [{ wabaId: statusData.id }, { gupshupId: statusData.id }] },
+				include: { WppContact: true }
+			});
+			if (!message || !message.WppContact) {
+				logger.log("Mensagem ou contato não encontrado para processar falha");
+				return;
+			}
+			const contact = message.WppContact;
+			const chat = await chatsService.getChatForContact(client.id, contact);
+			const systemMessage = `Ocorreu um erro ao enviar a mensagem para o número do WhatsApp.\nCódigo do erro: ${error.code}.\nDescrição: ${error.message}.`;
+			await messagesDistributionService.addThirdpartyMessage(
+				client.instance,
+				systemMessage,
+				"META",
+				true,
+				contact,
+				chat,
+				message.id
+			);
+		} catch (err) {
+			logger.log("Erro ao processar status de falha WABA");
+		}
+	}
 
-    // private async downloadAndStoreFile(instance: string, url: string, mime: string, filename?: string) {
-    //   // Implementação futura
-    // }
+	private async processConversationState({
+		logger,
+		statusData
+	}: {
+		logger: ProcessingLogger;
+		statusData: WABAMessageStatusData;
+		client: WppClient;
+	}) {
+		try {
+			if (!statusData.conversation?.expiration_timestamp) return;
+			logger.log("Atualizando expiration da conversa", {
+				expiration: statusData.conversation.expiration_timestamp
+			});
 
-    private async processFailedStatus({ logger, statusData, error, client }: { logger: ProcessingLogger; statusData: WABAMessageStatusData; error: { code: number; title: string; message: string; error_data?: { details: string } }; client: WppClient; }) {
-        try {
-            logger.log("Processando status de falha WABA", { messageId: statusData.id });
-            const message = await prismaService.wppMessage.findFirst({
-                where: { OR: [{ wabaId: statusData.id }, { gupshupId: statusData.id }] },
-                include: { WppContact: true }
-            });
-            if (!message || !message.WppContact) {
-                logger.log("Mensagem ou contato não encontrado para processar falha");
-                return;
-            }
-            const contact = message.WppContact;
-            const chat = await chatsService.getChatForContact(client.id, contact);
-            const systemMessage = `Ocorreu um erro ao enviar a mensagem para o número do WhatsApp.\nCódigo do erro: ${error.code}.\nDescrição: ${error.message}.`;
-            await messagesDistributionService.addThirdpartyMessage(
-                client.instance,
-                systemMessage,
-                "META",
-                true,
-                contact,
-                chat,
-                message.id
-            );
-        } catch (err) {
-            logger.log("Erro ao processar status de falha WABA");
-        }
-    }
+			const message = await prismaService.wppMessage.findFirst({
+				where: { wabaId: statusData.id },
+				include: { WppContact: true }
+			});
+			if (!message?.WppContact) return;
 
-    private async processConversationState({ logger, statusData }: { logger: ProcessingLogger; statusData: WABAMessageStatusData; client: WppClient; }) {
-        try {
-            if (!statusData.conversation?.expiration_timestamp) return;
-            logger.log("Atualizando expiration da conversa", { expiration: statusData.conversation.expiration_timestamp });
-
-            const message = await prismaService.wppMessage.findFirst({
-                where: { wabaId: statusData.id },
-                include: { WppContact: true }
-            });
-            if (!message?.WppContact) return;
-
-            await prismaService.wppContact.update({
-                where: { id: message.WppContact.id },
-                data: { conversationExpiration: statusData.conversation.expiration_timestamp + "000" }
-            });
-        } catch (err) {
-            logger.log("Erro ao processar estado de conversa WABA");
-        }
-    }
+			await prismaService.wppContact.update({
+				where: { id: message.WppContact.id },
+				data: { conversationExpiration: statusData.conversation.expiration_timestamp + "000" }
+			});
+		} catch (err) {
+			logger.log("Erro ao processar estado de conversa WABA");
+		}
+	}
 }
 
 export default new WABAService();

@@ -5,6 +5,7 @@ import WhatsappClient from "./whatsapp-client";
 import { GSRecoverTemplatesResponse } from "../types/gupshup-api.types";
 import ProcessingLogger from "../utils/processing-logger";
 import { randomUUID } from "crypto";
+import TemplateAdapter from "../adapters/template.adapter";
 
 const GUP_URL = "https://api.gupshup.io";
 
@@ -127,7 +128,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 			const details = err?.response?.data || err?.message || String(err);
 			logger.log("[Gupshup] Erro ao enviar mensagem.", details);
 			logger.failed(details);
-			console.error(details);
+
 			throw err;
 		}
 	}
@@ -142,8 +143,8 @@ class GupshupWhatsappClient implements WhatsappClient {
 		data.append(
 			"template",
 			JSON.stringify({
-				id: options.templateId,
-				params: options.parameters || []
+				id: options.template.id,
+				params: options.components
 			})
 		);
 
@@ -153,16 +154,18 @@ class GupshupWhatsappClient implements WhatsappClient {
 			}
 		});
 
-		const text = options.templateText.replace(/{{(\d+)}}/g, (_, index) => {
-			return options.parameters[parseInt(index, 10)] || "";
+		const replacedText = options.template.text.replace(/\{\{(\d+)\}\}/g, (_, index) => {
+			const idx = parseInt(index, 10);
+			return options.components[idx] || "";
 		});
+
 		const now = new Date();
 
 		const message: CreateMessageDto = {
 			instance: this.instance,
 			from: `me:${this.phone}`,
 			to: options.to,
-			body: text,
+			body: replacedText,
 			status: "SENT",
 			timestamp: now.getTime().toString(),
 			sentAt: now,
@@ -184,10 +187,12 @@ class GupshupWhatsappClient implements WhatsappClient {
 			throw new Error("Failed to fetch templates from Gupshup.");
 		}
 
-		return response.data.templates || [];
+		const mapped = response.data.templates.map((t) => TemplateAdapter.fromGupshupTemplate(t));
+
+		return mapped;
 	}
 
-	public async editMessage({ }: EditMessageOptions): Promise<void> {
+	public async editMessage({}: EditMessageOptions): Promise<void> {
 		throw new Error("Method not implemented.");
 	}
 }

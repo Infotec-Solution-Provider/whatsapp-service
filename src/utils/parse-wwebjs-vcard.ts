@@ -1,6 +1,5 @@
 function parseVCard(vCardText: string) {
 	if (!vCardText || typeof vCardText !== "string") {
-		console.error("O texto do vCard é inválido.");
 		return "";
 	}
 	const lines = vCardText.split("\n");

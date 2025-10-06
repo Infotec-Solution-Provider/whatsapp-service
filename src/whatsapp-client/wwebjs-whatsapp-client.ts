@@ -10,8 +10,14 @@ import socketService from "../services/socket.service";
 import ProcessingLogger from "../utils/processing-logger";
 import messagesService from "../services/messages.service";
 import messagesDistributionService from "../services/messages-distribution.service";
-import { EditMessageOptions, Mentions, SendMessageOptions } from "../types/whatsapp-instance.types";
+import {
+	EditMessageOptions,
+	Mentions,
+	SendMessageOptions,
+	SendTemplateOptions
+} from "../types/whatsapp-instance.types";
 import internalChatsService from "../services/internal-chats.service";
+import CreateMessageDto from "../dtos/create-message.dto";
 
 const PUPPETEER_ARGS = {
 	headless: true,
@@ -457,6 +463,18 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		}
 
 		return { text: newText, mentions: mentionIds };
+	}
+
+	public async getTemplates(): Promise<any> {
+		throw new Error("Not supported by WWEBJS");
+	}
+
+	public async sendTemplate(
+		_options: SendTemplateOptions,
+		_chatId: number,
+		_contactId: number
+	): Promise<CreateMessageDto> {
+		throw new Error("Not supported by WWEBJS");
 	}
 }
 

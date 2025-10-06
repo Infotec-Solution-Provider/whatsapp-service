@@ -795,12 +795,11 @@ class InternalChatsService {
 							userOrContact = null;
 						}
 					}
-					console.log("userOrContact", userOrContact);
 
 					const messageBody = internalChat?.isGroup
 						? `${userOrContact?.NOME || userOrContact?.name ? `*${userOrContact.NOME || userOrContact.name}*:` : ""} ${originalMsg.body}`
 						: originalMsg.body;
-					console.log("messageBody", messageBody);
+
 					const messageData: Prisma.InternalMessageCreateInput = {
 						instance: session.instance,
 						from: `user:${session.userId}`,
@@ -818,7 +817,7 @@ class InternalChatsService {
 						fileType: originalMsg.fileType,
 						fileSize: originalMsg.fileSize
 					};
-					console.log("messageData dentro do encaminhar interno", messageData);
+
 					const savedInternalMsg = await prismaService.internalMessage.create({
 						data: messageData
 					});

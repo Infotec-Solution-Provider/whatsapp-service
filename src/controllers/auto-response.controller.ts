@@ -19,9 +19,6 @@ class AutoResponseController {
     }
 
 private getRules = async (req: Request, res: Response) => {
-    console.log('autoResponseService:', autoResponseService);
-    console.log('instance:', req.session.instance);
-
     const { instance } = req.session;
     const rules = await autoResponseService.getRules(instance);
     res.status(200).send({

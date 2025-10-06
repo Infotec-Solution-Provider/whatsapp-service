@@ -1,5 +1,6 @@
+import { TemplateMessage } from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
-import { EditMessageOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
+import { EditMessageOptions, SendMessageOptions, SendTemplateOptions } from "../types/whatsapp-instance.types";
 
 /**
  * Abstract class representing a WhatsApp instance.
@@ -66,6 +67,14 @@ abstract class WhatsappClient {
 	 * @returns - A promise resolved when the message is edited.
 	 */
 	public abstract editMessage(props: EditMessageOptions): Promise<void>;
+
+	public abstract getTemplates(): Promise<TemplateMessage[]>;
+
+	public abstract sendTemplate(
+		props: SendTemplateOptions,
+		chatId: number,
+		contactId: number
+	): Promise<CreateMessageDto>;
 }
 
 export default WhatsappClient;

@@ -71,12 +71,3 @@ const enableNgrok = (process.env["ENABLE_NGROK"] || "false").toLowerCase() === "
 app.listen(serverPort, () => {
 	Logger.info("Server listening on port " + serverPort);
 });
-
-
-if (enableNgrok) {
-	ngrok.consoleLog();
-
-	ngrok.connect({ addr: 8080, authtoken: ngrokToken, subdomain: "inpulse-whatsapp" })
-		.then(listener => console.log(`Ingress established at: ${listener.url()}`));
-
-}

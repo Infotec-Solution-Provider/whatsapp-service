@@ -81,7 +81,6 @@ class WhatsappAudioConverter {
 					})
 					.on("end", () => {
 						Ffmpeg.ffprobe(tmpOutPath, (err, data) => {
-							console.log("FFPROBE RESULT", { err, data });
 							duration = data?.format?.duration || null;
 							resolve();
 						});
@@ -99,7 +98,6 @@ class WhatsappAudioConverter {
 				duration
 			};
 		} finally {
-			console.log("KEEP_TEMP_AUDIO", process.env["KEEP_TEMP_AUDIO"]);
 			if (process.env["KEEP_TEMP_AUDIO"] !== "true") {
 				Logger.debug("Removing temp audio files", { tmpInPath, tmpOutPath });
 				await this.safeUnlink(tmpInPath);

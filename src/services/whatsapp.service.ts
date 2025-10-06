@@ -17,11 +17,13 @@ import internalChatsService from "./internal-chats.service";
 import messagesDistributionService from "./messages-distribution.service";
 import messagesService from "./messages.service";
 import prismaService from "./prisma.service";
+import { TemplateMessage } from "../adapters/template.adapter";
+import { TemplateVariables } from "../types/whatsapp-api.types";
 
 export interface SendTemplateData {
-	templateId: string;
-	templateText: string;
-	templateParams: string[];
+	template: TemplateMessage;
+	templateVariables: TemplateVariables;
+	components: string[];
 }
 
 interface SendBotMessageData {
@@ -252,14 +254,17 @@ class WhatsappService {
 						data.file.mimetype
 					);
 
-					data
+					data;
 
 					process.log("Mensagem de audio, convertendo arquivo para " + convertedAudio.extension);
 					Logger.debug("Audio original", data.file);
 					Logger.debug("Audio convertido", convertedAudio);
 					data.file.buffer = convertedAudio.buffer;
 					data.file.mimetype = convertedAudio.mimeType;
-					data.file.originalname = data.file.originalname.replace(/\.[^/.]+$/, "." + convertedAudio.extension);
+					data.file.originalname = data.file.originalname.replace(
+						/\.[^/.]+$/,
+						"." + convertedAudio.extension
+					);
 					data.file.size = convertedAudio.size;
 					process.log("Mensagem convertida com sucesso.");
 				}
@@ -339,7 +344,6 @@ class WhatsappService {
 
 			return savedMsg;
 		} catch (err) {
-			console.error(err);
 			process.failed("Erro ao enviar mensagem: " + sanitizeErrorMessage(err));
 			throw new BadRequestError("Erro ao enviar mensagem.", err);
 		}
@@ -411,7 +415,6 @@ class WhatsappService {
 
 			return savedMsg;
 		} catch (err) {
-			console.error(err);
 			process.failed("Erro ao enviar mensagem: " + sanitizeErrorMessage(err));
 			throw new BadRequestError("Erro ao enviar mensagem.", err);
 		}
@@ -500,16 +503,6 @@ class WhatsappService {
 		return groups;
 	}
 
-	private async getGupshupClient(session: SessionData) {
-		const client = await this.getClientBySector(session.instance, session.sectorId);
-
-		if (!(client instanceof GupshupWhatsappClient)) {
-			throw new Error("Invalid WhatsApp client type for Gupshup service.");
-		}
-
-		return client;
-	}
-
 	public async sendTemplate(
 		session: SessionData,
 		to: string,
@@ -520,14 +513,14 @@ class WhatsappService {
 		const process = new ProcessingLogger(session.instance, "send-template", `${to}-${Date.now()}`, data);
 
 		try {
-			const client = await this.getGupshupClient(session);
+			const client = await this.getClientBySector(session.instance, session.sectorId);
 
 			const message = await client.sendTemplate(
 				{
 					to,
-					templateId: data.templateId,
-					templateText: data.templateText,
-					parameters: data.templateParams
+					template: data.template,
+					templateVariables: data.templateVariables,
+					components: data.components
 				},
 				chatId,
 				contactId
@@ -544,15 +537,10 @@ class WhatsappService {
 	}
 
 	public async getTemplates(session: SessionData) {
-		const client = await this.getGupshupClient(session);
+		const client = await this.getClientBySector(session.instance, session.sectorId);
 		const templates = await client.getTemplates();
 
-		return templates.map((t) => ({
-			id: t.id,
-			name: t.elementName,
-			category: t.category,
-			text: t.data
-		}));
+		return templates;
 	}
 
 	public async forwardMessages(
@@ -778,7 +766,7 @@ class WhatsappService {
 			return savedMsg;
 		} catch (err) {
 			process.failed(`Erro ao enviar resposta automática: ${sanitizeErrorMessage(err)}`);
-			console.error("Falha ao enviar resposta automática:", err);
+
 			return undefined;
 		}
 	}

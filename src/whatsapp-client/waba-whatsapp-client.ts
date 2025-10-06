@@ -1,12 +1,24 @@
+import { Logger } from "@in.pulse-crm/utils";
 import axios from "axios";
+import FormData from "form-data";
+import TemplateAdapter from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
 import filesService from "../services/files.service";
-import { EditMessageOptions, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
+import { TemplateVariables, WABAMessageTemplate, WABATemplateBodyComponent } from "../types/whatsapp-api.types";
+import {
+	EditMessageOptions,
+	SendFileOptions,
+	SendMessageOptions,
+	SendTemplateOptions
+} from "../types/whatsapp-instance.types";
+import generateUID from "../utils/generate-uid";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
-import FormData from "form-data";
-import { Logger } from "@in.pulse-crm/utils";
-import generateUID from "../utils/generate-uid";
+
+interface GetTemplateVariablesProps {
+	template: WABAMessageTemplate;
+	variables: TemplateVariables;
+}
 
 const GRAPH_API_URL = "https://graph.facebook.com/v16.0/";
 
@@ -165,6 +177,126 @@ class WABAWhatsappClient implements WhatsappClient {
 			throw new Error("Falha ao enviar mídia a Graph API. Processo ID: " + processId);
 		}
 	}
+
+	public async sendTemplate(
+		options: SendTemplateOptions,
+		chatId: number,
+		contactId: number
+	): Promise<CreateMessageDto> {
+		const process = new ProcessingLogger(this.instance, "waba-send-template-message", generateUID(), {
+			options,
+			chatId,
+			contactId
+		});
+
+		try {
+			process.log("Iniciando envio de mensagem de template...");
+			const requestURL = `https://graph.facebook.com/v16.0/${this.wabaPhoneId}/messages/`;
+			const components = this.getTemplateVariables({
+				template: options.template.raw,
+				variables: options.templateVariables
+			});
+			process.log("Componentes do template processados.", components);
+
+			const body = {
+				messaging_product: "whatsapp",
+				recipient_type: "individual",
+				to: options.to,
+				type: "template",
+				template: {
+					name: options.template.name,
+					language: {
+						code: options.template.raw.language
+					},
+					components
+				}
+			};
+			process.log("Enviando mensagem de template a Graph API...", {
+				url: requestURL,
+				body,
+				options: this.reqOptions
+			});
+
+			const response = await axios.post(requestURL, body, this.reqOptions);
+			const replacedText = (options.template.raw.components as WABATemplateBodyComponent[])
+				.map((c, i) => {
+					let text = c.text;
+					components[i]?.parameters.forEach((p, pi) => {
+						text = text.replaceAll(`{{${pi + 1}}}`, p.text);
+					});
+
+					return text;
+				})
+				.join("\n");
+
+			const now = new Date();
+			const message: CreateMessageDto = {
+				instance: this.instance,
+				from: `me:${this.phone}`,
+				to: options.to,
+				body: replacedText,
+				status: "PENDING",
+				timestamp: now.getTime().toString(),
+				sentAt: now,
+				type: "template",
+				wabaId: response.data.messages[0].id as string,
+				chatId,
+				contactId
+			};
+			process.log("Mensagem de template enviada com sucesso.");
+			process.success(message);
+			return message;
+		} catch (error) {
+			process.log("Falha ao enviar mensagem de template...");
+			process.failed(error);
+			throw error;
+		}
+	}
+
+	private getTemplateVariables({ template, variables }: GetTemplateVariablesProps) {
+		const templateComponents = template.components;
+
+		const formatedVars = templateComponents.map((c) => {
+			if (
+				c.type === "HEADER" &&
+				c.example &&
+				Array.isArray(c.example.header_text) &&
+				c.example.header_text[0] !== undefined
+			) {
+				const key = c.example.header_text[0];
+				const parameter = (variables as unknown as Record<string, string>)[key] || "Undefined";
+
+				return {
+					type: "header",
+					parameters: [{ type: "text", text: parameter }]
+				};
+			} else if (
+				c.type === "BODY" &&
+				c.example &&
+				Array.isArray(c.example.body_text) &&
+				c.example.body_text[0] !== undefined
+			) {
+				const parameters: string[] = [];
+
+				for (let s of c.example.body_text[0]) {
+					const parameter = (variables as unknown as Record<string, string>)[s] || "Undefined";
+					parameters.push(parameter);
+				}
+
+				if (parameters.length > 0) {
+					return {
+						type: "body",
+						parameters: parameters.map((p) => ({ type: "text", text: p }))
+					};
+				}
+			}
+			// Explicitly return undefined for code paths that do not match above
+			return undefined;
+		});
+
+		// Filter out undefined values
+		return formatedVars.filter((v) => v !== undefined);
+	}
 	/* 	private validateSupportedMediaType(mimeType: string, extension: string): void {
 			const supportedTypes = [
 				// Áudio
@@ -199,6 +331,14 @@ class WABAWhatsappClient implements WhatsappClient {
 				throw new Error(`Tipo de mídia não suportado: ${mimeType} (${extension})`);
 			}
 		} */
+
+	public async getTemplates(): Promise<any> {
+		const requestURL = `https://graph.facebook.com/v16.0/${this.wabaAccountId}/message_templates?limit=999`;
+		const response = await axios.get(requestURL, this.reqOptions);
+		const templates = response.data.data;
+
+		return templates.map((t: WABAMessageTemplate) => TemplateAdapter.fromWABATemplate(t));
+	}
 }
 
 export default WABAWhatsappClient;

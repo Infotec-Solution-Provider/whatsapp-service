@@ -1,4 +1,6 @@
 import { File } from "@in.pulse-crm/sdk";
+import { TemplateMessage } from "../adapters/template.adapter";
+import { TemplateVariables } from "./whatsapp-api.types";
 
 interface BaseSendMessageOptions {
 	to: string;
@@ -29,9 +31,9 @@ export interface EditMessageOptions {
 }
 
 export interface SendTemplateOptions extends BaseSendMessageOptions {
-	templateId: string;
-	templateText: string;
-	parameters: string[];
+	template: TemplateMessage;
+	templateVariables: TemplateVariables;
+	components: string[];
 }
 
 export interface WhatsappInstanceProps {
@@ -47,3 +49,5 @@ export type Mention = {
 export type Mentions = Mention[];
 
 export type WhatsAppMention = { id: string; tag?: string };
+
+export interface WhatsappTemplate {}

@@ -258,9 +258,9 @@ export interface WABAMessageTemplate {
 		code: string;
 		policy?: string;
 	};
-	status?: string;
-	category?: string;
-	id?: string;
+	status: string;
+	category: string;
+	id: string;
 }
 
 export type WABATemplateComponents =
@@ -410,4 +410,14 @@ export interface GSWebhookMessage {
 	entry: [ReceiveMessageEntry];
 	gs_app_id: string;
 	object: string;
+}
+
+export interface TemplateVariables {
+	saudação_tempo: string;
+	cliente_cnpj: string;
+	cliente_razao: string;
+	contato_primeiro_nome: string;
+	contato_nome_completo: string;
+	atendente_nome: string;
+	atendente_nome_exibição: string;
 }
