@@ -118,14 +118,14 @@ class GupshupService {
 
 			switch (type) {
 				case "message":
-					logger.processName = logger.processName + ("/message")
+					logger.processName = logger.processName + "/message";
 					logger.log("processando mensagem recebida");
 					const msg = await messagesService.insertMessage(data);
 					await mdservice.processMessage(instance, client.id, msg);
 					logger.log("mensagem processada com sucesso");
 					break;
 				case "status":
-					logger.processName = logger.processName + ("/status")
+					logger.processName = logger.processName + "/status";
 					logger.log("processando status de mensagem recebida");
 					const status = GUPSHUPMessageParser.parseStatus(entry.data);
 					await mdservice.processMessageStatusGS(entry.data.gs_id, entry.data.meta_msg_id, status);
@@ -152,12 +152,12 @@ class GupshupService {
 					logger.log("status de mensagem processado com sucesso");
 					break;
 				case "billing":
-					logger.processName = logger.processName + ("/billing")
+					logger.processName = logger.processName + "/billing";
 					logger.log("Processando evento de cobrança");
 					await this.processBillingEvent({ logger, event: data });
 					break;
 				default:
-					logger.processName = logger.processName + ("/unknown")
+					logger.processName = logger.processName + "/unknown";
 					logger.failed("entrada desconhecida");
 					break;
 			}

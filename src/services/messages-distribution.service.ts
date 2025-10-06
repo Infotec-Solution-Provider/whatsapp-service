@@ -323,7 +323,11 @@ class MessagesDistributionService {
 	}
 
 	public async processMessageStatusGS(gs_id: string, id: string, status: WppMessageStatus) {
+		const logger = new ProcessingLogger("", "gs-message-status", `gs:${gs_id}`, { gs_id, meta_msg_id: id, status });
+
 		try {
+			logger.log("Iniciando atualização de status Gupshup/META", { gs_id, meta_msg_id: id, status });
+
 			const findMsg = await prismaService.wppMessage.findFirst({
 				where: {
 					OR: [{ gupshupId: gs_id }, { wabaId: gs_id }]
@@ -331,8 +335,15 @@ class MessagesDistributionService {
 			});
 
 			if (!findMsg) {
+				logger.log("Mensagem não encontrada para atualizar status", { triedKeys: [gs_id] });
 				return;
 			}
+
+			logger.log("Mensagem localizada para atualização", {
+				dbId: findMsg.id,
+				prevStatus: findMsg.status,
+				hasChat: findMsg.chatId !== null
+			});
 
 			const updatedMsg = await prismaService.wppMessage.update({
 				where: {
@@ -345,7 +356,15 @@ class MessagesDistributionService {
 				}
 			});
 
+			logger.log("Status da mensagem atualizado", {
+				dbId: updatedMsg.id,
+				newStatus: updatedMsg.status,
+				chatId: updatedMsg.chatId
+			});
+
 			if (updatedMsg.chatId === null) {
+				logger.log("Mensagem sem chat associado após update. Encerrando fluxo.");
+				logger.success("Processo concluído (sem socket emit).");
 				return;
 			}
 
@@ -355,8 +374,13 @@ class MessagesDistributionService {
 				contactId: updatedMsg.contactId!,
 				status
 			});
+
+			logger.log("Status emitido via socket", { room: chatRoom });
+			logger.success("Atualização de status concluída com sucesso");
 		} catch (err) {
+			logger.log("Falha ao atualizar status da mensagem", { error: (err as any)?.message });
 			console.log("Não foi possível atualizar a mensagem de id: " + id);
+			logger.failed(err);
 		}
 	}
 
