@@ -1,32 +1,16 @@
 import { Request, Response, Router } from "express";
-import whatsappService from "../services/whatsapp.service";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
+import whatsappService from "../services/whatsapp.service";
+
 class WhatsappController {
 	constructor(public readonly router: Router) {
-		this.router.get(
-			"/api/whatsapp/groups",
-			isAuthenticated,
-			this.getGroups
-		);
-
-		this.router.get(
-			"/api/whatsapp/templates",
-			isAuthenticated,
-			this.getTemplates
-		);
-
-		this.router.post(
-			"/api/whatsapp/templates/send",
-			isAuthenticated,
-			this.sendTemplate
-		);
+		this.router.get("/api/whatsapp/groups", isAuthenticated, this.getGroups);
+		this.router.get("/api/whatsapp/templates", isAuthenticated, this.getTemplates);
+		this.router.post("/api/whatsapp/templates/send", isAuthenticated, this.sendTemplate);
 	}
 
 	private async getGroups(req: Request, res: Response) {
-		const groups = await whatsappService.getGroups(
-			req.session.instance,
-			req.session.sectorId
-		);
+		const groups = await whatsappService.getGroups(req.session.instance, req.session.sectorId);
 
 		res.status(200).json({
 			message: "Groups retrieved successfully!",
@@ -45,13 +29,7 @@ class WhatsappController {
 			const session = req.session;
 			const { chatId, contactId, data, to } = req.body;
 
-			await whatsappService.sendTemplate(
-				session,
-				to,
-				data,
-				chatId,
-				contactId
-			);
+			await whatsappService.sendTemplate(session, to, data, chatId, contactId);
 
 			res.status(201).send();
 		} catch (err: any) {
