@@ -217,7 +217,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				internalChatsService.receiveMessage(
 					chat.id.user,
 					parsedMsg,
-					msg.author || contact?.name || contact?.pushname || msg.from.split("@")[0]!
+					contact?.number || contact?.pushname || msg.from.split("@")[0]!
 				);
 			}
 		} catch (err) {
