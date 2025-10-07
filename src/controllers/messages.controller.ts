@@ -51,19 +51,26 @@ class MessagesController {
 	}
 
 	private async sendMessage(req: Request, res: Response) {
-		const { to, ...data } = req.body;
-		const file = req.file;
+		try {
+			const { to, ...data } = req.body;
+			const file = req.file;
 
-		if (file) {
-			data.file = file;
+			if (file) {
+				data.file = file;
+			}
+
+			const message = await whatsappService.sendMessage(req.session, to, data);
+
+			res.status(201).send({
+				message: "Message sent successfully!",
+				data: message
+			});
+		} catch (error) {
+			res.status(500).send({
+				message: "Failed to send message",
+				error: (error as Error).message
+			});
 		}
-
-		const message = await whatsappService.sendMessage(req.session, to, data);
-
-		res.status(201).send({
-			message: "Message sent successfully!",
-			data: message
-		});
 	}
 	private async forwardMessages(req: Request, res: Response) {
 		const { messageIds, whatsappTargets, internalTargets, sourceType } = req.body;

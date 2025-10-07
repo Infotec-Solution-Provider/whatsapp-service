@@ -14,6 +14,7 @@ import {
 import generateUID from "../utils/generate-uid";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
+import { AxiosError } from "axios";
 
 interface GetTemplateVariablesProps {
 	template: WABAMessageTemplate;
@@ -71,6 +72,11 @@ class WABAWhatsappClient implements WhatsappClient {
 				process.log("Upload de mídia concluído.", uploadedFile);
 				process.log("Montando corpo da mensagem de mídia...");
 				reqBody["type"] = msgType;
+
+				if (msgType === "audio") {
+					options.text = null;
+				}
+
 				reqBody[msgType] = {
 					id: uploadedFile.id,
 					...(options.text ? { caption: options.text } : {}),
@@ -104,6 +110,9 @@ class WABAWhatsappClient implements WhatsappClient {
 
 			return dto;
 		} catch (error) {
+			if (error instanceof AxiosError) {
+				console.error("Erro na requisição Axios:", error.response?.data || error.message);
+			}
 			process.log("Falha ao enviar mensagem...");
 			process.failed(error);
 			throw error;
