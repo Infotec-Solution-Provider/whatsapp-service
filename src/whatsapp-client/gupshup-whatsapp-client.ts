@@ -136,6 +136,8 @@ class GupshupWhatsappClient implements WhatsappClient {
 	public async sendTemplate(options: SendTemplateOptions, chatId: number, contactId: number) {
 		const data = new URLSearchParams();
 
+		console.log("[Gupshup] Enviando template com opções:", options);
+
 		data.append("channel", "whatsapp");
 		data.append("src.name", this.appName);
 		data.append("source", this.phone);
@@ -154,9 +156,10 @@ class GupshupWhatsappClient implements WhatsappClient {
 			}
 		});
 
-		const replacedText = options.template.text.replace(/\{\{(\d+)\}\}/g, (_, index) => {
-			const idx = parseInt(index, 10);
-			return options.components[idx] || "";
+		let replacedText = options.template.text;
+		options.components.forEach((param, index) => {
+			const placeholder = `{{${index + 1}}}`;
+			replacedText = replacedText.replace(placeholder, param);
 		});
 
 		const now = new Date();
