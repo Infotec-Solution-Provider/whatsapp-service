@@ -1,30 +1,155 @@
 import { Prisma, WppContact, WppSchedule } from "@prisma/client";
 import prismaService from "./prisma.service";
-import {
-	CreateScheduleDTO,
-	Customer,
-	SessionData,
-	SocketEventType
-} from "@in.pulse-crm/sdk";
+import { CreateScheduleDTO, Customer, SessionData, SocketEventType } from "@in.pulse-crm/sdk";
 import chatsService, { FETCH_CUSTOMERS_QUERY } from "./chats.service";
 import messagesDistributionService from "./messages-distribution.service";
 import cron from "node-cron";
 import socketService from "./socket.service";
-import { Logger } from "@in.pulse-crm/utils";
 import whatsappService from "./whatsapp.service";
 import chooseSectorBot from "../bots/choose-sector.bot";
 import instancesService from "./instances.service";
+import parametersService from "./parameters.service";
+import JsonSessionStore from "../utils/json-session-store";
+import ProcessingLogger from "../utils/processing-logger";
+
+type ChatMonitoringSession = {
+	chatId: number;
+	instance: string;
+	lastActivity: number;
+	hasOperatorMessage: boolean;
+	hasMenuPrompt: boolean;
+	state: "monitoring" | "awaiting_response" | "menu_sent";
+	timeouts: {
+		inactivity: number; // tempo para considerar chat inativo (operador ou cliente)
+		menuResponse: number; // tempo para aguardar resposta do menu
+	};
+};
 
 interface ChatsFilters {
 	userId?: string;
 	sectorId?: string;
 }
 class SchedulesService {
+	private chatSessions = new Map<number, ChatMonitoringSession>();
+	private sessionStore = new JsonSessionStore<ChatMonitoringSession>({
+		filename: "chat-monitoring.sessions.json"
+	});
+	private initialized = false;
+
 	constructor() {
 		cron.schedule("*/5 * * * *", async () => {
 			this.runSchedulesJob();
 			this.finishChatRoutine();
 		});
+	}
+
+	private async ensureInitialized() {
+		if (this.initialized) return;
+
+		await this.sessionStore.ensureLoaded((sessions) => {
+			this.chatSessions.clear();
+			const now = Date.now();
+
+			for (const session of sessions) {
+				if (session && typeof session.chatId === "number") {
+					this.chatSessions.set(session.chatId, {
+						...session,
+						lastActivity: session.lastActivity ?? now
+					});
+				}
+			}
+			this.initialized = true;
+		});
+	}
+
+	private async getTimeoutConfig(instance: string, sectorId?: number, userId?: number) {
+		try {
+			const params = await parametersService.getSessionParams({
+				instance,
+				sectorId: sectorId ?? 0,
+				userId: userId ?? 0,
+				name: "",
+				role: ""
+			});
+
+			return {
+				inactivity: Number(params["CHAT_INACTIVITY_MS"] || 30 * 60 * 1000), // 30min
+				menuResponse: Number(params["CHAT_MENU_RESPONSE_MS"] || 15 * 60 * 1000) // 15min
+			};
+		} catch (error) {
+			// Fallback para valores padrão se não conseguir buscar parâmetros
+			return {
+				inactivity: 30 * 60 * 1000, // 30min
+				menuResponse: 15 * 60 * 1000 // 15min
+			};
+		}
+	}
+
+	private async getOrCreateSession(
+		chatId: number,
+		instance: string,
+		sectorId?: number,
+		userId?: number
+	): Promise<ChatMonitoringSession> {
+		let session = this.chatSessions.get(chatId);
+
+		if (!session) {
+			const timeouts = await this.getTimeoutConfig(instance, sectorId, userId);
+			session = {
+				chatId,
+				instance,
+				lastActivity: Date.now(),
+				hasOperatorMessage: false,
+				hasMenuPrompt: false,
+				state: "monitoring",
+				timeouts
+			};
+			this.chatSessions.set(chatId, session);
+			this.sessionStore.scheduleSave(() => this.chatSessions.values());
+		}
+
+		return session;
+	}
+
+	private removeSession(chatId: number) {
+		this.chatSessions.delete(chatId);
+		this.sessionStore.scheduleSave(() => this.chatSessions.values());
+	}
+
+	private async finishChat(chat: any, reason: string, logger?: ProcessingLogger) {
+		logger?.log(`Finalizando chat ${chat.id}: ${reason}`);
+
+		await prismaService.wppChat.update({
+			where: { id: chat.id },
+			data: {
+				isFinished: true,
+				finishedAt: new Date(),
+				finishedBy: null
+			}
+		});
+
+		await messagesDistributionService.addSystemMessage(chat, reason);
+		await socketService.emit(SocketEventType.WppChatFinished, `${chat.instance}:chat:${chat.id}`, {
+			chatId: chat.id
+		});
+
+		const contact = await prismaService.wppContact.findUnique({
+			where: { id: chat.contactId as number }
+		});
+
+		await prismaService.notification.create({
+			data: {
+				instance: chat.instance,
+				title: "Atendimento finalizado automaticamente",
+				description: `O chat com ${contact?.name || chat.contactId} foi finalizado: ${reason}`,
+				chatId: chat.id,
+				type: "CHAT_AUTO_FINISHED",
+				userId: chat.userId ?? null
+			}
+		});
+
+		this.removeSession(chat.id);
+		logger?.success({ chatId: chat.id, reason });
 	}
 
 	private async runSchedulesJob() {
@@ -81,10 +206,7 @@ class SchedulesService {
 		}
 	}
 
-	public async getSchedulesBySession(
-		session: SessionData,
-		filters: ChatsFilters
-	) {
+	public async getSchedulesBySession(session: SessionData, filters: ChatsFilters) {
 		const whereClause: Prisma.WppScheduleWhereInput = {
 			chat: null
 		};
@@ -117,11 +239,9 @@ class SchedulesService {
 			.map((c) => c.contact!.customerId!);
 
 		const customers = customerIds.length
-			? await instancesService.executeQuery<Array<Customer>>(
-					session.instance,
-					FETCH_CUSTOMERS_QUERY,
-					[customerIds]
-				)
+			? await instancesService.executeQuery<Array<Customer>>(session.instance, FETCH_CUSTOMERS_QUERY, [
+					customerIds
+				])
 			: [];
 
 		for (const schedule of schedules) {
@@ -130,9 +250,7 @@ class SchedulesService {
 			let customer: Customer | null = null;
 
 			if (typeof contact?.customerId == "number") {
-				customer =
-					customers.find((c) => c.CODIGO === contact.customerId) ||
-					null;
+				customer = customers.find((c) => c.CODIGO === contact.customerId) || null;
 			}
 
 			detailedSchedules.push({
@@ -146,18 +264,49 @@ class SchedulesService {
 	}
 
 	public async finishChatRoutine() {
-		const agora = new Date();
-		const trintaMinAtras = new Date(agora.getTime() - 30 * 60 * 1000);
-		const duasHorasAtras = new Date(agora.getTime() - 48 * 60 * 60 * 1000);
+		await this.ensureInitialized();
 
-		// Busca os chats ativos iniciados há mais de 30 minutos e menos de 2 horas
-		const chats = await prismaService.wppChat.findMany({
+		const logger = new ProcessingLogger("system", "chat-monitoring", `routine-${Date.now()}`, {
+			operation: "finish-chat-routine"
+		});
+
+		try {
+			logger.log("Iniciando rotina de monitoramento de chats");
+
+			// Busca chats ativos para análise - sem filtro de instância específica
+			const activeChats = await this.getActiveChatsForMonitoring();
+			logger.log(`Encontrados ${activeChats.length} chats ativos para análise`);
+
+			for (const chat of activeChats) {
+				const chatLogger = new ProcessingLogger(
+					chat.instance,
+					"chat-monitoring",
+					`chat-${chat.id}-${Date.now()}`,
+					{ chatId: chat.id, instance: chat.instance }
+				);
+
+				try {
+					await this.processChat(chat, chatLogger);
+				} catch (error) {
+					chatLogger.failed(error);
+				}
+			}
+
+			logger.success({ processedChats: activeChats.length });
+		} catch (error) {
+			logger.failed(error);
+		}
+	}
+
+	private async getActiveChatsForMonitoring() {
+		const now = new Date();
+
+		return await prismaService.wppChat.findMany({
 			where: {
-				instance: "nunes",
 				isFinished: false,
 				startedAt: {
-					gte: duasHorasAtras, // não mais antigo que 2h
-					lte: trintaMinAtras // não mais recente que 30min
+					// Considera chats com pelo menos alguma idade mínima
+					lte: new Date(now.getTime() - 5 * 60 * 1000) // 5 minutos
 				}
 			},
 			include: {
@@ -166,200 +315,160 @@ class SchedulesService {
 						from: true,
 						timestamp: true,
 						body: true
+					},
+					orderBy: {
+						timestamp: "desc"
 					}
 				}
 			}
 		});
+	}
 
-		Logger.debug(`[CRON] Verificando chats inativos...`);
-		Logger.debug(`[CRON] Chats encontrados: ${chats.length}`);
-		Logger.debug(`[CRON] Chats encontrados: ${JSON.stringify(chats)}`);
+	private async processChat(chat: any, logger: ProcessingLogger) {
+		const session = await this.getOrCreateSession(chat.id, chat.instance, chat.sectorId, chat.userId);
 
-		for (const chat of chats) {
-			// Verifica se existe mensagem enviada pelo operador
-			const teveMensagemDeOperador = chat.messages.some((msg) =>
-				msg.from.startsWith("me:")
-			);
-			Logger.debug(
-				`[CRON] Chat ${chat.id} - Teve mensagem de operador: ${teveMensagemDeOperador}`
-			);
-			if (!teveMensagemDeOperador) {
-				await prismaService.wppChat.update({
-					where: { id: chat.id },
-					data: {
-						isFinished: true,
-						finishedAt: new Date(),
-						finishedBy: null // ou ID do sistema
-					}
-				});
-				Logger.debug(
-					`[CRON] Chat ${chat.id} finalizado automaticamente.`
+		logger.log("Processando chat", {
+			state: session.state,
+			timeouts: session.timeouts
+		});
+
+		// Análise das mensagens do chat
+		const messageAnalysis = this.analyzeMessages(chat.messages);
+
+		// Atualiza estado da sessão baseado na análise
+		session.hasOperatorMessage = messageAnalysis.hasOperatorMessage;
+		session.hasMenuPrompt = messageAnalysis.hasMenuPrompt;
+		session.lastActivity = messageAnalysis.lastActivity;
+
+		this.sessionStore.scheduleSave(() => this.chatSessions.values());
+
+		// Decisões baseadas no estado atual
+		await this.makeDecision(chat, session, messageAnalysis, logger);
+	}
+
+	private analyzeMessages(messages: any[]) {
+		let hasOperatorMessage = false;
+		let hasMenuPrompt = false;
+		let lastActivity = 0;
+		let lastMessage = null;
+		let lastOperatorMessage = null;
+
+		for (const message of messages) {
+			const timestamp = new Date(message.timestamp).getTime();
+			if (timestamp > lastActivity) {
+				lastActivity = timestamp;
+				lastMessage = message;
+			}
+
+			if (message.from.startsWith("me:")) {
+				hasOperatorMessage = true;
+				if (!lastOperatorMessage || timestamp > new Date(lastOperatorMessage.timestamp).getTime()) {
+					lastOperatorMessage = message;
+				}
+			}
+
+			if (message.body?.toLowerCase().includes("deseja voltar ao menu de setores")) {
+				hasMenuPrompt = true;
+			}
+		}
+
+		return {
+			hasOperatorMessage,
+			hasMenuPrompt,
+			lastActivity,
+			lastMessage,
+			lastOperatorMessage,
+			timeSinceLastActivity: Date.now() - lastActivity
+		};
+	}
+
+	private async makeDecision(chat: any, session: ChatMonitoringSession, analysis: any, logger: ProcessingLogger) {
+		const { timeouts } = session;
+		const { timeSinceLastActivity, hasOperatorMessage, hasMenuPrompt, lastMessage } = analysis;
+
+		// Caso 1: Chat sem nenhuma mensagem de operador
+		if (!hasOperatorMessage) {
+			if (timeSinceLastActivity >= timeouts.inactivity) {
+				await this.finishChat(
+					chat,
+					"Atendimento finalizado pelo sistema devido inatividade do operador",
+					logger
 				);
+			}
+			return;
+		}
 
-				const event = SocketEventType.WppChatFinished;
+		// Caso 2: Menu já foi enviado
+		if (hasMenuPrompt) {
+			if (timeSinceLastActivity >= timeouts.menuResponse) {
+				await this.finishChat(
+					chat,
+					"Atendimento finalizado automaticamente após tempo limite para resposta ao menu",
+					logger
+				);
+			}
+			return;
+		}
 
-				let finishMsg: string = `Atendimento finalizado pelo sistema devido inatividade do operador.`;
-				Logger.debug("Mensagem de finalização:", finishMsg);
+		// Caso 3: Chat inativo (independente de quem foi o último a responder)
+		if (timeSinceLastActivity >= timeouts.inactivity) {
+			// Se operador foi o último a responder, apenas notifica
+			if (lastMessage?.from.startsWith("me:")) {
+				logger.log("Cliente inativo há muito tempo após resposta do operador");
 				await messagesDistributionService.addSystemMessage(
 					chat,
-					finishMsg
+					`O cliente está aguardando há mais de ${Math.round(timeouts.inactivity / 1000 / 60)} minutos após sua última resposta. Deseja encerrar ou continuar o atendimento?`
 				);
-				await socketService.emit(event, `${chat.instance}:chat:${chat.id}`, {
-					chatId: chat.id
-				});
-				const contact = await prismaService.wppContact.findUnique({
-				where: {
-					id: chat.contactId as number
-				}
-				});
-				await prismaService.notification.create({
-				data: {
-					instance: chat.instance,
-					title: "Atendimento finalizado automaticamente",
-					description: `O chat com ${contact ? contact.name : chat.contactId} do contato, foi finalizado por inatividade do operador.`,
-					chatId: chat.id,
-					type: "CHAT_AUTO_FINISHED",
-					userId: chat.userId ?? null
-				}
-				});
-
 			} else {
-				const jaMandouPrompt = chat.messages.some((m) => {
-					const texto = m.body?.toLowerCase().trim();
-					return texto?.includes("deseja voltar ao menu de setores");
-				});
-
-				if (jaMandouPrompt) {
-					const mensagensOrdenadas = chat.messages
-					.filter((m) => m.timestamp)
-					.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-					const ultimaMensagem = mensagensOrdenadas[0];
-
-					const agora = new Date();
-					const quinzeMinutosAtras = new Date(agora.getTime() - 15 * 60 * 1000);
-
-						const deveEncerrar =
-						ultimaMensagem !== undefined &&
-						Number(ultimaMensagem.timestamp) <= quinzeMinutosAtras.getTime()
-
-					Logger.debug("[CRON] Verificação de encerramento simplificada:");
-					Logger.debug(`[CRON] Agora: ${agora.toISOString()} | ${agora.getTime()}`);
-					Logger.debug(`[CRON] 15min atrás: ${quinzeMinutosAtras.toISOString()} | ${quinzeMinutosAtras.getTime()}`);
-					Logger.debug(`[CRON] Última mensagem: ${ultimaMensagem?.body}`);
-					Logger.debug(`[CRON] Timestamp: ${ultimaMensagem?.timestamp ?? 'nenhum'}`);
-					Logger.debug(`[CRON] Deve encerrar? ${deveEncerrar}`);
-
-					if (deveEncerrar) {
-					// Finaliza o chat
-						await prismaService.wppChat.update({
-							where: { id: chat.id },
-							data: {
-							isFinished: true,
-							finishedAt: new Date(),
-							finishedBy: null // ou id do sistema
-							}
-						});
-
-						Logger.debug(`[CRON] Chat ${chat.id} finalizado automaticamente após 15 minutos sem resposta do cliente ou operador.`);
-
-						const event = SocketEventType.WppChatFinished;
-						const finishMsg = "Atendimento finalizado automaticamente após 15 minutos sem resposta do cliente e operador.";
-
-						await messagesDistributionService.addSystemMessage(chat, finishMsg);
-						await socketService.emit(event, `${chat.instance}:chat:${chat.id}`, { chatId: chat.id });
-
-						const contact = await prismaService.wppContact.findUnique({
-							where: { id: chat.contactId as number }
-						});
-
-						await prismaService.notification.create({
-							data: {
-							instance: chat.instance,
-							title: "Atendimento finalizado automaticamente",
-							description: `O chat com ${contact ? contact.name : chat.contactId} do contato, foi finalizado por inatividade após envio do menu.`,
-							chatId: chat.id,
-							type: "CHAT_AUTO_FINISHED",
-							userId: chat.userId ?? null
-							}
-						});
-
-					continue; // passa pro próximo chat do loop
-					} else {
-					// Se não passou o tempo, só continuar normalmente
-					Logger.debug(`[CRON] Chat ${chat.id} ainda aguardando resposta do cliente ou operador após envio do menu.`);
-					continue;
-					}
-				}
-
-				const trintaMinAtras = new Date(Date.now() - 30 * 60 * 1000);
-
-				const mensagensOrdenadas = chat.messages
-					.filter((m) => m.timestamp)
-					.sort(
-						(a, b) =>
-							new Date(b.timestamp).getTime() -
-							new Date(a.timestamp).getTime()
-					);
-
-				const ultimaMensagem = mensagensOrdenadas[0];
-				if (!ultimaMensagem) continue;
-
-				if (ultimaMensagem.from.startsWith("me:")) {
-					const ultimaData = new Date(ultimaMensagem.timestamp);
-					if (ultimaData <= trintaMinAtras) {
-						// Operador foi o último a responder, mas faz mais de 30 minutos
-						const awaitClient =
-							"O cliente está aguardando há mais de 30 minutos após sua última resposta. Deseja encerrar ou continuar o atendimento?";
-
-						await messagesDistributionService.addSystemMessage(
-							chat,
-							awaitClient
-						);
-
-						continue; // Evita enviar o menu novamente
-					} else {
-						Logger.debug(
-							`[CRON] Chat ${chat.id} - Operador respondeu recentemente`
-						);
-						continue;
-					}
-				}
-
-				const client = chat.messages.find(
-					(m) =>
-						!m.from.startsWith("me:") &&
-						!m.from.startsWith("bot:") &&
-						!m.from.startsWith("system")
-				);
-				if (!client) continue;
-
-				await whatsappService.sendBotMessage(client.from, {
-					chat,
-					text: [
-						"Deseja voltar ao menu de setores, finalizar conversa ou aguardar resposta do contato?",
-						"",
-						"*1* - Voltar ao menu de setores",
-						"*2* - Finalizar conversa",
-						"*3* - Aguardar resposta do contato",
-						"",
-						"*Responda apenas com o número da opção desejada.*"
-					].join("\n")
-				});
-				await prismaService.wppChat.update({
-					where: { id: chat.id },
-					data: { botId: 1 }
-				});
-				chooseSectorBot.forceStep(chat.id, 4, chat.userId ?? 0);
+				// Se cliente foi o último a responder, envia menu
+				logger.log("Enviando menu de opções devido à inatividade");
+				await this.sendInactivityMenu(chat, logger);
 			}
 		}
 	}
 
-	public async createSchedule(
-		token: string,
-		session: SessionData,
-		data: CreateScheduleDTO
-	) {
+	private async sendInactivityMenu(chat: any, logger: ProcessingLogger) {
+		const clientMessage = chat.messages.find(
+			(m: any) => !m.from.startsWith("me:") && !m.from.startsWith("bot:") && !m.from.startsWith("system")
+		);
+
+		if (!clientMessage) {
+			logger.log("Nenhuma mensagem de cliente encontrada para envio do menu");
+			return;
+		}
+
+		await whatsappService.sendBotMessage(clientMessage.from, {
+			chat,
+			text: [
+				"Deseja voltar ao menu de setores, finalizar conversa ou aguardar resposta do contato?",
+				"",
+				"*1* - Voltar ao menu de setores",
+				"*2* - Finalizar conversa",
+				"*3* - Aguardar resposta do contato",
+				"",
+				"*Responda apenas com o número da opção desejada.*"
+			].join("\n")
+		});
+
+		await prismaService.wppChat.update({
+			where: { id: chat.id },
+			data: { botId: 1 }
+		});
+
+		chooseSectorBot.forceStep(chat.id, 4, chat.userId ?? 0);
+
+		// Atualiza sessão para indicar que menu foi enviado
+		const session = this.chatSessions.get(chat.id);
+		if (session) {
+			session.hasMenuPrompt = true;
+			session.state = "menu_sent";
+			this.sessionStore.scheduleSave(() => this.chatSessions.values());
+		}
+
+		logger.log("Menu de inatividade enviado e bot configurado");
+	}
+
+	public async createSchedule(token: string, session: SessionData, data: CreateScheduleDTO) {
 		const chat = await prismaService.wppChat.findFirst({
 			where: {
 				contactId: data.contactId,
