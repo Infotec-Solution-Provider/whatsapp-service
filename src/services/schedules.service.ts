@@ -38,7 +38,7 @@ class SchedulesService {
 	private initialized = false;
 
 	constructor() {
-		cron.schedule("*/5 * * * *", async () => {
+		cron.schedule("*/10 * * * * *", async () => {
 			this.runSchedulesJob();
 			this.finishChatRoutine();
 		});
@@ -78,7 +78,7 @@ class SchedulesService {
 					inactivity: Number(params["CHAT_INACTIVITY_MS"] || 30 * 60 * 1000), // 30min
 					menuResponse: Number(params["CHAT_MENU_RESPONSE_MS"] || 15 * 60 * 1000) // 15min
 				},
-				autoFinishEnabled: params["CHAT_AUTO_FINISH_ENABLED"] !== "false" // padrão true, só desabilita se explicitamente "false"
+				autoFinishEnabled: params["CHAT_AUTO_FINISH_ENABLED"] === "true"
 			};
 		} catch (error) {
 			// Fallback para valores padrão se não conseguir buscar paâmetros
@@ -87,7 +87,7 @@ class SchedulesService {
 					inactivity: 30 * 60 * 1000, // 30min
 					menuResponse: 15 * 60 * 1000 // 15min
 				},
-				autoFinishEnabled: true // padrão habilitado
+				autoFinishEnabled: false
 			};
 		}
 	}
@@ -274,16 +274,16 @@ class SchedulesService {
 	public async finishChatRoutine() {
 		await this.ensureInitialized();
 
-		const logger = new ProcessingLogger("system", "chat-monitoring", `routine-${Date.now()}`, {
+		const process = new ProcessingLogger("system", "chat-monitoring", `routine-${Date.now()}`, {
 			operation: "finish-chat-routine"
 		});
 
 		try {
-			logger.log("Iniciando rotina de monitoramento de chats");
+			process.log("Iniciando rotina de monitoramento de chats");
 
 			// Busca chats ativos para análise - sem filtro de instância específica
 			const activeChats = await this.getActiveChatsForMonitoring();
-			logger.log(`Encontrados ${activeChats.length} chats ativos para análise`);
+			process.log(`Encontrados ${activeChats.length} chats ativos para análise`);
 
 			for (const chat of activeChats) {
 				const chatLogger = new ProcessingLogger(
@@ -300,22 +300,16 @@ class SchedulesService {
 				}
 			}
 
-			logger.success({ processedChats: activeChats.length });
+			process.success({ processedChats: activeChats.length });
 		} catch (error) {
-			logger.failed(error);
+			process.failed(error);
 		}
 	}
 
 	private async getActiveChatsForMonitoring() {
-		const now = new Date();
-
 		return await prismaService.wppChat.findMany({
 			where: {
-				isFinished: false,
-				startedAt: {
-					// Considera chats com pelo menos alguma idade mínima
-					lte: new Date(now.getTime() - 5 * 60 * 1000) // 5 minutos
-				}
+				isFinished: false
 			},
 			include: {
 				messages: {
@@ -332,10 +326,10 @@ class SchedulesService {
 		});
 	}
 
-	private async processChat(chat: any, logger: ProcessingLogger) {
+	private async processChat(chat: any, process: ProcessingLogger) {
 		const session = await this.getOrCreateSession(chat.id, chat.instance, chat.sectorId, chat.userId);
 
-		logger.log("Processando chat", {
+		process.log("Processando chat", {
 			state: session.state,
 			timeouts: session.timeouts
 		});
@@ -351,7 +345,7 @@ class SchedulesService {
 		this.sessionStore.scheduleSave(() => this.chatSessions.values());
 
 		// Decisões baseadas no estado atual
-		await this.makeDecision(chat, session, messageAnalysis, logger);
+		await this.makeDecision(chat, session, messageAnalysis, process);
 	}
 
 	private analyzeMessages(messages: any[]) {
@@ -390,14 +384,14 @@ class SchedulesService {
 		};
 	}
 
-	private async makeDecision(chat: any, session: ChatMonitoringSession, analysis: any, logger: ProcessingLogger) {
+	private async makeDecision(chat: any, session: ChatMonitoringSession, analysis: any, process: ProcessingLogger) {
 		const { timeouts, autoFinishEnabled } = session;
 		const { timeSinceLastActivity, hasOperatorMessage, hasMenuPrompt, lastMessage } = analysis;
 
 		// Se a auto-finalização está desabilitada, apenas logga mas não finaliza
 		if (!autoFinishEnabled) {
 			if (timeSinceLastActivity >= timeouts.inactivity) {
-				logger.log("Chat inativo, mas auto-finalização está desabilitada", {
+				process.log("Chat inativo, mas auto-finalização está desabilitada", {
 					timeSinceLastActivity: Math.round(timeSinceLastActivity / 1000 / 60) + " min"
 				});
 			}
@@ -410,7 +404,7 @@ class SchedulesService {
 				await this.finishChat(
 					chat,
 					"Atendimento finalizado pelo sistema devido inatividade do operador",
-					logger
+					process
 				);
 			}
 			return;
@@ -422,7 +416,7 @@ class SchedulesService {
 				await this.finishChat(
 					chat,
 					"Atendimento finalizado automaticamente após tempo limite para resposta ao menu",
-					logger
+					process
 				);
 			}
 			return;
@@ -432,26 +426,26 @@ class SchedulesService {
 		if (timeSinceLastActivity >= timeouts.inactivity) {
 			// Se operador foi o último a responder, apenas notifica
 			if (lastMessage?.from.startsWith("me:")) {
-				logger.log("Cliente inativo há muito tempo após resposta do operador");
+				process.log("Cliente inativo há muito tempo após resposta do operador");
 				await messagesDistributionService.addSystemMessage(
 					chat,
 					`O cliente está aguardando há mais de ${Math.round(timeouts.inactivity / 1000 / 60)} minutos após sua última resposta. Deseja encerrar ou continuar o atendimento?`
 				);
 			} else {
 				// Se cliente foi o último a responder, envia menu
-				logger.log("Enviando menu de opções devido à inatividade");
-				await this.sendInactivityMenu(chat, logger);
+				process.log("Enviando menu de opções devido à inatividade");
+				await this.sendInactivityMenu(chat, process);
 			}
 		}
 	}
 
-	private async sendInactivityMenu(chat: any, logger: ProcessingLogger) {
+	private async sendInactivityMenu(chat: any, process: ProcessingLogger) {
 		const clientMessage = chat.messages.find(
 			(m: any) => !m.from.startsWith("me:") && !m.from.startsWith("bot:") && !m.from.startsWith("system")
 		);
 
 		if (!clientMessage) {
-			logger.log("Nenhuma mensagem de cliente encontrada para envio do menu");
+			process.log("Nenhuma mensagem de cliente encontrada para envio do menu");
 			return;
 		}
 
@@ -483,7 +477,7 @@ class SchedulesService {
 			this.sessionStore.scheduleSave(() => this.chatSessions.values());
 		}
 
-		logger.log("Menu de inatividade enviado e bot configurado");
+		process.log("Menu de inatividade enviado e bot configurado");
 	}
 
 	public async createSchedule(token: string, session: SessionData, data: CreateScheduleDTO) {
