@@ -1,11 +1,10 @@
-import { Request, Response, Router } from "express";
-import messagesService from "../services/messages.service";
-import { BadRequestError } from "@rgranatodutra/http-errors";
-import isAuthenticated from "../middlewares/is-authenticated.middleware";
-import whatsappService from "../services/whatsapp.service";
-import upload from "../middlewares/multer.middleware";
-import messageForwardingService from "../services/message-forwarding.service";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { BadRequestError } from "@rgranatodutra/http-errors";
+import { Request, Response, Router } from "express";
+import isAuthenticated from "../middlewares/is-authenticated.middleware";
+import upload from "../middlewares/multer.middleware";
+import messagesService from "../services/messages.service";
+import whatsappService from "../services/whatsapp.service";
 
 class MessagesController {
 	constructor(public readonly router: Router) {
