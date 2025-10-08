@@ -86,7 +86,11 @@ class WhatsappService {
 	private readonly clients = new Map<number, WhatsappClient>();
 
 	public async buildClients() {
-		const clients = await prismaService.wppClient.findMany();
+		const clients = await prismaService.wppClient.findMany({
+			where: {
+				isActive: true
+			}
+		});
 
 		for (const client of clients) {
 			switch (client.type) {
