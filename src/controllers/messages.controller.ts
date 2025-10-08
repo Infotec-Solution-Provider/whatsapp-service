@@ -4,6 +4,7 @@ import { BadRequestError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import whatsappService from "../services/whatsapp.service";
 import upload from "../middlewares/multer.middleware";
+import messageForwardingService from "../services/message-forwarding.service";
 
 class MessagesController {
 	constructor(public readonly router: Router) {
@@ -88,7 +89,12 @@ class MessagesController {
 			);
 		}
 
-		await whatsappService.forwardMessages(req.session, messageIds, sourceType, whatsappTargets, internalTargets);
+		await messageForwardingService.forwardMessages({
+			session: req.session,
+			messageIds,
+			sourceType,
+			whatsappTargets
+		});
 
 		res.status(200).send({
 			message: "Mensagens enviadas para a fila de encaminhamento com sucesso!"

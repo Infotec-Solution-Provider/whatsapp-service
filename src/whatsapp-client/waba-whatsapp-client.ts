@@ -1,9 +1,10 @@
 import { Logger } from "@in.pulse-crm/utils";
-import axios from "axios";
+import axios, { AxiosError } from "axios";
 import FormData from "form-data";
 import TemplateAdapter from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
 import filesService from "../services/files.service";
+import prismaService from "../services/prisma.service";
 import { TemplateVariables, WABAMessageTemplate, WABATemplateBodyComponent } from "../types/whatsapp-api.types";
 import {
 	EditMessageOptions,
@@ -14,7 +15,6 @@ import {
 import generateUID from "../utils/generate-uid";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
-import { AxiosError } from "axios";
 
 interface GetTemplateVariablesProps {
 	template: WABAMessageTemplate;
@@ -121,6 +121,94 @@ class WABAWhatsappClient implements WhatsappClient {
 
 	public async editMessage({}: EditMessageOptions): Promise<void> {
 		throw new Error("Method not implemented.");
+	}
+
+	public async forwardMessage(to: string, messageId: string, isGroup: boolean = false): Promise<void> {
+		const process = new ProcessingLogger(this.instance, "waba-forward-message", generateUID(), {
+			to,
+			messageId,
+			isGroup
+		});
+
+		try {
+			process.log("Iniciando forward simulado - buscando mensagem original");
+
+			// Busca a mensagem original
+			const originalMessage = await prismaService.wppMessage.findFirst({
+				where: {
+					OR: [{ wabaId: messageId }, { gupshupId: messageId }, { wwebjsId: messageId }]
+				}
+			});
+
+			if (!originalMessage) {
+				throw new Error(`Mensagem não encontrada para forward: ${messageId}`);
+			}
+
+			process.log("Mensagem original encontrada", {
+				id: originalMessage.id,
+				type: originalMessage.type,
+				hasFile: !!originalMessage.fileId
+			});
+
+			// Monta as opções de envio baseado na mensagem original
+			let sendOptions: SendMessageOptions;
+
+			if (originalMessage.fileId) {
+				// Mensagem com arquivo - reutiliza o arquivo existente
+				process.log("Preparando forward de mídia - buscando metadados do arquivo");
+
+				const fileMetadata = await filesService.fetchFileMetadata(originalMessage.fileId);
+
+				sendOptions = {
+					to,
+					text: originalMessage.body ?? null,
+					fileUrl: filesService.getFileDownloadUrl(originalMessage.fileId),
+					fileName: originalMessage.fileName || fileMetadata.name,
+					fileType: this.mapFileTypeForWABA(originalMessage.type),
+					sendAsAudio: originalMessage.type === "ptt" || originalMessage.type === "audio",
+					sendAsDocument: originalMessage.type === "document",
+					file: fileMetadata
+				};
+
+				process.log("Opções de envio de mídia preparadas", {
+					fileName: sendOptions.fileName,
+					fileType: sendOptions.fileType,
+					sendAsAudio: sendOptions.sendAsAudio,
+					sendAsDocument: sendOptions.sendAsDocument
+				});
+			} else {
+				// Mensagem de texto
+				process.log("Preparando forward de texto");
+				sendOptions = {
+					to,
+					text: originalMessage.body || ""
+				};
+			}
+
+			// Envia a mensagem
+			process.log("Enviando mensagem forward...");
+			await this.sendMessage(sendOptions);
+			process.log("Forward simulado concluído com sucesso");
+			process.success("Forward message completed");
+		} catch (error) {
+			process.log("Erro no forward simulado", error);
+			process.failed(error);
+			throw error;
+		}
+	}
+
+	private mapFileTypeForWABA(messageType: string): "image" | "video" | "audio" | "document" {
+		switch (messageType) {
+			case "image":
+				return "image";
+			case "video":
+				return "video";
+			case "audio":
+			case "ptt":
+				return "audio";
+			default:
+				return "document";
+		}
 	}
 
 	private get reqOptions() {
@@ -306,40 +394,6 @@ class WABAWhatsappClient implements WhatsappClient {
 		// Filter out undefined values
 		return formatedVars.filter((v) => v !== undefined);
 	}
-	/* 	private validateSupportedMediaType(mimeType: string, extension: string): void {
-			const supportedTypes = [
-				// Áudio
-				{ mime: 'audio/aac', ext: '.aac' },
-				{ mime: 'audio/amr', ext: '.amr' },
-				{ mime: 'audio/mpeg', ext: '.mp3' },
-				{ mime: 'audio/mp4', ext: '.m4a' },
-				{ mime: 'audio/ogg', ext: '.ogg' },
-				// Documentos
-				{ mime: 'text/plain', ext: '.txt' },
-				{ mime: 'application/vnd.ms-excel', ext: '.xls' },
-				{ mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ext: '.xlsx' },
-				{ mime: 'application/msword', ext: '.doc' },
-				{ mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', ext: '.docx' },
-				{ mime: 'application/vnd.ms-powerpoint', ext: '.ppt' },
-				{ mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', ext: '.pptx' },
-				{ mime: 'application/pdf', ext: '.pdf' },
-				// Imagens
-				{ mime: 'image/jpeg', ext: '.jpeg' },
-				{ mime: 'image/png', ext: '.png' },
-				// Stickers
-				{ mime: 'image/webp', ext: '.webp' },
-				// Vídeo
-				{ mime: 'video/3gpp', ext: '.3gp' },
-				{ mime: 'video/mp4', ext: '.mp4' },
-			];
-	
-			const found = supportedTypes.some(type =>
-				type.mime === mimeType && extension.toLowerCase().endsWith(type.ext)
-			);
-			if (!found) {
-				throw new Error(`Tipo de mídia não suportado: ${mimeType} (${extension})`);
-			}
-		} */
 
 	public async getTemplates(): Promise<any> {
 		const requestURL = `https://graph.facebook.com/v16.0/${this.wabaAccountId}/message_templates?limit=999`;

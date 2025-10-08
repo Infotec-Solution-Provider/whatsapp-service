@@ -1,10 +1,15 @@
 import "dotenv/config";
 import { FileDirType, SessionData } from "@in.pulse-crm/sdk";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
-import { WppChat, WppClientType } from "@prisma/client";
+import { InternalMessage, WppChat, WppClientType, WppMessage } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import CreateMessageDto from "../dtos/create-message.dto";
-import { EditMessageOptions, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
+import {
+	EditMessageOptions,
+	SendFileOptions,
+	SendFileType,
+	SendMessageOptions
+} from "../types/whatsapp-instance.types";
 import WhatsappAudioConverter from "../utils/whatsapp-audio-converter";
 import ProcessingLogger from "../utils/processing-logger";
 import GupshupWhatsappClient from "../whatsapp-client/gupshup-whatsapp-client";
@@ -563,15 +568,18 @@ class WhatsappService {
 
 		process.log("Iniciando processo de encaminhamento nativo com salvamento no banco.");
 
-		let originalMessages: any[] = [];
+		const originalMessages: Array<WppMessage> | Array<InternalMessage> = [];
+
 		if (sourceType === "whatsapp") {
-			originalMessages = await prismaService.wppMessage.findMany({
+			const whatsappMessages = await prismaService.wppMessage.findMany({
 				where: { id: { in: messageIds } }
 			});
+			(originalMessages as Array<WppMessage>).push(...whatsappMessages);
 		} else if (sourceType === "internal") {
-			originalMessages = await prismaService.internalMessage.findMany({
+			const internalMessages = await prismaService.internalMessage.findMany({
 				where: { id: { in: messageIds } }
 			});
+			(originalMessages as Array<InternalMessage>).push(...internalMessages);
 		}
 		if (originalMessages.length === 0) {
 			process.log("Nenhuma mensagem original foi encontrada para encaminhar.");
@@ -633,17 +641,17 @@ class WhatsappService {
 								`Registro da mensagem ID:${originalMsg.id} salvo no banco para o alvo: ${target.id}. Novo ID: ${savedMsg.id}`
 							);
 							if (sourceType === "internal") {
-								const options: SendMessageOptions | SendFileOptions = {
+								const options = {
 									to: target.id,
 									text: originalMsg.body || undefined
-								};
+								} as SendMessageOptions | SendFileOptions;
 
 								if (originalMsg.fileId) {
 									(options as SendFileOptions).fileUrl = filesService.getFileDownloadUrl(
 										originalMsg.fileId
 									);
-									(options as SendFileOptions).fileName = originalMsg.fileName;
-									(options as SendFileOptions).fileType = originalMsg.fileType;
+									(options as SendFileOptions).fileName = originalMsg.fileName!;
+									(options as SendFileOptions).fileType = originalMsg.fileType! as SendFileType;
 									(options as SendFileOptions).sendAsAudio = originalMsg.type === "ptt";
 									(options as SendFileOptions).sendAsDocument = originalMsg.type === "document";
 								}
