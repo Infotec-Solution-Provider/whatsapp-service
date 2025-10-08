@@ -23,6 +23,7 @@ type ChatMonitoringSession = {
 		inactivity: number; // tempo para considerar chat inativo (operador ou cliente)
 		menuResponse: number; // tempo para aguardar resposta do menu
 	};
+	autoFinishEnabled: boolean; // se a finalização automática está habilitada
 };
 
 interface ChatsFilters {
@@ -73,14 +74,20 @@ class SchedulesService {
 			});
 
 			return {
-				inactivity: Number(params["CHAT_INACTIVITY_MS"] || 30 * 60 * 1000), // 30min
-				menuResponse: Number(params["CHAT_MENU_RESPONSE_MS"] || 15 * 60 * 1000) // 15min
+				timeouts: {
+					inactivity: Number(params["CHAT_INACTIVITY_MS"] || 30 * 60 * 1000), // 30min
+					menuResponse: Number(params["CHAT_MENU_RESPONSE_MS"] || 15 * 60 * 1000) // 15min
+				},
+				autoFinishEnabled: params["CHAT_AUTO_FINISH_ENABLED"] !== "false" // padrão true, só desabilita se explicitamente "false"
 			};
 		} catch (error) {
-			// Fallback para valores padrão se não conseguir buscar parâmetros
+			// Fallback para valores padrão se não conseguir buscar paâmetros
 			return {
-				inactivity: 30 * 60 * 1000, // 30min
-				menuResponse: 15 * 60 * 1000 // 15min
+				timeouts: {
+					inactivity: 30 * 60 * 1000, // 30min
+					menuResponse: 15 * 60 * 1000 // 15min
+				},
+				autoFinishEnabled: true // padrão habilitado
 			};
 		}
 	}
@@ -94,7 +101,7 @@ class SchedulesService {
 		let session = this.chatSessions.get(chatId);
 
 		if (!session) {
-			const timeouts = await this.getTimeoutConfig(instance, sectorId, userId);
+			const config = await this.getTimeoutConfig(instance, sectorId, userId);
 			session = {
 				chatId,
 				instance,
@@ -102,7 +109,8 @@ class SchedulesService {
 				hasOperatorMessage: false,
 				hasMenuPrompt: false,
 				state: "monitoring",
-				timeouts
+				timeouts: config.timeouts,
+				autoFinishEnabled: config.autoFinishEnabled
 			};
 			this.chatSessions.set(chatId, session);
 			this.sessionStore.scheduleSave(() => this.chatSessions.values());
@@ -383,8 +391,18 @@ class SchedulesService {
 	}
 
 	private async makeDecision(chat: any, session: ChatMonitoringSession, analysis: any, logger: ProcessingLogger) {
-		const { timeouts } = session;
+		const { timeouts, autoFinishEnabled } = session;
 		const { timeSinceLastActivity, hasOperatorMessage, hasMenuPrompt, lastMessage } = analysis;
+
+		// Se a auto-finalização está desabilitada, apenas logga mas não finaliza
+		if (!autoFinishEnabled) {
+			if (timeSinceLastActivity >= timeouts.inactivity) {
+				logger.log("Chat inativo, mas auto-finalização está desabilitada", {
+					timeSinceLastActivity: Math.round(timeSinceLastActivity / 1000 / 60) + " min"
+				});
+			}
+			return;
+		}
 
 		// Caso 1: Chat sem nenhuma mensagem de operador
 		if (!hasOperatorMessage) {
