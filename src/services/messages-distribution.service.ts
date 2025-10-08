@@ -62,12 +62,16 @@ class MessagesDistributionService {
 		return sectors;
 	}
 
-	public async processMessage(instance: string, clientId: number, msg: WppMessage) {
+	public async processMessage(instance: string, clientId: number, msg: WppMessage, contactName?: string | null) {
 		const logger = new ProcessingLogger(instance, "message-distribution", `WppMessage-${msg.id}`, msg);
 
 		try {
 			logger.log("Buscando contato para a mensagem.");
-			const contact = await contactsService.getOrCreateContact(instance, Formatter.phone(msg.from), msg.from);
+			const contact = await contactsService.getOrCreateContact(
+				instance,
+				contactName || Formatter.phone(msg.from),
+				msg.from
+			);
 			logger.log("Contato encontrado!", contact);
 
 			logger.log("Buscando chat para o contato.");
