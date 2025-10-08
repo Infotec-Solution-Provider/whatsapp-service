@@ -90,12 +90,13 @@ class MessagesController {
 			);
 		}
 
-		await messageForwardingService.forwardMessages({
+		/* 		await messageForwardingService.forwardMessages({
 			session: req.session,
 			messageIds,
 			sourceType,
 			whatsappTargets
-		});
+		}); */
+		await whatsappService.forwardMessages(req.session, messageIds, sourceType, whatsappTargets, internalTargets);
 
 		res.status(200).send({
 			message: "Mensagens enviadas para a fila de encaminhamento com sucesso!"
