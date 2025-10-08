@@ -1,4 +1,4 @@
-import { Prisma, WppContact, WppSchedule } from "@prisma/client";
+import { Prisma, WppChat, WppContact, WppMessage, WppSchedule } from "@prisma/client";
 import prismaService from "./prisma.service";
 import { CreateScheduleDTO, Customer, SessionData, SocketEventType } from "@in.pulse-crm/sdk";
 import chatsService, { FETCH_CUSTOMERS_QUERY } from "./chats.service";
@@ -11,6 +11,10 @@ import instancesService from "./instances.service";
 import parametersService from "./parameters.service";
 import JsonSessionStore from "../utils/json-session-store";
 import ProcessingLogger from "../utils/processing-logger";
+
+interface ChatWithMessages extends WppChat {
+	messages?: Array<WppMessage>;
+}
 
 type ChatMonitoringSession = {
 	chatId: number;
@@ -63,7 +67,7 @@ class SchedulesService {
 		});
 	}
 
-	private async getTimeoutConfig(instance: string, sectorId?: number, userId?: number) {
+	private async getTimeoutConfig(instance: string, sectorId: number | null, userId: number | null) {
 		try {
 			const params = await parametersService.getSessionParams({
 				instance,
@@ -92,19 +96,14 @@ class SchedulesService {
 		}
 	}
 
-	private async getOrCreateSession(
-		chatId: number,
-		instance: string,
-		sectorId?: number,
-		userId?: number
-	): Promise<ChatMonitoringSession> {
-		let session = this.chatSessions.get(chatId);
+	private async getOrCreateSession(chat: WppChat): Promise<ChatMonitoringSession> {
+		let session = this.chatSessions.get(chat.id);
 
 		if (!session) {
-			const config = await this.getTimeoutConfig(instance, sectorId, userId);
+			const config = await this.getTimeoutConfig(chat.instance, chat.sectorId, chat.userId);
 			session = {
-				chatId,
-				instance,
+				chatId: chat.id,
+				instance: chat.instance,
 				lastActivity: Date.now(),
 				hasOperatorMessage: false,
 				hasMenuPrompt: false,
@@ -112,7 +111,7 @@ class SchedulesService {
 				timeouts: config.timeouts,
 				autoFinishEnabled: config.autoFinishEnabled
 			};
-			this.chatSessions.set(chatId, session);
+			this.chatSessions.set(chat.id, session);
 			this.sessionStore.scheduleSave(() => this.chatSessions.values());
 		}
 
@@ -313,11 +312,6 @@ class SchedulesService {
 			},
 			include: {
 				messages: {
-					select: {
-						from: true,
-						timestamp: true,
-						body: true
-					},
 					orderBy: {
 						timestamp: "desc"
 					}
@@ -326,8 +320,8 @@ class SchedulesService {
 		});
 	}
 
-	private async processChat(chat: any, process: ProcessingLogger) {
-		const session = await this.getOrCreateSession(chat.id, chat.instance, chat.sectorId, chat.userId);
+	private async processChat(chat: ChatWithMessages, process: ProcessingLogger) {
+		const session = await this.getOrCreateSession(chat);
 
 		process.log("Processando chat", {
 			state: session.state,
@@ -348,7 +342,7 @@ class SchedulesService {
 		await this.makeDecision(chat, session, messageAnalysis, process);
 	}
 
-	private analyzeMessages(messages: any[]) {
+	private analyzeMessages(messages: WppMessage[] = []) {
 		let hasOperatorMessage = false;
 		let hasMenuPrompt = false;
 		let lastActivity = 0;
