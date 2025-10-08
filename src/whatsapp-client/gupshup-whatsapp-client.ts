@@ -6,6 +6,8 @@ import { GSRecoverTemplatesResponse } from "../types/gupshup-api.types";
 import ProcessingLogger from "../utils/processing-logger";
 import { randomUUID } from "crypto";
 import TemplateAdapter from "../adapters/template.adapter";
+import filesService from "../services/files.service";
+import prismaService from "../services/prisma.service";
 
 const GUP_URL = "https://api.gupshup.io";
 
@@ -197,6 +199,84 @@ class GupshupWhatsappClient implements WhatsappClient {
 
 	public async editMessage({}: EditMessageOptions): Promise<void> {
 		throw new Error("Method not implemented.");
+	}
+
+	public async forwardMessage(to: string, messageId: string, isGroup: boolean = false): Promise<void> {
+		const logger = new ProcessingLogger(this.instance, "gs-forward-message", randomUUID(), {
+			to,
+			messageId,
+			isGroup
+		});
+
+		try {
+			logger.log("[Gupshup] Iniciando forward simulado - buscando mensagem original");
+
+			// Busca a mensagem original
+			const originalMessage = await prismaService.wppMessage.findFirst({
+				where: {
+					OR: [{ gupshupId: messageId }, { wabaId: messageId }, { wwebjsId: messageId }]
+				}
+			});
+
+			if (!originalMessage) {
+				throw new Error(`Mensagem não encontrada para forward: ${messageId}`);
+			}
+
+			logger.log("[Gupshup] Mensagem original encontrada", {
+				id: originalMessage.id,
+				type: originalMessage.type,
+				hasFile: !!originalMessage.fileId
+			});
+
+			// Monta as opções de envio baseado na mensagem original
+			let sendOptions: SendMessageOptions;
+
+			if (originalMessage.fileId) {
+				// Mensagem com arquivo - reutiliza o arquivo existente
+				logger.log("[Gupshup] Preparando forward de mídia");
+
+				const fileMetadata = await filesService.fetchFileMetadata(originalMessage.fileId);
+
+				sendOptions = {
+					to,
+					text: originalMessage.body ?? null,
+					fileName: originalMessage.fileName || fileMetadata.name,
+					fileType: this.mapFileTypeForGupshup(originalMessage.type),
+					sendAsAudio: originalMessage.type === "ptt",
+					sendAsDocument: originalMessage.type === "document",
+					file: fileMetadata
+				};
+			} else {
+				// Mensagem de texto
+				logger.log("[Gupshup] Preparando forward de texto");
+				sendOptions = {
+					to,
+					text: originalMessage.body || ""
+				};
+			}
+
+			// Envia a mensagem
+			await this.sendMessage(sendOptions);
+			logger.log("[Gupshup] Forward simulado concluído com sucesso");
+		} catch (error) {
+			logger.log("[Gupshup] Erro no forward simulado", error);
+			logger.failed(error);
+			throw error;
+		}
+	}
+
+	private mapFileTypeForGupshup(messageType: string): "image" | "video" | "audio" | "document" {
+		switch (messageType) {
+			case "image":
+				return "image";
+			case "video":
+				return "video";
+			case "audio":
+			case "ptt":
+				return "audio";
+			default:
+				return "document";
+		}
 	}
 }
 

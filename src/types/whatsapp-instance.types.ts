@@ -8,13 +8,15 @@ interface BaseSendMessageOptions {
 	mentions?: Mentions;
 }
 
+export type SendFileType = "image" | "video" | "audio" | "document";
+
 export interface SendFileOptions extends BaseSendMessageOptions {
 	text?: string | null;
 	sendAsAudio?: boolean;
 	sendAsDocument?: boolean;
 	fileUrl: string;
 	fileName: string;
-	fileType?: "image" | "video" | "audio" | "document";
+	fileType?: SendFileType;
 	file: File;
 }
 

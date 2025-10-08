@@ -75,6 +75,8 @@ abstract class WhatsappClient {
 		chatId: number,
 		contactId: number
 	): Promise<CreateMessageDto>;
+
+	public abstract forwardMessage(to: string, messageId: string, isGroup: boolean): Promise<void>;
 }
 
 export default WhatsappClient;
