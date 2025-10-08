@@ -5,6 +5,7 @@ import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import whatsappService from "../services/whatsapp.service";
 import upload from "../middlewares/multer.middleware";
 import messageForwardingService from "../services/message-forwarding.service";
+import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 
 class MessagesController {
 	constructor(public readonly router: Router) {
@@ -68,7 +69,7 @@ class MessagesController {
 			});
 		} catch (error) {
 			res.status(500).send({
-				message: "Failed to send message",
+				message: sanitizeErrorMessage(error),
 				error: (error as Error).message
 			});
 		}
