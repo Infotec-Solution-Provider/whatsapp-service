@@ -75,10 +75,10 @@ class SchedulesService {
 
 			return {
 				timeouts: {
-					inactivity: Number(params["CHAT_INACTIVITY_MS"] || 30 * 60 * 1000), // 30min
-					menuResponse: Number(params["CHAT_MENU_RESPONSE_MS"] || 15 * 60 * 1000) // 15min
+					inactivity: Number(params["chat_inactivity_ms"] || 30 * 60 * 1000), // 30min
+					menuResponse: Number(params["chat_menu_response_ms"] || 15 * 60 * 1000) // 15min
 				},
-				autoFinishEnabled: params["CHAT_AUTO_FINISH_ENABLED"] === "true"
+				autoFinishEnabled: params["chat_auto_finish_enabled"] === "true"
 			};
 		} catch (error) {
 			// Fallback para valores padrão se não conseguir buscar paâmetros
@@ -87,7 +87,7 @@ class SchedulesService {
 					inactivity: 30 * 60 * 1000, // 30min
 					menuResponse: 15 * 60 * 1000 // 15min
 				},
-				autoFinishEnabled: false
+				autoFinishEnabled: false // Mudando padrão para false
 			};
 		}
 	}

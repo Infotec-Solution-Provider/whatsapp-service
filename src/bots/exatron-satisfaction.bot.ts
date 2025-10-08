@@ -78,7 +78,7 @@ class ExatronSatisfactionBot {
 			name: "",
 			role: ""
 		});
-		const timeoutms = Number(userParams["CHAT_TIMEOUT_MS"] || INACTIVITY_TIMEOUT_MS);
+		const timeoutms = Number(userParams["satisfaction_survey_timeout_ms"] || INACTIVITY_TIMEOUT_MS);
 
 		if (!s) {
 			s = {
