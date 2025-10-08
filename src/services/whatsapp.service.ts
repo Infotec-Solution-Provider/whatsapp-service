@@ -86,7 +86,11 @@ class WhatsappService {
 	private readonly clients = new Map<number, WhatsappClient>();
 
 	public async buildClients() {
-		const clients = await prismaService.wppClient.findMany();
+		const clients = await prismaService.wppClient.findMany({
+			where: {
+				isActive: true
+			}
+		});
 
 		for (const client of clients) {
 			switch (client.type) {
@@ -350,7 +354,7 @@ class WhatsappService {
 			return savedMsg;
 		} catch (err) {
 			process.failed("Erro ao enviar mensagem: " + sanitizeErrorMessage(err));
-			throw new BadRequestError("Erro ao enviar mensagem.", err);
+			throw new BadRequestError("Erro ao enviar mensagem: " + sanitizeErrorMessage(err), err);
 		}
 	}
 
@@ -776,6 +780,55 @@ class WhatsappService {
 			process.failed(`Erro ao enviar resposta automática: ${sanitizeErrorMessage(err)}`);
 
 			return undefined;
+		}
+	}
+
+	/**
+	 * Verifica se a janela de conversa ainda está aberta para um contato
+	 * @param instance - Instância do WhatsApp
+	 * @param phone - Telefone do contato
+	 * @returns true se a janela estiver aberta, false caso contrário
+	 */
+	public async isConversationWindowOpen(instance: string, phone: string): Promise<boolean> {
+		const process = new ProcessingLogger(instance, "check-conversation-window", phone, { phone });
+
+		try {
+			process.log("Verificando janela de conversa...");
+
+			const contact = await prismaService.wppContact.findUnique({
+				where: {
+					instance_phone: {
+						instance,
+						phone
+					}
+				}
+			});
+
+			if (!contact) {
+				process.log("Contato não encontrado - janela considerada fechada");
+				return false;
+			}
+
+			if (!contact.conversationExpiration) {
+				process.log("Contato sem data de expiração - janela considerada fechada");
+				return false;
+			}
+
+			const expirationDate = new Date(contact.conversationExpiration);
+			const now = new Date();
+
+			const isOpen = now < expirationDate;
+
+			process.log(`Janela de conversa ${isOpen ? "ABERTA" : "FECHADA"}`, {
+				expirationDate: expirationDate.toISOString(),
+				currentDate: now.toISOString(),
+				timeUntilExpiration: isOpen ? expirationDate.getTime() - now.getTime() : 0
+			});
+
+			return isOpen;
+		} catch (err) {
+			process.failed(`Erro ao verificar janela de conversa: ${sanitizeErrorMessage(err)}`);
+			return false; // Em caso de erro, considera a janela fechada por segurança
 		}
 	}
 }

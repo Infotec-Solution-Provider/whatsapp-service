@@ -15,6 +15,7 @@ import {
 import generateUID from "../utils/generate-uid";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
+import whatsappService from "../services/whatsapp.service";
 
 interface GetTemplateVariablesProps {
 	template: WABAMessageTemplate;
@@ -56,6 +57,16 @@ class WABAWhatsappClient implements WhatsappClient {
 
 		try {
 			process.log("Iniciando envio de mensagem...", options);
+
+			const isConversationWindowOpen = await whatsappService.isConversationWindowOpen(this.instance, options.to);
+
+			if (!isConversationWindowOpen) {
+				process.log("Janela de conversa não está aberta. ");
+				throw new Error(
+					"A janela de conversa com o contato não está aberta. Não é possível enviar a mensagem."
+				);
+			}
+
 			const reqUrl = `${GRAPH_API_URL}/${this.wabaPhoneId}/messages`;
 			const reqBody: any = {
 				recipient_type: "individual",

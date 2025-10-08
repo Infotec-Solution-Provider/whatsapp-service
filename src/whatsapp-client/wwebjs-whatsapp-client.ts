@@ -208,7 +208,9 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			if (!chat.isGroup) {
 				const savedMsg = await messagesService.insertMessage(parsedMsg);
 				process.log(`Message is successfully saved!`);
-				messagesDistributionService.processMessage(this.instance, this.id, savedMsg);
+				const contact = await msg.getContact();
+				const contactName = contact?.name || contact?.verifiedName || contact?.pushname || null;
+				messagesDistributionService.processMessage(this.instance, this.id, savedMsg, contactName);
 				process.log(`Message sent to distribution service!`);
 				process.success(savedMsg);
 			}
