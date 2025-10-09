@@ -1,4 +1,3 @@
-import { SessionData } from "@in.pulse-crm/sdk";
 import prismaService from "./prisma.service";
 
 class ParametersService {
