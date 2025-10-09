@@ -33,11 +33,19 @@ class ParametersService {
 		return instanceParams;
 	}
 
-	public async getSessionParams({ instance, sectorId, userId }: SessionData) {
+	public async getSessionParams({
+		instance,
+		sectorId,
+		userId
+	}: {
+		instance: string;
+		sectorId?: number | null;
+		userId?: number | null;
+	}) {
 		const [instanceParams, sectorParams, userParams] = await Promise.all([
 			this.getInstanceParams(instance),
-			this.getSectorParams(sectorId),
-			this.getUserParams(instance, userId)
+			sectorId ? this.getSectorParams(sectorId) : [],
+			userId ? this.getUserParams(instance, userId) : []
 		]);
 
 		// helper para transformar array em objeto

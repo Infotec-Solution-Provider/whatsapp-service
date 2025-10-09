@@ -71,10 +71,8 @@ class SchedulesService {
 		try {
 			const params = await parametersService.getSessionParams({
 				instance,
-				sectorId: sectorId ?? 0,
-				userId: userId ?? 0,
-				name: "",
-				role: ""
+				sectorId,
+				userId
 			});
 
 			return {
@@ -100,7 +98,7 @@ class SchedulesService {
 		let session = this.chatSessions.get(chat.id);
 
 		if (!session) {
-			const config = await this.getTimeoutConfig(chat.instance, chat.sectorId, chat.userId);
+			const config = await this.getTimeoutConfig(chat.instance, chat.sectorId, chat.userId || 9);
 			session = {
 				chatId: chat.id,
 				instance: chat.instance,
