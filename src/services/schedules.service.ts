@@ -11,6 +11,7 @@ import instancesService from "./instances.service";
 import parametersService from "./parameters.service";
 import JsonSessionStore from "../utils/json-session-store";
 import ProcessingLogger from "../utils/processing-logger";
+import { Logger } from "@in.pulse-crm/utils";
 
 interface ChatWithMessages extends WppChat {
 	messages?: Array<WppMessage>;
@@ -42,20 +43,28 @@ class SchedulesService {
 	private initialized = false;
 
 	constructor() {
-		cron.schedule("*/1 * * * *", async () => {
+		cron.schedule("*/5 * * * * *", async () => {
 			this.runSchedulesJob();
 			this.finishChatRoutine();
 		});
 	}
 
 	private async ensureInitialized() {
-		if (this.initialized) return;
+		Logger.debug("Inicializando sessões de monitoramento de chats...");
+		if (this.initialized) {
+			Logger.debug("Sessões já inicializadas.");
+			return;
+		}
+		Logger.debug("Carregando sessões do armazenamento...");
 
 		await this.sessionStore.ensureLoaded((sessions) => {
 			this.chatSessions.clear();
 			const now = Date.now();
 
 			for (const session of sessions) {
+				Logger.debug(
+					`Sessão carregada: Chat ID ${session.chatId}, Última Atividade ${new Date(session.lastActivity).toLocaleString()}`
+				);
 				if (session && typeof session.chatId === "number") {
 					this.chatSessions.set(session.chatId, {
 						...session,
@@ -64,6 +73,7 @@ class SchedulesService {
 				}
 			}
 			this.initialized = true;
+			Logger.debug(`Total de sessões carregadas: ${this.chatSessions.size}`);
 		});
 	}
 

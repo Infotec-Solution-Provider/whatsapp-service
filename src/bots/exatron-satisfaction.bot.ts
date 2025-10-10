@@ -74,9 +74,7 @@ class ExatronSatisfactionBot {
 		const userParams = await parametersService.getSessionParams({
 			instance: "exatron",
 			sectorId: chat.sectorId!,
-			userId: chat.userId!,
-			name: "",
-			role: ""
+			userId: chat.userId!
 		});
 		const timeoutms = Number(userParams["satisfaction_survey_timeout_ms"] || INACTIVITY_TIMEOUT_MS);
 
