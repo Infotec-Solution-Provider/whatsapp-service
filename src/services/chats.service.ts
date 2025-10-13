@@ -395,7 +395,7 @@ class ChatsService {
 			chatId: chat.id
 		});
 
-		if (result && result.WHATS_ACAO === "trigger-survey" && triggerSatisfactionBot) {
+		if ((result && result.WHATS_ACAO === "trigger-survey") || triggerSatisfactionBot) {
 			await exatronSatisfactionBot.startBot(chat, chat.contact!, chat.contact!.phone);
 		}
 	}
