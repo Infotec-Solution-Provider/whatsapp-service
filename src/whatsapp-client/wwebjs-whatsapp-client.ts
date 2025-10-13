@@ -18,6 +18,7 @@ import {
 } from "../types/whatsapp-instance.types";
 import internalChatsService from "../services/internal-chats.service";
 import CreateMessageDto from "../dtos/create-message.dto";
+import runFixLidMessagesRoutine from "../routines/fix-lid-messages.routine";
 
 const PUPPETEER_ARGS = {
 	headless: true,
@@ -178,6 +179,10 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				phone: this.wwebjs.info.wid.user
 			}
 		});
+
+		if (this.instance === "nunes") {
+			runFixLidMessagesRoutine(this.instance, this.wwebjs);
+		}
 	}
 
 	private async handleMessage(msg: WAWebJS.Message) {
