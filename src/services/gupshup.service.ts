@@ -13,6 +13,7 @@ import {
 import messagesDistributionService from "./messages-distribution.service";
 import chatsService from "./chats.service";
 import { WppClient } from "@prisma/client";
+import { TaskQueue, Logger } from "@in.pulse-crm/utils";
 
 interface ValidateEntryProps {
 	instance: string;
@@ -40,6 +41,24 @@ interface ProcessConversationStateProps {
 }
 
 class GupshupService {
+	private readonly queues = new Map<string, TaskQueue<void>>();
+
+	private getQueue(instance: string) {
+		let queue = this.queues.get(instance);
+
+		if (!queue) {
+			queue = new TaskQueue<void>({
+				concurrency: 1,
+				onTaskFailed: (error) => {
+					console.error(`[GupshupQueue][${instance}]`, error);
+				}
+			});
+			this.queues.set(instance, queue);
+		}
+
+		return queue;
+	}
+
 	private async validateEntry({ instance, logger, input }: ValidateEntryProps) {
 		logger.log("Validando webhook entry", {
 			instance,
@@ -98,7 +117,24 @@ class GupshupService {
 	}
 
 	public async handleWebhookEntry(instance: string, input: unknown) {
+		const queue = this.getQueue(instance);
+
+		return new Promise<void>((resolve, reject) => {
+			queue.add(async () => {
+				try {
+					await this.processWebhookEntry(instance, input);
+					resolve();
+				} catch (err) {
+					reject(err);
+					throw err;
+				}
+			});
+		});
+	}
+
+	private async processWebhookEntry(instance: string, input: unknown) {
 		const logger = new ProcessingLogger(instance, "webhook-entry", new Date().toISOString(), input);
+ 		const startedAt = Date.now();
 
 		try {
 			logger.log("validando webhook entry");
@@ -165,6 +201,10 @@ class GupshupService {
 		} catch (err: any) {
 			logger.failed(err);
 			throw err;
+		} finally {
+			const durationMs = Date.now() - startedAt;
+			Logger.debug(`[GupshupService] Processamento do webhook levou ${durationMs}ms para a instância ${instance}`);
+			logger.log("Tempo total de processamento do webhook", { durationMs });
 		}
 	}
 
