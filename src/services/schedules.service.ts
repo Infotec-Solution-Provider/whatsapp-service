@@ -14,7 +14,7 @@ interface ChatsFilters {
 }
 class SchedulesService {
 	constructor() {
-		cron.schedule("* */1 * * * *", () => {
+		cron.schedule("*/1 * * * *", () => {
 			this.runSchedulesJob();
 			runIdleChatsRoutine();
 		});
