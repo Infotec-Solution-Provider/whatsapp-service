@@ -1,19 +1,18 @@
+import { Logger } from "@in.pulse-crm/utils";
+import { WppClient } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
-import ProcessingLogger from "../utils/processing-logger";
 import GUPSHUPMessageParser from "../parsers/gupshup-message.parser";
-import prismaService from "./prisma.service";
-import messagesService from "./messages.service";
-import mdservice from "./messages-distribution.service";
 import {
 	GSBillingEvent,
 	GSConversationState,
 	GSMessageStatusData,
 	GSMessageStatusError
 } from "../types/gupshup-api.types";
-import messagesDistributionService from "./messages-distribution.service";
+import ProcessingLogger from "../utils/processing-logger";
 import chatsService from "./chats.service";
-import { WppClient } from "@prisma/client";
-import { Logger } from "@in.pulse-crm/utils";
+import { default as mdservice, default as messagesDistributionService } from "./messages-distribution.service";
+import messagesService from "./messages.service";
+import prismaService from "./prisma.service";
 
 interface ValidateEntryProps {
 	instance: string;
