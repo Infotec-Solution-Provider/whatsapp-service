@@ -29,7 +29,7 @@ export default async function runIdleChatsRoutine() {
 		const idleTime = Number(chatParameters["chat_auto_finish_idle_time"] || DEFAULT_CHAT_IDLE_TIME);
 		Logger.debug(`Usando tempo de inatividade de ${idleTime / 60000} minutos para o chat ${chat.id}`);
 
-		const isIdle = checkIsIdle(chat.messages, idleTime);
+		const isIdle = checkIsIdle(chat.startedAt!, chat.messages, idleTime);
 		if (!isIdle) {
 			Logger.debug(`Chat ${chat.id} não está ocioso. Ultima mensagem em ${chat.messages[0]?.sentAt}`);
 			continue;
@@ -162,8 +162,13 @@ async function finishChatAndNotify(chat: WppChat, reason: string, contactName: s
 	await chatsService.systemFinishChatById(chat.id, reason);
 }
 
-function checkIsIdle(messages: MessageLike[], idleTime: number) {
+function checkIsIdle(startedAt: Date, messages: MessageLike[], idleTime: number) {
 	const now = Date.now();
 	const lastMessageTime = messages[0]?.sentAt.getTime() || 0;
-	return now - lastMessageTime > idleTime;
+
+	const idleDuration = now - lastMessageTime;
+	const chatDuration = now - startedAt.getTime();
+	const isChatIdle = idleDuration > idleTime && chatDuration > idleTime;
+
+	return isChatIdle;
 }
