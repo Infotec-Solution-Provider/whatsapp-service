@@ -28,7 +28,8 @@ interface ProcessBillingEventProps {
 interface ProcessFailedStatusProps {
 	logger: ProcessingLogger;
 	error: GSMessageStatusError;
-	messageId: string;
+	wabaMessageId: string;
+	gsMessageId: string;
 	client: WppClient;
 }
 
@@ -137,7 +138,13 @@ class GupshupService {
 
 					if ("errors" in entry.data && entry.data.errors[0]) {
 						const error = entry.data.errors[0];
-						await this.processFailedStatus({ logger, error, messageId: entry.data.gs_id, client });
+						await this.processFailedStatus({
+							logger,
+							error,
+							wabaMessageId: entry.data.meta_msg_id,
+							gsMessageId: entry.data.gs_id,
+							client
+						});
 					}
 
 					if (
@@ -187,7 +194,7 @@ class GupshupService {
 				logger.log("Evento é faturável, inserindo na base de dados...");
 				await prismaService.wppMessage.update({
 					where: {
-						wabaId: event.references.id
+						gupshupId: event.references.gs_id
 					},
 					data: {
 						billingCategory: event.deductions.category
@@ -203,12 +210,12 @@ class GupshupService {
 		}
 	}
 
-	private async processFailedStatus({ logger, error, messageId, client }: ProcessFailedStatusProps) {
+	private async processFailedStatus({ logger, error, wabaMessageId, gsMessageId, client }: ProcessFailedStatusProps) {
 		try {
 			logger.log("Processando status de falha para a mensagem");
-			const message = await prismaService.wppMessage.findUniqueOrThrow({
+			const message = await prismaService.wppMessage.findFirstOrThrow({
 				where: {
-					wabaId: messageId
+					OR: [{ gupshupId: gsMessageId }, { wabaId: wabaMessageId }]
 				},
 				include: {
 					WppContact: true
