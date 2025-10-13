@@ -354,7 +354,8 @@ class ChatsService {
 		session: SessionData,
 		id: number,
 		resultId: number,
-		triggerSatisfactionBot = false
+		triggerSatisfactionBot = false,
+		reason?: string
 	) {
 		const results = await instancesService.executeQuery<InpulseResult[]>(session.instance, FETCH_RESULT_QUERY, [
 			resultId
@@ -383,7 +384,7 @@ class ChatsService {
 		let finishMsg: string = "";
 
 		if (!user && resultId === -50) {
-			finishMsg = `Atendimento finalizado pelo sistema.`;
+			finishMsg = `Atendimento finalizado pelo sistema.` + (reason ? `\nMotivo: ${reason}` : "");
 		}
 		if (user) {
 			finishMsg = `Atendimento finalizado por ${user.NOME}.\nResultado: ${results[0]?.NOME || "N/D"} `;
@@ -397,6 +398,28 @@ class ChatsService {
 		if (result && result.WHATS_ACAO === "trigger-survey" && triggerSatisfactionBot) {
 			await exatronSatisfactionBot.startBot(chat, chat.contact!, chat.contact!.phone);
 		}
+	}
+
+	public async systemFinishChatById(chatId: number, reason: string) {
+		const chat = await prismaService.wppChat.findUnique({
+			where: { id: chatId },
+			include: { contact: true }
+		});
+		if (!chat) {
+			throw new Error("Chat not found");
+		}
+		if (chat.isFinished) {
+			return;
+		}
+
+		await this.finishChatById(
+			null,
+			{ instance: chat.instance, userId: -1, sectorId: -1, role: "ADMIN", name: "SYSTEM" },
+			chatId,
+			-50,
+			false,
+			reason
+		);
 	}
 
 	public async startChatByContactId(
