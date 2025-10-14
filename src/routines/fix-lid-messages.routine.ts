@@ -9,17 +9,19 @@ async function runFixLidMessagesRoutine(instance: string, client: WAWebJS.Client
 			from: {
 				contains: "@lid"
 			}
-		},
-		include: {
-			chat: {
-				select: {
-					wppGroupId: true
-				}
-			}
 		}
 	});
 
-	for (const message of messagesWithLID) {
+	const uniqueFromMessages = new Map<string, (typeof messagesWithLID)[number]>();
+
+	for (const msg of messagesWithLID) {
+		if (!uniqueFromMessages.has(msg.from)) {
+			uniqueFromMessages.set(msg.from, msg);
+		}
+	}
+
+	for (const from of uniqueFromMessages.keys()) {
+		const message = uniqueFromMessages.get(from)!;
 		try {
 			if (!message.wwebjsId) {
 				Logger.debug(`Mensagem ${message.id} sem wwebjsId, pulando...`);
@@ -38,8 +40,23 @@ async function runFixLidMessagesRoutine(instance: string, client: WAWebJS.Client
 				continue;
 			}
 
-			const correctFrom = contact.number;
-			Logger.debug(`Atualizando mensagem ${message.id} de ${message.from} para ${correctFrom}`);
+			/* 
+            Wrong form: external:120363402687639158:143804548006066@lid
+            Correct form: external:120363402687639158:551999999999
+            */
+
+			const correctFrom = `external:${contact.number}:${contact.name || contact.pushname || contact.verifiedName || contact.number}`;
+			Logger.debug(`Atualizando from de ${message.from} para ${correctFrom}`);
+			await prismaService.internalMessage.updateMany({
+				where: {
+					instance,
+					from: message.from
+				},
+				data: {
+					from: correctFrom
+				}
+			});
+			Logger.info(`Mensagem ${message.id} atualizada de ${message.from} para ${correctFrom}`);
 		} catch (err) {
 			Logger.error(`Erro ao processar mensagem ${message.id}: ${err}`);
 			continue;
