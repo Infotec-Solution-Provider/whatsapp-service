@@ -480,7 +480,7 @@ class InternalChatsService {
 		}
 	}
 
-	public async receiveMessage(groupId: string, msg: CreateMessageDto, authorName: string) {
+	public async receiveMessage(groupId: string, msg: CreateMessageDto, authorName: string | null = null) {
 		const chat = await prismaService.internalChat.findUnique({
 			where: {
 				wppGroupId: groupId
@@ -492,7 +492,7 @@ class InternalChatsService {
 			const savedMsg = await prismaService.internalMessage.create({
 				data: {
 					...rest,
-					from: `external:${msg.from}:${authorName}`,
+					from: `external:${msg.from}` + (authorName ? `:${authorName}` : ""),
 					internalChatId: chat.id,
 					isForwarded: !!msg.isForwarded,
 					isEdited: false
