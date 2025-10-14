@@ -29,7 +29,12 @@ export default async function runIdleChatsJob() {
 		const idleTime = Number(chatParameters["chat_auto_finish_idle_time"] || DEFAULT_CHAT_IDLE_TIME);
 		Logger.debug(`Usando tempo de inatividade de ${idleTime / 60000} minutos para o chat ${chat.id}`);
 
-		const isIdle = checkIsIdle(chat.startedAt!, chat.messages, idleTime);
+		if (!chat.startedAt) {
+			Logger.warning(`Chat ${chat.id} não possui data de início. Pulando...`);
+			continue;
+		}
+
+		const isIdle = checkIsIdle(chat.startedAt, chat.messages, idleTime);
 		if (!isIdle) {
 			Logger.debug(`Chat ${chat.id} não está ocioso. Ultima mensagem em ${chat.messages[0]?.sentAt}`);
 			continue;

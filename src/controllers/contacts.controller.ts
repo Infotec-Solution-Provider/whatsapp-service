@@ -4,48 +4,17 @@ import contactsService from "../services/contacts.service";
 
 class ContactsController {
 	constructor(public readonly router: Router) {
-		this.router.get(
-			"/api/whatsapp/customer/:id/contacts",
-			isAuthenticated,
-			this.getCustomerContacts
-		);
-		this.router.get(
-			"/api/whatsapp/contacts/customer",
-			isAuthenticated,
-			this.getContactsWithCustomer
-		);
-		this.router.get(
-			"/api/whatsapp/contacts",
-			isAuthenticated,
-			this.getContacts
-		);
-		this.router.post(
-			"/api/whatsapp/customers/:id/contacts",
-			isAuthenticated,
-			this.createContact
-		);
-		this.router.post(
-			"/api/whatsapp/contacts",
-			isAuthenticated,
-			this.createContact
-		);
-		this.router.put(
-			"/api/whatsapp/contacts/:contactId",
-			isAuthenticated,
-			this.updateContact
-		);
-		this.router.delete(
-			"/api/whatsapp/contacts/:contactId",
-			isAuthenticated,
-			this.deleteContact
-		);
+		this.router.get("/api/whatsapp/customer/:id/contacts", isAuthenticated, this.getCustomerContacts);
+		this.router.get("/api/whatsapp/contacts/customer", isAuthenticated, this.getContactsWithCustomer);
+		this.router.get("/api/whatsapp/contacts", isAuthenticated, this.getContacts);
+		this.router.post("/api/whatsapp/customers/:id/contacts", isAuthenticated, this.createContact);
+		this.router.post("/api/whatsapp/contacts", isAuthenticated, this.createContact);
+		this.router.put("/api/whatsapp/contacts/:contactId", isAuthenticated, this.updateContact);
+		this.router.delete("/api/whatsapp/contacts/:contactId", isAuthenticated, this.deleteContact);
 	}
 
 	private async getCustomerContacts(req: Request, res: Response) {
-		const data = await contactsService.getCustomerContacts(
-			req.session.instance,
-			Number(req.params["id"])
-		);
+		const data = await contactsService.getCustomerContacts(req.session.instance, Number(req.params["id"]));
 
 		res.status(200).send({
 			message: "Chats retrieved successfully!",
@@ -54,9 +23,7 @@ class ContactsController {
 	}
 
 	private async getContacts(req: Request, res: Response) {
-		const data = await contactsService.getContacts(
-			req.session.instance,
-		);
+		const data = await contactsService.getContacts(req.session.instance);
 
 		res.status(200).send({
 			message: "Chats retrieved successfully!",
@@ -80,12 +47,7 @@ class ContactsController {
 		const customerId = Number(req.params["id"]);
 		const { name, phone } = req.body;
 
-		const contact = await contactsService.createContact(
-			req.session.instance,
-			name,
-			phone,
-			customerId
-		);
+		const contact = await contactsService.createContact(req.session.instance, name, phone, customerId);
 
 		res.status(200).send({
 			message: "Contact created successfully!",
