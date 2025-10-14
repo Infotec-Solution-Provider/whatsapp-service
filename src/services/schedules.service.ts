@@ -115,7 +115,7 @@ class SchedulesService {
 		});
 
 		if (chat) {
-			const systemMsg = `Esse atendimento foi agendado para retorno em ${date.toLocaleString()}.\nAgendado por ${session.name}.`;
+			const systemMsg = `Esse atendimento foi agendado para retorno em ${date.toLocaleString('pt-BR')}.\nAgendado por ${session.name}.`;
 			await chatsService.systemFinishChatById(chat.id, systemMsg);
 		}
 
