@@ -2,80 +2,36 @@ import { Prisma, WppContact, WppSchedule } from "@prisma/client";
 import prismaService from "./prisma.service";
 import { CreateScheduleDTO, Customer, SessionData } from "@in.pulse-crm/sdk";
 import chatsService, { FETCH_CUSTOMERS_QUERY } from "./chats.service";
-import messagesDistributionService from "./messages-distribution.service";
 import cron from "node-cron";
-import { Logger } from "@in.pulse-crm/utils";
 import instancesService from "./instances.service";
-import runIdleChatsRoutine from "../routines/idle-chats.routine";
+import runIdleChatsJob from "../routines/idle-chats.routine";
+import runSchedulesJob from "../routines/schedules.routine";
 
 interface ChatsFilters {
 	userId?: string;
 	sectorId?: string;
 }
 class SchedulesService {
+	private isSchedulesJobRunning: boolean = false;
+	private isIdleChatsJobRunning: boolean = false;
+
 	constructor() {
 		cron.schedule("*/1 * * * *", () => {
-			this.runSchedulesJob();
-			runIdleChatsRoutine();
-		});
-	}
-
-	private async runSchedulesJob() {
-		try {
-			const schedules = await prismaService.wppSchedule.findMany({
-				where: {
-					chatId: null,
-					scheduleDate: {
-						lte: new Date()
-					}
-				}
-			});
-
-			for (const schedule of schedules) {
-				const chat = await prismaService.wppChat.findFirst({
-					where: {
-						contactId: schedule.contactId,
-						instance: schedule.instance,
-						isFinished: false
-					}
+			if (!this.isSchedulesJobRunning) {
+				this.isSchedulesJobRunning = true;
+				runSchedulesJob().finally(() => {
+					this.isSchedulesJobRunning = false;
 				});
-
-				if (chat) {
-					await chatsService.finishChatById(
-						null,
-						{
-							instance: schedule.instance,
-							userId: schedule.scheduledBy,
-							sectorId: schedule.sectorId!,
-							role: "ADMIN",
-							name: "SYSTEM"
-						},
-						chat.id,
-						-50
-					);
-				}
-
-				const chatId = await chatsService.startScheduledChat(
-					schedule.instance,
-					schedule.sectorId!,
-					schedule.contactId,
-					schedule.scheduledFor
-				);
-
-				if (chatId) {
-					await prismaService.wppSchedule.update({
-						where: {
-							id: schedule.id
-						},
-						data: {
-							chatId
-						}
-					});
-				}
 			}
-		} catch (err: any) {
-			Logger.error("Erro ao executar job de agendamentos: ", err);
-		}
+		});
+		cron.schedule("*/1 * * * *", () => {
+			if (!this.isIdleChatsJobRunning) {
+				this.isIdleChatsJobRunning = true;
+				runIdleChatsJob().finally(() => {
+					this.isIdleChatsJobRunning = false;
+				});
+			}
+		});
 	}
 
 	public async getSchedulesBySession(session: SessionData, filters: ChatsFilters) {
@@ -135,7 +91,7 @@ class SchedulesService {
 		return detailedSchedules;
 	}
 
-	public async createSchedule(token: string, session: SessionData, data: CreateScheduleDTO) {
+	public async createSchedule(session: SessionData, data: CreateScheduleDTO) {
 		const chat = await prismaService.wppChat.findFirst({
 			where: {
 				contactId: data.contactId,
@@ -159,12 +115,8 @@ class SchedulesService {
 		});
 
 		if (chat) {
-			await chatsService.finishChatById(token, session, chat.id, -50);
-			await messagesDistributionService.addSystemMessage(
-				chat,
-				"Retorno agendado para: " + date.toLocaleString(),
-				true
-			);
+			const systemMsg = `Esse atendimento foi agendado para retorno em ${date.toLocaleString()}.\nAgendado por ${session.name}.`;
+			await chatsService.systemFinishChatById(chat.id, systemMsg);
 		}
 
 		return schedules;

@@ -10,27 +10,10 @@ interface SchedulesFilters {
 }
 class SchedulesController {
 	constructor(public readonly router: Router) {
-		this.router.get(
-			"/api/whatsapp/schedules",
-			isAuthenticated,
-			this.getSchedulesBySession
-		);
-		this.router.post(
-			"/api/whatsapp/schedules",
-			isAuthenticated,
-			this.createSchedule
-		);
-		this.router.patch(
-			"/api/whatsapp/schedules/:id",
-			isAuthenticated,
-			this.editSchedule
-		);
-		this.router.delete(
-			"/api/whatsapp/schedules/:id",
-			isAuthenticated,
-			this.deleteSchedule
-		);
-
+		this.router.get("/api/whatsapp/schedules", isAuthenticated, this.getSchedulesBySession);
+		this.router.post("/api/whatsapp/schedules", isAuthenticated, this.createSchedule);
+		this.router.patch("/api/whatsapp/schedules/:id", isAuthenticated, this.editSchedule);
+		this.router.delete("/api/whatsapp/schedules/:id", isAuthenticated, this.deleteSchedule);
 	}
 
 	private async getSchedulesBySession(req: Request, res: Response) {
@@ -49,10 +32,7 @@ class SchedulesController {
 			filters = { ...filters, sectorId: Number(sectorId) };
 		}
 
-		const data = await schedulesService.getSchedulesBySession(
-			req.session,
-			filters
-		);
+		const data = await schedulesService.getSchedulesBySession(req.session, filters);
 
 		res.status(200).send({
 			message: "Schedules retrieved successfully!",
@@ -69,9 +49,7 @@ class SchedulesController {
 		}
 
 		if (!input.contactId || typeof input.contactId !== "number") {
-			throw new BadRequestError(
-				"Contact ID is required and must be a number!"
-			);
+			throw new BadRequestError("Contact ID is required and must be a number!");
 		}
 
 		if (!input.date) {
@@ -79,22 +57,14 @@ class SchedulesController {
 		}
 
 		if (!input.scheduledFor || typeof input.scheduledFor !== "number") {
-			throw new BadRequestError(
-				"Scheduled For is required and must be a number!"
-			);
+			throw new BadRequestError("Scheduled For is required and must be a number!");
 		}
 
 		if (!input.sectorId || typeof input.sectorId !== "number") {
-			throw new BadRequestError(
-				"Sector ID is required and must be a number!"
-			);
+			throw new BadRequestError("Sector ID is required and must be a number!");
 		}
 
-		const result = await schedulesService.createSchedule(
-			(req.headers.authorization as string).replace("Bearer ", ""),
-			session,
-			input as CreateScheduleDTO
-		);
+		const result = await schedulesService.createSchedule(session, input as CreateScheduleDTO);
 
 		res.status(200).send({
 			message: "Schedule created successfully!",

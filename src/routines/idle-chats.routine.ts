@@ -16,7 +16,7 @@ const ROUTINE_PARAMETERS = [
 
 const DEFAULT_CHAT_IDLE_TIME = 30 * 60 * 1000; // minutos
 
-export default async function runIdleChatsRoutine() {
+export default async function runIdleChatsJob() {
 	const parameters = await getRoutineParameters();
 	const enabledInstances = await getRoutineEnabledInstances(parameters);
 	const ongoingChats = await getOngoingChats(enabledInstances);

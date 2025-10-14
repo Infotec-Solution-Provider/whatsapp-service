@@ -47,6 +47,14 @@ interface ChatsFilters {
 	isFinished?: string;
 }
 
+interface SystemStartNewChatProps {
+	instance: string;
+	contact: WppContact;
+	systemMessage?: string;
+	sectorId: number;
+	userId: number;
+}
+
 export const FETCH_CUSTOMERS_QUERY = "SELECT * FROM clientes WHERE CODIGO IN (?)";
 const FETCH_RESULT_QUERY = "SELECT * FROM resultados WHERE CODIGO = ?";
 
@@ -444,17 +452,7 @@ class ChatsService {
 				throw new Error("Contato não encontrado!");
 			}
 
-			const existingChat = await prismaService.wppChat.findFirst({
-				where: {
-					instance: session.instance,
-					contactId,
-					isFinished: false
-				}
-			});
-
-			if (existingChat) {
-				throw new Error("Alguém já está atendendo esse contato!");
-			}
+			await this.checkIfChatExistsOrThrow(session.instance, contact.id);
 
 			const profilePicture = await whatsappService.getProfilePictureUrl(session.instance, contact.phone);
 			const newChat = await prismaService.wppChat.create({
@@ -500,6 +498,68 @@ class ChatsService {
 		}
 	}
 
+	public async systemStartNewChat({ instance, sectorId, userId, contact, systemMessage }: SystemStartNewChatProps) {
+		const process = new ProcessingLogger(instance, "system-start-chat", `system-${contact.id}-${Date.now()}`, {
+			instance,
+			contactId: contact.id
+		});
+
+		try {
+			process.log(`Starting chat for contact ID ${contact.id} in instance ${instance}`);
+			process.log("Checking if chat already exists...");
+			await this.checkIfChatExistsOrThrow(instance, contact.id);
+			process.log("No existing chat found, proceeding to create a new chat...");
+
+			const profilePicture = await whatsappService.getProfilePictureUrl(instance, contact.phone);
+			const newChat = await prismaService.wppChat.create({
+				data: {
+					instance,
+					type: "ACTIVE",
+					avatarUrl: profilePicture,
+					userId,
+					contactId: contact.id,
+					sectorId,
+					startedAt: new Date()
+				},
+				include: {
+					contact: true,
+					messages: {
+						where: {
+							contactId: contact.id
+						}
+					}
+				}
+			});
+			process.log(`Chat created with ID ${newChat.id}`);
+
+			const message = systemMessage || `Atendimento iniciado pelo sistema.`;
+			await messagesDistributionService.addSystemMessage(newChat as WppChat, message, true);
+			await messagesDistributionService.notifyChatStarted(process, newChat as WppChat);
+
+			return newChat;
+		} catch (err: any) {
+			process.log("Erro ao iniciar o atendimento pelo sistema:" + err.message);
+			process.failed(err);
+			throw new Error("Erro ao iniciar o atendimento pelo sistema: " + err.message, { cause: err });
+		}
+	}
+
+	private async checkIfChatExistsOrThrow(instance: string, contactId: number) {
+		const existingChat = await prismaService.wppChat.findFirst({
+			where: {
+				instance,
+				contactId,
+				isFinished: false
+			}
+		});
+		if (existingChat) {
+			throw new Error("Alguém já está atendendo esse contato!");
+		}
+	}
+
+	/**
+	 * @deprecated
+	 */
 	public async startScheduledChat(instance: string, sectorId: number, contactId: number, scheduledFor: number) {
 		const process = new ProcessingLogger(instance, "start-chat", `${scheduledFor}-${contactId}_${Date.now()}`, {
 			instance,
