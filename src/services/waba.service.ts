@@ -243,6 +243,7 @@ class WABAService {
 			process.log("Atualizando expiration da conversa");
 			const currMessageDate = new Date(messageTimestamp);
 			const updatedExpiration = new Date(currMessageDate.getTime() + 24 * 60 * 60 * 1000).getTime().toString();
+
 			await prismaService.wppContact.update({
 				where: { id: contactId },
 				data: { conversationExpiration: updatedExpiration }
