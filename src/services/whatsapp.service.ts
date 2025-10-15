@@ -809,11 +809,13 @@ class WhatsappService {
 
 			if (!contact) {
 				process.log("Contato não encontrado - janela considerada fechada");
+				process.success("Verificação concluída com sucesso.");
 				return false;
 			}
 
 			if (!contact.conversationExpiration) {
 				process.log("Contato sem data de expiração - janela considerada fechada");
+				process.success("Verificação concluída com sucesso.");
 				return false;
 			}
 
