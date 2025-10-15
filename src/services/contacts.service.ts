@@ -107,13 +107,23 @@ class ContactsService {
 			}
 		});
 
-		if (existingContact) {
+		if (existingContact && !!existingContact.customerId) {
 			const message = `Este número já está cadastrado no cliente de código ${existingContact.customerId}`;
 			throw new ConflictError(message);
 		}
 
-		const createdContact = await prismaService.wppContact.create({
-			data: {
+		const createdContact = await prismaService.wppContact.upsert({
+			where: {
+				instance_phone: {
+					instance,
+					phone: validPhone
+				}
+			},
+			update: {
+				name,
+				customerId: customerId || null
+			},
+			create: {
 				instance,
 				name,
 				phone: validPhone,
