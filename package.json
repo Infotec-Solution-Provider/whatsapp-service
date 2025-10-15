@@ -7,7 +7,12 @@
 		"test": "echo \"Error: no test specified\" && exit 1",
 		"dev": "ts-node-dev --transpile-only --respawn --ignore-watch node_modules --watch .env src/main.ts",
 		"start": "ts-node src/main.ts",
-		"u": "npm i @in.pulse-crm/sdk@latest"
+		"u": "npm i @in.pulse-crm/sdk@latest",
+		"dev:instances": "cd ../instances-service && npm run dev",
+		"dev:users": "cd ../users-service && npm run dev",
+		"dev:customers": "cd ../customers-service && npm run dev",
+		"dev:files": "cd ../files-service && npm run dev",
+		"dev:socket": "cd ../socket-service && npm run dev"
 	},
 	"author": "Renan G. Dutra",
 	"license": "ISC",
