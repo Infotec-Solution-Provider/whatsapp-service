@@ -95,6 +95,7 @@ class WABAService {
 					if (processed.contactId) {
 						logger.log("Verificando necessidade de atualizar expiration da conversa");
 						const isUpdated = await this.checkAndUpdateContactConversationExpiration(
+							logger,
 							processed.contactId,
 							parsedMsg.timestamp
 						);
