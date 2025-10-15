@@ -436,3 +436,19 @@ enum WppMessageFlowStepType {
 
   @@map("message_flow_step_type")
 }
+
+model ReadyMessage {
+  id        Int      @id @default(autoincrement())
+  instance  String   @map("instance")
+  sectorId  Int      @map("sector_id")
+  title     String   @map("title")
+  message   String   @map("message") @db.Text
+  fileId    Int?     @map("file_id")
+  fileName  String?  @map("file_name")
+  onlyAdmin Boolean  @default(false) @map("only_admin")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([instance, sectorId])
+  @@map("ready_messages")
+}
