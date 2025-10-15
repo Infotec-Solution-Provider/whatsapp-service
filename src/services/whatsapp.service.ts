@@ -822,7 +822,7 @@ class WhatsappService {
 			Logger.debug("Contato encontrado, verificando data de expiração da conversa...", {
 				conversationExpiration: contact.conversationExpiration
 			});
-			const expirationDate = new Date(contact.conversationExpiration);
+			const expirationDate = new Date(+contact.conversationExpiration);
 			const now = new Date();
 
 			const isOpen = now < expirationDate;
