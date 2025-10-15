@@ -203,9 +203,28 @@ class WABAService {
 			});
 			if (!message?.WppContact) return;
 
+			const contact = message.WppContact;
+			const currentExpiration = contact.conversationExpiration
+				? Number(contact.conversationExpiration)
+				: null;
+			const newExpiration = Number(statusData.conversation.expiration_timestamp) * 1000;
+
+			if (Number.isNaN(newExpiration)) {
+				logger.log("Expiration inválida recebida, ignorando atualização.");
+				return;
+			}
+
+			if (currentExpiration && currentExpiration >= newExpiration) {
+				logger.log("Contato já possui janela de conversa maior ou igual, nenhuma atualização aplicada.", {
+					currentExpiration,
+					newExpiration
+				});
+				return;
+			}
+
 			await prismaService.wppContact.update({
-				where: { id: message.WppContact.id },
-				data: { conversationExpiration: statusData.conversation.expiration_timestamp + "000" }
+				where: { id: contact.id },
+				data: { conversationExpiration: newExpiration.toString() }
 			});
 		} catch (err) {
 			logger.log("Erro ao processar estado de conversa WABA");

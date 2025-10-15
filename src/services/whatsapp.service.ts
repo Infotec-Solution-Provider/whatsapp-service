@@ -796,7 +796,7 @@ class WhatsappService {
 		const process = new ProcessingLogger(instance, "check-conversation-window", phone, { phone });
 
 		try {
-			Logger.debug("Verificando janela de conversa...");
+			process.log("Verificando janela de conversa...");
 
 			const contact = await prismaService.wppContact.findUnique({
 				where: {
@@ -808,18 +808,18 @@ class WhatsappService {
 			});
 
 			if (!contact) {
-				Logger.debug("Contato não encontrado - janela considerada fechada");
+				process.log("Contato não encontrado - janela considerada fechada");
 				process.success("Verificação concluída com sucesso.");
 				return false;
 			}
 
 			if (!contact.conversationExpiration) {
-				Logger.debug("Contato sem data de expiração - janela considerada fechada");
+				process.log("Contato sem data de expiração - janela considerada fechada");
 				process.success("Verificação concluída com sucesso.");
 				return false;
 			}
 
-			Logger.debug("Contato encontrado, verificando data de expiração da conversa...", {
+			process.log("Contato encontrado, verificando data de expiração da conversa...", {
 				conversationExpiration: contact.conversationExpiration
 			});
 			const expirationDate = new Date(+contact.conversationExpiration);
@@ -827,7 +827,7 @@ class WhatsappService {
 
 			const isOpen = now < expirationDate;
 
-			Logger.debug(`Janela de conversa ${isOpen ? "ABERTA" : "FECHADA"}`, {
+			process.log(`Janela de conversa ${isOpen ? "ABERTA" : "FECHADA"}`, {
 				expirationDate: expirationDate.toISOString(),
 				currentDate: now.toISOString(),
 				timeUntilExpiration: isOpen ? expirationDate.getTime() - now.getTime() : 0
