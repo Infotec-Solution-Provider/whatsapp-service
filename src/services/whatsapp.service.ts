@@ -819,6 +819,9 @@ class WhatsappService {
 				return false;
 			}
 
+			Logger.debug("Contato encontrado, verificando data de expiração da conversa...", {
+				conversationExpiration: contact.conversationExpiration
+			});
 			const expirationDate = new Date(contact.conversationExpiration);
 			const now = new Date();
 
@@ -832,7 +835,8 @@ class WhatsappService {
 			process.success("Verificação concluída com sucesso.");
 
 			return isOpen;
-		} catch (err) {
+		} catch (err: any) {
+			Logger.error("Erro ao verificar janela de conversa", err);
 			process.failed(`Erro ao verificar janela de conversa: ${sanitizeErrorMessage(err)}`);
 			return false; // Em caso de erro, considera a janela fechada por segurança
 		}
