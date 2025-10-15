@@ -1,161 +1,172 @@
-import {
-	FileDirType,
-	SessionData,
-} from "@in.pulse-crm/sdk";
+import { FileDirType, SessionData } from "@in.pulse-crm/sdk";
+import { ReadyMessage } from "@prisma/client";
+import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
 import filesService from "./files.service";
-import instancesService from "./instances.service";
-import { plainToInstance } from "class-transformer";
+import prismaService from "./prisma.service";
 
-
-class ReadyMessage {
-	CODIGO!: number;
-	APENAS_ADMIN!: boolean;
-	TITULO!: string;
-	TEXTO_MENSAGEM!: string;
-	ARQUIVO_CODIGO!: number;
-	ARQUIVO_NOME!: string;
-	ARQUIVO_TIPO!: string;
-	LAST_UPDATE!: string;
-}
 interface CreateReadyMessageDto {
-    SETOR: string;
-    TEXTO_MENSAGEM: string;
-    TITULO: string;
-};
+	sectorId: number;
+	title: string;
+	message: string;
+	onlyAdmin?: boolean;
+}
 
+interface UpdateReadyMessageDto {
+	title?: string;
+	message?: string;
+	onlyAdmin?: boolean;
+}
 
 class ReadyMessagesService {
+	/**
+	 * Cria uma nova mensagem pronta
+	 */
 	public async createReadyMessage(
 		session: SessionData,
 		data: CreateReadyMessageDto,
 		file: Express.Multer.File | null = null
-	) {
-		let arquivo;
+	): Promise<ReadyMessage> {
+		let fileId: number | undefined;
+		let fileName: string | undefined;
 
-		data.TEXTO_MENSAGEM = encodeURI(data.TEXTO_MENSAGEM);
-		data.TITULO = encodeURI(data.TITULO);
+
+		console.log(data);
+		
+		// Upload do arquivo se fornecido
 		if (file) {
 			const fileData = await filesService.uploadFile({
-				instance:'infotec',
+				instance: session.instance,
 				fileName: file.originalname,
 				buffer: file.buffer,
 				mimeType: file.mimetype,
 				dirType: FileDirType.PUBLIC
 			});
 
-			arquivo = fileData;
+			fileId = fileData.id;
+			fileName = fileData.name;
 		}
-		const INSERT_QUERY = `INSERT INTO w_mensagens_prontas (SETOR, TEXTO_MENSAGEM, TITULO, ARQUIVO, ARQUIVO_CODIGO, LAST_UPDATE)
-		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP())`;
 
-		let readyMessage = await instancesService.executeQuery<{ insertId: number }>(session.instance, INSERT_QUERY,
-			[data.SETOR, data.TEXTO_MENSAGEM, data.TITULO, arquivo?.name,arquivo?.id ]);
+		// Criar mensagem pronta no banco
+		const readyMessage = await prismaService.readyMessage.create({
+			data: {
+				instance: session.instance,
+				sectorId: data.sectorId,
+				title: data.title,
+				message: data.message,
+				onlyAdmin: data.onlyAdmin || false,
+				fileId: fileId ?? null,
+				fileName: fileName ?? null
+			}
+		});
 
-		const selectQuery = `SELECT * FROM w_mensagens_prontas WHERE CODIGO = ? LIMIT 1`;
-
-		let result = await instancesService.executeQuery<Array<ReadyMessage>>(session.instance, selectQuery,
-				[readyMessage.insertId]);
-
-		result.map(m => {
-			m.TITULO = decodeURI(m.TITULO);
-			m.TEXTO_MENSAGEM = decodeURI(m.TEXTO_MENSAGEM);
-
-			return m;
-		})
-
-		return result[0];
+		return readyMessage;
 	}
-	public async getReadyMessages(session: SessionData) {
+
+	/**
+	 * Lista todas as mensagens prontas
+	 * Se não for TI (setor 3), filtra por setor
+	 */
+	public async getReadyMessages(session: SessionData): Promise<ReadyMessage[]> {
 		const isTI = session.sectorId === 3;
 
-		const baseQuery = `
-			SELECT *
-			FROM w_mensagens_prontas
-			${!isTI ? 'WHERE SETOR = ?' : ''}
-			ORDER BY TITULO ASC
-		`;
+		const readyMessages = await prismaService.readyMessage.findMany({
+			where: {
+				instance: session.instance,
+				...(isTI ? {} : { sectorId: session.sectorId })
+			},
+			orderBy: {
+				title: "asc"
+			}
+		});
 
-		const params = !isTI ? [session.sectorId] : [];
-
-		const result = await instancesService.executeQuery<Array<ReadyMessage>>(
-			session.instance,
-			baseQuery,
-			params
-		);
-
-		result.map(m => {
-			m.TITULO = decodeURI(m.TITULO);
-			m.TEXTO_MENSAGEM = decodeURI(m.TEXTO_MENSAGEM);
-
-			return m;
-		})
-
-		return result;
+		return readyMessages;
 	}
+
+	/**
+	 * Busca uma mensagem pronta por ID
+	 */
+	public async getReadyMessageById(session: SessionData, id: number): Promise<ReadyMessage> {
+		const readyMessage = await prismaService.readyMessage.findFirst({
+			where: {
+				id,
+				instance: session.instance
+			}
+		});
+
+		if (!readyMessage) {
+			throw new NotFoundError("Mensagem pronta não encontrada!");
+		}
+
+		return readyMessage;
+	}
+
+	/**
+	 * Atualiza uma mensagem pronta
+	 */
 	public async updateReadyMessage(
 		session: SessionData,
 		readyMessageId: number,
-		data: Partial<ReadyMessage>,
-		file: Express.Multer.File
-	) {
-		const fields = [];
-		const values: any[] = [];
+		data: UpdateReadyMessageDto,
+		file?: Express.Multer.File
+	): Promise<ReadyMessage> {
+		// Verificar se a mensagem existe
+		await this.getReadyMessageById(session, readyMessageId);
 
-		if (data.TITULO) data.TITULO = encodeURI(data.TITULO);
-		if (data.TEXTO_MENSAGEM) data.TEXTO_MENSAGEM = encodeURI(data.TEXTO_MENSAGEM);
+		const updateData: Partial<ReadyMessage> = {};
 
-
-		const fileData = await filesService.uploadFile({
-			instance: session.instance,
-			fileName: file.originalname,
-			buffer: file.buffer,
-			mimeType: file.mimetype,
-			dirType: FileDirType.PUBLIC
-		});
-
-		for (const [key, value] of Object.entries({ ...data, ARQUIVO: fileData.name })) {
-			if (typeof value === 'string') {
-				fields.push(key);
-				values.push(`'${value}'`);
-			};
-
-			if (typeof value === 'number') {
-				fields.push(key);
-				values.push(value);
-			};
-		};
-		const updateQuery = `UPDATE w_mensagens_prontas
-			SET ${fields.map((field, index) => `${field} = ${values[index]}`).join(', ')}, LAST_UPDATE = CURRENT_TIMESTAMP()
-			WHERE CODIGO = ${readyMessageId};
-			`;
-		if (!fields.length || !values.length) {
-			throw new Error("You must send at least one field to update.");
-		};
-		const selectQuery = `SELECT * FROM w_mensagens_prontas WHERE CODIGO = ${readyMessageId}`;
-		await instancesService.executeQuery<Array<ReadyMessage>>(session.instance, updateQuery,
-			[])
-		const updatedReadyMessage = instancesService.executeQuery(session.instance,updateQuery,[])
-			.then(async () => {
-				return await instancesService.executeQuery(session.instance,selectQuery,[])
-					.then((res:any) => plainToInstance(ReadyMessage, res[0][0]))
-					.catch((err) => {
-						throw new Error(err);
-					});
-			})
-			.catch((err) => {
-				throw new Error(err);
-			});
-
-		return updatedReadyMessage;
-	}
-	public async deleteReadyMessage(session: SessionData,
-		id: number) {
-
-		const deleteQuery = `DELETE FROM w_mensagens_prontas WHERE CODIGO = ?;`;
-		await instancesService.executeQuery<Array<ReadyMessage>>(session.instance, deleteQuery,
-			[id])
+		// Atualizar campos se fornecidos
+		if (data.title !== undefined) {
+			updateData.title = data.title;
 		}
 
+		if (data.message !== undefined) {
+			updateData.message = data.message;
+		}
+
+		if (data.onlyAdmin !== undefined) {
+			updateData.onlyAdmin = data.onlyAdmin;
+		}
+
+		// Upload de novo arquivo se fornecido
+		if (file) {
+			const fileData = await filesService.uploadFile({
+				instance: session.instance,
+				fileName: file.originalname,
+				buffer: file.buffer,
+				mimeType: file.mimetype,
+				dirType: FileDirType.PUBLIC
+			});
+
+			updateData.fileId = fileData.id;
+			updateData.fileName = fileData.name;
+		}
+
+		// Validar se há algo para atualizar
+		if (Object.keys(updateData).length === 0) {
+			throw new BadRequestError("Você deve enviar pelo menos um campo para atualizar.");
+		}
+
+		// Atualizar no banco
+		const updatedMessage = await prismaService.readyMessage.update({
+			where: { id: readyMessageId },
+			data: updateData
+		});
+
+		return updatedMessage;
+	}
+
+	/**
+	 * Deleta uma mensagem pronta
+	 */
+	public async deleteReadyMessage(session: SessionData, id: number): Promise<void> {
+		// Verificar se existe
+		await this.getReadyMessageById(session, id);
+
+		// Deletar
+		await prismaService.readyMessage.delete({
+			where: { id }
+		});
+	}
 }
 
 export default new ReadyMessagesService();

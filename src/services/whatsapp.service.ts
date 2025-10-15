@@ -247,7 +247,7 @@ class WhatsappService {
 					file: fileData
 				} as SendFileOptions;
 
-				message.fileId = data.fileId;
+				message.fileId = +data.fileId;
 				message.fileName = fileData.name;
 				message.fileType = fileData.mime_type;
 				message.fileSize = String(fileData.size);
@@ -275,8 +275,6 @@ class WhatsappService {
 					);
 					data.file.size = convertedAudio.size;
 					process.log("Mensagem convertida com sucesso.");
-					Logger.debug("Audio original", data.file);
-					Logger.debug("Audio convertido", convertedAudio);
 				}
 
 				const savedFile = await filesService.uploadFile({
@@ -286,8 +284,6 @@ class WhatsappService {
 					buffer: data.file.buffer,
 					dirType: FileDirType.PUBLIC
 				});
-
-				Logger.debug("Saved file", savedFile);
 
 				process.log(`Arquivo salvo com sucesso!`, savedFile);
 
