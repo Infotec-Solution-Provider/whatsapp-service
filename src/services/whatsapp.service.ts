@@ -827,6 +827,7 @@ class WhatsappService {
 				currentDate: now.toISOString(),
 				timeUntilExpiration: isOpen ? expirationDate.getTime() - now.getTime() : 0
 			});
+			process.success("Verificação concluída com sucesso.");
 
 			return isOpen;
 		} catch (err) {
