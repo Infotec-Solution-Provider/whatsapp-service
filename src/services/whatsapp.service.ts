@@ -266,8 +266,7 @@ class WhatsappService {
 					data;
 
 					process.log("Mensagem de audio, convertendo arquivo para " + convertedAudio.extension);
-					Logger.debug("Audio original", data.file);
-					Logger.debug("Audio convertido", convertedAudio);
+
 					data.file.buffer = convertedAudio.buffer;
 					data.file.mimetype = convertedAudio.mimeType;
 					data.file.originalname = data.file.originalname.replace(
@@ -276,6 +275,8 @@ class WhatsappService {
 					);
 					data.file.size = convertedAudio.size;
 					process.log("Mensagem convertida com sucesso.");
+					Logger.debug("Audio original", data.file);
+					Logger.debug("Audio convertido", convertedAudio);
 				}
 
 				const savedFile = await filesService.uploadFile({
@@ -285,6 +286,8 @@ class WhatsappService {
 					buffer: data.file.buffer,
 					dirType: FileDirType.PUBLIC
 				});
+
+				Logger.debug("Saved file", savedFile);
 
 				process.log(`Arquivo salvo com sucesso!`, savedFile);
 

@@ -30,6 +30,7 @@ import whatsappService from "./whatsapp.service";
 import chooseSectorBot from "../bots/choose-sector.bot";
 import chooseSellerBot from "../bots/seller-vollo.bot";
 import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
+import { InternalServerError } from "@rgranatodutra/http-errors";
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
 
@@ -80,7 +81,7 @@ class MessagesDistributionService {
 
 			if (currChat) {
 				logger.log("Chat anterior encontrado para o contato.", currChat);
-				await this.insertAndNotify(logger, currChat, msg);
+				const outputMessage = await this.insertAndNotify(logger, currChat, msg);
 
 				if (currChat.botId === 1) {
 					if (currChat.instance === "vollo") {
@@ -93,7 +94,7 @@ class MessagesDistributionService {
 				if (currChat.botId === 2) {
 					await exatronSatisfactionBot.processMessage(currChat, contact, msg);
 				}
-				return;
+				return outputMessage;
 			}
 
 			let newChat: WppChat | null = null;
@@ -152,10 +153,12 @@ class MessagesDistributionService {
 			await this.addSystemMessage(newChat, "Atendimento iniciado pelo cliente!", true);
 			logger.log("Chat criado com sucesso!", newChat);
 
-			await this.insertAndNotify(logger, newChat, msg, true);
+			const outputMsg = await this.insertAndNotify(logger, newChat, msg, true);
+			return outputMsg;
 		} catch (err) {
 			logger.log(`Erro ao processar mensagem!`);
 			logger.failed(err);
+			throw new InternalServerError("Não foi possível processar a mensagem.");
 		}
 	}
 
@@ -298,6 +301,8 @@ class MessagesDistributionService {
 		}
 		await this.notifyMessage(logger, insertedMsg);
 		logger.success(insertedMsg);
+
+		return insertedMsg;
 	}
 
 	public async processMessageStatus(type: "wwebjs" | "waba", id: string, status: WppMessageStatus) {

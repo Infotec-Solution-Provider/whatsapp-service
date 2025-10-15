@@ -1,12 +1,12 @@
-import { BadRequestError } from "@rgranatodutra/http-errors";
-import ProcessingLogger from "../utils/processing-logger";
-import prismaService from "./prisma.service";
-import messagesService from "./messages.service";
-import messagesDistributionService from "./messages-distribution.service";
-import chatsService from "./chats.service";
 import { WppClient } from "@prisma/client";
-import { ReceiveMessageBody, WABAMessageStatusData, Message } from "../types/whatsapp-api.types";
+import { BadRequestError } from "@rgranatodutra/http-errors";
 import WABAMessageParser from "../parsers/waba-message.parser";
+import { Message, ReceiveMessageBody, WABAMessageStatusData } from "../types/whatsapp-api.types";
+import ProcessingLogger from "../utils/processing-logger";
+import chatsService from "./chats.service";
+import messagesDistributionService from "./messages-distribution.service";
+import messagesService from "./messages.service";
+import prismaService from "./prisma.service";
 
 interface ValidateEntryResultStatus {
 	type: "status";
@@ -91,7 +91,21 @@ class WABAService {
 						logger
 					);
 					const inserted = await messagesService.insertMessage(parsedMsg);
-					await messagesDistributionService.processMessage(instance, client.id, inserted);
+					const processed = await messagesDistributionService.processMessage(instance, client.id, inserted);
+					if (processed.contactId) {
+						logger.log("Verificando necessidade de atualizar expiration da conversa");
+						const isUpdated = await this.checkAndUpdateContactConversationExpiration(
+							processed.contactId,
+							parsedMsg.timestamp
+						);
+
+						if (isUpdated) {
+							logger.log("Expiration da conversa atualizada com sucesso!");
+						} else {
+							logger.log("Nenhuma atualização na expiration da conversa.");
+						}
+					}
+
 					logger.log("Mensagem WABA processada com sucesso");
 					break;
 				case "status":
@@ -195,6 +209,29 @@ class WABAService {
 		} catch (err) {
 			logger.log("Erro ao processar estado de conversa WABA");
 		}
+	}
+
+	private async checkAndUpdateContactConversationExpiration(contactId: number, messageTimestamp: string) {
+		let isUpdated = false;
+
+		const contact = await prismaService.wppContact.findUnique({
+			where: { id: contactId }
+		});
+		if (!contact) return;
+		const expiration = contact.conversationExpiration;
+		const isContactWindowExpired = !expiration || Date.now() > parseInt(expiration);
+		const isMessageWithinWindow = messageTimestamp && parseInt(messageTimestamp + "000") <= Date.now();
+
+		if (isContactWindowExpired && isMessageWithinWindow) {
+			const currMessageDate = new Date(parseInt(messageTimestamp + "000"));
+			const updatedExpiration = new Date(currMessageDate.getTime() + 24 * 60 * 60 * 1000).getTime().toString();
+			await prismaService.wppContact.update({
+				where: { id: contactId },
+				data: { conversationExpiration: updatedExpiration }
+			});
+			isUpdated = true;
+		}
+		return isUpdated;
 	}
 }
 
