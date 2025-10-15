@@ -121,6 +121,7 @@ class MessagesDistributionService {
 				newChat = await prismaService.wppChat.create({
 					data: {
 						...data,
+						startedAt: new Date(),
 						botId: instance === "vollo" ? 1 : null,
 						...(instance === "vollo" && { userId: 15 })
 					}
