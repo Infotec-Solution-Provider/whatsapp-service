@@ -211,26 +211,39 @@ class WABAService {
 		}
 	}
 
-	private async checkAndUpdateContactConversationExpiration(contactId: number, messageTimestamp: string) {
+	private async checkAndUpdateContactConversationExpiration(
+		process: ProcessingLogger,
+		contactId: number,
+		messageTimestamp: string
+	) {
+		process.log("Verificando necessidade de atualizar expiration da conversa");
 		let isUpdated = false;
 
 		const contact = await prismaService.wppContact.findUnique({
 			where: { id: contactId }
 		});
-		if (!contact) return;
+		if (!contact) {
+			process.log("Contato não encontrado ao verificar expiration da conversa");
+			return;
+		}
+		process.log("Contato encontrado", contact);
 		const expiration = contact.conversationExpiration;
 		const isContactWindowExpired = !expiration || Date.now() > parseInt(expiration);
 		const isMessageWithinWindow = messageTimestamp && parseInt(messageTimestamp + "000") <= Date.now();
+		process.log("Verificando janelas de tempo", { isContactWindowExpired, isMessageWithinWindow });
 
-		if (isContactWindowExpired && isMessageWithinWindow) {
+		if (isContactWindowExpired && !isMessageWithinWindow) {
+			process.log("Atualizando expiration da conversa");
 			const currMessageDate = new Date(parseInt(messageTimestamp + "000"));
 			const updatedExpiration = new Date(currMessageDate.getTime() + 24 * 60 * 60 * 1000).getTime().toString();
 			await prismaService.wppContact.update({
 				where: { id: contactId },
 				data: { conversationExpiration: updatedExpiration }
 			});
+			process.log("Expiration da conversa atualizada", { contactId, updatedExpiration });
 			isUpdated = true;
 		}
+		process.log("Verificação de atualização da expiration da conversa concluída", { isUpdated });
 		return isUpdated;
 	}
 }
