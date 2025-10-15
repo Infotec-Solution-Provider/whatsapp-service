@@ -230,12 +230,17 @@ class WABAService {
 		process.log("Contato encontrado", contact);
 		const expiration = contact.conversationExpiration;
 		const isContactWindowExpired = !expiration || Date.now() > parseInt(expiration);
-		const isMessageWithinWindow = messageTimestamp && parseInt(messageTimestamp + "000") <= Date.now();
-		process.log("Verificando janelas de tempo", { isContactWindowExpired, isMessageWithinWindow });
+		const isMessageWithinWindow = messageTimestamp && parseInt(messageTimestamp) <= Date.now();
+		process.log("Verificando janelas de tempo", {
+			isContactWindowExpired,
+			isMessageWithinWindow,
+			expiration,
+			messageTimestamp
+		});
 
 		if (isContactWindowExpired && !isMessageWithinWindow) {
 			process.log("Atualizando expiration da conversa");
-			const currMessageDate = new Date(parseInt(messageTimestamp + "000"));
+			const currMessageDate = new Date(parseInt(messageTimestamp));
 			const updatedExpiration = new Date(currMessageDate.getTime() + 24 * 60 * 60 * 1000).getTime().toString();
 			await prismaService.wppContact.update({
 				where: { id: contactId },
