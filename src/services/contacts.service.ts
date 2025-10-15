@@ -95,7 +95,6 @@ class ContactsService {
 
 	public async createContact(instance: string, name: string, phone: string, customerId?: number) {
 		const validPhone = await whatsappService.getValidWhatsappPhone(instance, phone);
-		let contact;
 		if (!validPhone) {
 			throw new BadRequestError("Esse número não é um WhatsApp válido!");
 		}
