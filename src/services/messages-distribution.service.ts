@@ -98,6 +98,7 @@ class MessagesDistributionService {
 			}
 
 			let newChat: WppChat | null = null;
+			let systemMessage: string | null = null;
 
 			logger.log("Nenhum chat encontrado para o contato.");
 
@@ -117,15 +118,19 @@ class MessagesDistributionService {
 			} else {
 				logger.log("Um setor encontrado, iniciando o fluxo de atendimento.");
 				const flow = await this.getFlow(instance, sectors[0]!.id);
-				const data = await flow.getChatPayload(logger, contact);
+				const result = await flow.getChatPayload(logger, contact);
+				const chatData = { ...result };
+				delete chatData.systemMessage;
+
 				newChat = await prismaService.wppChat.create({
 					data: {
-						...data,
+						...chatData,
 						startedAt: new Date(),
 						botId: instance === "vollo" ? 1 : null,
 						...(instance === "vollo" && { userId: 15 })
 					}
 				});
+				systemMessage = result.systemMessage || null;
 			}
 
 			if (!newChat) {
@@ -150,8 +155,8 @@ class MessagesDistributionService {
 					where: { id: newChat.id }
 				});
 			}
-
-			await this.addSystemMessage(newChat, "Atendimento iniciado pelo cliente!", true);
+			systemMessage = systemMessage || "Atendimento iniciado pelo cliente!";
+			await this.addSystemMessage(newChat, systemMessage, true);
 			logger.log("Chat criado com sucesso!", newChat);
 
 			const outputMsg = await this.insertAndNotify(logger, newChat, msg, true);

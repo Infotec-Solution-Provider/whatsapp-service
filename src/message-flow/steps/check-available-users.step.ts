@@ -1,36 +1,16 @@
 import { UserOnlineSession } from "@in.pulse-crm/sdk";
 import authService from "../../services/auth.service";
 import prismaService from "../../services/prisma.service";
-import Step, { ChatPayload, FinalStep, NextStep, StepContext } from "./step";
-
-interface CheckAvailableUsersStepOptions {
-	instance: string;
-	sectorId: number;
-	stepId: number;
-	nextStepId: number;
-}
+import { BaseStep, StepConfig, StepContext, StepResult } from "../base/base.step";
 
 interface UserChatCount {
 	userId: number;
 	chats: number;
 }
 
-export default class CheckAvailableUsersStep implements Step {
-	private readonly instance: string;
-	private readonly sectorId: number;
-	private readonly nextStepId: number;
-	public readonly id: number;
-
-	constructor({
-		instance,
-		sectorId,
-		stepId,
-		nextStepId
-	}: CheckAvailableUsersStepOptions) {
-		this.instance = instance;
-		this.sectorId = sectorId;
-		this.id = stepId;
-		this.nextStepId = nextStepId;
+export default class CheckAvailableUsersStep extends BaseStep {
+	constructor(config: StepConfig) {
+		super(config);
 	}
 
 	/**
@@ -74,7 +54,7 @@ export default class CheckAvailableUsersStep implements Step {
 	/**
 	 * Executa o passo.
 	 */
-	public async run(ctx: StepContext): Promise<NextStep | FinalStep> {
+	public async execute(ctx: StepContext): Promise<StepResult> {
 		ctx.logger.log("Verificando usuários disponíveis...");
 
 		const sessions = await this.getSectorOnlineSessions();
@@ -82,31 +62,28 @@ export default class CheckAvailableUsersStep implements Step {
 
 		if (sessions.length === 0) {
 			ctx.logger.log("Nenhum usuário disponível encontrado.");
-			return { isFinal: false, stepId: this.nextStepId };
+			return this.continue(ctx);
 		}
 
 		const usersChats = await this.getUserChatsCount(sessions);
 
 		if (usersChats.length === 0) {
 			ctx.logger.log("Nenhum usuário disponível encontrado.");
-			return { isFinal: false, stepId: this.nextStepId };
+			return this.continue(ctx);
 		}
 
 		const { userId } = usersChats[0]!;
 
-		const chatData: ChatPayload = {
+		const chatData = {
 			instance: this.instance,
 			userId,
 			sectorId: this.sectorId,
-			type: "RECEPTIVE",
+			type: "RECEPTIVE" as const,
 			contactId: ctx.contact.id
 		};
 
 		ctx.logger.log(`Usuário ${userId} será atribuído ao chat.`, chatData);
 
-		return {
-			isFinal: true,
-			chatData
-		};
+		return this.finalize(chatData);
 	}
 }

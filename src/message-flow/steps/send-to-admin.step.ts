@@ -1,37 +1,22 @@
-import Step, { ChatPayload, FinalStep, StepContext } from "./step";
+import { BaseStep, StepConfig, StepContext, StepResult } from "../base/base.step";
 
-interface SendToAdminStepOptions {
-	instance: string;
-	stepId: number;
-	sectorId: number;
-}
-
-export default class SendToAdminStep implements Step {
-	private readonly instance: string;
-	private readonly sectorId: number;
-	public readonly id: number;
-
-	constructor({ instance, stepId, sectorId }: SendToAdminStepOptions) {
-		this.id = stepId;
-		this.instance = instance;
-		this.sectorId = sectorId;
+export default class SendToAdminStep extends BaseStep {
+	constructor(config: StepConfig) {
+		super(config);
 	}
 
-	public async run(ctx: StepContext): Promise<FinalStep> {
+	public async execute(ctx: StepContext): Promise<StepResult> {
 		ctx.logger.log("Enviando mensagem para o administrador...");
-		const chatData: ChatPayload = {
+
+		const chatData = {
 			instance: this.instance,
-			type: "RECEPTIVE",
+			type: "RECEPTIVE" as const,
 			userId: -1,
 			sectorId: this.sectorId,
 			contactId: ctx.contact.id
 		};
 
 		ctx.logger.log("Chat criado.", chatData);
-
-		return {
-			isFinal: true,
-			chatData
-		};
+		return this.finalize(chatData);
 	}
 }

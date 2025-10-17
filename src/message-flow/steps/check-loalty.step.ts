@@ -1,76 +1,33 @@
 import instances from "../../services/instances.service";
-import Step, { ChatPayload, FinalStep, NextStep, StepContext } from "./step";
 import instancesService from "../../services/instances.service";
 import { User } from "@in.pulse-crm/sdk";
-
-interface CustomerSchedules {
-	CODIGO: number;
-	CLIENTE: number;
-	CAMPANHA: number;
-	DT_RESULTADO: Date | null;
-	DT_AGENDAMENTO: Date;
-	RESULTADO: number;
-	CONCLUIDO: "SIM" | "NAO";
-	FONE1: string;
-	FONE2: string;
-	FONE3: string;
-	ORDEM: number;
-	OPERADOR: number;
-	OPERADOR_LIGACAO: number;
-	DATA_HORA_LIG: Date | null;
-	TELEFONE_LIGADO: string | null;
-	DATA_HORA_FIM: Date | null;
-	AGENDA: number;
-	DESC_FONE1: string | null;
-	DESC_FONE2: string | null;
-	DESC_FONE3: string | null;
-	FIDELIZA: "S" | "N";
-	MANUAL: "S" | "N";
-}
-
-interface CheckLoaltyStepOptions {
-	instance: string;
-	sectorId: number;
-	stepId: number;
-	nextStepId: number;
-}
+import { BaseStep, StepConfig, StepContext, StepResult, CustomerSchedule } from "../base/base.step";
 
 const CHECK_LOALTY_QUERY = `SELECT * FROM campanhas_clientes cc
             WHERE cc.CLIENTE = ?
             ORDER BY CODIGO DESC LIMIT 1;`;
 
-export default class CheckLoaltyStep implements Step {
-	private readonly instance: string;
-	private readonly sectorId: number;
-	private readonly nextStepId: number;
-	public readonly id: number;
-
-	constructor({
-		instance,
-		sectorId,
-		stepId,
-		nextStepId
-	}: CheckLoaltyStepOptions) {
-		this.instance = instance;
-		this.sectorId = sectorId;
-		this.nextStepId = nextStepId;
-		this.id = stepId;
+export default class CheckLoaltyStep extends BaseStep {
+	constructor(config: StepConfig) {
+		super(config);
 	}
 
-	public async run(ctx: StepContext): Promise<NextStep | FinalStep> {
+	public async execute(ctx: StepContext): Promise<StepResult> {
 		ctx.logger.log("Iniciando etapa de checagem de fidelização...");
 
 		if (!ctx.contact.customerId) {
-			return this.nextStep(ctx, "O contato não possui um ID de cliente.");
+			ctx.logger.log("O contato não possui um ID de cliente.");
+			return this.continue(ctx);
 		}
 
 		const customerSchedule = await this.fetchCustomerSchedule(ctx);
 		if (!customerSchedule) {
-			return this.nextStep(ctx, "Agendamento do cliente não encontrado.");
+			ctx.logger.log("Agendamento do cliente não encontrado.");
+			return this.continue(ctx);
 		}
 		if (customerSchedule.OPERADOR === 0) {
-			const msg = "O agendamento do cliente não possui um operador.";
-			return this.nextStep(ctx, msg);
+			ctx.logger.log("O agendamento do cliente não possui um operador.");
+			return this.continue(ctx);
 		}
 
 		const isSameSector = await this.isUserInSameSector(
@@ -78,12 +35,13 @@ export default class CheckLoaltyStep implements Step {
 			customerSchedule.OPERADOR
 		);
 		if (!isSameSector) {
-			return this.nextStep(ctx, "O usuário não está no mesmo setor.");
+			ctx.logger.log("O usuário não está no mesmo setor.");
+			return this.continue(ctx);
 		}
 
-		const chatData: ChatPayload = {
+		const chatData = {
 			instance: this.instance,
-			type: "RECEPTIVE",
+			type: "RECEPTIVE" as const,
 			userId: customerSchedule.OPERADOR,
 			contactId: ctx.contact.id,
 			sectorId: this.sectorId
@@ -91,14 +49,14 @@ export default class CheckLoaltyStep implements Step {
 
 		ctx.logger.log("Chat criado com sucesso.", chatData);
 
-		return { chatData, isFinal: true };
+		return this.finalize(chatData);
 	}
 
 	private async fetchCustomerSchedule(
 		ctx: StepContext
-	): Promise<CustomerSchedules | null> {
+	): Promise<CustomerSchedule | null> {
 		ctx.logger.log("Buscando agendamento do cliente...");
-		const result = await instances.executeQuery<Array<CustomerSchedules>>(
+		const result = await instances.executeQuery<Array<CustomerSchedule>>(
 			this.instance,
 			CHECK_LOALTY_QUERY,
 			[ctx.contact.customerId]
@@ -117,10 +75,5 @@ export default class CheckLoaltyStep implements Step {
 		);
 
 		return users.length > 0 && users[0]!.SETOR === this.sectorId;
-	}
-
-	private nextStep(ctx: StepContext, logMessage: string): NextStep {
-		ctx.logger.log(logMessage);
-		return { isFinal: false, stepId: this.nextStepId };
 	}
 }
