@@ -217,9 +217,6 @@ class MessageFlowsController {
 		const { stepId } = req.params;
 		const { type, stepNumber, nextStepId, fallbackStepId, config, connections, enabled, description } = req.body;
 
-		console.log(`[MessageFlowsController] Updating step ${stepId} with data:`, req.body);
-		console.log(`[MessageFlowsController] Tipo recebido do frontend: '${type}'`);
-
 		const updateData: any = {};
 
 		if (type !== undefined) updateData.type = type;
@@ -232,12 +229,7 @@ class MessageFlowsController {
 		if (enabled !== undefined) updateData.enabled = enabled;
 		if (description !== undefined) updateData.description = description;
 
-		console.log(`[MessageFlowsController] updateData a ser enviado para service:`, updateData);
-
 		const step = await messageFlowsService.updateStep(Number(stepId), updateData);
-
-		console.log(`[MessageFlowsController] Step retornado do service:`, step);
-		console.log(`[MessageFlowsController] step.type = '${step.type}'`);
 
 		res.json(step);
 	}

@@ -19,8 +19,6 @@ const API_BASE_URL = "/api";
 
 class FlowApiService {
 	private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-		console.log(`API Request: ${options.method || "GET"} ${endpoint}`, options.body ? JSON.parse(options.body as string) : "");
-		
 		const response = await fetch(`${API_BASE_URL}${endpoint}`, {
 			...options,
 			headers: {
@@ -33,23 +31,10 @@ class FlowApiService {
 			const error = await response.json().catch(() => ({
 				message: response.statusText
 			}));
-			console.error("API Error:", error);
 			throw new Error(error.message || "Request failed");
 		}
 
 		const data = await response.json();
-		console.log(`[FlowApiService] Raw response para ${endpoint}:`, data);
-		
-		// Log detalhado para debug de step
-		if (typeof data === 'object' && data !== null && 'stepNumber' in data) {
-			console.log(`[FlowApiService] Response é um Step:`);
-			console.log(`  - id: ${data.id}`);
-			console.log(`  - type: '${data.type}'`);
-			console.log(`  - stepType: '${data.stepType}'`);
-			console.log(`  - stepNumber: ${data.stepNumber}`);
-			console.log(`  - Todas as chaves: ${Object.keys(data).join(", ")}`);
-		}
-		
 		return data;
 	}
 

@@ -76,18 +76,6 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 
 	// Sincroniza formData quando o step prop muda (após update)
 	useEffect(() => {
-		console.log("[StepEditor] useEffect [step, steps] acionado");
-		if (step) {
-			console.log("[StepEditor] Step prop mudou, sincronizando formData:");
-			console.log("  step.id:", step.id);
-			console.log("  step.stepType:", step.stepType);
-			console.log("  step.stepNumber:", step.stepNumber);
-			console.log("  step.description:", step.description || "(vazio)");
-			console.log("  step.enabled:", step.enabled);
-			console.log("  step.config keys:", Object.keys(step.config || {}).join(", ") || "(vazio)");
-		} else {
-			console.log("[StepEditor] Criando novo step");
-		}
 		const newFormData = {
 			stepNumber: step?.stepNumber || Math.max(0, ...steps.map((s) => s.stepNumber)) + 1,
 			stepType: (step?.stepType || "QUERY") as WppMessageFlowStepType | "",
@@ -140,11 +128,6 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 				stepData.fallbackStepId = parseInt(formData.fallbackStepId);
 			}
 
-			console.log("[StepEditor] Enviando dados do step:");
-			console.log("  step.id (se update):", step?.id || "N/A");
-			console.log("  type:", stepData.type);
-			console.log("  stepNumber:", stepData.stepNumber);
-
 			// OPTIMISTIC UPDATE: Usar dados inputados imediatamente
 			const optimisticStep: FlowStep = {
 				id: step?.id || 0,
@@ -162,37 +145,31 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 			};
 
 			// Chamar onSave com dados otimistas ANTES de fazer a requisição
-			console.log("[StepEditor] Chamando onSave com dados otimistas");
 			onSave(optimisticStep);
 
 			// Depois fazer a requisição
 			try {
 				if (step) {
 					// Update existing step
-					console.log("[StepEditor] Atualizando step existente:", step.id);
 					await flowApiService.updateStep(step.id, stepData);
 				} else {
 					// Create new step
-					console.log("[StepEditor] Criando novo step no flow:", flowId);
 					await flowApiService.createStep(flowId, stepData);
 				}
 
-				// Mostrar toast de sucesso
-				setSnackbar({
-					open: true,
-					message: step ? "Passo atualizado com sucesso!" : "Passo criado com sucesso!",
-					severity: "success",
-				});
-
-				console.log("[StepEditor] Passo salvo com sucesso");
-			} catch (apiError) {
-				// Erro na requisição: reverter para dados originais
-				console.error("[StepEditor] Erro ao salvar na API, revertendo para dados originais:", apiError);
-				setFormData(originalFormData);
-				setSnackbar({
-					open: true,
-					message: apiError instanceof Error ? apiError.message : "Erro ao salvar passo",
-					severity: "error",
+			// Mostrar toast de sucesso
+			setSnackbar({
+				open: true,
+				message: step ? "Passo atualizado com sucesso!" : "Passo criado com sucesso!",
+				severity: "success",
+			});
+		} catch (apiError) {
+			// Erro na requisição: reverter para dados originais
+			setFormData(originalFormData);
+			setSnackbar({
+				open: true,
+				message: apiError instanceof Error ? apiError.message : "Erro ao salvar passo",
+				severity: "error",
 				});
 			}
 		} catch (err) {
