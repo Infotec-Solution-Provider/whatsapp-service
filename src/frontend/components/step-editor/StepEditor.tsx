@@ -88,8 +88,8 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 			const config = JSON.parse(configJson);
 
 			const stepData: any = {
+				type: formData.stepType,
 				stepNumber: formData.stepNumber,
-				stepType: formData.stepType,
 				config,
 				connections: formData.connections,
 				enabled: formData.enabled
