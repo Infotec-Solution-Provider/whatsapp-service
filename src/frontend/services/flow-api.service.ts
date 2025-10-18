@@ -38,7 +38,18 @@ class FlowApiService {
 		}
 
 		const data = await response.json();
-		console.log(`API Response: ${options.method || "GET"} ${endpoint}`, data);
+		console.log(`[FlowApiService] Raw response para ${endpoint}:`, data);
+		
+		// Log detalhado para debug de step
+		if (typeof data === 'object' && data !== null && 'stepNumber' in data) {
+			console.log(`[FlowApiService] Response é um Step:`);
+			console.log(`  - id: ${data.id}`);
+			console.log(`  - type: '${data.type}'`);
+			console.log(`  - stepType: '${data.stepType}'`);
+			console.log(`  - stepNumber: ${data.stepNumber}`);
+			console.log(`  - Todas as chaves: ${Object.keys(data).join(", ")}`);
+		}
+		
 		return data;
 	}
 

@@ -12,12 +12,14 @@ import {
 	Accordion,
 	AccordionDetails,
 	AccordionSummary,
+	Alert,
 	Box,
 	Button,
 	Dialog,
 	DialogActions,
 	DialogContent,
 	DialogTitle,
+	Snackbar,
 	TextField,
 	Typography
 } from "@mui/material";
@@ -53,6 +55,20 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 	});
 
 	const [configJson, setConfigJson] = useState(JSON.stringify(step?.config || {}, null, 2));
+	
+	// Estado para toast de sucesso/erro
+	const [snackbar, setSnackbar] = useState<{
+		open: boolean;
+		message: string;
+		severity: "success" | "error";
+	}>({
+		open: false,
+		message: "",
+		severity: "success",
+	});
+
+	// Guardar dados originais para reverter em caso de erro
+	const [originalFormData, setOriginalFormData] = useState(formData);
 
 	useEffect(() => {
 		loadStepTypes();
@@ -72,7 +88,7 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 		} else {
 			console.log("[StepEditor] Criando novo step");
 		}
-		setFormData({
+		const newFormData = {
 			stepNumber: step?.stepNumber || Math.max(0, ...steps.map((s) => s.stepNumber)) + 1,
 			stepType: (step?.stepType || "QUERY") as WppMessageFlowStepType | "",
 			nextStepId: step?.nextStepId?.toString() || "",
@@ -81,7 +97,9 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 			enabled: step?.enabled ?? true,
 			config: step?.config || {},
 			connections: step?.connections || null
-		});
+		};
+		setFormData(newFormData);
+		setOriginalFormData(newFormData);
 		setConfigJson(JSON.stringify(step?.config || {}, null, 2));
 	}, [step, steps]);
 
@@ -126,53 +144,77 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 			console.log("  step.id (se update):", step?.id || "N/A");
 			console.log("  type:", stepData.type);
 			console.log("  stepNumber:", stepData.stepNumber);
-			console.log("  description:", stepData.description || "(vazio)");
-			console.log("  enabled:", stepData.enabled);
-			console.log("  nextStepId:", stepData.nextStepId || "(vazio)");
-			console.log("  fallbackStepId:", stepData.fallbackStepId || "(vazio)");
-			console.log("  config keys:", Object.keys(stepData.config).join(", ") || "(vazio)");
-			console.log("  connections:", stepData.connections ? "present" : "null");
 
-			let savedStep: FlowStep;
+			// OPTIMISTIC UPDATE: Usar dados inputados imediatamente
+			const optimisticStep: FlowStep = {
+				id: step?.id || 0,
+				flowId: flowId,
+				stepNumber: formData.stepNumber,
+				stepType: formData.stepType as WppMessageFlowStepType,
+				config: config,
+				connections: formData.connections,
+				enabled: formData.enabled,
+				description: formData.description || null,
+				nextStepId: formData.nextStepId && formData.nextStepId !== "new" ? parseInt(formData.nextStepId) : null,
+				fallbackStepId: formData.fallbackStepId && formData.fallbackStepId !== "new" ? parseInt(formData.fallbackStepId) : null,
+				createdAt: step?.createdAt || new Date().toISOString(),
+				updatedAt: new Date().toISOString()
+			};
 
-			if (step) {
-				// Update existing step
-				console.log("[StepEditor] Atualizando step existente:", step.id);
-				savedStep = await flowApiService.updateStep(step.id, stepData);
-				console.log("[StepEditor] Resposta do update:", {
-					id: savedStep.id,
-					type: savedStep.stepType,
-					stepNumber: savedStep.stepNumber,
-					description: savedStep.description || "(vazio)",
-					enabled: savedStep.enabled,
-					config_keys: Object.keys(savedStep.config || {}).join(", "),
-					connections: savedStep.connections ? "present" : "null"
+			// Chamar onSave com dados otimistas ANTES de fazer a requisição
+			console.log("[StepEditor] Chamando onSave com dados otimistas");
+			onSave(optimisticStep);
+
+			// Depois fazer a requisição
+			try {
+				if (step) {
+					// Update existing step
+					console.log("[StepEditor] Atualizando step existente:", step.id);
+					await flowApiService.updateStep(step.id, stepData);
+				} else {
+					// Create new step
+					console.log("[StepEditor] Criando novo step no flow:", flowId);
+					await flowApiService.createStep(flowId, stepData);
+				}
+
+				// Mostrar toast de sucesso
+				setSnackbar({
+					open: true,
+					message: step ? "Passo atualizado com sucesso!" : "Passo criado com sucesso!",
+					severity: "success",
 				});
-			} else {
-				// Create new step
-				console.log("[StepEditor] Criando novo step no flow:", flowId);
-				savedStep = await flowApiService.createStep(flowId, stepData);
-				console.log("[StepEditor] Resposta do create:", {
-					id: savedStep.id,
-					type: savedStep.stepType,
-					stepNumber: savedStep.stepNumber,
-					description: savedStep.description || "(vazio)",
-					enabled: savedStep.enabled,
-					config_keys: Object.keys(savedStep.config || {}).join(", "),
-					connections: savedStep.connections ? "present" : "null"
+
+				console.log("[StepEditor] Passo salvo com sucesso");
+			} catch (apiError) {
+				// Erro na requisição: reverter para dados originais
+				console.error("[StepEditor] Erro ao salvar na API, revertendo para dados originais:", apiError);
+				setFormData(originalFormData);
+				setSnackbar({
+					open: true,
+					message: apiError instanceof Error ? apiError.message : "Erro ao salvar passo",
+					severity: "error",
 				});
 			}
-
-			console.log("[StepEditor] Chamando onSave com step salvo");
-			onSave(savedStep);
 		} catch (err) {
 			console.error("Erro ao salvar passo:", err);
 			if (err instanceof SyntaxError) {
-				alert("Erro no JSON de configuração: " + err.message);
+				setSnackbar({
+					open: true,
+					message: "Erro no JSON de configuração: " + err.message,
+					severity: "error",
+				});
 			} else {
-				alert(err instanceof Error ? err.message : "Erro ao salvar passo");
+				setSnackbar({
+					open: true,
+					message: err instanceof Error ? err.message : "Erro ao salvar passo",
+					severity: "error",
+				});
 			}
 		}
+	};
+
+	const handleCloseSnackbar = () => {
+		setSnackbar({ ...snackbar, open: false });
 	};
 
 	const handleConfigChange = (value: string) => {
@@ -377,6 +419,17 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 					{step ? "Salvar Alterações" : "Criar Passo"}
 				</Button>
 			</DialogActions>
+
+			<Snackbar
+				open={snackbar.open}
+				autoHideDuration={4000}
+				onClose={handleCloseSnackbar}
+				anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+			>
+				<Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: "100%" }}>
+					{snackbar.message}
+				</Alert>
+			</Snackbar>
 		</Dialog>
 	);
 };
