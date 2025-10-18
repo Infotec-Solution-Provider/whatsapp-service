@@ -61,6 +61,19 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 						required
 						placeholder="SELECT * FROM users WHERE id = ?"
 						helperText="Use ? para parâmetros. Exemplo: SELECT * FROM users WHERE id = ?"
+						sx={{
+							"& .MuiOutlinedInput-root": {
+								transition: designSystem.animations.smooth,
+								"&:hover fieldset": {
+									borderColor: "primary.main",
+								},
+								"&.Mui-focused fieldset": {
+									borderColor: "primary.main",
+									borderWidth: 2,
+									boxShadow: "0 0 0 3px rgba(102, 126, 234, 0.1)",
+								},
+							},
+						}}
 					/>
 
 					<TextField
@@ -70,20 +83,42 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 						fullWidth
 						placeholder="Ex: user, customer, availableUsers"
 						helperText="Nome da variável no contexto onde o resultado será armazenado"
+						sx={{
+							"& .MuiOutlinedInput-root": {
+								transition: designSystem.animations.smooth,
+								"&:hover fieldset": {
+									borderColor: "primary.main",
+								},
+								"&.Mui-focused fieldset": {
+									borderColor: "primary.main",
+									borderWidth: 2,
+									boxShadow: "0 0 0 3px rgba(102, 126, 234, 0.1)",
+								},
+							},
+						}}
 					/>
 
 					<Box
 						sx={{
-							bgcolor: "grey.100",
+							background: designSystem.gradients.slate,
 							p: 2,
-							borderRadius: 1,
-							border: "1px solid",
-							borderColor: "grey.200"
+							borderRadius: designSystem.spacing.lg,
+							border: "1px solid rgba(102, 126, 234, 0.2)",
+							boxShadow: designSystem.shadows.sm,
 						}}
 					>
 						<Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
 							<AddIcon fontSize="small" sx={{ color: "primary.main" }} />
-							<Typography variant="subtitle2" sx={{ fontWeight: 600, color: "primary.main" }}>
+							<Typography 
+								variant="subtitle2" 
+								sx={{ 
+									fontWeight: 700, 
+									background: designSystem.gradients.primary,
+									backgroundClip: "text",
+									WebkitBackgroundClip: "text",
+									WebkitTextFillColor: "transparent",
+								}}
+							>
 								Parâmetros
 							</Typography>
 						</Box>
@@ -96,13 +131,50 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 									size="small"
 									placeholder="${contact.userId} ou valor direto"
 									helperText={index === 0 ? "Use ${variavel} para interpolação" : ""}
+									sx={{
+										"& .MuiOutlinedInput-root": {
+											transition: designSystem.animations.smooth,
+											"&:hover fieldset": {
+												borderColor: "primary.main",
+											},
+											"&.Mui-focused fieldset": {
+												borderColor: "primary.main",
+												borderWidth: 2,
+												boxShadow: "0 0 0 3px rgba(102, 126, 234, 0.1)",
+											},
+										},
+									}}
 								/>
-								<IconButton onClick={() => removeParam(index)} color="error" size="small">
+								<IconButton 
+									onClick={() => removeParam(index)} 
+									color="error" 
+									size="small"
+									sx={{
+										transition: designSystem.animations.hover,
+										"&:hover": {
+											backgroundColor: "rgba(220, 38, 38, 0.1)",
+										},
+									}}
+								>
 									<DeleteIcon />
 								</IconButton>
 							</Box>
 						))}
-						<Button startIcon={<AddIcon />} onClick={addParam} variant="outlined" size="small">
+						<Button 
+							startIcon={<AddIcon />} 
+							onClick={addParam} 
+							variant="outlined" 
+							size="small"
+							sx={{
+								borderColor: "primary.main",
+								color: "primary.main",
+								transition: designSystem.animations.smooth,
+								"&:hover": {
+									background: designSystem.gradients.slate,
+									borderColor: "primary.main",
+								},
+							}}
+						>
 							Adicionar Parâmetro
 						</Button>
 					</Box>
@@ -113,6 +185,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 								<Switch
 									checked={config.single || false}
 									onChange={(e) => updateField("single", e.target.checked)}
+									sx={{
+										"& .MuiSwitch-switchBase.Mui-checked": {
+											color: "primary.main",
+										},
+										"& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": {
+											backgroundColor: "primary.main",
+										},
+									}}
 								/>
 							}
 							label="Retornar um único registro"
@@ -122,6 +202,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 								<Switch
 									checked={config.required || false}
 									onChange={(e) => updateField("required", e.target.checked)}
+									sx={{
+										"& .MuiSwitch-switchBase.Mui-checked": {
+											color: "primary.main",
+										},
+										"& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": {
+											backgroundColor: "primary.main",
+										},
+									}}
 								/>
 							}
 							label="Obrigatório (erro se vazio)"
@@ -151,7 +239,16 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 			<>
 				<Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
 					<CallSplitIcon fontSize="small" sx={{ color: "warning.main" }} />
-					<Typography variant="subtitle2" sx={{ fontWeight: 600, color: "warning.main" }}>
+					<Typography 
+						variant="subtitle2" 
+						sx={{ 
+							fontWeight: 700,
+							background: designSystem.gradients.warning,
+							backgroundClip: "text",
+							WebkitBackgroundClip: "text",
+							WebkitTextFillColor: "transparent",
+						}}
+					>
 						Configuração de Condição
 					</Typography>
 				</Box>
@@ -164,6 +261,19 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 						required
 						placeholder="contact.isOnlyAdmin, user.role, message.body"
 						helperText="Campo do contexto a ser avaliado (ex: contact.isOnlyAdmin)"
+						sx={{
+							"& .MuiOutlinedInput-root": {
+								transition: designSystem.animations.smooth,
+								"&:hover fieldset": {
+									borderColor: "warning.main",
+								},
+								"&.Mui-focused fieldset": {
+									borderColor: "warning.main",
+									borderWidth: 2,
+									boxShadow: "0 0 0 3px rgba(251, 191, 36, 0.1)",
+								},
+							},
+						}}
 					/>
 
 					<FormControl fullWidth required>
@@ -172,6 +282,18 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 							value={config.operator || "equals"}
 							label="Operador"
 							onChange={(e) => updateField("operator", e.target.value)}
+							sx={{
+								transition: designSystem.animations.smooth,
+								"& .MuiOutlinedInput-root": {
+									"&:hover fieldset": {
+										borderColor: "warning.main",
+									},
+									"&.Mui-focused fieldset": {
+										borderColor: "warning.main",
+										borderWidth: 2,
+									},
+								},
+							}}
 						>
 							{operators.map((op) => (
 								<MenuItem key={op.value} value={op.value}>
@@ -196,67 +318,160 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 							fullWidth
 							placeholder="true, false, admin, 123, etc."
 							helperText="Valor para comparar. Digite true/false para boolean, números serão convertidos automaticamente"
+							sx={{
+								"& .MuiOutlinedInput-root": {
+									transition: designSystem.animations.smooth,
+									"&:hover fieldset": {
+										borderColor: "warning.main",
+									},
+									"&.Mui-focused fieldset": {
+										borderColor: "warning.main",
+										borderWidth: 2,
+										boxShadow: "0 0 0 3px rgba(251, 191, 36, 0.1)",
+									},
+								},
+							}}
 						/>
 					)}
 				</Stack>
 
 				{/* Alertas informativos por operador */}
 				{config.operator === "equals" && (
-					<Alert severity="info" sx={{ mt: 2 }}>
+					<Alert 
+						severity="info" 
+						sx={{ 
+							mt: 2,
+							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							border: "1px solid rgba(59, 130, 246, 0.2)",
+							borderRadius: 1.5,
+						}}
+					>
 						Verifica se o campo é exatamente igual ao valor de comparação.
 					</Alert>
 				)}
 
 				{config.operator === "notEquals" && (
-					<Alert severity="info" sx={{ mt: 2 }}>
+					<Alert 
+						severity="info" 
+						sx={{ 
+							mt: 2,
+							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							border: "1px solid rgba(59, 130, 246, 0.2)",
+							borderRadius: 1.5,
+						}}
+					>
 						Verifica se o campo é diferente do valor de comparação.
 					</Alert>
 				)}
 
 				{config.operator === "contains" && (
-					<Alert severity="info" sx={{ mt: 2 }}>
+					<Alert 
+						severity="info" 
+						sx={{ 
+							mt: 2,
+							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							border: "1px solid rgba(59, 130, 246, 0.2)",
+							borderRadius: 1.5,
+						}}
+					>
 						Verifica se o campo (texto) contém o valor de comparação como substring.
 					</Alert>
 				)}
 
 				{config.operator === "in" && (
-					<Alert severity="info" sx={{ mt: 2 }}>
+					<Alert 
+						severity="info" 
+						sx={{ 
+							mt: 2,
+							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							border: "1px solid rgba(59, 130, 246, 0.2)",
+							borderRadius: 1.5,
+						}}
+					>
 						Verifica se o campo está dentro de uma lista de valores. Separe os valores com vírgula.
 					</Alert>
 				)}
 
 				{config.operator === "gt" && (
-					<Alert severity="info" sx={{ mt: 2 }}>
+					<Alert 
+						severity="info" 
+						sx={{ 
+							mt: 2,
+							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							border: "1px solid rgba(59, 130, 246, 0.2)",
+							borderRadius: 1.5,
+						}}
+					>
 						Verifica se o campo é maior que o valor de comparação. Use números.
 					</Alert>
 				)}
 
 				{config.operator === "gte" && (
-					<Alert severity="info" sx={{ mt: 2 }}>
+					<Alert 
+						severity="info" 
+						sx={{ 
+							mt: 2,
+							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							border: "1px solid rgba(59, 130, 246, 0.2)",
+							borderRadius: 1.5,
+						}}
+					>
 						Verifica se o campo é maior ou igual ao valor de comparação. Use números.
 					</Alert>
 				)}
 
 				{config.operator === "lt" && (
-					<Alert severity="info" sx={{ mt: 2 }}>
+					<Alert 
+						severity="info" 
+						sx={{ 
+							mt: 2,
+							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							border: "1px solid rgba(59, 130, 246, 0.2)",
+							borderRadius: 1.5,
+						}}
+					>
 						Verifica se o campo é menor que o valor de comparação. Use números.
 					</Alert>
 				)}
 
 				{config.operator === "lte" && (
-					<Alert severity="info" sx={{ mt: 2 }}>
+					<Alert 
+						severity="info" 
+						sx={{ 
+							mt: 2,
+							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							border: "1px solid rgba(59, 130, 246, 0.2)",
+							borderRadius: 1.5,
+						}}
+					>
 						Verifica se o campo é menor ou igual ao valor de comparação. Use números.
 					</Alert>
 				)}
 
 				{config.operator === "exists" && (
-					<Alert severity="info" sx={{ mt: 2 }}>
+					<Alert 
+						severity="info" 
+						sx={{ 
+							mt: 2,
+							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							border: "1px solid rgba(59, 130, 246, 0.2)",
+							borderRadius: 1.5,
+						}}
+					>
 						Verifica se o campo existe e não é null/undefined. Não precisa de valor de comparação.
 					</Alert>
 				)}
 
 				{config.operator === "regex" && (
-					<Alert severity="info" sx={{ mt: 2 }}>
+					<Alert 
+						severity="info" 
+						sx={{ 
+							mt: 2,
+							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							border: "1px solid rgba(59, 130, 246, 0.2)",
+							borderRadius: 1.5,
+						}}
+					>
 						Verifica se o campo corresponde a um padrão RegEx. Exemplo: <code>^[A-Z].*@gmail\\.com$</code>
 					</Alert>
 				)}
@@ -276,9 +491,30 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 					required
 					placeholder="message.body, user.department, contact.type"
 					helperText="Campo cujo valor será usado para rotear (ex: message.body)"
+					sx={{
+						"& .MuiOutlinedInput-root": {
+							transition: designSystem.animations.smooth,
+							"&:hover fieldset": {
+								borderColor: "primary.main",
+							},
+							"&.Mui-focused fieldset": {
+								borderColor: "primary.main",
+								borderWidth: 2,
+								boxShadow: "0 0 0 3px rgba(102, 126, 234, 0.1)",
+							},
+						},
+					}}
 				/>
 
-				<Alert severity="info" sx={{ mt: 2 }}>
+				<Alert 
+					severity="info" 
+					sx={{ 
+						mt: 2,
+						background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+						border: "1px solid rgba(59, 130, 246, 0.2)",
+						borderRadius: 1.5,
+					}}
+				>
 					As rotas são configuradas na seção "Conexões Condicionais" acima.
 					<br />O valor do campo será comparado com as chaves das rotas.
 				</Alert>
@@ -303,6 +539,19 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 						fullWidth
 						placeholder="-1 para admin, ou ID específico"
 						helperText="Use -1 para atribuir ao admin, ou ${user.id} para interpolação"
+						sx={{
+							"& .MuiOutlinedInput-root": {
+								transition: designSystem.animations.smooth,
+								"&:hover fieldset": {
+									borderColor: "success.main",
+								},
+								"&.Mui-focused fieldset": {
+									borderColor: "success.main",
+									borderWidth: 2,
+									boxShadow: "0 0 0 3px rgba(52, 211, 153, 0.1)",
+								},
+							},
+						}}
 					/>
 
 					<TextField
@@ -314,6 +563,19 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 						}}
 						fullWidth
 						placeholder="Deixe vazio para null"
+						sx={{
+							"& .MuiOutlinedInput-root": {
+								transition: designSystem.animations.smooth,
+								"&:hover fieldset": {
+									borderColor: "success.main",
+								},
+								"&.Mui-focused fieldset": {
+									borderColor: "success.main",
+									borderWidth: 2,
+									boxShadow: "0 0 0 3px rgba(52, 211, 153, 0.1)",
+								},
+							},
+						}}
 					/>
 
 					<FormControl fullWidth>
@@ -322,6 +584,18 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 							value={config.priority || "NORMAL"}
 							label="Prioridade"
 							onChange={(e) => updateField("priority", e.target.value)}
+							sx={{
+								transition: designSystem.animations.smooth,
+								"& .MuiOutlinedInput-root": {
+									"&:hover fieldset": {
+										borderColor: "success.main",
+									},
+									"&.Mui-focused fieldset": {
+										borderColor: "success.main",
+										borderWidth: 2,
+									},
+								},
+							}}
 						>
 							<MenuItem value="LOW">Baixa</MenuItem>
 							<MenuItem value="NORMAL">Normal</MenuItem>
@@ -336,6 +610,18 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 							value={config.type || "RECEPTIVE"}
 							label="Tipo de Chat"
 							onChange={(e) => updateField("type", e.target.value)}
+							sx={{
+								transition: designSystem.animations.smooth,
+								"& .MuiOutlinedInput-root": {
+									"&:hover fieldset": {
+										borderColor: "success.main",
+									},
+									"&.Mui-focused fieldset": {
+										borderColor: "success.main",
+										borderWidth: 2,
+									},
+								},
+							}}
 						>
 							<MenuItem value="RECEPTIVE">Receptivo</MenuItem>
 							<MenuItem value="ACTIVE">Ativo</MenuItem>
@@ -352,6 +638,19 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 						rows={2}
 						placeholder="Chat atribuído a ${user.name}"
 						helperText="Mensagem exibida no sistema. Use ${variavel} para interpolação"
+						sx={{
+							"& .MuiOutlinedInput-root": {
+								transition: designSystem.animations.smooth,
+								"&:hover fieldset": {
+									borderColor: "success.main",
+								},
+								"&.Mui-focused fieldset": {
+									borderColor: "success.main",
+									borderWidth: 2,
+									boxShadow: "0 0 0 3px rgba(52, 211, 153, 0.1)",
+								},
+							},
+						}}
 					/>
 				</Stack>
 			</>
@@ -375,7 +674,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 
 	if (noConfigSteps.includes(stepType)) {
 		return (
-			<Alert severity="info">
+			<Alert 
+				severity="info"
+				sx={{ 
+					background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+					border: "1px solid rgba(59, 130, 246, 0.2)",
+					borderRadius: 1.5,
+				}}
+			>
 				Este tipo de step não requer configuração adicional. Deixe o config vazio ({"{}"}).
 			</Alert>
 		);
@@ -383,7 +689,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 
 	// Fallback: Editor JSON manual para tipos não mapeados
 	return (
-		<Alert severity="warning">
+		<Alert 
+			severity="warning"
+			sx={{ 
+				background: "linear-gradient(135deg, rgba(251, 191, 36, 0.1) 0%, rgba(217, 119, 6, 0.1) 100%)",
+				border: "1px solid rgba(217, 119, 6, 0.2)",
+				borderRadius: 1.5,
+			}}
+		>
 			Tipo de step "{stepType}" não tem editor visual. Configure manualmente o JSON abaixo.
 		</Alert>
 	);
