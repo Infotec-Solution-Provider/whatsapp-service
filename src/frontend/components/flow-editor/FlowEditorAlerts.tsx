@@ -29,7 +29,7 @@ export const FlowEditorAlerts: React.FC<FlowEditorAlertsProps> = ({
 					}} 
 					onClose={onClearError}
 				>
-					❌ {error}
+					{error}
 				</Alert>
 			)}
 
@@ -45,7 +45,7 @@ export const FlowEditorAlerts: React.FC<FlowEditorAlertsProps> = ({
 					}} 
 					onClose={onClearSuccess}
 				>
-					✅ {successMessage}
+					{successMessage}
 				</Alert>
 			)}
 		</>

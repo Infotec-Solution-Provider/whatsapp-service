@@ -40,7 +40,7 @@ export const FlowEditorHeader: React.FC<FlowEditorHeaderProps> = ({
 						},
 					}}
 				>
-					← Voltar
+					Voltar
 				</Button>
 				<Button
 					variant="contained"
@@ -59,7 +59,7 @@ export const FlowEditorHeader: React.FC<FlowEditorHeaderProps> = ({
 						},
 					}}
 				>
-					➕ Novo Passo
+					Novo Passo
 				</Button>
 			</Box>
 

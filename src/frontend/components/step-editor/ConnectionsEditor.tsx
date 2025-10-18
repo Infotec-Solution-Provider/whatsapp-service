@@ -67,7 +67,7 @@ export const ConnectionsEditor: React.FC<ConnectionsEditorProps> = ({
 						pl: 1,
 					}}
 				>
-					⚙️ Conexões Condicionais
+					Conexões Condicionais
 				</Typography>
 
 				<Stack spacing={2}>
@@ -104,7 +104,7 @@ export const ConnectionsEditor: React.FC<ConnectionsEditorProps> = ({
 							</MenuItem>
 							{selectableSteps.map((step) => (
 								<MenuItem key={step.id} value={step.id}>
-									✅ Passo {step.stepNumber}: {getStepTypeLabel(step.stepType)}
+									Passo {step.stepNumber}: {getStepTypeLabel(step.stepType)}
 									{step.description && ` - ${step.description}`}
 								</MenuItem>
 							))}

@@ -159,10 +159,10 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 					p: 2.5
 				}}
 			>
-				<Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-					{step ? <EditIcon /> : <AddIcon />}
-					<Typography variant="h6">{step ? "✏️ Editar Passo" : "➕ Novo Passo"}</Typography>
-				</Box>
+			<Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+				{step ? <EditIcon /> : <AddIcon />}
+				<Typography variant="h6">{step ? "Editar Passo" : "Novo Passo"}</Typography>
+			</Box>
 				<Button
 					size="small"
 					color="inherit"

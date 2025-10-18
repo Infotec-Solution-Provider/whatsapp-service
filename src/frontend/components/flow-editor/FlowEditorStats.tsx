@@ -14,7 +14,7 @@ export const FlowEditorStats: React.FC<FlowEditorStatsProps> = ({ steps }) => {
 	return (
 		<Box sx={{ display: "flex", gap: 2, justifyContent: "center", flexWrap: "wrap" }}>
 			<Chip
-				label={`📊 ${steps.length} ${steps.length === 1 ? "passo configurado" : "passos configurados"}`}
+				label={`${steps.length} ${steps.length === 1 ? "passo configurado" : "passos configurados"}`}
 				color="primary"
 				variant="filled"
 				sx={{
@@ -29,7 +29,7 @@ export const FlowEditorStats: React.FC<FlowEditorStatsProps> = ({ steps }) => {
 				}}
 			/>
 			<Chip
-				label={`✅ ${enabledCount} ${enabledCount === 1 ? "ativo" : "ativos"}`}
+				label={`${enabledCount} ${enabledCount === 1 ? "ativo" : "ativos"}`}
 				color="success"
 				variant="filled"
 				sx={{
@@ -44,7 +44,7 @@ export const FlowEditorStats: React.FC<FlowEditorStatsProps> = ({ steps }) => {
 				}}
 			/>
 			<Chip
-				label={`⚠️ ${disabledCount} ${disabledCount === 1 ? "desabilitado" : "desabilitados"}`}
+				label={`${disabledCount} ${disabledCount === 1 ? "desabilitado" : "desabilitados"}`}
 				color="warning"
 				variant="filled"
 				sx={{
