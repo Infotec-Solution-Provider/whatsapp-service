@@ -35,28 +35,10 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flow: initialFlow, onBac
 			setLoading(true);
 			setError(null);
 
-			// Verifica se os steps já vieram no objeto flow
-			if (initialFlow && (initialFlow as any).WppMessageFlowStep) {
-				const mappedSteps = (initialFlow as any).WppMessageFlowStep.map((step: any) => ({
-					id: step.id,
-					flowId: step.messageFlowId,
-					stepNumber: step.stepNumber,
-					stepType: step.type,
-					nextStepId: step.nextStepId,
-					fallbackStepId: step.fallbackStepId,
-					config: step.config || {},
-					connections: step.connections || null,
-					description: step.description,
-					enabled: step.enabled,
-					createdAt: step.createdAt,
-					updatedAt: step.updatedAt
-				}));
-				setSteps(mappedSteps);
-			} else {
-				// Busca do backend
-				const fetchedSteps = await flowApiService.listSteps(flow.id);
-				setSteps(fetchedSteps);
-			}
+			// Sempre busca os steps do backend para garantir que os dados estejam completos
+			// e com mapeamento correto dos campos (Prisma schema vs Frontend types)
+			const fetchedSteps = await flowApiService.listSteps(flow.id);
+			setSteps(fetchedSteps);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Erro ao carregar passos");
 		} finally {
@@ -118,24 +100,6 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flow: initialFlow, onBac
 			setError(null);
 
 			const updated = await flowApiService.updateFlow(flow.id, updates);
-
-			// Mapeia os steps se vieram do backend
-			if ((updated as any).WppMessageFlowStep) {
-				(updated as any).steps = (updated as any).WppMessageFlowStep.map((step: any) => ({
-					id: step.id,
-					flowId: step.messageFlowId,
-					stepNumber: step.stepNumber,
-					stepType: step.type,
-					nextStepId: step.nextStepId,
-					fallbackStepId: step.fallbackStepId,
-					config: step.config || {},
-					connections: step.connections || null,
-					description: step.description,
-					enabled: step.enabled,
-					createdAt: step.createdAt,
-					updatedAt: step.updatedAt
-				}));
-			}
 
 			setFlow(updated);
 			onFlowUpdated(updated);

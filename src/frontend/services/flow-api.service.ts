@@ -17,6 +17,26 @@ import type {
 
 const API_BASE_URL = "/api";
 
+/**
+ * Mapeia dados brutos do backend para o formato esperado pelo frontend
+ */
+function mapStepData(rawStep: any): FlowStep {
+	return {
+		id: rawStep.id,
+		flowId: rawStep.messageFlowId || rawStep.message_flow_id,
+		stepNumber: rawStep.stepNumber || rawStep.step_number,
+		stepType: rawStep.type || rawStep.stepType,
+		nextStepId: rawStep.nextStepId || rawStep.next_step_id,
+		fallbackStepId: rawStep.fallbackStepId || rawStep.fallback_step_id,
+		config: rawStep.config || {},
+		connections: rawStep.connections || null,
+		description: rawStep.description,
+		enabled: rawStep.enabled ?? true,
+		createdAt: rawStep.createdAt || rawStep.created_at,
+		updatedAt: rawStep.updatedAt || rawStep.updated_at
+	};
+}
+
 class FlowApiService {
 	private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
 		console.log(`API Request: ${options.method || "GET"} ${endpoint}`, options.body ? JSON.parse(options.body as string) : "");
@@ -79,25 +99,29 @@ class FlowApiService {
 	// Step Management
 
 	async listSteps(flowId: number): Promise<FlowStep[]> {
-		return this.request<FlowStep[]>(`/message-flows/${flowId}/steps`);
+		const rawSteps = await this.request<any[]>(`/message-flows/${flowId}/steps`);
+		return rawSteps.map(mapStepData);
 	}
 
 	async getStep(stepId: number): Promise<FlowStep> {
-		return this.request<FlowStep>(`/message-flows/steps/${stepId}`);
+		const rawStep = await this.request<any>(`/message-flows/steps/${stepId}`);
+		return mapStepData(rawStep);
 	}
 
 	async createStep(flowId: number, data: CreateStepDTO): Promise<FlowStep> {
-		return this.request<FlowStep>(`/message-flows/${flowId}/steps`, {
+		const rawStep = await this.request<any>(`/message-flows/${flowId}/steps`, {
 			method: "POST",
 			body: JSON.stringify(data)
 		});
+		return mapStepData(rawStep);
 	}
 
 	async updateStep(stepId: number, data: UpdateStepDTO): Promise<FlowStep> {
-		return this.request<FlowStep>(`/message-flows/steps/${stepId}`, {
+		const rawStep = await this.request<any>(`/message-flows/steps/${stepId}`, {
 			method: "PUT",
 			body: JSON.stringify(data)
 		});
+		return mapStepData(rawStep);
 	}
 
 	async deleteStep(stepId: number): Promise<{ message: string }> {

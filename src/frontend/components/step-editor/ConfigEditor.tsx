@@ -52,6 +52,27 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 			<>
 				<Stack spacing={2}>
 					<TextField
+						label="Armazenar Como (storeAs)"
+						value={config.storeAs || ""}
+						onChange={(e) => updateField("storeAs", e.target.value)}
+						fullWidth
+						placeholder="Ex: user, customer, availableUsers"
+						helperText="Nome da variável no contexto onde o resultado será armazenado"
+						sx={{
+							"& .MuiOutlinedInput-root": {
+								transition: designSystem.animations.smooth,
+								"&:hover fieldset": {
+									borderColor: "primary.main"
+								},
+								"&.Mui-focused fieldset": {
+									borderColor: "primary.main",
+									borderWidth: 2,
+									boxShadow: "0 0 0 3px rgba(102, 126, 234, 0.1)"
+								}
+							}
+						}}
+					/>
+					<TextField
 						label="Query SQL"
 						value={config.query || ""}
 						onChange={(e) => updateField("query", e.target.value)}
@@ -65,36 +86,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 							"& .MuiOutlinedInput-root": {
 								transition: designSystem.animations.smooth,
 								"&:hover fieldset": {
-									borderColor: "primary.main",
+									borderColor: "primary.main"
 								},
 								"&.Mui-focused fieldset": {
 									borderColor: "primary.main",
 									borderWidth: 2,
-									boxShadow: "0 0 0 3px rgba(102, 126, 234, 0.1)",
-								},
-							},
-						}}
-					/>
-
-					<TextField
-						label="Armazenar Como (storeAs)"
-						value={config.storeAs || ""}
-						onChange={(e) => updateField("storeAs", e.target.value)}
-						fullWidth
-						placeholder="Ex: user, customer, availableUsers"
-						helperText="Nome da variável no contexto onde o resultado será armazenado"
-						sx={{
-							"& .MuiOutlinedInput-root": {
-								transition: designSystem.animations.smooth,
-								"&:hover fieldset": {
-									borderColor: "primary.main",
-								},
-								"&.Mui-focused fieldset": {
-									borderColor: "primary.main",
-									borderWidth: 2,
-									boxShadow: "0 0 0 3px rgba(102, 126, 234, 0.1)",
-								},
-							},
+									boxShadow: "0 0 0 3px rgba(102, 126, 234, 0.1)"
+								}
+							}
 						}}
 					/>
 
@@ -104,19 +103,19 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 							p: 2,
 							borderRadius: designSystem.spacing.lg,
 							border: "1px solid rgba(102, 126, 234, 0.2)",
-							boxShadow: designSystem.shadows.sm,
+							boxShadow: designSystem.shadows.sm
 						}}
 					>
 						<Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
 							<AddIcon fontSize="small" sx={{ color: "primary.main" }} />
-							<Typography 
-								variant="subtitle2" 
-								sx={{ 
-									fontWeight: 700, 
+							<Typography
+								variant="subtitle2"
+								sx={{
+									fontWeight: 700,
 									background: designSystem.gradients.primary,
 									backgroundClip: "text",
 									WebkitBackgroundClip: "text",
-									WebkitTextFillColor: "transparent",
+									WebkitTextFillColor: "transparent"
 								}}
 							>
 								Parâmetros
@@ -135,35 +134,35 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 										"& .MuiOutlinedInput-root": {
 											transition: designSystem.animations.smooth,
 											"&:hover fieldset": {
-												borderColor: "primary.main",
+												borderColor: "primary.main"
 											},
 											"&.Mui-focused fieldset": {
 												borderColor: "primary.main",
 												borderWidth: 2,
-												boxShadow: "0 0 0 3px rgba(102, 126, 234, 0.1)",
-											},
-										},
+												boxShadow: "0 0 0 3px rgba(102, 126, 234, 0.1)"
+											}
+										}
 									}}
 								/>
-								<IconButton 
-									onClick={() => removeParam(index)} 
-									color="error" 
+								<IconButton
+									onClick={() => removeParam(index)}
+									color="error"
 									size="small"
 									sx={{
 										transition: designSystem.animations.hover,
 										"&:hover": {
-											backgroundColor: "rgba(220, 38, 38, 0.1)",
-										},
+											backgroundColor: "rgba(220, 38, 38, 0.1)"
+										}
 									}}
 								>
 									<DeleteIcon />
 								</IconButton>
 							</Box>
 						))}
-						<Button 
-							startIcon={<AddIcon />} 
-							onClick={addParam} 
-							variant="outlined" 
+						<Button
+							startIcon={<AddIcon />}
+							onClick={addParam}
+							variant="outlined"
 							size="small"
 							sx={{
 								borderColor: "primary.main",
@@ -171,8 +170,8 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 								transition: designSystem.animations.smooth,
 								"&:hover": {
 									background: designSystem.gradients.slate,
-									borderColor: "primary.main",
-								},
+									borderColor: "primary.main"
+								}
 							}}
 						>
 							Adicionar Parâmetro
@@ -187,11 +186,11 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 									onChange={(e) => updateField("single", e.target.checked)}
 									sx={{
 										"& .MuiSwitch-switchBase.Mui-checked": {
-											color: "primary.main",
+											color: "primary.main"
 										},
 										"& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": {
-											backgroundColor: "primary.main",
-										},
+											backgroundColor: "primary.main"
+										}
 									}}
 								/>
 							}
@@ -204,11 +203,11 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 									onChange={(e) => updateField("required", e.target.checked)}
 									sx={{
 										"& .MuiSwitch-switchBase.Mui-checked": {
-											color: "primary.main",
+											color: "primary.main"
 										},
 										"& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": {
-											backgroundColor: "primary.main",
-										},
+											backgroundColor: "primary.main"
+										}
 									}}
 								/>
 							}
@@ -239,14 +238,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 			<>
 				<Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
 					<CallSplitIcon fontSize="small" sx={{ color: "warning.main" }} />
-					<Typography 
-						variant="subtitle2" 
-						sx={{ 
+					<Typography
+						variant="subtitle2"
+						sx={{
 							fontWeight: 700,
 							background: designSystem.gradients.warning,
 							backgroundClip: "text",
 							WebkitBackgroundClip: "text",
-							WebkitTextFillColor: "transparent",
+							WebkitTextFillColor: "transparent"
 						}}
 					>
 						Configuração de Condição
@@ -265,14 +264,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 							"& .MuiOutlinedInput-root": {
 								transition: designSystem.animations.smooth,
 								"&:hover fieldset": {
-									borderColor: "warning.main",
+									borderColor: "warning.main"
 								},
 								"&.Mui-focused fieldset": {
 									borderColor: "warning.main",
 									borderWidth: 2,
-									boxShadow: "0 0 0 3px rgba(251, 191, 36, 0.1)",
-								},
-							},
+									boxShadow: "0 0 0 3px rgba(251, 191, 36, 0.1)"
+								}
+							}
 						}}
 					/>
 
@@ -286,13 +285,13 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 								transition: designSystem.animations.smooth,
 								"& .MuiOutlinedInput-root": {
 									"&:hover fieldset": {
-										borderColor: "warning.main",
+										borderColor: "warning.main"
 									},
 									"&.Mui-focused fieldset": {
 										borderColor: "warning.main",
-										borderWidth: 2,
-									},
-								},
+										borderWidth: 2
+									}
+								}
 							}}
 						>
 							{operators.map((op) => (
@@ -322,14 +321,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 								"& .MuiOutlinedInput-root": {
 									transition: designSystem.animations.smooth,
 									"&:hover fieldset": {
-										borderColor: "warning.main",
+										borderColor: "warning.main"
 									},
 									"&.Mui-focused fieldset": {
 										borderColor: "warning.main",
 										borderWidth: 2,
-										boxShadow: "0 0 0 3px rgba(251, 191, 36, 0.1)",
-									},
-								},
+										boxShadow: "0 0 0 3px rgba(251, 191, 36, 0.1)"
+									}
+								}
 							}}
 						/>
 					)}
@@ -337,13 +336,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 
 				{/* Alertas informativos por operador */}
 				{config.operator === "equals" && (
-					<Alert 
-						severity="info" 
-						sx={{ 
+					<Alert
+						severity="info"
+						sx={{
 							mt: 2,
-							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							background:
+								"linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
 							border: "1px solid rgba(59, 130, 246, 0.2)",
-							borderRadius: 1.5,
+							borderRadius: 1.5
 						}}
 					>
 						Verifica se o campo é exatamente igual ao valor de comparação.
@@ -351,13 +351,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 				)}
 
 				{config.operator === "notEquals" && (
-					<Alert 
-						severity="info" 
-						sx={{ 
+					<Alert
+						severity="info"
+						sx={{
 							mt: 2,
-							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							background:
+								"linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
 							border: "1px solid rgba(59, 130, 246, 0.2)",
-							borderRadius: 1.5,
+							borderRadius: 1.5
 						}}
 					>
 						Verifica se o campo é diferente do valor de comparação.
@@ -365,13 +366,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 				)}
 
 				{config.operator === "contains" && (
-					<Alert 
-						severity="info" 
-						sx={{ 
+					<Alert
+						severity="info"
+						sx={{
 							mt: 2,
-							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							background:
+								"linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
 							border: "1px solid rgba(59, 130, 246, 0.2)",
-							borderRadius: 1.5,
+							borderRadius: 1.5
 						}}
 					>
 						Verifica se o campo (texto) contém o valor de comparação como substring.
@@ -379,13 +381,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 				)}
 
 				{config.operator === "in" && (
-					<Alert 
-						severity="info" 
-						sx={{ 
+					<Alert
+						severity="info"
+						sx={{
 							mt: 2,
-							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							background:
+								"linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
 							border: "1px solid rgba(59, 130, 246, 0.2)",
-							borderRadius: 1.5,
+							borderRadius: 1.5
 						}}
 					>
 						Verifica se o campo está dentro de uma lista de valores. Separe os valores com vírgula.
@@ -393,13 +396,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 				)}
 
 				{config.operator === "gt" && (
-					<Alert 
-						severity="info" 
-						sx={{ 
+					<Alert
+						severity="info"
+						sx={{
 							mt: 2,
-							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							background:
+								"linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
 							border: "1px solid rgba(59, 130, 246, 0.2)",
-							borderRadius: 1.5,
+							borderRadius: 1.5
 						}}
 					>
 						Verifica se o campo é maior que o valor de comparação. Use números.
@@ -407,13 +411,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 				)}
 
 				{config.operator === "gte" && (
-					<Alert 
-						severity="info" 
-						sx={{ 
+					<Alert
+						severity="info"
+						sx={{
 							mt: 2,
-							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							background:
+								"linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
 							border: "1px solid rgba(59, 130, 246, 0.2)",
-							borderRadius: 1.5,
+							borderRadius: 1.5
 						}}
 					>
 						Verifica se o campo é maior ou igual ao valor de comparação. Use números.
@@ -421,13 +426,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 				)}
 
 				{config.operator === "lt" && (
-					<Alert 
-						severity="info" 
-						sx={{ 
+					<Alert
+						severity="info"
+						sx={{
 							mt: 2,
-							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							background:
+								"linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
 							border: "1px solid rgba(59, 130, 246, 0.2)",
-							borderRadius: 1.5,
+							borderRadius: 1.5
 						}}
 					>
 						Verifica se o campo é menor que o valor de comparação. Use números.
@@ -435,13 +441,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 				)}
 
 				{config.operator === "lte" && (
-					<Alert 
-						severity="info" 
-						sx={{ 
+					<Alert
+						severity="info"
+						sx={{
 							mt: 2,
-							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							background:
+								"linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
 							border: "1px solid rgba(59, 130, 246, 0.2)",
-							borderRadius: 1.5,
+							borderRadius: 1.5
 						}}
 					>
 						Verifica se o campo é menor ou igual ao valor de comparação. Use números.
@@ -449,13 +456,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 				)}
 
 				{config.operator === "exists" && (
-					<Alert 
-						severity="info" 
-						sx={{ 
+					<Alert
+						severity="info"
+						sx={{
 							mt: 2,
-							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							background:
+								"linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
 							border: "1px solid rgba(59, 130, 246, 0.2)",
-							borderRadius: 1.5,
+							borderRadius: 1.5
 						}}
 					>
 						Verifica se o campo existe e não é null/undefined. Não precisa de valor de comparação.
@@ -463,13 +471,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 				)}
 
 				{config.operator === "regex" && (
-					<Alert 
-						severity="info" 
-						sx={{ 
+					<Alert
+						severity="info"
+						sx={{
 							mt: 2,
-							background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
+							background:
+								"linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
 							border: "1px solid rgba(59, 130, 246, 0.2)",
-							borderRadius: 1.5,
+							borderRadius: 1.5
 						}}
 					>
 						Verifica se o campo corresponde a um padrão RegEx. Exemplo: <code>^[A-Z].*@gmail\\.com$</code>
@@ -495,24 +504,24 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 						"& .MuiOutlinedInput-root": {
 							transition: designSystem.animations.smooth,
 							"&:hover fieldset": {
-								borderColor: "primary.main",
+								borderColor: "primary.main"
 							},
 							"&.Mui-focused fieldset": {
 								borderColor: "primary.main",
 								borderWidth: 2,
-								boxShadow: "0 0 0 3px rgba(102, 126, 234, 0.1)",
-							},
-						},
+								boxShadow: "0 0 0 3px rgba(102, 126, 234, 0.1)"
+							}
+						}
 					}}
 				/>
 
-				<Alert 
-					severity="info" 
-					sx={{ 
+				<Alert
+					severity="info"
+					sx={{
 						mt: 2,
 						background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
 						border: "1px solid rgba(59, 130, 246, 0.2)",
-						borderRadius: 1.5,
+						borderRadius: 1.5
 					}}
 				>
 					As rotas são configuradas na seção "Conexões Condicionais" acima.
@@ -543,14 +552,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 							"& .MuiOutlinedInput-root": {
 								transition: designSystem.animations.smooth,
 								"&:hover fieldset": {
-									borderColor: "success.main",
+									borderColor: "success.main"
 								},
 								"&.Mui-focused fieldset": {
 									borderColor: "success.main",
 									borderWidth: 2,
-									boxShadow: "0 0 0 3px rgba(52, 211, 153, 0.1)",
-								},
-							},
+									boxShadow: "0 0 0 3px rgba(52, 211, 153, 0.1)"
+								}
+							}
 						}}
 					/>
 
@@ -567,14 +576,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 							"& .MuiOutlinedInput-root": {
 								transition: designSystem.animations.smooth,
 								"&:hover fieldset": {
-									borderColor: "success.main",
+									borderColor: "success.main"
 								},
 								"&.Mui-focused fieldset": {
 									borderColor: "success.main",
 									borderWidth: 2,
-									boxShadow: "0 0 0 3px rgba(52, 211, 153, 0.1)",
-								},
-							},
+									boxShadow: "0 0 0 3px rgba(52, 211, 153, 0.1)"
+								}
+							}
 						}}
 					/>
 
@@ -588,13 +597,13 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 								transition: designSystem.animations.smooth,
 								"& .MuiOutlinedInput-root": {
 									"&:hover fieldset": {
-										borderColor: "success.main",
+										borderColor: "success.main"
 									},
 									"&.Mui-focused fieldset": {
 										borderColor: "success.main",
-										borderWidth: 2,
-									},
-								},
+										borderWidth: 2
+									}
+								}
 							}}
 						>
 							<MenuItem value="LOW">Baixa</MenuItem>
@@ -614,13 +623,13 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 								transition: designSystem.animations.smooth,
 								"& .MuiOutlinedInput-root": {
 									"&:hover fieldset": {
-										borderColor: "success.main",
+										borderColor: "success.main"
 									},
 									"&.Mui-focused fieldset": {
 										borderColor: "success.main",
-										borderWidth: 2,
-									},
-								},
+										borderWidth: 2
+									}
+								}
 							}}
 						>
 							<MenuItem value="RECEPTIVE">Receptivo</MenuItem>
@@ -642,14 +651,14 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 							"& .MuiOutlinedInput-root": {
 								transition: designSystem.animations.smooth,
 								"&:hover fieldset": {
-									borderColor: "success.main",
+									borderColor: "success.main"
 								},
 								"&.Mui-focused fieldset": {
 									borderColor: "success.main",
 									borderWidth: 2,
-									boxShadow: "0 0 0 3px rgba(52, 211, 153, 0.1)",
-								},
-							},
+									boxShadow: "0 0 0 3px rgba(52, 211, 153, 0.1)"
+								}
+							}
 						}}
 					/>
 				</Stack>
@@ -674,12 +683,12 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 
 	if (noConfigSteps.includes(stepType)) {
 		return (
-			<Alert 
+			<Alert
 				severity="info"
-				sx={{ 
+				sx={{
 					background: "linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%)",
 					border: "1px solid rgba(59, 130, 246, 0.2)",
-					borderRadius: 1.5,
+					borderRadius: 1.5
 				}}
 			>
 				Este tipo de step não requer configuração adicional. Deixe o config vazio ({"{}"}).
@@ -689,12 +698,12 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 
 	// Fallback: Editor JSON manual para tipos não mapeados
 	return (
-		<Alert 
+		<Alert
 			severity="warning"
-			sx={{ 
+			sx={{
 				background: "linear-gradient(135deg, rgba(251, 191, 36, 0.1) 0%, rgba(217, 119, 6, 0.1) 100%)",
 				border: "1px solid rgba(217, 119, 6, 0.2)",
-				borderRadius: 1.5,
+				borderRadius: 1.5
 			}}
 		>
 			Tipo de step "{stepType}" não tem editor visual. Configure manualmente o JSON abaixo.
