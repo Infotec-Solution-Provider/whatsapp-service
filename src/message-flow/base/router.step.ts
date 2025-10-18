@@ -2,7 +2,7 @@ import { BaseStep, StepContext, StepResult } from "./base.step";
 
 interface RouterConfig {
 	field: string; // Campo para avaliar
-	routes: Record<string, number>; // Mapa valor → stepId
+	routes: Record<string, number>; // Mapa valor → stepNumber
 	default?: number; // Step padrão se não encontrar rota
 }
 
@@ -18,21 +18,21 @@ export class RouterStep extends BaseStep {
 		context.logger.log(`Roteando baseado em ${config.field}`, { value });
 
 		// Procura rota exata
-		let nextStepId = config.routes[String(value)];
+		let nextStepNumber = config.routes[String(value)];
 
 		// Se não encontrou, usa rota padrão
-		if (nextStepId === undefined) {
-			nextStepId = config.default || this.nextStepId;
+		if (nextStepNumber === undefined) {
+			nextStepNumber = config.default || this.nextStepNumber;
 		}
 
-		if (nextStepId === undefined) {
+		if (nextStepNumber === undefined) {
 			throw new Error(
 				`Nenhuma rota encontrada para valor "${value}" e sem rota padrão`
 			);
 		}
 
-		context.logger.log(`Rota selecionada: ${nextStepId}`);
+		context.logger.log(`Rota selecionada: #${nextStepNumber}`);
 
-		return this.continue(context, nextStepId);
+		return this.continue(context, nextStepNumber);
 	}
 }

@@ -26,6 +26,21 @@ export default class ProcessingLogger {
 		}
 	}
 
+	public debug(entry: string, data?: unknown): void {
+		const timestamp = new Date().toISOString();
+		const debugEntry = data !== undefined 
+			? `${timestamp}: [DEBUG] ${entry} ${JSON.stringify(data)}`
+			: `${timestamp}: [DEBUG] ${entry}`;
+		this.logEntries.push(debugEntry);
+		
+		// Também exibe no console para debugging em tempo real
+		if (data !== undefined) {
+			console.log(`[DEBUG] ${entry}`, data);
+		} else {
+			console.log(`[DEBUG] ${entry}`);
+		}
+	}
+
 	public success(result: unknown): void {
 		this.output.push(result);
 		this.endTime = new Date();

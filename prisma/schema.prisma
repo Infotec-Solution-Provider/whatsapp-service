@@ -242,7 +242,8 @@ model WppMessageFlowStep {
   stepNumber     Int                    @map("step_number")
   
   // Novos campos para configuração avançada
-  config         Json?                  @map("config")          // Configuração específica do step em JSON
+  config         Json?                  @map("config")          // Configuração específica do step em JSON (sem conexões)
+  connections    Json?                  @map("connections")     // Conexões condicionais/dinâmicas (onTrue, onFalse, routes)
   nextStepId     Int?                   @map("next_step_id")    // ID do próximo step (permite fluxos não-lineares)
   fallbackStepId Int?                   @map("fallback_step_id") // Step alternativo em caso de erro
   enabled        Boolean                @default(true) @map("enabled") // Habilitar/desabilitar step

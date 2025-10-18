@@ -35,8 +35,8 @@ export class QueryStep extends BaseStep {
 		if (config.required && results.length === 0) {
 			context.logger.log("Query não retornou resultados (required=true)");
 
-			if (this.fallbackStepId) {
-				return this.continue(context, this.fallbackStepId);
+			if (this.fallbackStepNumber) {
+				return this.continue(context, this.fallbackStepNumber);
 			}
 
 			throw new Error(`Query required but returned no results: ${config.query}`);

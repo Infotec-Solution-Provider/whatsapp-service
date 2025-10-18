@@ -8,7 +8,6 @@ import { RouterStep } from "./base/router.step";
 
 // Business steps (específicos do domínio - todos refatorados)
 import CheckAvailableUsersStep from "./steps/check-available-users.step";
-import CheckCustomerCampaignTypeStep from "./steps/check-customer-campaign-type.step";
 import CheckLoyaltyStep from "./steps/check-loalty.step";
 import CheckOnlyAdminStep from "./steps/check-only-admin.step";
 import SendToAdminStep from "./steps/send-to-admin.step";
@@ -76,13 +75,4 @@ export function registerAllSteps(): void {
 		requiredConfig: [],
 		optionalConfig: ["preferAdmin", "systemMessage"]
 	});
-
-	StepRegistry.register("CHECK_CUSTOMER_CAMPAIGN_TYPE", CheckCustomerCampaignTypeStep, {
-		description: "Verifica tipo de campanha e roteia campanhas inativas para supervisão",
-		requiredConfig: [],
-		optionalConfig: ["inactiveTypes", "systemMessage"]
-	});
 }
-
-// Auto-register ao importar
-registerAllSteps();

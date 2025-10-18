@@ -38,7 +38,9 @@ export class AssignStep extends BaseStep {
 		};
 
 		if (config.systemMessage) {
-			chatData.systemMessage = config.systemMessage;
+			const interpolated = this.interpolateString(context, config.systemMessage);
+			chatData.systemMessage = interpolated;
+			context.logger.log(`System message interpolated: "${config.systemMessage}" → "${interpolated}"`);
 		}
 		if (config.priority) {
 			chatData.priority = config.priority;

@@ -99,7 +99,7 @@ VALUES (
 | `CONDITION` | Conditional branching based on context | `condition`, `field`, `operator`, `value` |
 | `QUERY` | Execute SQL queries and store results | `query`, `params`, `resultField` |
 | `ROUTER` | Multi-branch routing based on field value | `field`, `routes` |
-| `ASSIGN` | Direct chat assignment | `userId`, `walletId`, `priority` |
+| `ASSIGN` | Direct chat assignment | `userId`, `walletId`, `priority`, `systemMessage`, `type` |
 
 ### Business Steps
 
@@ -251,6 +251,33 @@ const params = this.resolveParams(ctx, [
   123
 ]);
 // Result: [456, "fixed-value", 123]
+```
+
+#### `interpolateString(context: StepContext, template: string): string`
+Interpolate a string replacing all occurrences of `${field.path}`.
+
+```typescript
+const message = this.interpolateString(ctx, 
+  "📅 Cliente: ${customer.NOME} (${customer.CODIGO})"
+);
+// Result: "📅 Cliente: João Silva (12345)"
+
+// Multiple interpolations in systemMessage
+const systemMsg = this.interpolateString(ctx,
+  "Cliente é de AGENDA PÚBLICA.\n\nCliente: ${customer.NOME} (${customer.CODIGO})\nOperador: ${operator.NOME}"
+);
+```
+
+**Usage in ASSIGN step:**
+
+```json
+{
+  "type": "ASSIGN",
+  "config": {
+    "userId": -1,
+    "systemMessage": "📅 Cliente: ${customer.NOME} (${customer.CODIGO})\nAtribuindo para supervisão."
+  }
+}
 ```
 
 ## 📊 StepContext

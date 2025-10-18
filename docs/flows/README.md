@@ -1,8 +1,134 @@
-# 📚 Message Flow System - Documentation
+# 📚 Sistema de Fluxos de Mensagens - Índice Geral
 
-## 🎯 Overview
+## 🎯 Visão Geral
 
-Sistema de fluxo de mensagens baseado em **Chain of Responsibility Pattern** com arquitetura moderna e extensível.
+Sistema de fluxos de mensagens baseado em **Chain of Responsibility Pattern** que permite criar fluxos personalizados de distribuição de mensagens no banco de dados, oferecendo controle total sobre como os chats são atribuídos a usuários, carteiras ou admin.
+
+---
+
+## 📖 Documentação Disponível
+
+### 🚀 Para Começar (Usuários)
+
+1. **[Manual de Criação de Fluxos](./MANUAL_CRIACAO_FLUXOS.md)** ⭐ **COMECE AQUI**
+   - Como funciona o sistema
+   - Estrutura do banco de dados
+   - Passo a passo para criar fluxos
+   - Templates SQL prontos
+   - Consultas úteis
+
+2. **[Documentação Completa dos Steps](./STEPS_DOCUMENTATION.md)**
+   - Todos os steps disponíveis
+   - Configurações detalhadas
+   - Exemplos práticos
+   - Troubleshooting
+
+3. **[Exemplos Práticos de Fluxos](./EXEMPLOS_PRATICOS_FLUXOS.md)**
+   - Fluxo básico de distribuição
+   - Fluxo com priorização VIP
+   - Fluxo por horário
+   - Fluxo por tipo de cliente
+   - Fluxo com fidelização
+
+### 🔧 Documentação Técnica (Desenvolvedores)
+
+4. **[Nomenclatura de Steps](../refactor/NOMENCLATURA_STEPS.md)**
+   - Padronização de nomes
+   - stepNumber vs stepId
+   - Estrutura do código
+   - Changelog da refatoração
+
+5. **[Correção do Factory](../refactor/CORRECAO_FACTORY.md)**
+   - Problema com next_step_id
+   - Solução implementada
+   - Fluxos não-lineares
+   - Breaking changes
+
+---
+
+## 🎓 Guia Rápido
+
+### Você quer...
+
+#### ✅ Criar seu primeiro fluxo?
+→ Leia o **[Manual de Criação de Fluxos](./MANUAL_CRIACAO_FLUXOS.md)**
+
+#### ✅ Entender o que cada step faz?
+→ Leia a **[Documentação dos Steps](./STEPS_DOCUMENTATION.md)**
+
+#### ✅ Ver exemplos prontos?
+→ Veja os **[Exemplos Práticos](./EXEMPLOS_PRATICOS_FLUXOS.md)**
+
+#### ✅ Entender o código?
+→ Continue lendo este documento
+
+#### ✅ Resolver problemas?
+→ Veja a seção **Troubleshooting** abaixo
+
+---
+
+## 📋 Quick Reference
+
+### Steps Específicos (Pré-construídos)
+
+| Step | O que faz | Quando usar |
+|------|-----------|-------------|
+| `CHECK_ONLY_ADMIN` | Verifica se é admin | Primeiro step |
+| `CHECK_LOALTY` | Verifica fidelização | Manter vendedor-cliente |
+| `CHECK_AVAILABLE_USERS` | Distribui por carga | Balancear chats |
+| `SEND_TO_ADMIN` | Envia para admin | Último step (fallback) |
+| `SEND_TO_SECTOR_USER` | Envia para usuário do setor | Atribuição simples |
+
+### Steps Genéricos (Configuráveis)
+
+| Step | O que faz | Config principal |
+|------|-----------|------------------|
+| `QUERY` | Executa SQL | `query`, `storeAs` |
+| `CONDITION` | If/else | `field`, `operator`, `onTrue`, `onFalse` |
+| `ROUTER` | Switch/case | `field`, `routes` |
+| `ASSIGN` | Atribui chat | `userId` ou `walletId` |
+
+### Exemplo Mínimo
+
+```sql
+-- 1. Criar fluxo
+INSERT INTO message_flows (instance, sector_id, description)
+VALUES ('minha_instancia', 1, 'Fluxo básico');
+
+-- 2. Adicionar steps
+INSERT INTO message_flows_steps (message_flow_id, type, step_number, next_step_id) VALUES
+(1, 'CHECK_ONLY_ADMIN', 1, 2),
+(1, 'CHECK_LOALTY', 2, 3),
+(1, 'CHECK_AVAILABLE_USERS', 3, 4),
+(1, 'SEND_TO_ADMIN', 4, NULL);
+```
+
+---
+
+## 🔍 Estrutura do Banco
+
+```sql
+message_flows
+├── id (PK)
+├── instance (UK com sector_id)
+├── sector_id (UK com instance)
+└── description
+
+message_flows_steps
+├── id (PK)
+├── message_flow_id (FK)
+├── type (enum)
+├── step_number (UK com message_flow_id)
+├── next_step_id ← Controla próximo step
+├── fallback_step_id ← Step em caso de erro
+├── config (JSON)
+├── enabled
+└── description
+```
+
+---
+
+## 🏗️ Arquitetura do Código
 
 ## 🏗️ Architecture
 

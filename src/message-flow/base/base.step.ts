@@ -1,6 +1,7 @@
 import { WppChatPriority, WppChatType, WppContact } from "@prisma/client";
 import ProcessingLogger from "../../utils/processing-logger";
 import { Customer } from "@in.pulse-crm/sdk";
+import { Logger } from "@in.pulse-crm/utils";
 
 export interface CustomerSchedule {
 	CODIGO: number;
@@ -28,12 +29,12 @@ export interface CustomerSchedule {
 }
 
 export interface StepConfig {
-	id: number;
+	stepNumber: number; // Posição sequencial no fluxo (1, 2, 3...)
 	instance: string;
 	sectorId: number;
 	config?: Record<string, any>;
-	nextStepId?: number;
-	fallbackStepId?: number;
+	nextStepNumber?: number; // Próxima posição no fluxo
+	fallbackStepNumber?: number; // Posição alternativa em caso de erro
 }
 
 export interface StepContext {
@@ -49,7 +50,7 @@ export interface StepContext {
 
 export interface StepResult {
 	isFinal: boolean;
-	stepId?: number;
+	nextStepNumber?: number; // Próxima posição no fluxo (renomeado de stepId)
 	chatData?: ChatPayload;
 	context: StepContext;
 }
@@ -70,20 +71,20 @@ export interface ChatPayload {
  * Fornece funcionalidades comuns como logging, resolução de campos e error handling.
  */
 export abstract class BaseStep {
-	public readonly id: number;
+	public readonly stepNumber: number; // Posição sequencial no fluxo
 	protected readonly instance: string;
 	protected readonly sectorId: number;
 	protected readonly config: Record<string, any>;
-	protected readonly nextStepId: number | undefined;
-	protected readonly fallbackStepId: number | undefined;
+	protected readonly nextStepNumber: number | undefined;
+	protected readonly fallbackStepNumber: number | undefined;
 
 	constructor(stepConfig: StepConfig) {
-		this.id = stepConfig.id;
+		this.stepNumber = stepConfig.stepNumber;
 		this.instance = stepConfig.instance;
 		this.sectorId = stepConfig.sectorId;
 		this.config = stepConfig.config || {};
-		this.nextStepId = stepConfig.nextStepId ?? undefined;
-		this.fallbackStepId = stepConfig.fallbackStepId ?? undefined;
+		this.nextStepNumber = stepConfig.nextStepNumber ?? undefined;
+		this.fallbackStepNumber = stepConfig.fallbackStepNumber ?? undefined;
 	}
 
 	/**
@@ -97,26 +98,26 @@ export abstract class BaseStep {
 	 * Este método é chamado pelo MessageFlow.
 	 */
 	async run(context: StepContext): Promise<StepResult> {
-		context.logger.log(`[Step ${this.id}] Iniciando execução: ${this.constructor.name}`);
+		context.logger.log(`[Step #${this.stepNumber}] Iniciando execução: ${this.constructor.name}`);
 
 		try {
 			const result = await this.execute(context);
 
 			if (result.isFinal) {
-				context.logger.log(`[Step ${this.id}] Finalizou com chat`, result.chatData);
+				context.logger.log(`[Step #${this.stepNumber}] Finalizou com chat`, result.chatData);
 			} else {
-				context.logger.log(`[Step ${this.id}] Próximo step: ${result.stepId}`);
+				context.logger.log(`[Step #${this.stepNumber}] Próximo step: #${result.nextStepNumber}`);
 			}
 
 			return result;
 		} catch (error) {
-			context.logger.log(`[Step ${this.id}] Erro durante execução`, error);
+			context.logger.log(`[Step #${this.stepNumber}] Erro durante execução`, error);
 
-			if (this.fallbackStepId) {
-				context.logger.log(`[Step ${this.id}] Usando fallback: ${this.fallbackStepId}`);
+			if (this.fallbackStepNumber) {
+				context.logger.log(`[Step #${this.stepNumber}] Usando fallback: #${this.fallbackStepNumber}`);
 				return {
 					isFinal: false,
-					stepId: this.fallbackStepId,
+					nextStepNumber: this.fallbackStepNumber,
 					context
 				};
 			}
@@ -162,15 +163,30 @@ export abstract class BaseStep {
 	}
 
 	/**
+	 * Interpola uma string substituindo todas as ocorrências de ${field.path}.
+	 * Exemplo: "Cliente: ${customer.NOME} (${customer.CODIGO})" → "Cliente: João (123)"
+	 * @param context Contexto do step
+	 * @param template String com placeholders ${...}
+	 * @returns String interpolada
+	 */
+	protected interpolateString(context: StepContext, template: string): string {
+		Logger.debug(`[BaseStep] Interpolating string: ${template}`, context);
+		return template.replace(/\$\{([^}]+)\}/g, (match, fieldPath) => {
+			const value = this.resolveField(context, fieldPath.trim());
+			return value !== undefined && value !== null ? String(value) : match;
+		});
+	}
+
+	/**
 	 * Cria um resultado para continuar o fluxo para o próximo step.
 	 * @param context Contexto atualizado
-	 * @param stepId ID do próximo step (opcional, usa nextStepId por padrão)
+	 * @param nextStepNumber Número do próximo step (opcional, usa nextStepNumber por padrão)
 	 * @returns StepResult para continuar o fluxo
 	 */
-	protected continue(context: StepContext, stepId?: number): StepResult {
+	protected continue(context: StepContext, nextStepNumber?: number): StepResult {
 		return {
 			isFinal: false,
-			stepId: stepId !== undefined ? stepId : this.nextStepId!,
+			nextStepNumber: nextStepNumber !== undefined ? nextStepNumber : this.nextStepNumber!,
 			context
 		};
 	}
