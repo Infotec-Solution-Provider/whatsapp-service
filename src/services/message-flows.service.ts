@@ -218,6 +218,7 @@ class MessageFlowsService {
 	 */
 	async updateStep(stepId: number, data: UpdateStepDto) {
 		Logger.info(`[MessageFlowsService] Updating step ${stepId}`);
+		Logger.info(`[MessageFlowsService] data recebido: type='${data.type}', stepNumber=${data.stepNumber}`);
 
 		const updateData: any = {};
 		if (data.type !== undefined) updateData.type = data.type;
@@ -229,7 +230,7 @@ class MessageFlowsService {
 		if (data.description !== undefined) updateData.description = data.description;
 		if (data.connections !== undefined) updateData.connections = data.connections as any;
 
-		Logger.debug(`[MessageFlowsService] Update data for step ${stepId}:`, updateData);
+		Logger.debug(`[MessageFlowsService] updateData para Prisma:`, updateData);
 
 		const step = await prismaService.wppMessageFlowStep.update({
 			where: { id: stepId },
@@ -237,6 +238,7 @@ class MessageFlowsService {
 		});
 
 		Logger.info(`[MessageFlowsService] Step ${stepId} updated`);
+		Logger.info(`[MessageFlowsService] Passo retornado do Prisma: id=${step.id}, type='${step.type}', stepNumber=${step.stepNumber}`);
 		return step;
 	}
 

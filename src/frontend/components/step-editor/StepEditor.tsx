@@ -60,6 +60,18 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 
 	// Sincroniza formData quando o step prop muda (após update)
 	useEffect(() => {
+		console.log("[StepEditor] useEffect [step, steps] acionado");
+		if (step) {
+			console.log("[StepEditor] Step prop mudou, sincronizando formData:");
+			console.log("  step.id:", step.id);
+			console.log("  step.stepType:", step.stepType);
+			console.log("  step.stepNumber:", step.stepNumber);
+			console.log("  step.description:", step.description || "(vazio)");
+			console.log("  step.enabled:", step.enabled);
+			console.log("  step.config keys:", Object.keys(step.config || {}).join(", ") || "(vazio)");
+		} else {
+			console.log("[StepEditor] Criando novo step");
+		}
 		setFormData({
 			stepNumber: step?.stepNumber || Math.max(0, ...steps.map((s) => s.stepNumber)) + 1,
 			stepType: (step?.stepType || "QUERY") as WppMessageFlowStepType | "",
@@ -110,16 +122,48 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 				stepData.fallbackStepId = parseInt(formData.fallbackStepId);
 			}
 
+			console.log("[StepEditor] Enviando dados do step:");
+			console.log("  step.id (se update):", step?.id || "N/A");
+			console.log("  type:", stepData.type);
+			console.log("  stepNumber:", stepData.stepNumber);
+			console.log("  description:", stepData.description || "(vazio)");
+			console.log("  enabled:", stepData.enabled);
+			console.log("  nextStepId:", stepData.nextStepId || "(vazio)");
+			console.log("  fallbackStepId:", stepData.fallbackStepId || "(vazio)");
+			console.log("  config keys:", Object.keys(stepData.config).join(", ") || "(vazio)");
+			console.log("  connections:", stepData.connections ? "present" : "null");
+
 			let savedStep: FlowStep;
 
 			if (step) {
 				// Update existing step
+				console.log("[StepEditor] Atualizando step existente:", step.id);
 				savedStep = await flowApiService.updateStep(step.id, stepData);
+				console.log("[StepEditor] Resposta do update:", {
+					id: savedStep.id,
+					type: savedStep.stepType,
+					stepNumber: savedStep.stepNumber,
+					description: savedStep.description || "(vazio)",
+					enabled: savedStep.enabled,
+					config_keys: Object.keys(savedStep.config || {}).join(", "),
+					connections: savedStep.connections ? "present" : "null"
+				});
 			} else {
 				// Create new step
+				console.log("[StepEditor] Criando novo step no flow:", flowId);
 				savedStep = await flowApiService.createStep(flowId, stepData);
+				console.log("[StepEditor] Resposta do create:", {
+					id: savedStep.id,
+					type: savedStep.stepType,
+					stepNumber: savedStep.stepNumber,
+					description: savedStep.description || "(vazio)",
+					enabled: savedStep.enabled,
+					config_keys: Object.keys(savedStep.config || {}).join(", "),
+					connections: savedStep.connections ? "present" : "null"
+				});
 			}
 
+			console.log("[StepEditor] Chamando onSave com step salvo");
 			onSave(savedStep);
 		} catch (err) {
 			console.error("Erro ao salvar passo:", err);

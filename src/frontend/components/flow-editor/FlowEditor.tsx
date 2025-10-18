@@ -75,6 +75,14 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flow: initialFlow, onBac
 	};
 
 	const handleStepSaved = async (savedStep: FlowStep) => {
+		console.log("[FlowEditor] handleStepSaved chamado");
+		console.log("  savedStep.id:", savedStep.id);
+		console.log("  savedStep.stepType:", savedStep.stepType);
+		console.log("  savedStep.stepNumber:", savedStep.stepNumber);
+		console.log("  savedStep.description:", savedStep.description || "(vazio)");
+		console.log("  savedStep.config keys:", Object.keys(savedStep.config || {}).join(", ") || "(vazio)");
+		console.log("  savedStep.connections:", savedStep.connections ? "present" : "null");
+
 		setSuccessMessage("Passo salvo com sucesso!");
 		setTimeout(() => setSuccessMessage(null), 3000);
 
@@ -83,11 +91,13 @@ export const FlowEditor: React.FC<FlowEditorProps> = ({ flow: initialFlow, onBac
 			const existingIndex = prevSteps.findIndex((s) => s.id === savedStep.id);
 			if (existingIndex >= 0) {
 				// Atualiza step existente
+				console.log("[FlowEditor] Atualizando step existente no index:", existingIndex);
 				const newSteps = [...prevSteps];
 				newSteps[existingIndex] = savedStep;
 				return newSteps;
 			} else {
 				// Adiciona novo step
+				console.log("[FlowEditor] Adicionando novo step ao array");
 				return [...prevSteps, savedStep].sort((a, b) => a.stepNumber - b.stepNumber);
 			}
 		});
