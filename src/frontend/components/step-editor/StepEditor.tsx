@@ -58,6 +58,21 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 		loadStepTypes();
 	}, []);
 
+	// Sincroniza formData quando o step prop muda (após update)
+	useEffect(() => {
+		setFormData({
+			stepNumber: step?.stepNumber || Math.max(0, ...steps.map((s) => s.stepNumber)) + 1,
+			stepType: (step?.stepType || "QUERY") as WppMessageFlowStepType | "",
+			nextStepId: step?.nextStepId?.toString() || "",
+			fallbackStepId: step?.fallbackStepId?.toString() || "",
+			description: step?.description || "",
+			enabled: step?.enabled ?? true,
+			config: step?.config || {},
+			connections: step?.connections || null
+		});
+		setConfigJson(JSON.stringify(step?.config || {}, null, 2));
+	}, [step, steps]);
+
 	const loadStepTypes = async () => {
 		try {
 			const types = await flowApiService.getAvailableStepTypes();
