@@ -2,8 +2,11 @@ import { BaseStep, StepContext, StepResult } from "./base.step";
 
 interface RouterConfig {
 	field: string; // Campo para avaliar
-	routes: Record<string, number>; // Mapa valor → stepNumber
-	default?: number; // Step padrão se não encontrar rota
+}
+
+interface RouterConnections {
+	routes?: Record<string, number>; // Mapa valor → stepNumber
+	defaultRoute?: number; // Step padrão se não encontrar rota
 }
 
 /**
@@ -13,16 +16,17 @@ interface RouterConfig {
 export class RouterStep extends BaseStep {
 	async execute(context: StepContext): Promise<StepResult> {
 		const config = this.config as RouterConfig;
+		const connections = this.connections as RouterConnections;
 		const value = this.resolveField(context, config.field);
 
 		context.logger.log(`Roteando baseado em ${config.field}`, { value });
 
 		// Procura rota exata
-		let nextStepNumber = config.routes[String(value)];
+		let nextStepNumber = connections.routes?.[String(value)];
 
 		// Se não encontrou, usa rota padrão
 		if (nextStepNumber === undefined) {
-			nextStepNumber = config.default || this.nextStepNumber;
+			nextStepNumber = connections.defaultRoute || this.nextStepNumber;
 		}
 
 		if (nextStepNumber === undefined) {

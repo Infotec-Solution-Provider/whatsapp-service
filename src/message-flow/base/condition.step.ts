@@ -4,8 +4,11 @@ interface ConditionConfig {
 	field: string; // Campo a verificar (ex: "contact.isOnlyAdmin")
 	operator: string; // Operador (equals, notEquals, contains, in, gt, lt, etc)
 	value: any; // Valor para comparar
-	onTrue: number; // StepId se condição for verdadeira
-	onFalse: number; // StepId se condição for falsa
+}
+
+interface ConditionConnections {
+	onTrue?: number; // StepId se condição for verdadeira
+	onFalse?: number; // StepId se condição for falsa
 }
 
 /**
@@ -15,6 +18,7 @@ interface ConditionConfig {
 export class ConditionStep extends BaseStep {
 	async execute(context: StepContext): Promise<StepResult> {
 		const config = this.config as ConditionConfig;
+		const connections = this.connections as ConditionConnections;
 		const fieldValue = this.resolveField(context, config.field);
 
 		context.logger.log(
@@ -23,7 +27,7 @@ export class ConditionStep extends BaseStep {
 		);
 
 		const result = this.evaluate(fieldValue, config.operator, config.value);
-		const nextStepId = result ? config.onTrue : config.onFalse;
+		const nextStepId = result ? connections.onTrue : connections.onFalse;
 
 		context.logger.log(`Resultado da condição: ${result} → Step ${nextStepId}`);
 

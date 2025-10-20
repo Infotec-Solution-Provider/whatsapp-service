@@ -15,7 +15,8 @@ export default class MessageFlowFactory {
 		stepNumber: number,
 		nextStepNumber?: number,
 		config?: Record<string, any>,
-		fallbackStepNumber?: number
+		fallbackStepNumber?: number,
+		connections?: Record<string, any>
 	): BaseStep {
 		Logger.debug(`[MessageFlowFactory] Creating step`, {
 			type,
@@ -24,14 +25,16 @@ export default class MessageFlowFactory {
 			stepNumber,
 			nextStepNumber,
 			fallbackStepNumber,
-			config
+			config,
+			connections
 		});
 
 		const stepConfig: any = {
 			stepNumber,
 			instance,
 			sectorId,
-			config: config || {}
+			config: config || {},
+			connections: connections || {}
 		};
 
 		if (nextStepNumber !== undefined) {
@@ -110,47 +113,48 @@ export default class MessageFlowFactory {
 			// Ordena os steps por stepNumber para garantir a ordem correta
 			const sortedSteps = [...flow.WppMessageFlowStep].sort((a, b) => a.stepNumber - b.stepNumber);
 
-			for (const step of sortedSteps) {
-				// Usa os valores do banco de dados para next e fallback
-				const stepConfig: any = {
-					stepNumber: step.stepNumber,
-					instance,
-					sectorId,
-					config: MessageFlowFactory.getValidatedStepConfig(step.config)
-				};
+		for (const step of sortedSteps) {
+			// Usa os valores do banco de dados para next e fallback
+			const stepConfig: any = {
+				stepNumber: step.stepNumber,
+				instance,
+				sectorId,
+				config: MessageFlowFactory.getValidatedStepConfig(step.config),
+				connections: step.connections || {}
+			};
 
-				// Adiciona nextStepNumber se definido no banco
-				if (step.nextStepId !== null && step.nextStepId !== undefined) {
-					stepConfig.nextStepNumber = step.nextStepId;
-				}
-
-				// Adiciona fallbackStepNumber se definido no banco
-				if (step.fallbackStepId !== null && step.fallbackStepId !== undefined) {
-					stepConfig.fallbackStepNumber = step.fallbackStepId;
-				}
-
-				Logger.debug(`[MessageFlowFactory] Creating step from database`, {
-					type: step.type,
-					stepNumber: step.stepNumber,
-					nextStepNumber: stepConfig.nextStepNumber,
-					fallbackStepNumber: stepConfig.fallbackStepNumber,
-					hasConfig: !!step.config
-				});
-
-				const stepInstance = this.createStep(
-					step.type as string,
-					instance,
-					sectorId,
-					step.stepNumber,
-					stepConfig.nextStepNumber,
-					stepConfig.config,
-					stepConfig.fallbackStepNumber
-				);
-				
-				messageFlow.addStep(stepInstance);
+			// Adiciona nextStepNumber se definido no banco
+			if (step.nextStepId !== null && step.nextStepId !== undefined) {
+				stepConfig.nextStepNumber = step.nextStepId;
 			}
 
-			Logger.debug(
+			// Adiciona fallbackStepNumber se definido no banco
+			if (step.fallbackStepId !== null && step.fallbackStepId !== undefined) {
+				stepConfig.fallbackStepNumber = step.fallbackStepId;
+			}
+
+			Logger.debug(`[MessageFlowFactory] Creating step from database`, {
+				type: step.type,
+				stepNumber: step.stepNumber,
+				nextStepNumber: stepConfig.nextStepNumber,
+				fallbackStepNumber: stepConfig.fallbackStepNumber,
+				hasConfig: !!step.config,
+				hasConnections: !!step.connections
+			});
+
+			const stepInstance = this.createStep(
+				step.type as string,
+				instance,
+				sectorId,
+				step.stepNumber,
+				stepConfig.nextStepNumber,
+				stepConfig.config,
+				stepConfig.fallbackStepNumber,
+				stepConfig.connections
+			);
+			
+			messageFlow.addStep(stepInstance);
+		}			Logger.debug(
 				`[MessageFlowFactory] Message flow created successfully with ${flow.WppMessageFlowStep.length} steps`
 			);
 			messageFlow.debugStepsMap();

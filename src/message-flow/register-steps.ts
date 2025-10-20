@@ -22,7 +22,7 @@ export function registerAllSteps(): void {
 
 	StepRegistry.register("CONDITION", ConditionStep, {
 		description: "Avalia uma condição e direciona baseado no resultado",
-		requiredConfig: ["field", "operator", "value", "onTrue", "onFalse"],
+		requiredConfig: ["field", "operator", "value"],
 		optionalConfig: []
 	});
 
@@ -34,8 +34,8 @@ export function registerAllSteps(): void {
 
 	StepRegistry.register("ROUTER", RouterStep, {
 		description: "Roteia baseado no valor de um campo",
-		requiredConfig: ["field", "routes"],
-		optionalConfig: ["default"]
+		requiredConfig: ["field"],
+		optionalConfig: []
 	});
 
 	StepRegistry.register("ASSIGN", AssignStep, {

@@ -33,6 +33,7 @@ export interface StepConfig {
 	instance: string;
 	sectorId: number;
 	config?: Record<string, any>;
+	connections?: Record<string, any>; // Conexões condicionais (onTrue/onFalse para CONDITION, routes para ROUTER)
 	nextStepNumber?: number; // Próxima posição no fluxo
 	fallbackStepNumber?: number; // Posição alternativa em caso de erro
 }
@@ -75,6 +76,7 @@ export abstract class BaseStep {
 	protected readonly instance: string;
 	protected readonly sectorId: number;
 	protected readonly config: Record<string, any>;
+	protected readonly connections: Record<string, any>; // Conexões condicionais
 	protected readonly nextStepNumber: number | undefined;
 	protected readonly fallbackStepNumber: number | undefined;
 
@@ -83,6 +85,7 @@ export abstract class BaseStep {
 		this.instance = stepConfig.instance;
 		this.sectorId = stepConfig.sectorId;
 		this.config = stepConfig.config || {};
+		this.connections = stepConfig.connections || {};
 		this.nextStepNumber = stepConfig.nextStepNumber ?? undefined;
 		this.fallbackStepNumber = stepConfig.fallbackStepNumber ?? undefined;
 	}
