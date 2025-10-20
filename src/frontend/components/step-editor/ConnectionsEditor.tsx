@@ -100,15 +100,15 @@ export const ConnectionsEditor: React.FC<ConnectionsEditorProps> = ({
 							}}
 						>
 							<MenuItem value="">
-								<em>Nenhum</em>
+							<em>Nenhuma</em>
+						</MenuItem>
+						{selectableSteps.map((step) => (
+							<MenuItem key={step.id} value={step.stepNumber}>
+								Passo {step.stepNumber}: {getStepTypeLabel(step.stepType)}
+								{step.description && ` - ${step.description}`}
 							</MenuItem>
-							{selectableSteps.map((step) => (
-								<MenuItem key={step.id} value={step.id}>
-									Passo {step.stepNumber}: {getStepTypeLabel(step.stepType)}
-									{step.description && ` - ${step.description}`}
-								</MenuItem>
-							))}
-						</Select>
+						))}
+					</Select>
 					</FormControl>
 
 					{/* OnFalse */}
@@ -217,15 +217,15 @@ export const ConnectionsEditor: React.FC<ConnectionsEditorProps> = ({
 									label="Passo Destino"
 								>
 									<MenuItem value="">
-										<em>Selecione um passo</em>
+									<em>Selecione um passo</em>
+								</MenuItem>
+								{selectableSteps.map((step) => (
+									<MenuItem key={step.id} value={step.stepNumber}>
+										Passo {step.stepNumber}: {getStepTypeLabel(step.stepType)}
+										{step.description && ` - ${step.description}`}
 									</MenuItem>
-									{selectableSteps.map((step) => (
-										<MenuItem key={step.id} value={step.id}>
-											Passo {step.stepNumber}: {getStepTypeLabel(step.stepType)}
-											{step.description && ` - ${step.description}`}
-										</MenuItem>
-									))}
-								</Select>
+								))}
+							</Select>
 							</FormControl>
 							<IconButton onClick={() => deleteRoute(key)} color="error" size="small">
 								<DeleteIcon />
