@@ -116,8 +116,8 @@ class ChooseSellerBot {
 					const step = new CheckAvailableUsersStep({
 						instance: message.instance,
 						sectorId: chat.sectorId!,
-						stepId: 1,
-						nextStepId: 1
+						stepNumber: 1,
+						nextStepNumber: 1
 					});
 
 					const result = await step.run({ contact, logger });
@@ -138,8 +138,8 @@ class ChooseSellerBot {
 						break;
 					}
 
-					const user = result.isFinal
-						? users.find((u) => u.CODIGO === result.chatData.userId) ||
+					const user = result.isFinal && result.chatData
+						? users.find((u) => u.CODIGO === result.chatData!.userId) ||
 							({ NOME: "Supervisão", CODIGO: -1 } as User)
 						: ({ NOME: "Supervisão", CODIGO: -1 } as User);
 
