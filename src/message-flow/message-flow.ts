@@ -8,13 +8,15 @@ export default class MessageFlow {
 	private activeFlows: Map<number, Promise<ChatPayload>> = new Map();
 
 	public async getChatPayload(logger: ProcessingLogger, contact: WppContact): Promise<ChatPayload> {
-		logger.log("Iniciando o processamento da mensagem no fluxo de etapas.");
-		logger.debug(`[MessageFlow] Total de etapas registradas: ${this.steps.size}`);
-		logger.debug(`[MessageFlow] Números das etapas disponíveis: [${Array.from(this.steps.keys()).join(', ')}]`);
+		logger.log("╔═══════════════════════════════════════════════════════════");
+		logger.log("║ INICIANDO PROCESSAMENTO DE FLUXO");
+		logger.log(`║ Contato: ${contact.name || contact.phone} (ID: ${contact.id})`);
+		logger.log(`║ Steps disponíveis: ${this.steps.size} [${Array.from(this.steps.keys()).join(', ')}]`);
+		logger.log("╚═══════════════════════════════════════════════════════════");
 
 		const ongoingFlow = this.getOngoingFlow(contact.id);
 		if (ongoingFlow) {
-			logger.log(`Já existe um fluxo ativo para o contato ${contact.id}. Aguardando...`);
+			logger.log(`⚠ Fluxo já em andamento para contato ${contact.id}. Aguardando conclusão...`);
 			return ongoingFlow;
 		}
 
@@ -42,35 +44,33 @@ export default class MessageFlow {
 			let currentStepNumber = 1; // Começa sempre na etapa #1
 			let context: StepContext = { logger, contact };
 			let iterationCount = 0;
-
-			logger.debug(`[MessageFlow] Iniciando processamento do fluxo para o contato ${contact.id}`);
+			const maxIterations = 50; // Proteção contra loops infinitos
 
 			while (true) {
 				iterationCount++;
-				logger.debug(`[MessageFlow] Iteração ${iterationCount} - Tentando executar etapa #${currentStepNumber}`);
+				
+				if (iterationCount > maxIterations) {
+					throw new Error(`Fluxo excedeu máximo de ${maxIterations} iterações. Possível loop infinito.`);
+				}
 				
 				const step = this.getStep(currentStepNumber, logger);
-				logger.debug(`[MessageFlow] Etapa #${currentStepNumber} encontrada: ${step.constructor.name}`);
-				
 				const result = await this.executeStep(step, context);
-				logger.debug(`[MessageFlow] Resultado da etapa #${currentStepNumber}:`, {
-					isFinal: result.isFinal,
-					nextStepNumber: result.nextStepNumber,
-					hasContext: !!result.context,
-					hasChatData: !!result.chatData
-				});
 
 				if (result.isFinal) {
-					logger.log(`A etapa #${currentStepNumber} retornou um chat com sucesso!`, result.chatData);
-					logger.debug(`[MessageFlow] Fluxo finalizado após ${iterationCount} iterações`);
+					logger.log("╔═══════════════════════════════════════════════════════════");
+					logger.log(`║ ✓ FLUXO FINALIZADO (${iterationCount} steps executados)`);
+					logger.log("╚═══════════════════════════════════════════════════════════");
 					return this.validateChat(result.chatData || null, logger);
 				}
+				
 				context = { ...context, ...result.context };
 				currentStepNumber = this.getNextStepNumber(result, currentStepNumber);
-				logger.debug(`[MessageFlow] Próxima etapa a ser executada: #${currentStepNumber}`);
 			}
 		} catch (error) {
-			logger.log("Erro durante o processamento do fluxo de etapas:", error);
+			logger.log("╔═══════════════════════════════════════════════════════════");
+			logger.log("║ ✗ ERRO NO PROCESSAMENTO DO FLUXO");
+			logger.log("╚═══════════════════════════════════════════════════════════");
+			logger.log("Erro:", error);
 			logger.failed(error);
 			throw error;
 		}

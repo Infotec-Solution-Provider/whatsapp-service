@@ -101,23 +101,43 @@ export abstract class BaseStep {
 	 * Este método é chamado pelo MessageFlow.
 	 */
 	async run(context: StepContext): Promise<StepResult> {
-		context.logger.log(`[Step #${this.stepNumber}] Iniciando execução: ${this.constructor.name}`);
+		const stepType = this.constructor.name.replace('Step', '');
+		const startTime = Date.now();
+		
+		context.logger.log(`┌─ [Step #${this.stepNumber}] ${stepType}`, {
+			instance: this.instance,
+			sectorId: this.sectorId,
+			contactId: context.contact?.id,
+			hasConfig: Object.keys(this.config).length > 0,
+			hasConnections: Object.keys(this.connections).length > 0
+		});
 
 		try {
 			const result = await this.execute(context);
+			const duration = Date.now() - startTime;
 
 			if (result.isFinal) {
-				context.logger.log(`[Step #${this.stepNumber}] Finalizou com chat`, result.chatData);
+				context.logger.log(`└─ [Step #${this.stepNumber}] ✓ FINALIZADO (${duration}ms)`, {
+					chatType: result.chatData?.type,
+					userId: result.chatData?.userId,
+					walletId: result.chatData?.walletId,
+					priority: result.chatData?.priority,
+					systemMessage: result.chatData?.systemMessage?.substring(0, 50)
+				});
 			} else {
-				context.logger.log(`[Step #${this.stepNumber}] Próximo step: #${result.nextStepNumber}`);
+				context.logger.log(`└─ [Step #${this.stepNumber}] → Step #${result.nextStepNumber} (${duration}ms)`);
 			}
 
 			return result;
 		} catch (error) {
-			context.logger.log(`[Step #${this.stepNumber}] Erro durante execução`, error);
+			const duration = Date.now() - startTime;
+			context.logger.log(`└─ [Step #${this.stepNumber}] ✗ ERRO (${duration}ms)`, {
+				error: error instanceof Error ? error.message : String(error),
+				stack: error instanceof Error ? error.stack?.split('\n').slice(0, 3) : undefined
+			});
 
 			if (this.fallbackStepNumber) {
-				context.logger.log(`[Step #${this.stepNumber}] Usando fallback: #${this.fallbackStepNumber}`);
+				context.logger.log(`   ↳ Usando fallback → Step #${this.fallbackStepNumber}`);
 				return {
 					isFinal: false,
 					nextStepNumber: this.fallbackStepNumber,

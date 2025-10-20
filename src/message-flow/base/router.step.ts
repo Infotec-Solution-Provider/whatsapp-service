@@ -19,7 +19,11 @@ export class RouterStep extends BaseStep {
 		const connections = this.connections as RouterConnections;
 		const value = this.resolveField(context, config.field);
 
-		context.logger.log(`Roteando baseado em ${config.field}`, { value });
+		const availableRoutes = Object.keys(connections.routes || {}).join(', ');
+		context.logger.log(`  Roteando campo: ${config.field} = ${JSON.stringify(value)}`, {
+			availableRoutes: availableRoutes || '(nenhuma)',
+			hasDefault: !!connections.defaultRoute
+		});
 
 		// Procura rota exata
 		let nextStepNumber = connections.routes?.[String(value)];
@@ -27,6 +31,9 @@ export class RouterStep extends BaseStep {
 		// Se não encontrou, usa rota padrão
 		if (nextStepNumber === undefined) {
 			nextStepNumber = connections.defaultRoute || this.nextStepNumber;
+			context.logger.log(`  Rota não encontrada, usando: ${connections.defaultRoute ? 'default' : 'nextStep'} → #${nextStepNumber}`);
+		} else {
+			context.logger.log(`  Rota encontrada: "${value}" → Step #${nextStepNumber}`);
 		}
 
 		if (nextStepNumber === undefined) {
@@ -34,8 +41,6 @@ export class RouterStep extends BaseStep {
 				`Nenhuma rota encontrada para valor "${value}" e sem rota padrão`
 			);
 		}
-
-		context.logger.log(`Rota selecionada: #${nextStepNumber}`);
 
 		return this.continue(context, nextStepNumber);
 	}

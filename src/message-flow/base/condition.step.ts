@@ -21,15 +21,15 @@ export class ConditionStep extends BaseStep {
 		const connections = this.connections as ConditionConnections;
 		const fieldValue = this.resolveField(context, config.field);
 
-		context.logger.log(
-			`Verificando condição: ${config.field} ${config.operator} ${config.value}`,
-			{ fieldValue }
-		);
+		context.logger.log(`  Condição: ${config.field} ${config.operator} ${JSON.stringify(config.value)}`, {
+			resolvedValue: fieldValue,
+			valueType: typeof fieldValue
+		});
 
 		const result = this.evaluate(fieldValue, config.operator, config.value);
 		const nextStepId = result ? connections.onTrue : connections.onFalse;
 
-		context.logger.log(`Resultado da condição: ${result} → Step ${nextStepId}`);
+		context.logger.log(`  Resultado: ${result ? '✓ TRUE' : '✗ FALSE'} → Step #${nextStepId}`);
 
 		return this.continue(context, nextStepId);
 	}

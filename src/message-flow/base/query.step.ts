@@ -17,12 +17,22 @@ export class QueryStep extends BaseStep {
 	async execute(context: StepContext): Promise<StepResult> {
 		const config = this.config as QueryConfig;
 
-		context.logger.log(`Executando query`, {
-			query: config.query,
-			storeAs: config.storeAs
+		const querySummary = config.query.length > 60 
+			? config.query.substring(0, 60) + '...' 
+			: config.query;
+		
+		context.logger.log(`  Query: ${querySummary}`, {
+			storeAs: config.storeAs,
+			single: config.single || false,
+			required: config.required || false,
+			hasParams: (config.params?.length || 0) > 0
 		});
 
 		const params = config.params ? this.resolveParams(context, config.params) : [];
+
+		if (params.length > 0) {
+			context.logger.log(`  Params: ${JSON.stringify(params)}`);
+		}
 
 		const results = (await instancesService.executeQuery(
 			this.instance,
@@ -30,10 +40,10 @@ export class QueryStep extends BaseStep {
 			params
 		)) as any[];
 
-		context.logger.log(`Query retornou ${results.length} resultado(s)`);
+		context.logger.log(`  Resultados: ${results.length} linha(s) retornada(s)`);
 
 		if (config.required && results.length === 0) {
-			context.logger.log("Query não retornou resultados (required=true)");
+			context.logger.log(`  ⚠ Query obrigatória não retornou dados → fallback`);
 
 			if (this.fallbackStepNumber) {
 				return this.continue(context, this.fallbackStepNumber);
@@ -46,7 +56,7 @@ export class QueryStep extends BaseStep {
 		const value = config.single ? results[0] : results;
 		context[config.storeAs] = value;
 
-		context.logger.log(`Resultado armazenado em context.${config.storeAs}`);
+		context.logger.log(`  ✓ Armazenado: context.${config.storeAs} ${config.single ? '(single)' : `(array[${results.length}])`}`);
 
 		return this.continue(context);
 	}

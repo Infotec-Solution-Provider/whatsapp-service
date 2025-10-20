@@ -28,6 +28,18 @@ export class AssignStep extends BaseStep {
 				? this.resolveField(context, config.walletId.slice(2, -1))
 				: config.walletId;
 
+		const assignmentType = userId 
+			? (userId === -1 ? 'ADMIN' : `USER #${userId}`)
+			: walletId 
+				? `WALLET #${walletId}`
+				: 'DEFAULT';
+
+		context.logger.log(`  Atribuindo: ${assignmentType}`, {
+			type: config.type || 'RECEPTIVE',
+			priority: config.priority || 'NORMAL',
+			hasSystemMessage: !!config.systemMessage
+		});
+
 		const chatData: ChatPayload = {
 			instance: this.instance,
 			type: config.type || "RECEPTIVE",
@@ -40,13 +52,13 @@ export class AssignStep extends BaseStep {
 		if (config.systemMessage) {
 			const interpolated = this.interpolateString(context, config.systemMessage);
 			chatData.systemMessage = interpolated;
-			context.logger.log(`System message interpolated: "${config.systemMessage}" → "${interpolated}"`);
+			if (interpolated !== config.systemMessage) {
+				context.logger.log(`  Mensagem interpolada: "${config.systemMessage}" → "${interpolated}"`);
+			}
 		}
 		if (config.priority) {
 			chatData.priority = config.priority;
 		}
-
-		context.logger.log("Chat atribuído", chatData);
 
 		return this.finalize(chatData);
 	}
