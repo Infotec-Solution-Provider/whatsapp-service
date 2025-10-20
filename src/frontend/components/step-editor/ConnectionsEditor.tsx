@@ -128,7 +128,7 @@ export const ConnectionsEditor: React.FC<ConnectionsEditorProps> = ({
 								<em>Nenhum</em>
 							</MenuItem>
 							{selectableSteps.map((step) => (
-								<MenuItem key={step.id} value={step.id}>
+								<MenuItem key={step.id} value={step.stepNumber}>
 									Passo {step.stepNumber}: {getStepTypeLabel(step.stepType)}
 									{step.description && ` - ${step.description}`}
 								</MenuItem>
@@ -256,7 +256,7 @@ export const ConnectionsEditor: React.FC<ConnectionsEditorProps> = ({
 								<em>Nenhuma</em>
 							</MenuItem>
 							{selectableSteps.map((step) => (
-								<MenuItem key={step.id} value={step.id}>
+								<MenuItem key={step.id} value={step.stepNumber}>
 									Passo {step.stepNumber}: {getStepTypeLabel(step.stepType)}
 									{step.description && ` - ${step.description}`}
 								</MenuItem>
