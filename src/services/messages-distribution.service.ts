@@ -115,6 +115,18 @@ class MessagesDistributionService {
 						botId: 1
 					}
 				});
+			} else if (instance === "vollo") {
+				newChat = await prismaService.wppChat.create({
+					data: {
+						instance,
+						type: "RECEPTIVE",
+						contactId: contact.id,
+						sectorId: sectors[0]!.id,
+						startedAt: new Date(),
+						botId: instance === "vollo" ? 1 : null,
+						...(instance === "vollo" && { userId: 15 })
+					}
+				});
 			} else {
 				logger.log("Um setor encontrado, iniciando o fluxo de atendimento.");
 				const flow = await this.getFlow(instance, sectors[0]!.id);
@@ -125,9 +137,7 @@ class MessagesDistributionService {
 				newChat = await prismaService.wppChat.create({
 					data: {
 						...chatData,
-						startedAt: new Date(),
-						botId: instance === "vollo" ? 1 : null,
-						...(instance === "vollo" && { userId: 15 })
+						startedAt: new Date()
 					}
 				});
 				systemMessage = result.systemMessage || null;
