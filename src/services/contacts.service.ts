@@ -62,8 +62,7 @@ class ContactsService {
 			}
 		});
 
-		const [chats, contacts] = await Promise.all([chatsPromise, contactsPromise]);
-		const cache = await this.getInstanceCache(instance);
+		const [chats, contacts, cache] = await Promise.all([chatsPromise, contactsPromise, this.getInstanceCache(instance)]);
 
 		return contacts.map((contact) => {
 			const customer = contact.customerId && cache.customers.get(contact.customerId);
@@ -84,34 +83,54 @@ class ContactsService {
 		const isValid = cached && cached.expiresAt > new Date();
 		const renewing = this.ongoingCacheRenewals.get(instance);
 
-		if (!cached || (isValid && !renewing)) {
-			cached && (cached.isRenewing = true);
+		if (!cached || (!isValid && !renewing)) {
+			// Mark as renewing if cache exists
+			if (cached) {
+				cached.isRenewing = true;
+			}
 			const newCachePromise = this.renewCache(instance);
+			this.ongoingCacheRenewals.set(instance, newCachePromise);
 			return newCachePromise;
 		} else if (cached && renewing) {
 			return renewing;
 		}
 
-		return cached;
+		return Promise.resolve(cached);
 	}
 
 	private async renewCache(instance: string) {
-		this.cache.get(instance)!.isRenewing = true;
-		const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutos
+		try {
+			const existingCache = this.cache.get(instance);
+			// Mark as renewing if cache exists
+			if (existingCache) {
+				existingCache.isRenewing = true;
+			}
+			const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutos
 
-		const users = await usersService.getUsers({ perPage: "999" }).then(({ data }) => {
-			const users: Map<number, User> = new Map();
-			data.forEach((user) => users.set(user.CODIGO, user));
-			return users;
-		});
+			const users = await usersService.getUsers({ perPage: "999" }).then(({ data }) => {
+				const users: Map<number, User> = new Map();
+				data.forEach((user) => users.set(user.CODIGO, user));
+				return users;
+			});
 
-		const customers = await customersService.getCustomers({ perPage: "99999" }).then(({ data }) => {
-			const customers: Map<number, Customer> = new Map();
-			data.forEach((c) => customers.set(c.CODIGO, c));
-			return customers;
-		});
-		this.cache.set(instance, { expiresAt, customers, users, isRenewing: false });
-		return this.cache.get(instance)!;
+			const customers = await customersService.getCustomers({ perPage: "99999" }).then(({ data }) => {
+				const customers: Map<number, Customer> = new Map();
+				data.forEach((c) => customers.set(c.CODIGO, c));
+				return customers;
+			});
+			
+			const newCache: InstanceCache = { expiresAt, customers, users, isRenewing: false };
+			this.cache.set(instance, newCache);
+			
+			// Clean up ongoing renewal tracking
+			this.ongoingCacheRenewals.delete(instance);
+			
+			return newCache;
+		} catch (error) {
+			// Clean up ongoing renewal tracking on error
+			this.ongoingCacheRenewals.delete(instance);
+			throw error;
+		}
 	}
 
 	public async getCustomerContacts(instance: string, customerId: number) {
