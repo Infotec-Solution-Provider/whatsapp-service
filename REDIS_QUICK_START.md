@@ -2,40 +2,54 @@
 
 ## Instalação Rápida (5 minutos)
 
-### 1. Instalar dependências
+### 0. Instalar Redis (se ainda não tiver)
+
+**Ubuntu/Debian:**
+```bash
+sudo apt update
+sudo apt install redis-server -y
+sudo systemctl start redis-server
+sudo systemctl enable redis-server
+```
+
+**CentOS/RHEL:**
+```bash
+sudo yum install epel-release -y
+sudo yum install redis -y
+sudo systemctl start redis
+sudo systemctl enable redis
+```
+
+**Verificar instalação:**
+```bash
+redis-cli ping
+# Deve retornar: PONG
+```
+
+📖 **Guia completo:** `docs/REDIS_LINUX_INSTALL.md`
+
+### 1. Instalar dependências (já instaladas)
 ```bash
 # As dependências já foram instaladas:
 # - ioredis
 # - @types/ioredis
 ```
 
-### 2. Iniciar Redis
-```bash
-npm run redis:start
-```
-
-### 3. Configurar .env
+### 2. Configurar .env
 ```bash
 # Adicionar ao arquivo .env:
 REDIS_URL="redis://localhost:6379"
+
+# Ou via comando:
+echo 'REDIS_URL="redis://localhost:6379"' >> .env
 ```
 
-### 4. Iniciar aplicação
+### 3. Iniciar aplicação
 ```bash
 npm run dev
 ```
 
-### 5. Verificar funcionamento
-```bash
-# Em outro terminal, verificar logs do Redis
-npm run redis:logs
-
-# Ou monitorar comandos em tempo real
-npm run redis:monitor
-```
-
-## ✅ Pronto!
-
+### 4. Verificar funcionamento
 Quando a aplicação conectar com sucesso, você verá:
 ```
 ✅ Redis connected successfully
@@ -46,12 +60,37 @@ Quando a aplicação conectar com sucesso, você verá:
 1. Fazer uma requisição para listar contatos
 2. Verificar chaves criadas no Redis:
 ```bash
-npm run redis:keys
+redis-cli KEYS "*"
 ```
 
 3. Ver estatísticas:
 ```bash
-npm run redis:stats
+redis-cli INFO stats
+```
+
+## 📊 Comandos Úteis do Redis
+
+```bash
+# Ver todas as chaves
+redis-cli KEYS "*"
+
+# Ver clientes em cache
+redis-cli KEYS "customer:*"
+
+# Ver usuários em cache
+redis-cli KEYS "user:*"
+
+# Limpar cache
+redis-cli FLUSHDB
+
+# Monitorar em tempo real
+redis-cli MONITOR
+
+# Ver estatísticas
+redis-cli INFO stats
+
+# Ver uso de memória
+redis-cli INFO memory
 ```
 
 ## 📚 Documentação Completa
