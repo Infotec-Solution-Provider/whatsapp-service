@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Teste de Estilização - Message Flow Manager</title>
+</head>
+<body>
+  <h1>🧪 Teste de Estilização</h1>
+  <p>Se você está vendo este texto sem estilização, o CSS não foi carregado corretamente.</p>
+  
+  <div style="margin: 20px; padding: 20px; border: 2px solid #ccc; border-radius: 8px;">
+    <h2>Checklist:</h2>
+    <ul>
+      <li>✅ Página carrega</li>
+      <li id="css-check">❌ CSS carregado (aguardando...)</li>
+      <li id="bundle-check">❌ Bundle carregado (aguardando...)</li>
+    </ul>
+  </div>
+
+  <div id="root"></div>
+  
+  <script src="/dist/bundle.js" onload="document.getElementById('bundle-check').innerHTML='✅ Bundle carregado com sucesso!'" onerror="document.getElementById('bundle-check').innerHTML='❌ Erro ao carregar bundle'"></script>
+  
+  <script>
+    // Verificar se o CSS foi injetado
+    setTimeout(() => {
+      const hasStyles = document.head.querySelectorAll('style').length > 0;
+      const checkElement = document.getElementById('css-check');
+      if (hasStyles) {
+        checkElement.innerHTML = '✅ CSS injetado no HEAD (' + document.head.querySelectorAll('style').length + ' tag(s) style)';
+        checkElement.style.color = 'green';
+      } else {
+        checkElement.innerHTML = '❌ CSS NÃO foi injetado';
+        checkElement.style.color = 'red';
+      }
+    }, 1000);
+  </script>
+</body>
+</html>

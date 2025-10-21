@@ -1,102 +1,175 @@
+import { Logger } from "@in.pulse-crm/utils";
 import prismaService from "../services/prisma.service";
+import { BaseStep } from "./base/base.step";
 import MessageFlow from "./message-flow";
-import CheckAvailableUsersStep from "./steps/check-available-users.step";
-import CheckLoaltyStep from "./steps/check-loalty.step";
-import CheckOnlyAdminStep from "./steps/check-only-admin.step";
-import SendToAdminStep from "./steps/send-to-admin.step";
-import Step from "./steps/step";
-
-const stepConstructors = {
-	CHECK_ONLY_ADMIN: CheckOnlyAdminStep,
-	CHECK_LOALTY: CheckLoaltyStep,
-	CHECK_AVAILABLE_USERS: CheckAvailableUsersStep,
-	SEND_TO_ADMIN: SendToAdminStep
-};
+import { StepRegistry } from "./step-registry";
 
 export default class MessageFlowFactory {
+	/**
+	 * Cria uma instância de step usando o StepRegistry.
+	 */
 	private static createStep(
-		type: keyof typeof stepConstructors,
+		type: string,
 		instance: string,
 		sectorId: number,
-		stepId: number,
-		nextStepId?: number
-	): Step {
-		const StepConstructor = stepConstructors[type];
-		if (!StepConstructor) {
-			throw new Error(`Step type ${type} is not supported.`);
-		}
-		return new StepConstructor({
+		stepNumber: number,
+		nextStepNumber?: number,
+		config?: Record<string, any>,
+		fallbackStepNumber?: number,
+		connections?: Record<string, any>
+	): BaseStep {
+		Logger.debug(`[MessageFlowFactory] Creating step`, {
+			type,
 			instance,
 			sectorId,
-			stepId,
-			nextStepId: nextStepId ?? -1
+			stepNumber,
+			nextStepNumber,
+			fallbackStepNumber,
+			config,
+			connections
 		});
+
+		const stepConfig: any = {
+			stepNumber,
+			instance,
+			sectorId,
+			config: config || {},
+			connections: connections || {}
+		};
+
+		if (nextStepNumber !== undefined) {
+			stepConfig.nextStepNumber = nextStepNumber;
+		}
+
+		if (fallbackStepNumber !== undefined) {
+			stepConfig.fallbackStepNumber = fallbackStepNumber;
+		}
+
+		try {
+			const step = StepRegistry.create(type, stepConfig);
+			Logger.debug(`[MessageFlowFactory] Step created successfully`, { type, stepNumber });
+			return step;
+		} catch (error: any) {
+			Logger.error(`[MessageFlowFactory] Failed to create step: type=${type}, stepNumber=${stepNumber}`, error);
+			throw error;
+		}
 	}
 
-	public static createDefaultMessageFlow(
-		instance: string,
-		sectorId: number
-	): MessageFlow {
+	public static createDefaultMessageFlow(instance: string, sectorId: number): MessageFlow {
+		Logger.debug(`[MessageFlowFactory] Creating default message flow`, { instance, sectorId });
+
 		const messageFlow = new MessageFlow();
 
 		const steps = [
-			{ type: "CHECK_ONLY_ADMIN", stepId: 1, nextStepId: 2 },
-			{ type: "CHECK_LOALTY", stepId: 2, nextStepId: 3 },
-			{ type: "CHECK_AVAILABLE_USERS", stepId: 3, nextStepId: 4 },
-			{ type: "SEND_TO_ADMIN", stepId: 4 }
+			{ type: "CHECK_ONLY_ADMIN", stepNumber: 1, nextStepNumber: 2 },
+			{ type: "CHECK_LOALTY", stepNumber: 2, nextStepNumber: 3 },
+			{ type: "CHECK_AVAILABLE_USERS", stepNumber: 3, nextStepNumber: 4 },
+			{ type: "SEND_TO_ADMIN", stepNumber: 4 }
 		];
 
 		for (const stepConfig of steps) {
 			const step = this.createStep(
-				stepConfig.type as keyof typeof stepConstructors,
+				stepConfig.type,
 				instance,
 				sectorId,
-				stepConfig.stepId,
-				stepConfig.nextStepId
+				stepConfig.stepNumber,
+				stepConfig.nextStepNumber
 			);
 			messageFlow.addStep(step);
 		}
 
+		Logger.debug(`[MessageFlowFactory] Default message flow created with ${steps.length} steps`);
+		messageFlow.debugStepsMap();
 		return messageFlow;
 	}
 
-	public static async createMessageFlow(
-		instance: string,
-		sectorId: number
-	): Promise<MessageFlow> {
-		const flow = await prismaService.wppMessageFlow.findUnique({
-			where: {
-				instance_sectorId: {
-					instance,
-					sectorId
+	public static async createMessageFlow(instance: string, sectorId: number): Promise<MessageFlow> {
+		Logger.debug(`[MessageFlowFactory] Loading message flow from database`, { instance, sectorId });
+
+		try {
+			const flow = await prismaService.wppMessageFlow.findUnique({
+				where: {
+					instance_sectorId: {
+						instance,
+						sectorId
+					}
+				},
+				include: {
+					WppMessageFlowStep: true
 				}
-			},
-			include: {
-				WppMessageFlowStep: true
+			});
+
+			if (!flow) {
+				Logger.debug(`[MessageFlowFactory] No custom flow found, using default flow`);
+				return this.createDefaultMessageFlow(instance, sectorId);
 			}
-		});
 
-		if (!flow) {
-			return this.createDefaultMessageFlow(instance, sectorId);
-		}
+			Logger.debug(`[MessageFlowFactory] Custom flow found with ${flow.WppMessageFlowStep.length} steps`, {
+				flowId: flow.id
+			});
 
-		const messageFlow = new MessageFlow();
-		let currentStepId = 1;
+			const messageFlow = new MessageFlow();
 
-		for (const step of flow.WppMessageFlowStep) {
-			const nextStepId =
-				step.type === "SEND_TO_ADMIN" ? undefined : currentStepId + 1;
-			const stepInstance = this.createStep(
-				step.type as keyof typeof stepConstructors,
-				instance,
-				sectorId,
-				currentStepId,
-				nextStepId
+			// Ordena os steps por stepNumber para garantir a ordem correta
+			const sortedSteps = [...flow.WppMessageFlowStep].sort((a, b) => a.stepNumber - b.stepNumber);
+
+			for (const step of sortedSteps) {
+				// Usa os valores do banco de dados para next e fallback
+				const stepConfig: any = {
+					stepNumber: step.stepNumber,
+					instance,
+					sectorId,
+					config: MessageFlowFactory.getValidatedStepConfig(step.config),
+					connections: step.connections || {}
+				};
+
+				// Adiciona nextStepNumber se definido no banco
+				if (step.nextStepId !== null && step.nextStepId !== undefined) {
+					stepConfig.nextStepNumber = step.nextStepId;
+				}
+
+				// Adiciona fallbackStepNumber se definido no banco
+				if (step.fallbackStepId !== null && step.fallbackStepId !== undefined) {
+					stepConfig.fallbackStepNumber = step.fallbackStepId;
+				}
+
+				Logger.debug(`[MessageFlowFactory] Creating step from database`, {
+					type: step.type,
+					stepNumber: step.stepNumber,
+					nextStepNumber: stepConfig.nextStepNumber,
+					fallbackStepNumber: stepConfig.fallbackStepNumber,
+					hasConfig: !!step.config,
+					hasConnections: !!step.connections
+				});
+
+				const stepInstance = this.createStep(
+					step.type as string,
+					instance,
+					sectorId,
+					step.stepNumber,
+					stepConfig.nextStepNumber,
+					stepConfig.config,
+					stepConfig.fallbackStepNumber,
+					stepConfig.connections
+				);
+
+				messageFlow.addStep(stepInstance);
+			}
+			Logger.debug(
+				`[MessageFlowFactory] Message flow created successfully with ${flow.WppMessageFlowStep.length} steps`
 			);
-			messageFlow.addStep(stepInstance);
-			currentStepId++;
+			messageFlow.debugStepsMap();
+			return messageFlow;
+		} catch (error: any) {
+			Logger.error(`[MessageFlowFactory] Failed to create message flow`, error);
+			throw error;
 		}
+	}
 
-		return messageFlow;
+	private static getValidatedStepConfig(stepConfig: any): Record<string, any> {
+		if (!stepConfig || typeof stepConfig !== "object") {
+			return {};
+		}
+		return stepConfig;
 	}
 }

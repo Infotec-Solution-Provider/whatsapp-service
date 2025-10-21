@@ -1,25 +1,13 @@
 import { User } from "@in.pulse-crm/sdk";
 import instancesService from "../../services/instances.service";
-import Step, { ChatPayload, FinalStep, StepContext } from "./step";
+import { BaseStep, StepConfig, StepContext, StepResult } from "../base/base.step";
 
-interface SendToAdminStepOptions {
-	instance: string;
-	stepId: number;
-	sectorId: number;
-}
-
-export default class SendToSectorUserStep implements Step {
-	private readonly instance: string;
-	private readonly sectorId: number;
-	public readonly id: number;
-
-	constructor({ instance, stepId, sectorId }: SendToAdminStepOptions) {
-		this.id = stepId;
-		this.instance = instance;
-		this.sectorId = sectorId;
+export default class SendToSectorUserStep extends BaseStep {
+	constructor(config: StepConfig) {
+		super(config);
 	}
 
-	public async run(ctx: StepContext): Promise<FinalStep> {
+	public async execute(ctx: StepContext): Promise<StepResult> {
 		ctx.logger.log("Enviando mensagem para um usuário do setor...");
 
 		const users = await instancesService.executeQuery<User[]>(
@@ -28,22 +16,24 @@ export default class SendToSectorUserStep implements Step {
 			[this.sectorId]
 		);
 
+		// Configuração: preferir admin se configurado
+		const preferAdmin = this.config['preferAdmin'] !== false;
 		const findAdmin = users.find((user) => user.NIVEL === "ADMIN");
 		const findUser = users[0];
 
-		const chatData: ChatPayload = {
+		const userId = preferAdmin 
+			? (findAdmin?.CODIGO || findUser?.CODIGO || -1)
+			: (findUser?.CODIGO || -1);
+
+		const chatData = {
 			instance: this.instance,
-			type: "RECEPTIVE",
-			userId: findAdmin?.CODIGO || findUser?.CODIGO || -1,
+			type: "RECEPTIVE" as const,
+			userId,
 			sectorId: this.sectorId,
 			contactId: ctx.contact.id
 		};
 
 		ctx.logger.log("Chat criado.", chatData);
-
-		return {
-			isFinal: true,
-			chatData
-		};
+		return this.finalize(chatData);
 	}
 }

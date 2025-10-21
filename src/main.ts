@@ -9,6 +9,7 @@ import chatsController from "./controllers/chats.controller";
 import contactsController from "./controllers/contacts.controller";
 import gupshupController from "./controllers/gupshup.controller";
 import internalchatsController from "./controllers/internal-chats.controller";
+import messageFlowsController from "./controllers/message-flows.controller";
 import messagesController from "./controllers/messages.controller";
 import monitorController from "./controllers/monitor.controller";
 import notificationsController from "./controllers/notifications.controller";
@@ -21,6 +22,7 @@ import wabaController from "./controllers/waba.controller";
 import walletsController from "./controllers/wallets.controller";
 import whatsappController from "./controllers/whatsapp.controller";
 import whatsappService from "./services/whatsapp.service";
+import { registerAllSteps } from "./message-flow/register-steps";
 
 whatsappService.buildClients();
 const app = express();
@@ -35,6 +37,9 @@ const logRoute = (r: express.Router) => {
 app.use(express.json({ limit: "2gb" }));
 app.use(express.urlencoded({ extended: true, limit: "2gb" }));
 app.use(cors());
+
+// Serve static files for frontend
+app.use(express.static("public"));
 
 app.use(logRoute(whatsappController.router));
 app.use(logRoute(chatsController.router));
@@ -52,8 +57,14 @@ app.use(logRoute(parametersController.router));
 app.use(logRoute(gupshupController.router));
 app.use(logRoute(autoResponseController.router));
 app.use(logRoute(wabaController.router));
+app.use(logRoute(messageFlowsController.router));
 
 logRoutes("", routesToLog);
+
+// Serve frontend for any unmatched routes (SPA fallback)
+app.get("/flows", (_req, res) => {
+	res.sendFile("index.html", { root: "public" });
+});
 
 app.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
 	console.error(err);
@@ -66,5 +77,6 @@ app.use(handleRequestError);
 const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;
 
 app.listen(serverPort, () => {
+	registerAllSteps();
 	Logger.info("Server listening on port " + serverPort);
 });

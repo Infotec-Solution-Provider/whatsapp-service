@@ -236,16 +236,26 @@ model WppMessageFlow {
 }
 
 model WppMessageFlowStep {
-  id            Int                    @id @default(autoincrement())
-  type          WppMessageFlowStepType
-  messageFlowId Int                    @map("message_flow_id")
-  stepNumber    Int                    @map("step_number")
-  createdAt     DateTime               @default(now()) @map("created_at")
-  updatedAt     DateTime               @updatedAt @map("updated_at")
+  id             Int                    @id @default(autoincrement())
+  type           WppMessageFlowStepType
+  messageFlowId  Int                    @map("message_flow_id")
+  stepNumber     Int                    @map("step_number")
+  
+  // Novos campos para configuração avançada
+  config         Json?                  @map("config")          // Configuração específica do step em JSON (sem conexões)
+  connections    Json?                  @map("connections")     // Conexões condicionais/dinâmicas (onTrue, onFalse, routes)
+  nextStepId     Int?                   @map("next_step_id")    // ID do próximo step (permite fluxos não-lineares)
+  fallbackStepId Int?                   @map("fallback_step_id") // Step alternativo em caso de erro
+  enabled        Boolean                @default(true) @map("enabled") // Habilitar/desabilitar step
+  description    String?                @map("description")     // Descrição do que o step faz
+  
+  createdAt      DateTime               @default(now()) @map("created_at")
+  updatedAt      DateTime               @updatedAt @map("updated_at")
 
   WppMessageFlow WppMessageFlow @relation(fields: [messageFlowId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@unique([messageFlowId, stepNumber])
+  @@index([messageFlowId, enabled])
   @@map("message_flows_steps")
 }
 
@@ -429,12 +439,54 @@ enum WppChatPriority {
 }
 
 enum WppMessageFlowStepType {
+  // Steps genéricos (reutilizáveis)
+  CONDITION
+  QUERY
+  ROUTER
+  ASSIGN
+  
+  // Steps específicos (compatibilidade)
   CHECK_AVAILABLE_USERS
   CHECK_LOALTY
   CHECK_ONLY_ADMIN
   SEND_TO_ADMIN
+  
+  // Outros steps específicos
+  SEND_TO_SECTOR_USER
+  SEND_TO_SPECIFIC_USER
+  CHECK_CUSTOMER_CAMPAIGN_TYPE
 
   @@map("message_flow_step_type")
+}
+
+// Nova tabela para métricas de performance dos fluxos
+model WppMessageFlowMetric {
+  id        Int      @id @default(autoincrement())
+  flowId    Int      @map("flow_id")
+  stepId    Int      @map("step_id")
+  contactId Int      @map("contact_id")
+  duration  Int      @map("duration_ms")    // Duração em millisegundos
+  result    String   @map("result")         // 'success' | 'failure' | 'skipped'
+  error     String?  @map("error")          // Mensagem de erro se houver
+  timestamp DateTime @default(now()) @map("timestamp")
+  
+  @@index([flowId, timestamp])
+  @@index([stepId, result])
+  @@map("message_flow_metrics")
+}
+
+// Nova tabela para versionamento de fluxos (opcional)
+model WppMessageFlowVersion {
+  id          Int      @id @default(autoincrement())
+  flowId      Int      @map("flow_id")
+  version     Int      @map("version")
+  config      Json     @map("config")         // Snapshot completo do fluxo
+  createdBy   Int?     @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  description String?  @map("description")
+  
+  @@unique([flowId, version])
+  @@map("message_flow_versions")
 }
 
 model ReadyMessage {

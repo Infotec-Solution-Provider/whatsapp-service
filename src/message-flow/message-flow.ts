@@ -1,122 +1,131 @@
 import ProcessingLogger from "../utils/processing-logger";
-import Step, { ChatPayload, StepContext } from "./steps/step";
+
 import { WppContact } from "@prisma/client";
+import { BaseStep, ChatPayload, StepContext, StepResult } from "./base/base.step";
 
 export default class MessageFlow {
-	private steps: Map<number, Step> = new Map();
-
-	// Fluxos ativos por ContactId;
+	private steps: Map<number, BaseStep> = new Map(); // Map<stepNumber, BaseStep>
 	private activeFlows: Map<number, Promise<ChatPayload>> = new Map();
 
-	public async getChatPayload(
-		logger: ProcessingLogger,
-		contact: WppContact
-	): Promise<ChatPayload> {
-		logger.log("Iniciando o processamento da mensagem no fluxo de etapas.");
+	public async getChatPayload(logger: ProcessingLogger, contact: WppContact): Promise<ChatPayload> {
+		logger.log("╔═══════════════════════════════════════════════════════════");
+		logger.log("║ INICIANDO PROCESSAMENTO DE FLUXO");
+		logger.log(`║ Contato: ${contact.name || contact.phone} (ID: ${contact.id})`);
+		logger.log(`║ Steps disponíveis: ${this.steps.size} [${Array.from(this.steps.keys()).join(', ')}]`);
+		logger.log("╚═══════════════════════════════════════════════════════════");
 
-		// Verifique se já existe um fluxo ativo para o contato
-		if (this.activeFlows.has(contact.id)) {
-			logger.log(
-				`Já existe um fluxo ativo para o contato ${contact.id}. Aguardando...`
-			);
-			return this.activeFlows.get(contact.id)!; // Retorna o fluxo ativo
+		const ongoingFlow = this.getOngoingFlow(contact.id);
+		if (ongoingFlow) {
+			logger.log(`⚠ Fluxo já em andamento para contato ${contact.id}. Aguardando conclusão...`);
+			return ongoingFlow;
 		}
 
-		// Crie um novo fluxo e armazene no mapa de controle
-		const flowPromise = this.processFlow(logger, contact);
-		this.activeFlows.set(contact.id, flowPromise);
+		const newFlow = this.processFlow(logger, contact);
+		this.activeFlows.set(contact.id, newFlow);
 
 		try {
-			const chat = await flowPromise;
+			const chat = await newFlow;
 			return chat;
 		} finally {
-			// Remova o fluxo do mapa após a conclusão
 			this.activeFlows.delete(contact.id);
 		}
 	}
 
-	private async processFlow(
-		logger: ProcessingLogger,
-		contact: WppContact
-	): Promise<ChatPayload> {
-		let currStepId = 1;
-		const context: StepContext = { logger, contact };
+	private getOngoingFlow(contactId: number) {
+		if (this.activeFlows.has(contactId)) {
+			return this.activeFlows.get(contactId)!;
+		}
 
-		while (true) {
-			const step = this.getStep(currStepId, logger);
-			const result = await this.executeStep(step, context);
+		return null;
+	}
 
-			if (result.isFinal) {
-				logger.log(
-					`A etapa ${currStepId} retornou um chat com sucesso!`,
-					result.chatData
-				);
-				return this.validateChat(result.chatData, logger);
+	private async processFlow(logger: ProcessingLogger, contact: WppContact): Promise<ChatPayload> {
+		try {
+			let currentStepNumber = 1; // Começa sempre na etapa #1
+			let context: StepContext = { logger, contact };
+			let iterationCount = 0;
+			const maxIterations = 50; // Proteção contra loops infinitos
+
+			while (true) {
+				iterationCount++;
+				
+				if (iterationCount > maxIterations) {
+					throw new Error(`Fluxo excedeu máximo de ${maxIterations} iterações. Possível loop infinito.`);
+				}
+				
+				const step = this.getStep(currentStepNumber, logger);
+				const result = await this.executeStep(step, context);
+
+				if (result.isFinal) {
+					logger.log("╔═══════════════════════════════════════════════════════════");
+					logger.log(`║ ✓ FLUXO FINALIZADO (${iterationCount} steps executados)`);
+					logger.log("╚═══════════════════════════════════════════════════════════");
+					return this.validateChat(result.chatData || null, logger);
+				}
+				
+				context = { ...context, ...result.context };
+				currentStepNumber = this.getNextStepNumber(result, currentStepNumber);
 			}
-
-			currStepId = this.getNextStepId(result, currStepId, logger);
+		} catch (error) {
+			logger.log("╔═══════════════════════════════════════════════════════════");
+			logger.log("║ ✗ ERRO NO PROCESSAMENTO DO FLUXO");
+			logger.log("╚═══════════════════════════════════════════════════════════");
+			logger.log("Erro:", error);
+			logger.failed(error);
+			throw error;
 		}
 	}
 
-	private getStep(stepId: number, logger: ProcessingLogger): Step {
-		const step = this.steps.get(stepId);
+	private getStep(stepNumber: number, logger: ProcessingLogger): BaseStep {
+		logger.debug(`[MessageFlow] Buscando etapa #${stepNumber} no mapa de etapas`);
+		const step = this.steps.get(stepNumber);
 		if (!step) {
-			const err = new Error(`Etapa ${stepId} não encontrada.`);
+			const availableSteps = Array.from(this.steps.keys()).join(', ');
+			logger.debug(`[MessageFlow] Etapas disponíveis: [${availableSteps}]`);
+			const err = new Error(`Etapa #${stepNumber} não encontrada no fluxo.`);
 			logger.log(`Erro: ${err.message}`);
 			logger.failed(err);
 			throw err;
 		}
+		logger.debug(`[MessageFlow] Etapa #${stepNumber} encontrada: ${step.constructor.name}`);
 		return step;
 	}
 
-	private async executeStep(
-		step: Step,
-		context: {
-			logger: ProcessingLogger;
-			contact: WppContact;
-		}
-	) {
-		context.logger.log(`Executando a lógica da etapa ${step.id}.`);
+	private async executeStep(step: BaseStep, context: StepContext) {
+		context.logger.log(`Executando a lógica da etapa #${step.stepNumber}.`);
 		return step.run(context);
 	}
 
-	private validateChat(
-		chat: ChatPayload | null,
-		logger: ProcessingLogger
-	): ChatPayload {
-		if (!chat) {
-			const err = new Error(
-				"Nenhum chat foi retornado pelo fluxo de etapas."
-			);
-			logger.log("Erro: Falha ao gerar um chat.");
-			logger.failed(err);
-			throw err;
+	private validateChat(chatPayload: ChatPayload | null, logger: ProcessingLogger): ChatPayload {
+		if (!chatPayload) {
+			throw new Error("Nenhum chat foi retornado pelo fluxo de etapas.");
 		}
 		logger.log("Processamento do fluxo de etapas concluído com sucesso.");
-		return chat;
+		return chatPayload;
 	}
 
-	private getNextStepId(
-		result: { stepId?: number; isFinal: boolean },
-		currStepId: number,
-		logger: ProcessingLogger
-	): number {
-		if (result.stepId) {
-			logger.log(
-				`A etapa ${currStepId} direcionou para a próxima etapa ${result.stepId}.`
-			);
-			return result.stepId;
+	private getNextStepNumber(result: StepResult, currentStepNumber: number): number {
+		if (!result.nextStepNumber) {
+			throw new Error(`A etapa #${currentStepNumber} não retornou um próximo passo nem um resultado final.`);
 		}
 
-		const err = new Error(
-			`A etapa ${currStepId} não retornou um próximo passo nem um resultado final.`
-		);
-		logger.log(`Erro: ${err.message}`);
-		logger.failed(err);
-		throw err;
+		return result.nextStepNumber;
 	}
 
-	public addStep(step: Step): void {
-		this.steps.set(step.id, step);
+	public addStep(step: BaseStep): void {
+		if (this.steps.has(step.stepNumber)) {
+			throw new Error(`Etapa #${step.stepNumber} já está registrada no fluxo de mensagens.`);
+		}
+		this.steps.set(step.stepNumber, step);
+		console.log(`[MessageFlow] Etapa #${step.stepNumber} (${step.constructor.name}) registrada com sucesso`);
+	}
+
+	public debugStepsMap(): void {
+		console.log('[MessageFlow] === Mapa de Etapas Registradas ===');
+		console.log(`[MessageFlow] Total de etapas: ${this.steps.size}`);
+		this.steps.forEach((step, stepNumber) => {
+			console.log(`[MessageFlow] Etapa #${stepNumber} -> ${step.constructor.name}`);
+		});
+		console.log('[MessageFlow] ===============================');
 	}
 }
