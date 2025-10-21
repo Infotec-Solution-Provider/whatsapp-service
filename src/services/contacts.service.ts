@@ -1,13 +1,32 @@
-import { User } from "@in.pulse-crm/sdk";
+import { Customer, User } from "@in.pulse-crm/sdk";
 import { Prisma } from "@prisma/client";
+import { BadRequestError, ConflictError } from "@rgranatodutra/http-errors";
 import chatsService from "./chats.service";
 import customersService from "./customers.service";
 import prismaService from "./prisma.service";
 import usersService from "./users.service";
 import whatsappService from "./whatsapp.service";
-import { BadRequestError, ConflictError } from "@rgranatodutra/http-errors";
 
+export interface ContactsFilters {
+	name: string | null;
+	phone: string | null;
+	customerId: number | null;
+	customerErp: string | null;
+	customerCnpj: string | null;
+	customerName: string | null;
+	page: number;
+	perPage: number;
+}
+interface InstanceCache {
+	isRenewing: boolean;
+	expiresAt: Date;
+	customers: Map<number, Customer>;
+	users: Map<number, User>;
+}
 class ContactsService {
+	private cache: Map<string, InstanceCache> = new Map();
+	private ongoingCacheRenewals: Map<string, Promise<InstanceCache>> = new Map();
+
 	public async getOrCreateContact(instance: string, name: string, phone: string) {
 		const contact = await prismaService.wppContact.findUnique({
 			where: {
@@ -32,37 +51,26 @@ class ContactsService {
 	}
 
 	public async getContactsWithCustomer(instance: string, token: string) {
-		const chats = await chatsService.getChats({ isFinished: "false" });
-		usersService;
+		customersService.setAuth(token);
 		usersService.setAuth(token);
 
-		const users = await usersService.getUsers({ perPage: "999" }).then((res) => {
-			const users: Map<number, User> = new Map();
-
-			res.data.forEach((user) => {
-				users.set(user.CODIGO, user);
-			});
-
-			return users;
-		});
-
-		const contacts = await prismaService.wppContact.findMany({
+		const chatsPromise = chatsService.getChats({ isFinished: "false" });
+		const contactsPromise = prismaService.wppContact.findMany({
 			where: {
 				instance,
 				isDeleted: false
 			}
 		});
 
-		customersService.setAuth(token);
-
-		const res = await customersService.getCustomers({
-			perPage: "999999"
-		});
+		const [chats, contacts] = await Promise.all([chatsPromise, contactsPromise]);
+		const cache = await this.getInstanceCache(instance);
 
 		return contacts.map((contact) => {
-			const customer = contact.customerId && res.data.find((c) => c.CODIGO === contact.customerId);
+			const customer = contact.customerId && cache.customers.get(contact.customerId);
 			const chat = chats.find((c) => c.contactId === contact.id);
-			const user = chat ? users.get(chat.userId || -200)?.NOME || "Supervisão" : null;
+
+			// Gambiarra
+			const user = chat ? cache.users.get(chat.userId || -200)?.NOME || "Supervisão" : null;
 
 			return {
 				...contact,
@@ -70,6 +78,40 @@ class ContactsService {
 				chatingWith: user
 			};
 		});
+	}
+	private getInstanceCache(instance: string) {
+		const cached = this.cache.get(instance);
+		const isValid = cached && cached.expiresAt > new Date();
+		const renewing = this.ongoingCacheRenewals.get(instance);
+
+		if (!cached || (isValid && !renewing)) {
+			cached && (cached.isRenewing = true);
+			const newCachePromise = this.renewCache(instance);
+			return newCachePromise;
+		} else if (cached && renewing) {
+			return renewing;
+		}
+
+		return cached;
+	}
+
+	private async renewCache(instance: string) {
+		this.cache.get(instance)!.isRenewing = true;
+		const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutos
+
+		const users = await usersService.getUsers({ perPage: "999" }).then(({ data }) => {
+			const users: Map<number, User> = new Map();
+			data.forEach((user) => users.set(user.CODIGO, user));
+			return users;
+		});
+
+		const customers = await customersService.getCustomers({ perPage: "99999" }).then(({ data }) => {
+			const customers: Map<number, Customer> = new Map();
+			data.forEach((c) => customers.set(c.CODIGO, c));
+			return customers;
+		});
+		this.cache.set(instance, { expiresAt, customers, users, isRenewing: false });
+		return this.cache.get(instance)!;
 	}
 
 	public async getCustomerContacts(instance: string, customerId: number) {
