@@ -1,9 +1,7 @@
-version: '3.8'
-
 services:
   # Redis para cache de clientes e usuários
   redis:
-    image: redis:7-alpine
+    image: redis:alpine
     container_name: whatsapp-redis
     ports:
       - "6379:6379"
