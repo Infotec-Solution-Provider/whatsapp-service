@@ -6,26 +6,11 @@ import customersService from "./customers.service";
 import prismaService from "./prisma.service";
 import usersService from "./users.service";
 import whatsappService from "./whatsapp.service";
+import redisService from "./redis.service";
 
-export interface ContactsFilters {
-	name: string | null;
-	phone: string | null;
-	customerId: number | null;
-	customerErp: string | null;
-	customerCnpj: string | null;
-	customerName: string | null;
-	page: number;
-	perPage: number;
-}
-interface InstanceCache {
-	isRenewing: boolean;
-	expiresAt: Date;
-	customers: Map<number, Customer>;
-	users: Map<number, User>;
-}
 class ContactsService {
-	private cache: Map<string, InstanceCache> = new Map();
-	private ongoingCacheRenewals: Map<string, Promise<InstanceCache>> = new Map();
+	private readonly CUSTOMER_CACHE_TTL = 5 * 60; // 5 minutos em segundos
+	private readonly USER_CACHE_TTL = 5 * 60; // 5 minutos em segundos
 
 	public async getOrCreateContact(instance: string, name: string, phone: string) {
 		const contact = await prismaService.wppContact.findUnique({
@@ -62,14 +47,24 @@ class ContactsService {
 			}
 		});
 
-		const [chats, contacts, cache] = await Promise.all([chatsPromise, contactsPromise, this.getInstanceCache(instance)]);
+		const [chats, contacts] = await Promise.all([chatsPromise, contactsPromise]);
+
+		// Coletar IDs únicos de clientes e usuários necessários
+		const uniqueCustomerIds = [...new Set(contacts.map(c => c.customerId).filter(Boolean))] as number[];
+		const uniqueUserIds = [...new Set(chats.map(c => c.userId).filter(Boolean))] as number[];
+
+		// Buscar dados do cache (Redis) ou da API
+		const [customersMap, usersMap] = await Promise.all([
+			this.getCustomersByIds(instance, uniqueCustomerIds),
+			this.getUsersByIds(instance, uniqueUserIds)
+		]);
 
 		return contacts.map((contact) => {
-			const customer = contact.customerId && cache.customers.get(contact.customerId);
+			const customer = contact.customerId && customersMap.get(contact.customerId);
 			const chat = chats.find((c) => c.contactId === contact.id);
 
 			// Gambiarra
-			const user = chat ? cache.users.get(chat.userId || -200)?.NOME || "Supervisão" : null;
+			const user = chat ? usersMap.get(chat.userId || -200)?.NOME || "Supervisão" : null;
 
 			return {
 				...contact,
@@ -78,59 +73,129 @@ class ContactsService {
 			};
 		});
 	}
-	private getInstanceCache(instance: string) {
-		const cached = this.cache.get(instance);
-		const isValid = cached && cached.expiresAt > new Date();
-		const renewing = this.ongoingCacheRenewals.get(instance);
 
-		if (!cached || (!isValid && !renewing)) {
-			// Mark as renewing if cache exists
-			if (cached) {
-				cached.isRenewing = true;
-			}
-			const newCachePromise = this.renewCache(instance);
-			this.ongoingCacheRenewals.set(instance, newCachePromise);
-			return newCachePromise;
-		} else if (cached && renewing) {
-			return renewing;
+	/**
+	 * Busca clientes por IDs, primeiro tentando o Redis, depois a API
+	 */
+	private async getCustomersByIds(instance: string, customerIds: number[]): Promise<Map<number, Customer>> {
+		const result = new Map<number, Customer>();
+		
+		if (customerIds.length === 0) {
+			return result;
 		}
 
-		return Promise.resolve(cached);
+		// Tentar buscar do Redis
+		const cacheKeys = customerIds.map(id => `customer:${instance}:${id}`);
+		const cachedCustomers = await redisService.mget<Customer>(cacheKeys);
+
+		const idsToFetch: number[] = [];
+		
+		cachedCustomers.forEach((customer, index) => {
+			if (customer) {
+				result.set(customerIds[index]!, customer);
+			} else {
+				idsToFetch.push(customerIds[index]!);
+			}
+		});
+
+		// Se todos estavam em cache, retornar
+		if (idsToFetch.length === 0) {
+			return result;
+		}
+
+		// Buscar da API apenas os que não estavam em cache
+		try {
+			// Buscar em lotes para evitar muitas requisições
+			const batchSize = 100;
+			for (let i = 0; i < idsToFetch.length; i += batchSize) {
+				const batch = idsToFetch.slice(i, i + batchSize);
+				const { data: customers } = await customersService.getCustomers({
+					perPage: batch.length.toString()
+				});
+
+				// Filtrar apenas os clientes solicitados
+				const requestedCustomers = customers.filter(c => batch.includes(c.CODIGO));
+
+				// Armazenar no Redis e no resultado
+				const cacheItems = requestedCustomers.map(customer => ({
+					key: `customer:${instance}:${customer.CODIGO}`,
+					value: customer,
+					ttl: this.CUSTOMER_CACHE_TTL
+				}));
+
+				await redisService.mset(cacheItems);
+
+				requestedCustomers.forEach(customer => {
+					result.set(customer.CODIGO, customer);
+				});
+			}
+		} catch (error) {
+			console.error('Erro ao buscar clientes:', error);
+		}
+
+		return result;
 	}
 
-	private async renewCache(instance: string) {
-		try {
-			const existingCache = this.cache.get(instance);
-			// Mark as renewing if cache exists
-			if (existingCache) {
-				existingCache.isRenewing = true;
-			}
-			const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutos
-
-			const users = await usersService.getUsers({ perPage: "999" }).then(({ data }) => {
-				const users: Map<number, User> = new Map();
-				data.forEach((user) => users.set(user.CODIGO, user));
-				return users;
-			});
-
-			const customers = await customersService.getCustomers({ perPage: "99999" }).then(({ data }) => {
-				const customers: Map<number, Customer> = new Map();
-				data.forEach((c) => customers.set(c.CODIGO, c));
-				return customers;
-			});
-			
-			const newCache: InstanceCache = { expiresAt, customers, users, isRenewing: false };
-			this.cache.set(instance, newCache);
-			
-			// Clean up ongoing renewal tracking
-			this.ongoingCacheRenewals.delete(instance);
-			
-			return newCache;
-		} catch (error) {
-			// Clean up ongoing renewal tracking on error
-			this.ongoingCacheRenewals.delete(instance);
-			throw error;
+	/**
+	 * Busca usuários por IDs, primeiro tentando o Redis, depois a API
+	 */
+	private async getUsersByIds(instance: string, userIds: number[]): Promise<Map<number, User>> {
+		const result = new Map<number, User>();
+		
+		if (userIds.length === 0) {
+			return result;
 		}
+
+		// Tentar buscar do Redis
+		const cacheKeys = userIds.map(id => `user:${instance}:${id}`);
+		const cachedUsers = await redisService.mget<User>(cacheKeys);
+
+		const idsToFetch: number[] = [];
+		
+		cachedUsers.forEach((user, index) => {
+			if (user) {
+				result.set(userIds[index]!, user);
+			} else {
+				idsToFetch.push(userIds[index]!);
+			}
+		});
+
+		// Se todos estavam em cache, retornar
+		if (idsToFetch.length === 0) {
+			return result;
+		}
+
+		// Buscar da API apenas os que não estavam em cache
+		try {
+			// Buscar em lotes para evitar muitas requisições
+			const batchSize = 100;
+			for (let i = 0; i < idsToFetch.length; i += batchSize) {
+				const batch = idsToFetch.slice(i, i + batchSize);
+				const { data: users } = await usersService.getUsers({
+					perPage: batch.length.toString()
+				});
+
+				// Filtrar apenas os usuários solicitados
+				const requestedUsers = users.filter(u => batch.includes(u.CODIGO));
+
+				// Armazenar no Redis e no resultado
+				const cacheItems = requestedUsers.map(user => ({
+					key: `user:${instance}:${user.CODIGO}`,
+					value: user,
+					ttl: this.USER_CACHE_TTL
+				}));
+
+				await redisService.mset(cacheItems);
+
+				requestedUsers.forEach(user => {
+					result.set(user.CODIGO, user);
+				});
+			}
+		} catch (error) {
+			console.error('Erro ao buscar usuários:', error);
+		}
+
+		return result;
 	}
 
 	public async getCustomerContacts(instance: string, customerId: number) {
