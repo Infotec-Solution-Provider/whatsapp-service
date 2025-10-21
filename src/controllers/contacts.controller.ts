@@ -32,15 +32,29 @@ class ContactsController {
 	}
 
 	private async getContactsWithCustomer(req: Request, res: Response) {
-		const data = await contactsService.getContactsWithCustomer(
+		const filters = {
+			name: (req.query['name'] as string) || null,
+			phone: (req.query['phone'] as string) || null,
+			customerId: req.query['customerId'] ? Number(req.query['customerId']) : null,
+			customerErp: (req.query['customerErp'] as string) || null,
+			customerCnpj: (req.query['customerCnpj'] as string) || null,
+			customerName: (req.query['customerName'] as string) || null,
+			hasCustomer: req.query['hasCustomer'] ? req.query['hasCustomer'] === 'true' : null,
+			page: req.query['page'] ? Number(req.query['page']) : 1,
+			perPage: req.query['perPage'] ? Number(req.query['perPage']) : 50
+		};
+
+		const result = await contactsService.getContactsWithCustomer(
 			req.session.instance,
-			req.headers["authorization"] as string
+			req.headers["authorization"] as string,
+			filters
 		);
 
-		res.status(200).send({
+		const resBody = {
 			message: "Contacts retrieved successfully!",
-			data
-		});
+			...result
+		}
+		res.status(200).send(resBody);
 	}
 
 	private async createContact(req: Request, res: Response) {

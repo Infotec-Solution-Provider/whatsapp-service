@@ -8,6 +8,18 @@ import usersService from "./users.service";
 import whatsappService from "./whatsapp.service";
 import redisService from "./redis.service";
 
+export interface ContactsFilters {
+	name: string | null;
+	phone: string | null;
+	customerId: number | null;
+	customerErp: string | null;
+	customerCnpj: string | null;
+	customerName: string | null;
+	hasCustomer: boolean | null;
+	page: number;
+	perPage: number;
+}
+
 class ContactsService {
 	private readonly CUSTOMER_CACHE_TTL = 5 * 60; // 5 minutos em segundos
 	private readonly USER_CACHE_TTL = 5 * 60; // 5 minutos em segundos
@@ -35,33 +47,118 @@ class ContactsService {
 		});
 	}
 
-	public async getContactsWithCustomer(instance: string, token: string) {
+	public async getContactsWithCustomer(instance: string, token: string, filters: ContactsFilters) {
 		customersService.setAuth(token);
 		usersService.setAuth(token);
 
-		const chatsPromise = chatsService.getChats({ isFinished: "false" });
-		const contactsPromise = prismaService.wppContact.findMany({
-			where: {
-				instance,
-				isDeleted: false
+		// Normalizar e validar paginação
+		const page = Math.max(1, filters.page);
+		const perPage = Math.max(1, Math.min(100, filters.perPage));
+
+		// Construir filtros para a consulta do banco
+		const whereConditions: Prisma.WppContactWhereInput = {
+			instance,
+			isDeleted: false
+		};
+
+		// Aplicar filtros básicos de contato
+		if (filters.name) {
+			whereConditions.name = {
+				contains: filters.name
+			};
+		}
+
+		if (filters.phone) {
+			whereConditions.phone = {
+				contains: filters.phone
+			};
+		}
+
+		if (filters.customerId) {
+			whereConditions.customerId = filters.customerId;
+		}
+
+		if (filters.hasCustomer !== null) {
+			if (filters.hasCustomer) {
+				whereConditions.customerId = { not: null };
+			} else {
+				whereConditions.customerId = null;
 			}
-		});
+		}
 
-		const [chats, contacts] = await Promise.all([chatsPromise, contactsPromise]);
+		// OTIMIZAÇÃO 1: Se há filtros de cliente (customerErp, customerCnpj, customerName),
+		// precisamos buscar todos e filtrar depois. Caso contrário, podemos paginar no banco.
+		const hasCustomerFilters = !!(filters.customerErp || filters.customerCnpj || filters.customerName);
 
-		// Coletar IDs únicos de clientes e usuários necessários
+		let contacts: any[];
+		let total: number;
+
+		if (hasCustomerFilters) {
+			// Com filtros de cliente, precisamos buscar todos e filtrar depois
+			contacts = await prismaService.wppContact.findMany({
+				where: whereConditions,
+				orderBy: { id: 'desc' }
+			});
+			total = contacts.length; // Será recalculado após filtros
+		} else {
+			// OTIMIZAÇÃO 2: Sem filtros de cliente, paginar direto no banco + count otimizado
+			const [contactsResult, countResult] = await Promise.all([
+				prismaService.wppContact.findMany({
+					where: whereConditions,
+					skip: (page - 1) * perPage,
+					take: perPage,
+					orderBy: { id: 'desc' }
+				}),
+				prismaService.wppContact.count({
+					where: whereConditions
+				})
+			]);
+			
+			contacts = contactsResult;
+			total = countResult;
+		}
+
+		// Se não há contatos, retornar vazio imediatamente
+		if (contacts.length === 0) {
+			return {
+				data: [],
+				pagination: {
+					page,
+					perPage,
+					total: 0,
+					totalPages: 0,
+					hasNext: false,
+					hasPrev: false
+				}
+			};
+		}
+
+		// OTIMIZAÇÃO 3: Buscar chats em paralelo
+		const chatsPromise = chatsService.getChats({ isFinished: "false" });
+
+		// Coletar IDs únicos de clientes necessários (apenas dos contatos retornados)
 		const uniqueCustomerIds = [...new Set(contacts.map(c => c.customerId).filter(Boolean))] as number[];
-		const uniqueUserIds = [...new Set(chats.map(c => c.userId).filter(Boolean))] as number[];
 
-		// Buscar dados do cache (Redis) ou da API
-		const [customersMap, usersMap] = await Promise.all([
-			this.getCustomersByIds(instance, uniqueCustomerIds),
-			this.getUsersByIds(instance, uniqueUserIds)
+		// Buscar chats e dados de clientes em paralelo
+		const [chats, customersMap] = await Promise.all([
+			chatsPromise,
+			this.getCustomersByIds(instance, uniqueCustomerIds)
 		]);
 
-		return contacts.map((contact) => {
+		// OTIMIZAÇÃO 4: Criar Map de chats por contactId para lookup O(1)
+		const chatsMap = new Map(chats.map(chat => [chat.contactId, chat]));
+
+		// Coletar IDs únicos de usuários (apenas dos chats relevantes)
+		const relevantChats = contacts.map(c => chatsMap.get(c.id)).filter(Boolean) as any[];
+		const uniqueUserIds = [...new Set(relevantChats.map(c => c.userId).filter(Boolean))] as number[];
+
+		// Buscar usuários
+		const usersMap = await this.getUsersByIds(instance, uniqueUserIds);
+
+		// Mapear contatos com dados de cliente e usuário
+		let mappedContacts = contacts.map((contact) => {
 			const customer = contact.customerId && customersMap.get(contact.customerId);
-			const chat = chats.find((c) => c.contactId === contact.id);
+			const chat = chatsMap.get(contact.id);
 
 			// Gambiarra
 			const user = chat ? usersMap.get(chat.userId || -200)?.NOME || "Supervisão" : null;
@@ -72,6 +169,52 @@ class ContactsService {
 				chatingWith: user
 			};
 		});
+
+		// Aplicar filtros de cliente (pós-processamento quando necessário)
+		if (hasCustomerFilters) {
+			mappedContacts = mappedContacts.filter((contact) => {
+				if (!contact.customer) return false;
+
+				let matches = true;
+
+				if (filters.customerErp) {
+					matches = matches && (contact.customer.COD_ERP?.toString().includes(filters.customerErp) ?? false);
+				}
+
+				if (filters.customerCnpj) {
+					matches = matches && (contact.customer.CPF_CNPJ?.includes(filters.customerCnpj) ?? false);
+				}
+
+				if (filters.customerName) {
+					const customerName = contact.customer.FANTASIA || contact.customer.RAZAO || '';
+					matches = matches && customerName.toLowerCase().includes(filters.customerName.toLowerCase());
+				}
+
+				return matches;
+			});
+
+			// Recalcular total após filtros de cliente
+			total = mappedContacts.length;
+
+			// Aplicar paginação manual após filtros
+			const startIndex = (page - 1) * perPage;
+			const endIndex = startIndex + perPage;
+			mappedContacts = mappedContacts.slice(startIndex, endIndex);
+		}
+
+		const totalPages = Math.ceil(total / perPage);
+
+		return {
+			data: mappedContacts,
+			pagination: {
+				page,
+				perPage,
+				total,
+				totalPages,
+				hasNext: page < totalPages,
+				hasPrev: page > 1
+			}
+		};
 	}
 
 	/**
