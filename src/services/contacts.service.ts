@@ -51,15 +51,22 @@ class ContactsService {
 		customersService.setAuth(token);
 		usersService.setAuth(token);
 
+		// LOG: início do fluxo
+		console.log('[getContactsWithCustomer] start', { instance, filters });
+
 		// Normalizar e validar paginação
 		const page = Math.max(1, filters.page);
 		const perPage = Math.max(1, Math.min(100, filters.perPage));
+
+		console.log('[getContactsWithCustomer] pagination', { page, perPage });
 
 		// Construir filtros para a consulta do banco
 		const whereConditions: Prisma.WppContactWhereInput = {
 			instance,
 			isDeleted: false
 		};
+
+		console.log('[getContactsWithCustomer] initial whereConditions', JSON.stringify(whereConditions));
 
 		// Aplicar filtros básicos de contato
 		if (filters.name) {
@@ -90,6 +97,8 @@ class ContactsService {
 		// precisamos buscar todos e filtrar depois. Caso contrário, podemos paginar no banco.
 		const hasCustomerFilters = !!(filters.customerErp || filters.customerCnpj || filters.customerName);
 
+		console.log('[getContactsWithCustomer] hasCustomerFilters', hasCustomerFilters);
+
 		let contacts: any[];
 		let total: number;
 
@@ -100,6 +109,8 @@ class ContactsService {
 				orderBy: { id: 'desc' }
 			});
 			total = contacts.length; // Será recalculado após filtros
+
+			console.log('[getContactsWithCustomer] fetched ALL contacts', { count: contacts.length, sampleIds: contacts.slice(0, 10).map(c => c.id) });
 		} else {
 			// OTIMIZAÇÃO 2: Sem filtros de cliente, paginar direto no banco + count otimizado
 			const [contactsResult, countResult] = await Promise.all([
@@ -113,9 +124,11 @@ class ContactsService {
 					where: whereConditions
 				})
 			]);
-			
+
 			contacts = contactsResult;
 			total = countResult;
+
+			console.log('[getContactsWithCustomer] fetched PAGINATED contacts', { resultCount: contacts.length, totalCount: total, sampleIds: contacts.slice(0, 10).map(c => c.id) });
 		}
 
 		// Se não há contatos, retornar vazio imediatamente
@@ -136,8 +149,12 @@ class ContactsService {
 		// OTIMIZAÇÃO 3: Buscar chats em paralelo
 		const chatsPromise = chatsService.getChats({ isFinished: "false" });
 
+		console.log('[getContactsWithCustomer] chats fetch started (promise created)');
+
 		// Coletar IDs únicos de clientes necessários (apenas dos contatos retornados)
 		const uniqueCustomerIds = [...new Set(contacts.map(c => c.customerId).filter(Boolean))] as number[];
+
+		console.log('[getContactsWithCustomer] uniqueCustomerIds', uniqueCustomerIds);
 
 		// Buscar chats e dados de clientes em paralelo
 		const [chats, customersMap] = await Promise.all([
@@ -145,15 +162,23 @@ class ContactsService {
 			this.getCustomersByIds(instance, uniqueCustomerIds)
 		]);
 
+		console.log('[getContactsWithCustomer] chats and customers fetched', { chatsCount: chats.length, customersFound: customersMap.size });
+
 		// OTIMIZAÇÃO 4: Criar Map de chats por contactId para lookup O(1)
 		const chatsMap = new Map(chats.map(chat => [chat.contactId, chat]));
+
+		console.log('[getContactsWithCustomer] chatsMap size', chatsMap.size);
 
 		// Coletar IDs únicos de usuários (apenas dos chats relevantes)
 		const relevantChats = contacts.map(c => chatsMap.get(c.id)).filter(Boolean) as any[];
 		const uniqueUserIds = [...new Set(relevantChats.map(c => c.userId).filter(Boolean))] as number[];
 
+		console.log('[getContactsWithCustomer] uniqueUserIds', uniqueUserIds);
+
 		// Buscar usuários
 		const usersMap = await this.getUsersByIds(instance, uniqueUserIds);
+
+		console.log('[getContactsWithCustomer] usersMap size', usersMap.size);
 
 		// Mapear contatos com dados de cliente e usuário
 		let mappedContacts = contacts.map((contact) => {
@@ -169,6 +194,8 @@ class ContactsService {
 				chatingWith: user
 			};
 		});
+
+		console.log('[getContactsWithCustomer] mappedContacts count BEFORE customer-filters', mappedContacts.length);
 
 		// Aplicar filtros de cliente (pós-processamento quando necessário)
 		if (hasCustomerFilters) {
@@ -196,10 +223,14 @@ class ContactsService {
 			// Recalcular total após filtros de cliente
 			total = mappedContacts.length;
 
+			console.log('[getContactsWithCustomer] mappedContacts count AFTER customer-filters', total);
+
 			// Aplicar paginação manual após filtros
 			const startIndex = (page - 1) * perPage;
 			const endIndex = startIndex + perPage;
 			mappedContacts = mappedContacts.slice(startIndex, endIndex);
+
+			console.log('[getContactsWithCustomer] pagination after filtering', { startIndex, endIndex, returned: mappedContacts.length });
 		}
 
 		const totalPages = Math.ceil(total / perPage);
@@ -217,12 +248,15 @@ class ContactsService {
 		};
 	}
 
+	// LOG final do retorno
+	// Nota: registro feito logo antes do return para facilitar debug (ver acima)
+
 	/**
 	 * Busca clientes por IDs, primeiro tentando o Redis, depois a API
 	 */
 	private async getCustomersByIds(instance: string, customerIds: number[]): Promise<Map<number, Customer>> {
 		const result = new Map<number, Customer>();
-		
+
 		if (customerIds.length === 0) {
 			return result;
 		}
@@ -232,7 +266,7 @@ class ContactsService {
 		const cachedCustomers = await redisService.mget<Customer>(cacheKeys);
 
 		const idsToFetch: number[] = [];
-		
+
 		cachedCustomers.forEach((customer, index) => {
 			if (customer) {
 				result.set(customerIds[index]!, customer);
@@ -284,7 +318,7 @@ class ContactsService {
 	 */
 	private async getUsersByIds(instance: string, userIds: number[]): Promise<Map<number, User>> {
 		const result = new Map<number, User>();
-		
+
 		if (userIds.length === 0) {
 			return result;
 		}
@@ -294,7 +328,7 @@ class ContactsService {
 		const cachedUsers = await redisService.mget<User>(cacheKeys);
 
 		const idsToFetch: number[] = [];
-		
+
 		cachedUsers.forEach((user, index) => {
 			if (user) {
 				result.set(userIds[index]!, user);
