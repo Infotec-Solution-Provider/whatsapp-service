@@ -47,91 +47,94 @@ class ContactsService {
 		});
 	}
 
+	/**
+	 * getContactsWithCustomer — versão otimizada
+	 * Regras:
+	 * - Filtros de CLIENTE (ERP/CNPJ/NOME): buscar clientes primeiro -> pegar CODIGO -> filtrar contatos no DB (customerId IN [...]).
+	 * - Filtros de CONTATO (name/phone): aplicar direto em wppContact no DB.
+	 * - Nenhum filtro: paginação direta no DB.
+	 * - hasCustomer/customerId: aplicados direto no where.
+	 * - Enriquecimento (chats/usuários) preservado; Maps para O(1).
+	 * - SEM uso de `mode: 'insensitive'` (corrige TS2353).
+	 */
 	public async getContactsWithCustomer(instance: string, token: string, filters: ContactsFilters) {
 		customersService.setAuth(token);
 		usersService.setAuth(token);
 
-		// LOG: início do fluxo
-		console.log('[getContactsWithCustomer] start', { instance, filters });
+		console.log("[getContactsWithCustomer] start", { instance, filters });
 
-		// Normalizar e validar paginação
+		// paginação normalizada
 		const page = Math.max(1, filters.page);
 		const perPage = Math.max(1, Math.min(100, filters.perPage));
+		console.log("[getContactsWithCustomer] pagination", { page, perPage });
 
-		console.log('[getContactsWithCustomer] pagination', { page, perPage });
-
-		// Construir filtros para a consulta do banco
+		// where base SEMPRE inclui instance
 		const whereConditions: Prisma.WppContactWhereInput = {
 			instance,
 			isDeleted: false
 		};
 
-		console.log('[getContactsWithCustomer] initial whereConditions', JSON.stringify(whereConditions));
+		// 1) Filtros do "lado do cliente": ERP/CNPJ/NOME
+		const hasCustomerSideFilters = !!(filters.customerErp || filters.customerCnpj || filters.customerName);
+		if (hasCustomerSideFilters) {
+			const matchedCustomerIds = await this.searchCustomerIdsByFilters(instance, filters);
+			console.log("[getContactsWithCustomer] matchedCustomerIds", matchedCustomerIds);
 
-		// Aplicar filtros básicos de contato
+			if (matchedCustomerIds.length === 0) {
+				return {
+					data: [],
+					pagination: {
+						page,
+						perPage,
+						total: 0,
+						totalPages: 0,
+						hasNext: false,
+						hasPrev: false
+					}
+				};
+			}
+
+			// aplica customerId IN [...] no mesmo instance
+			whereConditions.customerId = { in: matchedCustomerIds };
+		}
+
+		// 2) Filtros do "lado do contato": name/phone
 		if (filters.name) {
-			whereConditions.name = {
-				contains: filters.name
-			};
+			// Removido `mode: 'insensitive'` para evitar TS2353. Se precisar de case-insensitive,
+			// garanta isso via collation/ci no banco.
+			whereConditions.name = { contains: filters.name };
 		}
 
 		if (filters.phone) {
-			whereConditions.phone = {
-				contains: filters.phone
-			};
+			whereConditions.phone = { contains: filters.phone };
 		}
 
+		// 3) Vínculo com cliente: customerId / hasCustomer
 		if (filters.customerId) {
 			whereConditions.customerId = filters.customerId;
 		}
 
 		if (filters.hasCustomer !== null) {
-			if (filters.hasCustomer) {
-				whereConditions.customerId = { not: null };
-			} else {
-				whereConditions.customerId = null;
-			}
+			whereConditions.customerId = filters.hasCustomer ? { not: null } : null;
 		}
 
-		// OTIMIZAÇÃO 1: Se há filtros de cliente (customerErp, customerCnpj, customerName),
-		// precisamos buscar todos e filtrar depois. Caso contrário, podemos paginar no banco.
-		const hasCustomerFilters = !!(filters.customerErp || filters.customerCnpj || filters.customerName);
-
-		console.log('[getContactsWithCustomer] hasCustomerFilters', hasCustomerFilters);
-
-		let contacts: any[];
-		let total: number;
-
-		if (hasCustomerFilters) {
-			// Com filtros de cliente, precisamos buscar todos e filtrar depois
-			contacts = await prismaService.wppContact.findMany({
+		// 4) Consulta SEMPRE paginada no DB (nada de overfetch + filtro em memória)
+		const [contacts, total] = await Promise.all([
+			prismaService.wppContact.findMany({
 				where: whereConditions,
-				orderBy: { id: 'desc' }
-			});
-			total = contacts.length; // Será recalculado após filtros
+				skip: (page - 1) * perPage,
+				take: perPage,
+				orderBy: { id: "desc" }
+			}),
+			prismaService.wppContact.count({ where: whereConditions })
+		]);
 
-			console.log('[getContactsWithCustomer] fetched ALL contacts', { count: contacts.length, sampleIds: contacts.slice(0, 10).map(c => c.id) });
-		} else {
-			// OTIMIZAÇÃO 2: Sem filtros de cliente, paginar direto no banco + count otimizado
-			const [contactsResult, countResult] = await Promise.all([
-				prismaService.wppContact.findMany({
-					where: whereConditions,
-					skip: (page - 1) * perPage,
-					take: perPage,
-					orderBy: { id: 'desc' }
-				}),
-				prismaService.wppContact.count({
-					where: whereConditions
-				})
-			]);
+		console.log("[getContactsWithCustomer] db result", {
+			resultCount: contacts.length,
+			totalCount: total,
+			sampleIds: contacts.slice(0, 10).map((c) => c.id)
+		});
 
-			contacts = contactsResult;
-			total = countResult;
-
-			console.log('[getContactsWithCustomer] fetched PAGINATED contacts', { resultCount: contacts.length, totalCount: total, sampleIds: contacts.slice(0, 10).map(c => c.id) });
-		}
-
-		// Se não há contatos, retornar vazio imediatamente
 		if (contacts.length === 0) {
 			return {
 				data: [],
@@ -146,46 +149,35 @@ class ContactsService {
 			};
 		}
 
-		// OTIMIZAÇÃO 3: Buscar chats em paralelo
+		// 5) Enriquecimento: chats + customers + users
+		// Se seu chatsService aceitar instance, prefira: getChats({ isFinished: "false", instance })
 		const chatsPromise = chatsService.getChats({ isFinished: "false" });
 
-		console.log('[getContactsWithCustomer] chats fetch started (promise created)');
+		const uniqueCustomerIds = [...new Set(contacts.map((c) => c.customerId).filter(Boolean))] as number[];
 
-		// Coletar IDs únicos de clientes necessários (apenas dos contatos retornados)
-		const uniqueCustomerIds = [...new Set(contacts.map(c => c.customerId).filter(Boolean))] as number[];
-
-		console.log('[getContactsWithCustomer] uniqueCustomerIds', uniqueCustomerIds);
-
-		// Buscar chats e dados de clientes em paralelo
 		const [chats, customersMap] = await Promise.all([
 			chatsPromise,
 			this.getCustomersByIds(instance, uniqueCustomerIds)
 		]);
 
-		console.log('[getContactsWithCustomer] chats and customers fetched', { chatsCount: chats.length, customersFound: customersMap.size });
+		console.log("[getContactsWithCustomer] enrichment fetched", {
+			chatsCount: Array.isArray(chats) ? chats.length : 0,
+			customersFound: customersMap.size
+		});
 
-		// OTIMIZAÇÃO 4: Criar Map de chats por contactId para lookup O(1)
-		const chatsMap = new Map(chats.map(chat => [chat.contactId, chat]));
+		const chatsMap = new Map<number, any>(
+			(Array.isArray(chats) ? chats : []).map((chat: any) => [chat.contactId, chat])
+		);
 
-		console.log('[getContactsWithCustomer] chatsMap size', chatsMap.size);
+		const relevantChats = contacts.map((c) => chatsMap.get(c.id)).filter(Boolean) as any[];
+		const uniqueUserIds = [...new Set(relevantChats.map((c) => c.userId).filter(Boolean))] as number[];
 
-		// Coletar IDs únicos de usuários (apenas dos chats relevantes)
-		const relevantChats = contacts.map(c => chatsMap.get(c.id)).filter(Boolean) as any[];
-		const uniqueUserIds = [...new Set(relevantChats.map(c => c.userId).filter(Boolean))] as number[];
-
-		console.log('[getContactsWithCustomer] uniqueUserIds', uniqueUserIds);
-
-		// Buscar usuários
 		const usersMap = await this.getUsersByIds(instance, uniqueUserIds);
+		console.log("[getContactsWithCustomer] usersMap size", usersMap.size);
 
-		console.log('[getContactsWithCustomer] usersMap size', usersMap.size);
-
-		// Mapear contatos com dados de cliente e usuário
-		let mappedContacts = contacts.map((contact) => {
-			const customer = contact.customerId && customersMap.get(contact.customerId);
+		const mappedContacts = contacts.map((contact) => {
+			const customer = contact.customerId ? customersMap.get(contact.customerId) : null;
 			const chat = chatsMap.get(contact.id);
-
-			// Gambiarra
 			const user = chat ? usersMap.get(chat.userId || -200)?.NOME || "Supervisão" : null;
 
 			return {
@@ -194,44 +186,6 @@ class ContactsService {
 				chatingWith: user
 			};
 		});
-
-		console.log('[getContactsWithCustomer] mappedContacts count BEFORE customer-filters', mappedContacts.length);
-
-		// Aplicar filtros de cliente (pós-processamento quando necessário)
-		if (hasCustomerFilters) {
-			mappedContacts = mappedContacts.filter((contact) => {
-				if (!contact.customer) return false;
-
-				let matches = true;
-
-				if (filters.customerErp) {
-					matches = matches && (contact.customer.COD_ERP?.toString().includes(filters.customerErp) ?? false);
-				}
-
-				if (filters.customerCnpj) {
-					matches = matches && (contact.customer.CPF_CNPJ?.includes(filters.customerCnpj) ?? false);
-				}
-
-				if (filters.customerName) {
-					const customerName = contact.customer.FANTASIA || contact.customer.RAZAO || '';
-					matches = matches && customerName.toLowerCase().includes(filters.customerName.toLowerCase());
-				}
-
-				return matches;
-			});
-
-			// Recalcular total após filtros de cliente
-			total = mappedContacts.length;
-
-			console.log('[getContactsWithCustomer] mappedContacts count AFTER customer-filters', total);
-
-			// Aplicar paginação manual após filtros
-			const startIndex = (page - 1) * perPage;
-			const endIndex = startIndex + perPage;
-			mappedContacts = mappedContacts.slice(startIndex, endIndex);
-
-			console.log('[getContactsWithCustomer] pagination after filtering', { startIndex, endIndex, returned: mappedContacts.length });
-		}
 
 		const totalPages = Math.ceil(total / perPage);
 
@@ -248,21 +202,115 @@ class ContactsService {
 		};
 	}
 
-	// LOG final do retorno
-	// Nota: registro feito logo antes do return para facilitar debug (ver acima)
+	/**
+	 * Mapeia filtros para possíveis parâmetros aceitos pela API de clientes.
+	 * -> Inclui `instance` se sua API suportar (comente/descomente conforme seu backend).
+	 */
+	private mapCustomerFilters(instance: string, filters: ContactsFilters): Record<string, string> {
+		const params: Record<string, string> = {};
+
+		// Se sua API/SDK aceitar o escopo por instance/tenant/empresa, habilite aqui:
+		// params["instance"] = instance;
+		// params["tenant"] = instance;
+		// params["empresa"] = instance;
+		// params["FILIAL"] = instance;
+
+		if (filters.customerErp) {
+			params["COD_ERP"] = filters.customerErp;
+			// params["ERP"] = filters.customerErp;
+			// params["erp"] = filters.customerErp;
+		}
+
+		if (filters.customerCnpj) {
+			params["CPF_CNPJ"] = filters.customerCnpj;
+			// params["CNPJ"] = filters.customerCnpj;
+			// params["cnpj"] = filters.customerCnpj;
+		}
+
+		if (filters.customerName) {
+			// ajuste para o campo que seu backend usa (RAZAO, FANTASIA, search, name...)
+			params["RAZAO"] = filters.customerName;
+			// params["FANTASIA"] = filters.customerName;
+			// params["search"] = filters.customerName;
+			// params["name"] = filters.customerName;
+		}
+
+		params["perPage"] = "500";
+		return params;
+	}
 
 	/**
-	 * Busca clientes por IDs, primeiro tentando o Redis, depois a API
+	 * Busca IDs (CODIGO) de clientes conforme filtros (ERP/CNPJ/NOME).
+	 * - Tenta filtrar via API com parâmetros mapeados (incluindo instance, se suportado).
+	 * - Reforça o match localmente (ERP/CNPJ/NOME) para robustez.
 	 */
-	private async getCustomersByIds(instance: string, customerIds: number[]): Promise<Map<number, Customer>> {
+	private async searchCustomerIdsByFilters(
+		instance: string,
+		filters: ContactsFilters
+	): Promise<number[]> {
+		const params = this.mapCustomerFilters(instance, filters);
+
+		try {
+			const response = await customersService.getCustomers(params as any);
+			const customers: any[] = response?.data ?? [];
+
+			// Reforço local (caso a API seja elástica nos filtros)
+			const erp = (filters.customerErp ?? "").toString().trim();
+			const cnpj = (filters.customerCnpj ?? "").toString().trim();
+			const name = (filters.customerName ?? "").toString().trim().toLowerCase();
+
+			const matches = customers.filter((c: any) => {
+				let ok = true;
+
+				if (erp) {
+					ok = ok && (
+						c?.COD_ERP?.toString().includes(erp) ||
+						c?.ERP?.toString().includes(erp)
+					);
+				}
+
+				if (cnpj) {
+					ok = ok && (
+						c?.CPF_CNPJ?.includes(cnpj) ||
+						c?.CNPJ?.includes(cnpj) ||
+						c?.cnpj?.includes(cnpj)
+					);
+				}
+
+				if (name) {
+					const fantasia = (c?.FANTASIA ?? "").toString().toLowerCase();
+					const razao = (c?.RAZAO ?? "").toString().toLowerCase();
+					const nome = (c?.NOME ?? "").toString().toLowerCase();
+					ok = ok && (fantasia.includes(name) || razao.includes(name) || nome.includes(name));
+				}
+
+				return ok;
+			});
+
+			const ids = matches.map((c: any) => c?.CODIGO).filter((x: any) => Number.isFinite(x));
+			// Set para deduplicar
+			return Array.from(new Set<number>(ids));
+		} catch (error) {
+			console.error("[searchCustomerIdsByFilters] erro na API de clientes", error);
+			return [];
+		}
+	}
+
+	/**
+	 * Busca clientes por IDs, com cache Redis por instance.
+	 */
+	private async getCustomersByIds(
+		instance: string,
+		customerIds: number[]
+	): Promise<Map<number, Customer>> {
 		const result = new Map<number, Customer>();
 
 		if (customerIds.length === 0) {
 			return result;
 		}
 
-		// Tentar buscar do Redis
-		const cacheKeys = customerIds.map(id => `customer:${instance}:${id}`);
+		// Redis por instance
+		const cacheKeys = customerIds.map((id) => `customer:${instance}:${id}`);
 		const cachedCustomers = await redisService.mget<Customer>(cacheKeys);
 
 		const idsToFetch: number[] = [];
@@ -275,46 +323,49 @@ class ContactsService {
 			}
 		});
 
-		// Se todos estavam em cache, retornar
 		if (idsToFetch.length === 0) {
 			return result;
 		}
 
-		// Buscar da API apenas os que não estavam em cache
 		try {
-			// Buscar em lotes para evitar muitas requisições
 			const batchSize = 100;
 			for (let i = 0; i < idsToFetch.length; i += batchSize) {
 				const batch = idsToFetch.slice(i, i + batchSize);
+
+				// Ideal: endpoint byIds (se tiver, use-o e passe instance).
+				// const { data: customers } = await customersService.getCustomers({ ids: batch.join(","), perPage: batch.length.toString(), instance });
+
+				// Fallback universal:
 				const { data: customers } = await customersService.getCustomers({
 					perPage: batch.length.toString()
+					// ...(instance ? { instance } : {}) // descomente se a API aceitar
 				});
 
-				// Filtrar apenas os clientes solicitados
-				const requestedCustomers = customers.filter(c => batch.includes(c.CODIGO));
+				const requestedCustomers = (customers || []).filter((c: any) => batch.includes(c.CODIGO));
 
-				// Armazenar no Redis e no resultado
-				const cacheItems = requestedCustomers.map(customer => ({
+				const cacheItems = requestedCustomers.map((customer: any) => ({
 					key: `customer:${instance}:${customer.CODIGO}`,
 					value: customer,
 					ttl: this.CUSTOMER_CACHE_TTL
 				}));
 
-				await redisService.mset(cacheItems);
+				if (cacheItems.length) {
+					await redisService.mset(cacheItems);
+				}
 
-				requestedCustomers.forEach(customer => {
+				requestedCustomers.forEach((customer: any) => {
 					result.set(customer.CODIGO, customer);
 				});
 			}
 		} catch (error) {
-			console.error('Erro ao buscar clientes:', error);
+			console.error("Erro ao buscar clientes:", error);
 		}
 
 		return result;
 	}
 
 	/**
-	 * Busca usuários por IDs, primeiro tentando o Redis, depois a API
+	 * Busca usuários por IDs, com cache Redis por instance.
 	 */
 	private async getUsersByIds(instance: string, userIds: number[]): Promise<Map<number, User>> {
 		const result = new Map<number, User>();
@@ -323,8 +374,7 @@ class ContactsService {
 			return result;
 		}
 
-		// Tentar buscar do Redis
-		const cacheKeys = userIds.map(id => `user:${instance}:${id}`);
+		const cacheKeys = userIds.map((id) => `user:${instance}:${id}`);
 		const cachedUsers = await redisService.mget<User>(cacheKeys);
 
 		const idsToFetch: number[] = [];
@@ -337,39 +387,42 @@ class ContactsService {
 			}
 		});
 
-		// Se todos estavam em cache, retornar
 		if (idsToFetch.length === 0) {
 			return result;
 		}
 
-		// Buscar da API apenas os que não estavam em cache
 		try {
-			// Buscar em lotes para evitar muitas requisições
 			const batchSize = 100;
 			for (let i = 0; i < idsToFetch.length; i += batchSize) {
 				const batch = idsToFetch.slice(i, i + batchSize);
+
+				// Ideal: endpoint byIds (se tiver, use-o e passe instance).
+				// const { data: users } = await usersService.getUsers({ ids: batch.join(","), perPage: batch.length.toString(), instance });
+
+				// Fallback universal:
 				const { data: users } = await usersService.getUsers({
 					perPage: batch.length.toString()
+					// ...(instance ? { instance } : {}) // descomente se a API aceitar
 				});
 
-				// Filtrar apenas os usuários solicitados
-				const requestedUsers = users.filter(u => batch.includes(u.CODIGO));
+				const requestedUsers = (users || []).filter((u: any) => batch.includes(u.CODIGO));
 
-				// Armazenar no Redis e no resultado
-				const cacheItems = requestedUsers.map(user => ({
+				const cacheItems = requestedUsers.map((user: any) => ({
 					key: `user:${instance}:${user.CODIGO}`,
 					value: user,
 					ttl: this.USER_CACHE_TTL
 				}));
 
-				await redisService.mset(cacheItems);
+				if (cacheItems.length) {
+					await redisService.mset(cacheItems);
+				}
 
-				requestedUsers.forEach(user => {
+				requestedUsers.forEach((user: any) => {
 					result.set(user.CODIGO, user);
 				});
 			}
 		} catch (error) {
-			console.error('Erro ao buscar usuários:', error);
+			console.error("Erro ao buscar usuários:", error);
 		}
 
 		return result;
@@ -386,6 +439,7 @@ class ContactsService {
 
 		return contacts;
 	}
+
 	public async getContacts(instance: string) {
 		const contacts = await prismaService.wppContact.findMany({
 			where: {
