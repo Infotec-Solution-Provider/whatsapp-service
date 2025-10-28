@@ -30,9 +30,37 @@ import whatsappService from "./whatsapp.service";
 import chooseSectorBot from "../bots/choose-sector.bot";
 import chooseSellerBot from "../bots/seller-vollo.bot";
 import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
+import customerLinkingBot from "../bots/customer-linking.bot";
 import { InternalServerError } from "@rgranatodutra/http-errors";
+
+// Interface para bots que processam mensagens
+interface BotProcessor {
+	processMessage(chat: WppChat, contact: WppContact, message: WppMessage): Promise<void>;
+	startBot?(chat: WppChat, contact: WppContact, to: string, quotedId?: number): Promise<void>;
+	shouldActivate?(chat: WppChat, contact: WppContact): Promise<boolean>;
+}
+
+// Registry de bots por ID
+type BotRegistry = Map<number, BotProcessor>;
+
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
+	private botRegistry: BotRegistry = new Map();
+
+	constructor() {
+		this.registerBots();
+	}
+
+	/**
+	 * Registra todos os bots disponíveis no sistema
+	 * Facilita adicionar novos bots sem modificar a lógica principal
+	 */
+	private registerBots() {
+		this.botRegistry.set(1, chooseSectorBot);
+		this.botRegistry.set(2, exatronSatisfactionBot);
+		this.botRegistry.set(3, customerLinkingBot);
+		// Adicionar novos bots aqui é simples: this.botRegistry.set(4, newBot);
+	}
 
 	public async getFlow(instance: string, sectorId: number): Promise<MessageFlow> {
 		const flowKey = `${instance}:${sectorId}`;
@@ -63,10 +91,176 @@ class MessagesDistributionService {
 		return sectors;
 	}
 
+	/**
+	 * Processa bot ativo em um chat existente
+	 */
+	private async processBotMessage(chat: WppChat, contact: WppContact, msg: WppMessage, logger: ProcessingLogger) {
+		if (!chat.botId) return;
+
+		const bot = this.botRegistry.get(chat.botId);
+		if (!bot) {
+			logger.log(`Bot ID ${chat.botId} não encontrado no registry`);
+			return;
+		}
+
+		logger.log(`Processando mensagem com bot ID ${chat.botId}`);
+
+		// Tratamento especial para instância Vollo com bot de escolha de setor
+		if (chat.botId === 1 && chat.instance === "vollo") {
+			await chooseSellerBot.processMessage(chat, contact, msg);
+		} else {
+			await bot.processMessage(chat, contact, msg);
+		}
+	}
+
+	/**
+	 * Inicializa bot em um novo chat
+	 */
+	private async initializeBotForNewChat(
+		chat: WppChat,
+		contact: WppContact,
+		msg: WppMessage,
+		logger: ProcessingLogger
+	) {
+		if (!chat.botId) return;
+
+		const bot = this.botRegistry.get(chat.botId);
+		if (!bot) {
+			logger.log(`Bot ID ${chat.botId} não encontrado no registry para inicialização`);
+			return;
+		}
+
+		logger.log(`Inicializando bot ID ${chat.botId} para novo chat`);
+
+		// Tratamento especial para instância Vollo
+		if (chat.botId === 1 && chat.instance === "vollo") {
+			await chooseSellerBot.processMessage(chat, contact, msg);
+			return;
+		}
+
+		// Se o bot tem método startBot, usa; caso contrário, usa processMessage
+		if (bot.startBot) {
+			await bot.startBot(chat, contact, msg.from, msg.id);
+		} else {
+			await bot.processMessage(chat, contact, msg);
+		}
+	}
+
+	/**
+	 * Determina qual bot deve ser ativado para um novo chat
+	 */
+	private async determineBotForNewChat(
+		chat: WppChat,
+		contact: WppContact,
+		logger: ProcessingLogger
+	): Promise<number | null> {
+		// Verifica bots com método shouldActivate (ordem de prioridade)
+		for (const [botId, bot] of this.botRegistry.entries()) {
+			if (bot.shouldActivate) {
+				const shouldActivate = await bot.shouldActivate(chat, contact);
+				if (shouldActivate) {
+					logger.log(`Bot ID ${botId} será ativado (via shouldActivate)`);
+					return botId;
+				}
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Cria um novo chat baseado na quantidade de setores
+	 */
+	private async createNewChat(
+		instance: string,
+		sectors: WppSector[],
+		contact: WppContact,
+		logger: ProcessingLogger
+	): Promise<{ chat: WppChat; systemMessage: string | null }> {
+		// Múltiplos setores: ativa bot de escolha de setor
+		if (sectors.length > 1) {
+			logger.log("Mais de um setor encontrado, iniciando o fluxo de escolha de setor.");
+			const chat = await prismaService.wppChat.create({
+				data: {
+					instance,
+					type: "RECEPTIVE",
+					contactId: contact.id,
+					sectorId: sectors[0]!.id,
+					startedAt: new Date(),
+					botId: 1
+				}
+			});
+			return { chat, systemMessage: null };
+		}
+
+		// Tratamento especial para instância Vollo
+		if (instance === "vollo") {
+			const chat = await prismaService.wppChat.create({
+				data: {
+					instance,
+					type: "RECEPTIVE",
+					contactId: contact.id,
+					sectorId: sectors[0]!.id,
+					startedAt: new Date(),
+					botId: 1,
+					userId: 15
+				}
+			});
+			return { chat, systemMessage: null };
+		}
+
+		// Fluxo padrão: verifica se deve ativar bot primeiro
+		logger.log("Um setor encontrado, verificando ativação de bots.");
+
+		// Cria chat temporário para verificar bots (sem persistir ainda)
+		const tempChat = {
+			instance,
+			type: "RECEPTIVE" as const,
+			contactId: contact.id,
+			sectorId: sectors[0]!.id,
+			startedAt: new Date()
+		} as WppChat;
+
+		// Verifica se algum bot deve ser ativado
+		const botId = await this.determineBotForNewChat(tempChat, contact, logger);
+
+		if (botId) {
+			// Se tem bot, cria chat SEM usar MessageFlow (não atribui atendente)
+			logger.log(`Bot ID ${botId} será ativado. Criando chat sem atribuir atendente.`);
+			const chat = await prismaService.wppChat.create({
+				data: {
+					instance,
+					type: "RECEPTIVE",
+					contactId: contact.id,
+					sectorId: sectors[0]!.id,
+					startedAt: new Date(),
+					botId
+				}
+			});
+			return { chat, systemMessage: null };
+		}
+
+		// Sem bot: usa MessageFlow normal (atribui atendente)
+		logger.log("Nenhum bot ativo. Usando MessageFlow para atribuir atendente.");
+		const flow = await this.getFlow(instance, sectors[0]!.id);
+		const result = await flow.getChatPayload(logger, contact);
+		const { systemMessage, ...chatData } = result;
+
+		const chat = await prismaService.wppChat.create({
+			data: {
+				...chatData,
+				startedAt: new Date()
+			}
+		});
+
+		return { chat, systemMessage: systemMessage || null };
+	}
+
 	public async processMessage(instance: string, clientId: number, msg: WppMessage, contactName?: string | null) {
 		const logger = new ProcessingLogger(instance, "message-distribution", `WppMessage-${msg.id}`, msg);
 
 		try {
+			// 1. Busca ou cria contato
 			logger.log("Buscando contato para a mensagem.");
 			const contact = await contactsService.getOrCreateContact(
 				instance,
@@ -75,89 +269,34 @@ class MessagesDistributionService {
 			);
 			logger.log("Contato encontrado!", contact);
 
+			// 2. Busca chat existente
 			logger.log("Buscando chat para o contato.");
 			const currChat = await chatsService.getChatForContact(clientId, contact);
 			await this.checkAndSendAutoResponseMessage(instance, contact, currChat, logger);
 
+			// 3. Processa mensagem em chat existente
 			if (currChat) {
 				logger.log("Chat anterior encontrado para o contato.", currChat);
 				const outputMessage = await this.insertAndNotify(logger, currChat, msg);
-
-				if (currChat.botId === 1) {
-					if (currChat.instance === "vollo") {
-						await chooseSellerBot.processMessage(currChat, contact, msg);
-					} else {
-						await chooseSectorBot.processMessage(currChat, contact, msg);
-					}
-				}
-
-				if (currChat.botId === 2) {
-					await exatronSatisfactionBot.processMessage(currChat, contact, msg);
-				}
+				await this.processBotMessage(currChat, contact, msg, logger);
 				return outputMessage;
 			}
 
-			let newChat: WppChat | null = null;
-			let systemMessage: string | null = null;
-
+			// 4. Cria novo chat
 			logger.log("Nenhum chat encontrado para o contato.");
-
 			const sectors = await this.getSectors(clientId);
-			if (sectors.length > 1) {
-				logger.log("Mais de um setor encontrado, iniciando o fluxo de escolha de setor.");
-				newChat = await prismaService.wppChat.create({
-					data: {
-						instance,
-						type: "RECEPTIVE",
-						contactId: contact.id,
-						sectorId: sectors[0]!.id,
-						startedAt: new Date(),
-						botId: 1
-					}
-				});
-			} else if (instance === "vollo") {
-				newChat = await prismaService.wppChat.create({
-					data: {
-						instance,
-						type: "RECEPTIVE",
-						contactId: contact.id,
-						sectorId: sectors[0]!.id,
-						startedAt: new Date(),
-						botId: instance === "vollo" ? 1 : null,
-						...(instance === "vollo" && { userId: 15 })
-					}
-				});
-			} else {
-				logger.log("Um setor encontrado, iniciando o fluxo de atendimento.");
-				const flow = await this.getFlow(instance, sectors[0]!.id);
-				const result = await flow.getChatPayload(logger, contact);
-				const chatData = { ...result };
-				delete chatData.systemMessage;
-
-				newChat = await prismaService.wppChat.create({
-					data: {
-						...chatData,
-						startedAt: new Date()
-					}
-				});
-				systemMessage = result.systemMessage || null;
-			}
+			const { chat: newChat, systemMessage } = await this.createNewChat(instance, sectors, contact, logger);
 
 			if (!newChat) {
 				throw new Error("Nenhum chat foi criado.");
 			}
 
-			if (newChat.botId === 1) {
-				if (newChat.instance === "vollo") {
-					await chooseSellerBot.processMessage(newChat, contact, msg);
-				} else {
-					await chooseSectorBot.processMessage(newChat, contact, msg);
-				}
-			}
+			// 5. Inicializa bot se necessário
+			await this.initializeBotForNewChat(newChat, contact, msg, logger);
 
-			logger.log("Novo chat encontrado!", newChat);
+			// 6. Finaliza criação do chat
+			logger.log("Novo chat criado!", newChat);
 
-			logger.log("Buscando foto de perfil do cliente.");
 			const avatarUrl = await whatsappService.getProfilePictureUrl(instance, msg.from);
 			if (avatarUrl) {
 				await prismaService.wppChat.update({
@@ -165,8 +304,9 @@ class MessagesDistributionService {
 					where: { id: newChat.id }
 				});
 			}
-			systemMessage = systemMessage || "Atendimento iniciado pelo cliente!";
-			await this.addSystemMessage(newChat, systemMessage, true);
+
+			const finalSystemMessage = systemMessage || "Atendimento iniciado pelo cliente!";
+			await this.addSystemMessage(newChat, finalSystemMessage, true);
 			logger.log("Chat criado com sucesso!", newChat);
 
 			const outputMsg = await this.insertAndNotify(logger, newChat, msg, true);
@@ -203,6 +343,7 @@ class MessagesDistributionService {
 			logger.failed(err);
 		}
 	}
+
 	public async transferChatOperator(sector: WppSector, operador: User, contact: WppContact, chat: WppChat) {
 		const logger = new ProcessingLogger(
 			sector.instance,
