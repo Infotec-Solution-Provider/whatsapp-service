@@ -9,8 +9,26 @@ class ContactsController {
 		this.router.get("/api/whatsapp/contacts", isAuthenticated, this.getContacts);
 		this.router.post("/api/whatsapp/customers/:id/contacts", isAuthenticated, this.createContact);
 		this.router.post("/api/whatsapp/contacts", isAuthenticated, this.createContact);
+		this.router.post("/api/whatsapp/contacts/:contactId/sectors", isAuthenticated, this.addSectorToContact);
 		this.router.put("/api/whatsapp/contacts/:contactId", isAuthenticated, this.updateContact);
 		this.router.delete("/api/whatsapp/contacts/:contactId", isAuthenticated, this.deleteContact);
+	}
+
+	private async addSectorToContact(req: Request, res: Response) {
+		const contactId = Number(req.params["contactId"]);
+		const sectorId = req.body && req.body.sectorId ? Number(req.body.sectorId) : undefined;
+
+		if (!sectorId) {
+			res.status(400).send({ message: 'sectorId is required' });
+			return;
+		}
+
+		const contact = await contactsService.addSectorToContact(contactId, sectorId);
+
+		res.status(200).send({
+			message: 'Sector added to contact successfully!',
+			data: contact
+		});
 	}
 
 	private async getCustomerContacts(req: Request, res: Response) {
@@ -58,10 +76,13 @@ class ContactsController {
 	}
 
 	private async createContact(req: Request, res: Response) {
-		const customerId = Number(req.params["id"]);
-		const { name, phone } = req.body;
+		const customerId = req.params["id"] ? Number(req.params["id"]) : undefined;
+		const { name, phone, sectorIds } = req.body;
 
-		const contact = await contactsService.createContact(req.session.instance, name, phone, customerId);
+		// sectorIds is optional and should be an array of numbers when provided
+		const parsedSectorIds = Array.isArray(sectorIds) ? sectorIds.map((s: any) => Number(s)) : undefined;
+
+		const contact = await contactsService.createContact(req.session.instance, name, phone, customerId, parsedSectorIds);
 
 		res.status(200).send({
 			message: "Contact created successfully!",
@@ -71,7 +92,11 @@ class ContactsController {
 
 	private async updateContact(req: Request, res: Response) {
 		const contactId = Number(req.params["contactId"]);
-		const updatedContact = await contactsService.updateContact(contactId, req.body);
+		// Allow optional sectorIds in body to update sectors
+		const { sectorIds, ...updateData } = req.body;
+		const parsedSectorIds = Array.isArray(sectorIds) ? sectorIds.map((s: any) => Number(s)) : undefined;
+
+		const updatedContact = await contactsService.updateContact(contactId, updateData, parsedSectorIds);
 
 		res.status(200).send({
 			message: "Contact updated successfully!",

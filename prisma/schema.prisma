@@ -45,6 +45,8 @@ model WppContact {
   WppChat     WppChat[]
   WppMessage  WppMessage[]
   WppSchedule WppSchedule[]
+  // Relação com setores (um contato pode pertencer a vários setores)
+  sectors     WppContactSector[]
 
   @@unique([instance, phone])
   @@index([customerId, instance])
@@ -216,9 +218,23 @@ model WppSector {
   WppChat      WppChat[]
   WppSchedule  WppSchedule[]
   InternalChat InternalChat[]
+  // Relação com contatos (um setor pode ter vários contatos)
+  contacts     WppContactSector[]
 
   @@unique([instance, name])
   @@map("sectors")
+}
+
+// Tabela de associação entre contatos e setores (many-to-many explícito)
+model WppContactSector {
+  contactId Int
+  sectorId  Int
+
+  contact WppContact @relation(fields: [contactId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  sector  WppSector  @relation(fields: [sectorId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@id([contactId, sectorId])
+  @@map("contacts_sectors")
 }
 
 model WppMessageFlow {

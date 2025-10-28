@@ -97,7 +97,7 @@ class ContactsService {
 			// Com filtros de cliente, precisamos buscar todos e filtrar depois
 			contacts = await prismaService.wppContact.findMany({
 				where: whereConditions,
-				orderBy: { id: 'desc' }
+				orderBy: { id: "desc" }
 			});
 			total = contacts.length; // Será recalculado após filtros
 		} else {
@@ -107,13 +107,13 @@ class ContactsService {
 					where: whereConditions,
 					skip: (page - 1) * perPage,
 					take: perPage,
-					orderBy: { id: 'desc' }
+					orderBy: { id: "desc" }
 				}),
 				prismaService.wppContact.count({
 					where: whereConditions
 				})
 			]);
-			
+
 			contacts = contactsResult;
 			total = countResult;
 		}
@@ -137,7 +137,7 @@ class ContactsService {
 		const chatsPromise = chatsService.getChats({ isFinished: "false" });
 
 		// Coletar IDs únicos de clientes necessários (apenas dos contatos retornados)
-		const uniqueCustomerIds = [...new Set(contacts.map(c => c.customerId).filter(Boolean))] as number[];
+		const uniqueCustomerIds = [...new Set(contacts.map((c) => c.customerId).filter(Boolean))] as number[];
 
 		// Buscar chats e dados de clientes em paralelo
 		const [chats, customersMap] = await Promise.all([
@@ -146,11 +146,11 @@ class ContactsService {
 		]);
 
 		// OTIMIZAÇÃO 4: Criar Map de chats por contactId para lookup O(1)
-		const chatsMap = new Map(chats.map(chat => [chat.contactId, chat]));
+		const chatsMap = new Map(chats.map((chat) => [chat.contactId, chat]));
 
 		// Coletar IDs únicos de usuários (apenas dos chats relevantes)
-		const relevantChats = contacts.map(c => chatsMap.get(c.id)).filter(Boolean) as any[];
-		const uniqueUserIds = [...new Set(relevantChats.map(c => c.userId).filter(Boolean))] as number[];
+		const relevantChats = contacts.map((c) => chatsMap.get(c.id)).filter(Boolean) as any[];
+		const uniqueUserIds = [...new Set(relevantChats.map((c) => c.userId).filter(Boolean))] as number[];
 
 		// Buscar usuários
 		const usersMap = await this.getUsersByIds(instance, uniqueUserIds);
@@ -186,7 +186,7 @@ class ContactsService {
 				}
 
 				if (filters.customerName) {
-					const customerName = contact.customer.FANTASIA || contact.customer.RAZAO || '';
+					const customerName = contact.customer.FANTASIA || contact.customer.RAZAO || "";
 					matches = matches && customerName.toLowerCase().includes(filters.customerName.toLowerCase());
 				}
 
@@ -222,17 +222,17 @@ class ContactsService {
 	 */
 	private async getCustomersByIds(instance: string, customerIds: number[]): Promise<Map<number, Customer>> {
 		const result = new Map<number, Customer>();
-		
+
 		if (customerIds.length === 0) {
 			return result;
 		}
 
 		// Tentar buscar do Redis
-		const cacheKeys = customerIds.map(id => `customer:${instance}:${id}`);
+		const cacheKeys = customerIds.map((id) => `customer:${instance}:${id}`);
 		const cachedCustomers = await redisService.mget<Customer>(cacheKeys);
 
 		const idsToFetch: number[] = [];
-		
+
 		cachedCustomers.forEach((customer, index) => {
 			if (customer) {
 				result.set(customerIds[index]!, customer);
@@ -257,10 +257,10 @@ class ContactsService {
 				});
 
 				// Filtrar apenas os clientes solicitados
-				const requestedCustomers = customers.filter(c => batch.includes(c.CODIGO));
+				const requestedCustomers = customers.filter((c) => batch.includes(c.CODIGO));
 
 				// Armazenar no Redis e no resultado
-				const cacheItems = requestedCustomers.map(customer => ({
+				const cacheItems = requestedCustomers.map((customer) => ({
 					key: `customer:${instance}:${customer.CODIGO}`,
 					value: customer,
 					ttl: this.CUSTOMER_CACHE_TTL
@@ -268,12 +268,12 @@ class ContactsService {
 
 				await redisService.mset(cacheItems);
 
-				requestedCustomers.forEach(customer => {
+				requestedCustomers.forEach((customer) => {
 					result.set(customer.CODIGO, customer);
 				});
 			}
 		} catch (error) {
-			console.error('Erro ao buscar clientes:', error);
+			console.error("Erro ao buscar clientes:", error);
 		}
 
 		return result;
@@ -284,17 +284,17 @@ class ContactsService {
 	 */
 	private async getUsersByIds(instance: string, userIds: number[]): Promise<Map<number, User>> {
 		const result = new Map<number, User>();
-		
+
 		if (userIds.length === 0) {
 			return result;
 		}
 
 		// Tentar buscar do Redis
-		const cacheKeys = userIds.map(id => `user:${instance}:${id}`);
+		const cacheKeys = userIds.map((id) => `user:${instance}:${id}`);
 		const cachedUsers = await redisService.mget<User>(cacheKeys);
 
 		const idsToFetch: number[] = [];
-		
+
 		cachedUsers.forEach((user, index) => {
 			if (user) {
 				result.set(userIds[index]!, user);
@@ -319,10 +319,10 @@ class ContactsService {
 				});
 
 				// Filtrar apenas os usuários solicitados
-				const requestedUsers = users.filter(u => batch.includes(u.CODIGO));
+				const requestedUsers = users.filter((u) => batch.includes(u.CODIGO));
 
 				// Armazenar no Redis e no resultado
-				const cacheItems = requestedUsers.map(user => ({
+				const cacheItems = requestedUsers.map((user) => ({
 					key: `user:${instance}:${user.CODIGO}`,
 					value: user,
 					ttl: this.USER_CACHE_TTL
@@ -330,12 +330,12 @@ class ContactsService {
 
 				await redisService.mset(cacheItems);
 
-				requestedUsers.forEach(user => {
+				requestedUsers.forEach((user) => {
 					result.set(user.CODIGO, user);
 				});
 			}
 		} catch (error) {
-			console.error('Erro ao buscar usuários:', error);
+			console.error("Erro ao buscar usuários:", error);
 		}
 
 		return result;
@@ -362,56 +362,194 @@ class ContactsService {
 		return contacts;
 	}
 
-	public async createContact(instance: string, name: string, phone: string, customerId?: number) {
+	/**
+	 * Create contact with optional sector assignment.
+	 * Business rules:
+	 * - A contact may belong to multiple sectors.
+	 * - If a contact has no sectors, it's considered global.
+	 * - When creating a contact, if the phone already exists linked to other sector(s) (or global), return an error.
+	 */
+	public async createContact(
+		instance: string,
+		name: string,
+		phone: string,
+		customerId?: number,
+		sectorIds?: number[]
+	) {
 		const validPhone = await whatsappService.getValidWhatsappPhone(instance, phone);
 		if (!validPhone) {
 			throw new BadRequestError("Esse número não é um WhatsApp válido!");
 		}
+
 		const existingContact = await prismaService.wppContact.findUnique({
 			where: {
 				instance_phone: {
 					instance,
 					phone: validPhone
 				}
-			}
+			},
+			// include sectors - cast to any because Prisma client types must be regenerated after schema change
+			include: { sectors: true }
 		});
 
-		if (existingContact && !!existingContact.customerId) {
+		// If contact exists and mapped to a customer, keep old behavior
+		if (
+			existingContact &&
+			!!existingContact.customerId &&
+			customerId &&
+			existingContact.customerId !== customerId
+		) {
 			const message = `Este número já está cadastrado no cliente de código ${existingContact.customerId}`;
 			throw new ConflictError(message);
 		}
 
-		const createdContact = await prismaService.wppContact.upsert({
-			where: {
-				instance_phone: {
-					instance,
-					phone: validPhone
+		// If contact exists, we must enforce sector rules
+		if (existingContact) {
+			const existingSectorIds = (existingContact.sectors || []).map((s) => s.sectorId);
+
+			// If creating global (no sectorIds provided)
+			if (!sectorIds || sectorIds.length === 0) {
+				// If there are sectors linked already, it's a conflict (would create a global contact while it exists in other sectors)
+				if (existingSectorIds.length > 0) {
+					throw new ConflictError("Este número já está cadastrado em outro(s) setor(es)");
 				}
-			},
-			update: {
-				name,
-				customerId: customerId || null
-			},
-			create: {
-				instance,
-				name,
-				phone: validPhone,
-				customerId: customerId || null
+
+				// Otherwise it's already global: update and return
+				const updated = await prismaService.wppContact.update({
+					where: { id: existingContact.id },
+					data: { name, customerId: customerId || null }
+				});
+				return updated;
 			}
+
+			// Creating with sectors: if existing is global -> conflict
+			if (existingSectorIds.length === 0) {
+				throw new ConflictError("Este número já está cadastrado globalmente");
+			}
+
+			// If existing sectors differ from requested sectors -> conflict
+			const requested = [...new Set(sectorIds)];
+			const missingInRequested = existingSectorIds.filter((id: number) => !requested.includes(id));
+			const extraInRequested = requested.filter((id: number) => !existingSectorIds.includes(id));
+
+			if (missingInRequested.length > 0 || extraInRequested.length > 0) {
+				throw new ConflictError("Este número já está cadastrado em outro(s) setor(es)");
+			}
+
+			// Sectors match: update name/customerId and return
+			const updated = await prismaService.wppContact.update({
+				where: { id: existingContact.id },
+				data: { name, customerId: customerId || null }
+			});
+
+			return updated;
+		}
+
+		// Contact does not exist: create new and optionally link sectors
+		const createData: any = {
+			instance,
+			name,
+			phone: validPhone,
+			customerId: customerId || null
+		};
+
+		if (sectorIds && sectorIds.length > 0) {
+			// create nested rows in the join table
+			createData.sectors = {
+				create: sectorIds.map((id) => ({ sectorId: id }))
+			};
+		}
+
+		const createdContact = await prismaService.wppContact.create({
+			data: createData,
+			// include sectors - cast to any because Prisma client types must be regenerated after schema change
+			include: { sectors: true }
 		});
 
 		return createdContact;
 	}
 
-	public async updateContact(contactId: number, data: Prisma.WppContactUpdateInput) {
+	/**
+	 * Update contact fields and optionally replace sector associations.
+	 * If sectorIds is provided, all existing sector links will be replaced by the provided list.
+	 */
+	public async updateContact(contactId: number, data: Prisma.WppContactUpdateInput, sectorIds?: number[]) {
+		// If sectorIds is not provided, simple update
+		if (!sectorIds) {
+			const contact = await prismaService.wppContact.update({
+				where: { id: contactId },
+				data
+			});
+
+			return contact;
+		}
+
+		// When sectorIds provided, replace relations in the join table
+		const cleanedSectorIds = [...new Set(sectorIds)];
+
+		const updatePayload: Prisma.WppContactUpdateInput = {
+			...data,
+			// Replace sectors: delete existing and create new ones
+			sectors: {
+				deleteMany: {},
+				create: cleanedSectorIds.map((id) => ({ sectorId: id }))
+			}
+		};
+
 		const contact = await prismaService.wppContact.update({
-			where: {
-				id: contactId
-			},
-			data
+			where: { id: contactId },
+			data: updatePayload,
+			// include sectors for convenience (cast to any until prisma client is regenerated)
+			include: { sectors: true }
 		});
 
 		return contact;
+	}
+
+	/**
+	 * Add a single sector to a contact.
+	 * Rules:
+	 * - If the contact is global (no sectors), don't allow adding a sector (keeps consistency with create rules).
+	 * - If the sector already exists for the contact, return the contact unchanged.
+	 * - Otherwise, create the association and return the updated contact (including sectors).
+	 */
+	public async addSectorToContact(contactId: number, sectorId: number) {
+		const contact = await prismaService.wppContact.findUnique({
+			where: { id: contactId },
+			include: { sectors: true }
+		});
+
+		if (!contact) {
+			throw new BadRequestError("Contato não encontrado");
+		}
+
+		const existingSectorIds = (contact.sectors || []).map((s: any) => s.sectorId);
+
+		// If contact is global (no sectors), do not allow adding sector (matching create conflict rule)
+		if (existingSectorIds.length === 0) {
+			throw new ConflictError("Este número já está cadastrado globalmente");
+		}
+
+		if (existingSectorIds.includes(sectorId)) {
+			// nothing to do, return contact with sectors
+			return await prismaService.wppContact.findUnique({
+				where: { id: contactId },
+				include: { sectors: true }
+			});
+		}
+
+		// Add new sector association
+		await prismaService.wppContact.update({
+			where: { id: contactId },
+			data: { sectors: { create: { sectorId } } }
+		});
+
+		const updated = await prismaService.wppContact.findUnique({
+			where: { id: contactId },
+			include: { sectors: true }
+		});
+
+		return updated;
 	}
 
 	public async deleteContact(contactId: number) {
