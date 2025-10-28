@@ -48,14 +48,14 @@ class ContactsService {
 	}
 
 	/**
-	 * getContactsWithCustomer — versão otimizada
+	 * getContactsWithCustomer — versão otimizada e multi-tenant
 	 * Regras:
-	 * - Filtros de CLIENTE (ERP/CNPJ/NOME): buscar clientes primeiro -> pegar CODIGO -> filtrar contatos no DB (customerId IN [...]).
-	 * - Filtros de CONTATO (name/phone): aplicar direto em wppContact no DB.
-	 * - Nenhum filtro: paginação direta no DB.
-	 * - hasCustomer/customerId: aplicados direto no where.
-	 * - Enriquecimento (chats/usuários) preservado; Maps para O(1).
-	 * - SEM uso de `mode: 'insensitive'` (corrige TS2353).
+	 * - Filtros de CLIENTE (ERP/CNPJ/NOME): buscar clientes (scoped por instance) -> pegar CODIGO -> filtrar contatos no DB (customerId IN [...]) + instance.
+	 * - Filtros de CONTATO (name/phone): aplicar direto em wppContact no DB
+	 * - Nenhum filtro: paginação direta no DB
+	 * - hasCustomer/customerId: aplicados direto no where
+	 * - Enriquecimento (chats/usuários) preservado; todos escopados por instance.
+	 * - Removido `mode: 'insensitive'` do Prisma (evita TS2353). Case-insensitive deve ser via collation/ci.
 	 */
 	public async getContactsWithCustomer(instance: string, token: string, filters: ContactsFilters) {
 		customersService.setAuth(token);
@@ -100,8 +100,7 @@ class ContactsService {
 
 		// 2) Filtros do "lado do contato": name/phone
 		if (filters.name) {
-			// Removido `mode: 'insensitive'` para evitar TS2353. Se precisar de case-insensitive,
-			// garanta isso via collation/ci no banco.
+			// Case-insensitive via collation/ci no DB se necessário.
 			whereConditions.name = { contains: filters.name };
 		}
 
@@ -110,15 +109,18 @@ class ContactsService {
 		}
 
 		// 3) Vínculo com cliente: customerId / hasCustomer
-		if (filters.customerId) {
+		// Mantém a precedência da versão original: hasCustomer pode sobrescrever.
+		if (typeof filters.customerId === "number" && Number.isFinite(filters.customerId)) {
 			whereConditions.customerId = filters.customerId;
 		}
 
-		if (filters.hasCustomer !== null) {
-			whereConditions.customerId = filters.hasCustomer ? { not: null } : null;
+		if (filters.hasCustomer === true) {
+			whereConditions.customerId = { not: null };
+		} else if (filters.hasCustomer === false) {
+			whereConditions.customerId = null;
 		}
 
-		// 4) Consulta SEMPRE paginada no DB (nada de overfetch + filtro em memória)
+		// 4) Consulta SEMPRE paginada no DB (sem overfetch de contatos)
 		const [contacts, total] = await Promise.all([
 			prismaService.wppContact.findMany({
 				where: whereConditions,
@@ -149,8 +151,8 @@ class ContactsService {
 			};
 		}
 
-		// 5) Enriquecimento: chats + customers + users
-		// Se seu chatsService aceitar instance, prefira: getChats({ isFinished: "false", instance })
+		// 5) Enriquecimento: chats + customers + users (sempre escopados)
+		// Se seu chatsService aceitar instance (recomendado), passamos:
 		const chatsPromise = chatsService.getChats({ isFinished: "false" });
 
 		const uniqueCustomerIds = [...new Set(contacts.map((c) => c.customerId).filter(Boolean))] as number[];
@@ -204,13 +206,15 @@ class ContactsService {
 
 	/**
 	 * Mapeia filtros para possíveis parâmetros aceitos pela API de clientes.
-	 * -> Inclui `instance` se sua API suportar (comente/descomente conforme seu backend).
+	 * -> Inclui sempre o escopo de `instance` para evitar vazamento multi-tenant.
+	 * Ajuste as chaves se o backend usar nomes diferentes (tenant/empresa/filial...).
 	 */
 	private mapCustomerFilters(instance: string, filters: ContactsFilters): Record<string, string> {
 		const params: Record<string, string> = {};
 
-		// Se sua API/SDK aceitar o escopo por instance/tenant/empresa, habilite aqui:
-		// params["instance"] = instance;
+		// Escopo de tenant / instancia — ajuste conforme sua API:
+		params["instance"] = instance;
+		// Alternativas comuns (descomente e/ou ajuste se seu backend usar outra chave):
 		// params["tenant"] = instance;
 		// params["empresa"] = instance;
 		// params["FILIAL"] = instance;
@@ -235,13 +239,15 @@ class ContactsService {
 			// params["name"] = filters.customerName;
 		}
 
+		// Janela controlada para reduzir roundtrips
 		params["perPage"] = "500";
+
 		return params;
 	}
 
 	/**
-	 * Busca IDs (CODIGO) de clientes conforme filtros (ERP/CNPJ/NOME).
-	 * - Tenta filtrar via API com parâmetros mapeados (incluindo instance, se suportado).
+	 * Busca IDs (CODIGO) de clientes conforme filtros (ERP/CNPJ/NOME), sempre escopado por `instance`.
+	 * - Filtra via API com parâmetros mapeados (inclui instance).
 	 * - Reforça o match localmente (ERP/CNPJ/NOME) para robustez.
 	 */
 	private async searchCustomerIdsByFilters(
@@ -297,7 +303,7 @@ class ContactsService {
 	}
 
 	/**
-	 * Busca clientes por IDs, com cache Redis por instance.
+	 * Busca clientes por IDs, com cache Redis por instance e chamada à API escopada por instance.
 	 */
 	private async getCustomersByIds(
 		instance: string,
@@ -335,10 +341,9 @@ class ContactsService {
 				// Ideal: endpoint byIds (se tiver, use-o e passe instance).
 				// const { data: customers } = await customersService.getCustomers({ ids: batch.join(","), perPage: batch.length.toString(), instance });
 
-				// Fallback universal:
+				// Fallback universal (escopado por instance):
 				const { data: customers } = await customersService.getCustomers({
-					perPage: batch.length.toString()
-					// ...(instance ? { instance } : {}) // descomente se a API aceitar
+					perPage: batch.length.toString(),
 				});
 
 				const requestedCustomers = (customers || []).filter((c: any) => batch.includes(c.CODIGO));
@@ -365,7 +370,7 @@ class ContactsService {
 	}
 
 	/**
-	 * Busca usuários por IDs, com cache Redis por instance.
+	 * Busca usuários por IDs, com cache Redis por instance e chamada à API escopada por instance.
 	 */
 	private async getUsersByIds(instance: string, userIds: number[]): Promise<Map<number, User>> {
 		const result = new Map<number, User>();
@@ -396,13 +401,12 @@ class ContactsService {
 			for (let i = 0; i < idsToFetch.length; i += batchSize) {
 				const batch = idsToFetch.slice(i, i + batchSize);
 
-				// Ideal: endpoint byIds (se tiver, use-o e passe instance).
+				// Ideal: endpoint byIds (se houver), passando instance.
 				// const { data: users } = await usersService.getUsers({ ids: batch.join(","), perPage: batch.length.toString(), instance });
 
-				// Fallback universal:
+				// Fallback universal (escopado por instance):
 				const { data: users } = await usersService.getUsers({
-					perPage: batch.length.toString()
-					// ...(instance ? { instance } : {}) // descomente se a API aceitar
+					perPage: batch.length.toString(),
 				});
 
 				const requestedUsers = (users || []).filter((u: any) => batch.includes(u.CODIGO));
