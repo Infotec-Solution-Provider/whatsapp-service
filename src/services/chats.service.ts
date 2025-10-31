@@ -108,6 +108,7 @@ class ChatsService {
 				where: {
 					isFinished: false,
 					sectorId: session.sectorId,
+					instance: session.instance,
 					userId: -1
 				},
 				include: {

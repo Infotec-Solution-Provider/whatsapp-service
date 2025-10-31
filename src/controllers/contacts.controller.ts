@@ -34,6 +34,8 @@ class ContactsController {
 	private async getCustomerContacts(req: Request, res: Response) {
 		const data = await contactsService.getCustomerContacts(req.session.instance, Number(req.params["id"]));
 
+		console.log(data)
+
 		res.status(200).send({
 			message: "Chats retrieved successfully!",
 			data
@@ -42,6 +44,8 @@ class ContactsController {
 
 	private async getContacts(req: Request, res: Response) {
 		const data = await contactsService.getContacts(req.session.instance);
+
+		console.log(data[0])
 
 		res.status(200).send({
 			message: "Chats retrieved successfully!",
@@ -91,11 +95,15 @@ class ContactsController {
 	}
 
 	private async updateContact(req: Request, res: Response) {
+
+		
 		const contactId = Number(req.params["contactId"]);
 		// Allow optional sectorIds in body to update sectors
 		const { sectorIds, ...updateData } = req.body;
 		const parsedSectorIds = Array.isArray(sectorIds) ? sectorIds.map((s: any) => Number(s)) : undefined;
-
+		console.log('Update Data:', updateData);
+		console.log('Parsed Sector IDs:', parsedSectorIds);
+		console.log('Body:', req.body);
 		const updatedContact = await contactsService.updateContact(contactId, updateData, parsedSectorIds);
 
 		res.status(200).send({

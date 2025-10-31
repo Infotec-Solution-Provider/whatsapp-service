@@ -7,6 +7,7 @@ import whatsappService from "../services/whatsapp.service";
 import JsonSessionStore from "../utils/json-session-store";
 import ProcessingLogger from "../utils/processing-logger";
 import parametersService from "../services/parameters.service";
+import chatsService from "../services/chats.service";
 
 type RunningSession = {
 	chatId: number;
@@ -19,10 +20,12 @@ type RunningSession = {
 };
 
 const ASK_CNPJ_MSG = "Para prosseguir, preciso vincular seu cadastro. Por favor, informe o CNPJ da sua empresa.";
-const INVALID_CNPJ_MSG = "CNPJ inválido. Por favor, digite um CNPJ válido (apenas números ou com formatação XX.XXX.XXX/XXXX-XX).";
+const INVALID_CNPJ_MSG =
+	"CNPJ inválido. Por favor, digite um CNPJ válido (apenas números ou com formatação XX.XXX.XXX/XXXX-XX).";
 const CUSTOMER_FOUND_MSG = "Cliente encontrado! Vinculando seu cadastro...";
 const CUSTOMER_LINKED_MSG = "Cadastro vinculado com sucesso! Você já pode prosseguir com o atendimento.";
-const CUSTOMER_NOT_FOUND_MSG = "Cliente não encontrado em nossa base de dados. Você será direcionado para atendimento humano.";
+const CUSTOMER_NOT_FOUND_MSG =
+	"Cliente não encontrado em nossa base de dados. Você será direcionado para atendimento humano.";
 const TIMEOUT_MSG = "Atendimento finalizado por inatividade.";
 
 const INACTIVITY_TIMEOUT_MS = process.env["CUSTOMER_LINKING_TIMEOUT_MS"]
@@ -124,11 +127,11 @@ class CustomerLinkingBot {
 
 						logger.log("Sessão expirada por inatividade. Direcionando para atendimento humano.");
 						await this.transferToHuman(chat, logger);
-						
+
 						const contact = await prismaService.wppContact.findUnique({ where: { id: s.contactId } });
 						const from = contact?.phone || "";
 						await this.sendBotText(from, chat, TIMEOUT_MSG);
-						
+
 						this.remove(s.chatId);
 						logger.success({ finished: true });
 					} catch (e) {
@@ -163,16 +166,18 @@ class CustomerLinkingBot {
 	}
 
 	/** Busca cliente por CNPJ na base de dados da instância */
-	private async findCustomerByCnpj(instance: string, cnpj: string, logger?: ProcessingLogger): Promise<number | null> {
+	private async findCustomerByCnpj(
+		instance: string,
+		cnpj: string,
+		logger?: ProcessingLogger
+	): Promise<number | null> {
 		try {
 			logger?.log("Buscando cliente por CNPJ", { cnpj });
 
 			// Busca na tabela de clientes da instância
-			const result = await instancesService.executeQuery<Array<{ CODIGO: number; NOME: string; CPF_CNPJ: string }>>(
-				instance,
-				"SELECT CODIGO, NOME, CPF_CNPJ FROM clientes WHERE CPF_CNPJ = ? LIMIT 1",
-				[cnpj]
-			);
+			const result = await instancesService.executeQuery<
+				Array<{ CODIGO: number; NOME: string; CPF_CNPJ: string }>
+			>(instance, "SELECT CODIGO, NOME, CPF_CNPJ FROM clientes WHERE CPF_CNPJ = ? LIMIT 1", [cnpj]);
 
 			if (result && result.length > 0 && result[0]) {
 				logger?.log("Cliente encontrado", { customerId: result[0].CODIGO, name: result[0].NOME });
@@ -205,21 +210,36 @@ class CustomerLinkingBot {
 	}
 
 	/** Transfere para atendimento humano */
-	private async transferToHuman(chat: WppChat, logger?: ProcessingLogger) {
+	private async transferToHuman(chat: WppChat, logger: ProcessingLogger) {
 		try {
 			logger?.log("Transferindo para atendimento humano");
-
-			// Remove o botId para liberar o chat para atendimento humano
-			await prismaService.wppChat.update({
-				where: { id: chat.id },
-				data: { botId: null }
-			});
 
 			await messagesDistributionService.addSystemMessage(
 				chat,
 				"Cliente não vinculado. Direcionando para atendimento humano.",
 				false
 			);
+
+			const sector = await prismaService.wppSector.findUniqueOrThrow({ where: { id: chat.sectorId! } });
+			const contact = await prismaService.wppContact.findUniqueOrThrow({ where: { id: chat.contactId! } });
+
+			await chatsService.systemFinishChatById(chat.id, "Transferido para atendimento humano");
+			const { chat: newChat } = await messagesDistributionService.createNewChat(
+				chat.instance,
+				[sector],
+				contact,
+				logger,
+				true
+			);
+			const avatarUrl = await whatsappService.getProfilePictureUrl(newChat.instance, contact.phone);
+			if (avatarUrl) {
+				await prismaService.wppChat.update({
+					data: { avatarUrl },
+					where: { id: newChat.id }
+				});
+			}
+
+			await messagesDistributionService.notifyChatStarted(logger, newChat);
 
 			logger?.log("Chat liberado para atendimento humano");
 		} catch (e) {
@@ -259,7 +279,7 @@ class CustomerLinkingBot {
 		const params = await parametersService.getSessionParams({
 			instance: chat.instance,
 			sectorId: chat.sectorId!,
-			userId: chat.userId!
+			userId: -1
 		});
 
 		const enabled = params["customer_linking_bot_enabled"];
@@ -273,17 +293,19 @@ class CustomerLinkingBot {
 		await this.ensureLoaded();
 		const session = await this.getOrCreate(chat, contact);
 
-		const logger = new ProcessingLogger(
-			chat.instance,
-			"customer-linking",
-			`start-${chat.id}-${Date.now()}`,
-			{ chatId: chat.id, contactId: contact.id }
-		);
+		const logger = new ProcessingLogger(chat.instance, "customer-linking", `start-${chat.id}-${Date.now()}`, {
+			chatId: chat.id,
+			contactId: contact.id
+		});
 
 		try {
 			logger.log("Iniciando bot de vinculação de cliente");
 
-			await messagesDistributionService.addSystemMessage(chat, "Iniciando processo de vinculação de cliente.", false);
+			await messagesDistributionService.addSystemMessage(
+				chat,
+				"Iniciando processo de vinculação de cliente.",
+				false
+			);
 
 			await prismaService.wppChat.update({
 				where: { id: chat.id },
@@ -296,7 +318,7 @@ class CustomerLinkingBot {
 
 			logger.log("Solicitando CNPJ ao cliente");
 			await this.sendBotText(to, chat, ASK_CNPJ_MSG, quotedId);
-			
+
 			logger.success({ step: session.step });
 		} catch (err) {
 			logger.failed(err);
@@ -315,25 +337,20 @@ class CustomerLinkingBot {
 		const instance = chat.instance;
 		const from = message.from;
 
-		const logger = new ProcessingLogger(
-			instance,
-			"customer-linking",
-			`chat-${chat.id}-${Date.now()}`,
-			{
-				chatId: chat.id,
-				contactId: contact.id,
-				messageId: message.id,
-				step: session.step
-			}
-		);
+		const logger = new ProcessingLogger(instance, "customer-linking", `chat-${chat.id}-${Date.now()}`, {
+			chatId: chat.id,
+			contactId: contact.id,
+			messageId: message.id,
+			step: session.step
+		});
 
 		try {
 			if (session.step === 0) {
 				// Aguardando CNPJ
 				logger.log("Step 0: aguardando CNPJ");
-				
+
 				const cnpj = this.validateAndNormalizeCnpj(message.body);
-				
+
 				if (!cnpj) {
 					logger.log("CNPJ inválido recebido");
 					await this.sendBotText(from, chat, INVALID_CNPJ_MSG, message.id);
@@ -350,37 +367,37 @@ class CustomerLinkingBot {
 					// Cliente encontrado
 					logger.log("Cliente encontrado, vinculando");
 					session.foundCustomerId = customerId;
-					
+
 					await this.sendBotText(from, chat, CUSTOMER_FOUND_MSG, message.id);
-					
+
 					// Vincula o cliente ao contato
 					await this.linkCustomerToContact(contact.id, customerId, logger);
-					
+
 					await this.sendBotText(from, chat, CUSTOMER_LINKED_MSG);
-					
+
 					// Finaliza o bot
 					session.step = 2;
 					session.lastActivity = Date.now();
 					store.scheduleSave(() => this.sessions.values());
-					
+
 					await this.finishBot(chat, logger);
 					this.remove(chat.id);
-					
+
 					logger.success({ step: session.step, customerId, linked: true });
 				} else {
 					// Cliente não encontrado
 					logger.log("Cliente não encontrado, transferindo para atendimento humano");
-					
+
 					await this.sendBotText(from, chat, CUSTOMER_NOT_FOUND_MSG, message.id);
-					
+
 					// Transfere para atendimento humano
 					session.step = 2;
 					session.lastActivity = Date.now();
 					store.scheduleSave(() => this.sessions.values());
-					
+
 					await this.transferToHuman(chat, logger);
 					this.remove(chat.id);
-					
+
 					logger.success({ step: session.step, customerNotFound: true });
 				}
 
@@ -410,10 +427,10 @@ class CustomerLinkingBot {
 	 */
 	public async reset(chatId: number, contactId: number) {
 		await this.ensureLoaded();
-		this.sessions.set(chatId, { 
-			chatId, 
+		this.sessions.set(chatId, {
+			chatId,
 			contactId,
-			step: 0, 
+			step: 0,
 			lastActivity: Date.now(),
 			timeoutms: INACTIVITY_TIMEOUT_MS
 		});

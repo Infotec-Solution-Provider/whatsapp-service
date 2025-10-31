@@ -133,6 +133,15 @@ class WhatsappService {
 	}
 
 	public async getClientBySector(instance: string, sectorId: number) {
+		console.log({
+				instance,
+				isActive: true,
+				WppSector: {
+					some: {
+						id: sectorId
+					}
+				}
+			})
 		const dbClient = await prismaService.wppClient.findFirstOrThrow({
 			where: {
 				instance,

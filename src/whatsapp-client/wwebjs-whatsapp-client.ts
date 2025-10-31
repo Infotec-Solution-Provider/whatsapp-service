@@ -192,6 +192,11 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		try {
 			const chat = await msg.getChat();
 
+			console.log(msg.from)
+			if (msg.from !== "555191167029@c.us") {
+				return process.log("Message ignored: it is from an unknown sender.");
+			}
+
 			if (msg.fromMe) {
 				return process.log("Message ignored: it is from me.");
 			}
@@ -204,9 +209,9 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				return process.log("Message ignored: it is ignored type.");
 			}
 
-			if (msg.from === "status@broadcast") {
+/* 			if (msg.from === "status@broadcast") {
 				return process.log("Message ignored: it is broadcast.");
-			}
+			} */
 			const parsedMsg = await MessageParser.parse(process, this.instance, msg, false, false, chat.isGroup);
 			process.log(`Message is successfully parsed!`, parsedMsg);
 

@@ -97,7 +97,10 @@ class ContactsService {
 			// Com filtros de cliente, precisamos buscar todos e filtrar depois
 			contacts = await prismaService.wppContact.findMany({
 				where: whereConditions,
-				orderBy: { id: "desc" }
+				orderBy: { id: "desc" },
+				include: {
+					sectors: true
+				}
 			});
 			total = contacts.length; // Será recalculado após filtros
 		} else {
@@ -107,7 +110,10 @@ class ContactsService {
 					where: whereConditions,
 					skip: (page - 1) * perPage,
 					take: perPage,
-					orderBy: { id: "desc" }
+					orderBy: { id: "desc" },
+					include: {
+						sectors: true
+					}
 				}),
 				prismaService.wppContact.count({
 					where: whereConditions
@@ -347,6 +353,9 @@ class ContactsService {
 				instance,
 				customerId,
 				isDeleted: false
+			},
+			include: {
+				sectors: true
 			}
 		});
 
@@ -357,6 +366,9 @@ class ContactsService {
 			where: {
 				instance,
 				isDeleted: false
+			},
+			include: {
+				sectors: true
 			}
 		});
 		return contacts;

@@ -28,10 +28,10 @@ import chatsService from "./chats.service";
 import messagesService from "./messages.service";
 import whatsappService from "./whatsapp.service";
 import chooseSectorBot from "../bots/choose-sector.bot";
-import chooseSellerBot from "../bots/seller-vollo.bot";
 import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
 import customerLinkingBot from "../bots/customer-linking.bot";
 import { InternalServerError } from "@rgranatodutra/http-errors";
+import chooseSellerBot from "../bots/seller-vollo.bot";
 
 // Interface para bots que processam mensagens
 interface BotProcessor {
@@ -59,7 +59,8 @@ class MessagesDistributionService {
 		this.botRegistry.set(1, chooseSectorBot);
 		this.botRegistry.set(2, exatronSatisfactionBot);
 		this.botRegistry.set(3, customerLinkingBot);
-		// Adicionar novos bots aqui é simples: this.botRegistry.set(4, newBot);
+		this.botRegistry.set(4, chooseSellerBot); // Bot Vollo para tratamento específico de instância Vollo
+		// Adicionar novos bots aqui é simples: this.botRegistry.set(5, newBot);
 	}
 
 	public async getFlow(instance: string, sectorId: number): Promise<MessageFlow> {
@@ -104,13 +105,7 @@ class MessagesDistributionService {
 		}
 
 		logger.log(`Processando mensagem com bot ID ${chat.botId}`);
-
-		// Tratamento especial para instância Vollo com bot de escolha de setor
-		if (chat.botId === 1 && chat.instance === "vollo") {
-			await chooseSellerBot.processMessage(chat, contact, msg);
-		} else {
-			await bot.processMessage(chat, contact, msg);
-		}
+		await bot.processMessage(chat, contact, msg);
 	}
 
 	/**
@@ -131,12 +126,6 @@ class MessagesDistributionService {
 		}
 
 		logger.log(`Inicializando bot ID ${chat.botId} para novo chat`);
-
-		// Tratamento especial para instância Vollo
-		if (chat.botId === 1 && chat.instance === "vollo") {
-			await chooseSellerBot.processMessage(chat, contact, msg);
-			return;
-		}
 
 		// Se o bot tem método startBot, usa; caso contrário, usa processMessage
 		if (bot.startBot) {
@@ -171,11 +160,12 @@ class MessagesDistributionService {
 	/**
 	 * Cria um novo chat baseado na quantidade de setores
 	 */
-	private async createNewChat(
+	public async createNewChat(
 		instance: string,
 		sectors: WppSector[],
 		contact: WppContact,
-		logger: ProcessingLogger
+		logger: ProcessingLogger,
+		skipBotCheck: boolean = false
 	): Promise<{ chat: WppChat; systemMessage: string | null }> {
 		// Múltiplos setores: ativa bot de escolha de setor
 		if (sectors.length > 1) {
@@ -188,22 +178,6 @@ class MessagesDistributionService {
 					sectorId: sectors[0]!.id,
 					startedAt: new Date(),
 					botId: 1
-				}
-			});
-			return { chat, systemMessage: null };
-		}
-
-		// Tratamento especial para instância Vollo
-		if (instance === "vollo") {
-			const chat = await prismaService.wppChat.create({
-				data: {
-					instance,
-					type: "RECEPTIVE",
-					contactId: contact.id,
-					sectorId: sectors[0]!.id,
-					startedAt: new Date(),
-					botId: 1,
-					userId: 15
 				}
 			});
 			return { chat, systemMessage: null };
@@ -222,22 +196,32 @@ class MessagesDistributionService {
 		} as WppChat;
 
 		// Verifica se algum bot deve ser ativado
-		const botId = await this.determineBotForNewChat(tempChat, contact, logger);
+		if (!skipBotCheck) {
+			const botId = await this.determineBotForNewChat(tempChat, contact, logger);
 
-		if (botId) {
-			// Se tem bot, cria chat SEM usar MessageFlow (não atribui atendente)
-			logger.log(`Bot ID ${botId} será ativado. Criando chat sem atribuir atendente.`);
-			const chat = await prismaService.wppChat.create({
-				data: {
+			if (botId) {
+				// Se tem bot, cria chat com o bot ativo (pode incluir userId se bot definir)
+				logger.log(`Bot ID ${botId} será ativado. Criando chat com bot.`);
+				const chatData: any = {
 					instance,
 					type: "RECEPTIVE",
 					contactId: contact.id,
 					sectorId: sectors[0]!.id,
 					startedAt: new Date(),
 					botId
+				};
+
+				// Bot Vollo (ID 4) tem tratamento especial: atribui userId=15 fixo
+				if (botId === 4) {
+					chatData.userId = 15;
+					logger.log("Bot Vollo detectado. Atribuindo userId=15 (operador padrão Vollo).");
 				}
-			});
-			return { chat, systemMessage: null };
+
+				const chat = await prismaService.wppChat.create({
+					data: chatData
+				});
+				return { chat, systemMessage: null };
+			}
 		}
 
 		// Sem bot: usa MessageFlow normal (atribui atendente)
@@ -446,7 +430,7 @@ class MessagesDistributionService {
 		}
 	}
 
-	private async insertAndNotify(
+	public async insertAndNotify(
 		logger: ProcessingLogger,
 		chat: WppChat,
 		msg: WppMessage,

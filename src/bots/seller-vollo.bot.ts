@@ -102,8 +102,7 @@ class ChooseSellerBot {
 					this.remove(chat.id.toString());
 					break;
 				} else if (!validOption && session.stepCount === 1) {
-					const repeat =
-						"Por gentileza, escolha uma das vendedoras abaixo:\n\n1 - Aline\n2 - Nathalia";
+					const repeat = "Por gentileza, escolha uma das vendedoras abaixo:\n\n1 - Aline\n2 - Nathalia";
 
 					await whatsappService.sendBotMessage(message.from, {
 						chat,
@@ -138,10 +137,11 @@ class ChooseSellerBot {
 						break;
 					}
 
-					const user = result.isFinal && result.chatData
-						? users.find((u) => u.CODIGO === result.chatData!.userId) ||
-							({ NOME: "Supervisão", CODIGO: -1 } as User)
-						: ({ NOME: "Supervisão", CODIGO: -1 } as User);
+					const user =
+						result.isFinal && result.chatData
+							? users.find((u) => u.CODIGO === result.chatData!.userId) ||
+								({ NOME: "Supervisão", CODIGO: -1 } as User)
+							: ({ NOME: "Supervisão", CODIGO: -1 } as User);
 
 					await whatsappService.sendBotMessage(message.from, {
 						chat,
@@ -156,6 +156,10 @@ class ChooseSellerBot {
 				}
 			}
 		}
+	}
+
+	async shouldActivate(chat: WppChat): Promise<boolean> {
+		return chat.instance === "vollo";
 	}
 }
 
