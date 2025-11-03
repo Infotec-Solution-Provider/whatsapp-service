@@ -138,7 +138,12 @@ class MessageForwardingService {
 	}
 
 	private async getWhatsappClient(session: SessionData): Promise<WhatsappClient> {
-		const client = await whatsappService.getClientBySector(session.instance, session.sectorId);
+		const sector = await prismaService.wppSector.findUnique({ where: { id: session.sectorId } });
+
+		if (!sector || !sector.defaultClientId) {
+			throw new BadRequestError("Nenhum cliente WhatsApp padrão configurado para o setor do usuário.");
+		}
+		const client = await whatsappService.getClient(sector.defaultClientId);
 
 		if (!client) {
 			throw new BadRequestError("Nenhum cliente WhatsApp encontrado para o setor especificado.");
@@ -245,7 +250,8 @@ class MessageForwardingService {
 			fileId: originalMessage.fileId,
 			fileName: originalMessage.fileName,
 			fileType: originalMessage.fileType,
-			fileSize: originalMessage.fileSize
+			fileSize: originalMessage.fileSize,
+			clientId: client.id
 		};
 
 		const savedMessage = await messagesService.insertMessage(messageToSave);

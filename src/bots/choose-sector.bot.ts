@@ -82,7 +82,7 @@ class ChooseSectorBot {
 		switch (currentStep) {
 			case 1:
 				this.setRunningStep(chat.id, 2);
-				whatsappService.sendBotMessage(message.from, {
+				whatsappService.sendBotMessage(message.from, message.clientId!, {
 					chat,
 					text: chooseSectorMessage
 				});
@@ -110,12 +110,12 @@ class ChooseSectorBot {
 						operadores,
 						setor: chooseSector
 					});
-					whatsappService.sendBotMessage(message.from, {
+					whatsappService.sendBotMessage(message.from, message.clientId!, {
 						chat,
 						text: answer
 					});
 				} else {
-					whatsappService.sendBotMessage(message.from, {
+					whatsappService.sendBotMessage(message.from, message.clientId!, {
 						chat,
 						text: "Opção inválida! Tente novamente."
 					});
@@ -130,12 +130,12 @@ class ChooseSectorBot {
 
 				if (chooseOptionOp === 0) {
 					this.setRunningStep(chat.id, 2);
-					whatsappService.sendBotMessage(message.from, {
+					whatsappService.sendBotMessage(message.from, message.clientId!, {
 						chat,
 						text: "Tudo bem, voltando para a escolha de setor..."
 					});
 					setTimeout(() => {
-						whatsappService.sendBotMessage(message.from, {
+						whatsappService.sendBotMessage(message.from, message.clientId!, {
 							chat,
 							text: chooseSectorMessage
 						});
@@ -152,18 +152,18 @@ class ChooseSectorBot {
 
 					this.removeRunningStep(chat.id);
 					await messagesDistributionService.transferChatOperator(sector, chooseOp, contact, chat);
-					whatsappService.sendBotMessage(message.from, {
+					whatsappService.sendBotMessage(message.from, message.clientId!, {
 						chat,
 						text: answer
 					});
 					setTimeout(() => {
-						whatsappService.sendBotMessage(message.from, {
+						whatsappService.sendBotMessage(message.from, message.clientId!, {
 							chat,
 							text: operatoranswer
 						});
 					}, 200);
 				} else {
-					whatsappService.sendBotMessage(message.from, {
+					whatsappService.sendBotMessage(message.from, message.clientId!, {
 						chat,
 						text: "Opção inválida! Tente novamente."
 					});
@@ -177,12 +177,12 @@ class ChooseSectorBot {
 					case 1:
 						this.setRunningStep(chat.id, 2);
 
-						whatsappService.sendBotMessage(message.from, {
+						whatsappService.sendBotMessage(message.from, message.clientId!, {
 							chat,
 							text: "Certo, retornando ao menu de setores..."
 						});
 						setTimeout(() => {
-							whatsappService.sendBotMessage(message.from, {
+							whatsappService.sendBotMessage(message.from, message.clientId!, {
 								chat,
 								text: chooseSectorMessage
 							});
@@ -204,7 +204,7 @@ class ChooseSectorBot {
 						await socketService.emit(SocketEventType.WppChatFinished, `${chat.instance}:chat:${chat.id}`, {
 							chatId: chat.id
 						});
-						whatsappService.sendBotMessage(message.from, {
+						whatsappService.sendBotMessage(message.from, message.clientId!, {
 							chat,
 							text: "Atendimento encerrado. Caso precise de algo, estamos à disposição!"
 						});
@@ -218,14 +218,14 @@ class ChooseSectorBot {
 							data: { userId: user, botId: null }
 						});
 
-						whatsappService.sendBotMessage(message.from, {
+						whatsappService.sendBotMessage(message.from, message.clientId!, {
 							chat,
 							text: "Tudo bem! Vamos continuar aguardando o atendimento."
 						});
 						break;
 
 					default:
-						whatsappService.sendBotMessage(message.from, {
+						whatsappService.sendBotMessage(message.from, message.clientId!, {
 							chat,
 							text: "Opção inválida! Responda apenas com o número da opção desejada."
 						});
@@ -239,8 +239,8 @@ class ChooseSectorBot {
 		}
 	}
 
-	public async askIfWantsToBackToMenu(chat: WppChat, contact: WppContact) {
-		await whatsappService.sendBotMessage(contact.phone, {
+	public async askIfWantsToBackToMenu(clientId: number, chat: WppChat, contact: WppContact) {
+		await whatsappService.sendBotMessage(contact.phone, clientId, {
 			chat,
 			text: [
 				"Deseja voltar ao menu de setores, finalizar conversa ou aguardar resposta do contato?",

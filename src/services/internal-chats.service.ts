@@ -543,9 +543,14 @@ class InternalChatsService {
 		data: InternalSendMessageData,
 		message: InternalMessage
 	) {
-		const client = await whatsappService.getClientBySector(session.instance, session.sectorId);
+		const sector = await prismaService.wppSector.findUnique({ where: { id: session.sectorId } });
 
-		if (!(client instanceof WWEBJSWhatsappClient)) {
+		if (!sector || !sector.defaultClientId) {
+			throw new BadRequestError("Nenhum cliente WhatsApp padrão configurado para o setor do usuário.");
+		}
+		const client = whatsappService.getClient(sector.defaultClientId);
+
+		if (!client) {
 			return;
 		}
 
@@ -578,29 +583,23 @@ class InternalChatsService {
 
 		if (groupId && client && message.fileId && message.fileName) {
 			const fileUrl = filesService.getFileDownloadUrl(message.fileId);
-			return await client.sendMessage(
-				{
-					fileName: message.fileName!,
-					fileUrl,
-					to: groupId,
-					quotedId: data.quotedId || null,
-					sendAsAudio: data.sendAsAudio === "true",
-					sendAsDocument: data.sendAsDocument === "true",
-					text,
-					mentions: waMentions
-				},
-				true
-			);
+			return await client.sendMessage({
+				fileName: message.fileName!,
+				fileUrl,
+				to: groupId,
+				quotedId: data.quotedId || null,
+				sendAsAudio: data.sendAsAudio === "true",
+				sendAsDocument: data.sendAsDocument === "true",
+				text,
+				mentions: waMentions
+			});
 		} else if (groupId && client) {
-			return await client.sendMessage(
-				{
-					to: groupId,
-					quotedId: data.quotedId || null,
-					text,
-					mentions: waMentions
-				},
-				true
-			);
+			return await client.sendMessage({
+				to: groupId,
+				quotedId: data.quotedId || null,
+				text,
+				mentions: waMentions
+			});
 		}
 
 		return await client.sendMessage({
@@ -667,7 +666,16 @@ class InternalChatsService {
 			// Se a mensagem pertence a um grupo do WhatsApp, edita lá também
 			if (originalMsg.chat && originalMsg.chat?.wppGroupId && session.sectorId) {
 				process.log("Mensagem pertence a um grupo do WhatsApp, tentando editar lá também.");
-				const client = await whatsappService.getClientBySector(session.instance, session.sectorId);
+				const sector = await prismaService.wppSector.findUnique({ where: { id: session.sectorId } });
+
+				if (!sector || !sector.defaultClientId) {
+					throw new BadRequestError("Nenhum cliente WhatsApp padrão configurado para o setor do usuário.");
+				}
+				const client = await whatsappService.getClient(sector.defaultClientId);
+
+				if (!client) {
+					throw new BadRequestError("Nenhum cliente WhatsApp encontrado para o setor especificado.");
+				}
 
 				if (client && originalMsg.wwebjsId) {
 					process.log("Editando mensagem no grupo do WhatsApp.");
@@ -761,7 +769,16 @@ class InternalChatsService {
 				return;
 			}
 
-			const client = await whatsappService.getClientBySector(session.instance, session.sectorId);
+			const sector = await prismaService.wppSector.findUnique({ where: { id: session.sectorId } });
+
+			if (!sector || !sector.defaultClientId) {
+				throw new BadRequestError("Nenhum cliente WhatsApp padrão configurado para o setor do usuário.");
+			}
+			const client = await whatsappService.getClient(sector.defaultClientId);
+
+			if (!client) {
+				throw new BadRequestError("Nenhum cliente WhatsApp encontrado para o setor especificado.");
+			}
 
 			for (const chatId of internalTargetChatIds) {
 				const internalChat = await prismaService.internalChat.findUnique({

@@ -60,7 +60,7 @@ class ChooseSellerBot {
 				const welcome =
 					"Olá! 😊\n\nCom qual das nossas vendedoras você gostaria de falar?\n\n1 - Aline\n2 - Nathalia\n\nFico no aguardo da sua escolha!";
 
-				await whatsappService.sendBotMessage(message.from, {
+				await whatsappService.sendBotMessage(message.from, message.clientId!, {
 					chat,
 					text: welcome,
 					quotedId: message.id
@@ -82,7 +82,7 @@ class ChooseSellerBot {
 					});
 
 					if (!sector) {
-						await whatsappService.sendBotMessage(message.from, {
+						await whatsappService.sendBotMessage(message.from, message.clientId!, {
 							chat,
 							text: "Setor não encontrado. Por favor, tente novamente mais tarde.",
 							quotedId: message.id
@@ -91,7 +91,7 @@ class ChooseSellerBot {
 						break;
 					}
 
-					await whatsappService.sendBotMessage(message.from, {
+					await whatsappService.sendBotMessage(message.from, message.clientId!, {
 						chat,
 						text: `Estamos transferindo você para ${op?.name}...\nVocê será atendido em instantes.`,
 						quotedId: message.id
@@ -104,7 +104,7 @@ class ChooseSellerBot {
 				} else if (!validOption && session.stepCount === 1) {
 					const repeat = "Por gentileza, escolha uma das vendedoras abaixo:\n\n1 - Aline\n2 - Nathalia";
 
-					await whatsappService.sendBotMessage(message.from, {
+					await whatsappService.sendBotMessage(message.from, message.clientId!, {
 						chat,
 						text: repeat,
 						quotedId: message.id
@@ -128,7 +128,7 @@ class ChooseSellerBot {
 					});
 
 					if (!sector) {
-						await whatsappService.sendBotMessage(message.from, {
+						await whatsappService.sendBotMessage(message.from, message.clientId!, {
 							chat,
 							text: "Setor não encontrado. Por favor, tente novamente mais tarde.",
 							quotedId: message.id
@@ -143,7 +143,7 @@ class ChooseSellerBot {
 								({ NOME: "Supervisão", CODIGO: -1 } as User)
 							: ({ NOME: "Supervisão", CODIGO: -1 } as User);
 
-					await whatsappService.sendBotMessage(message.from, {
+					await whatsappService.sendBotMessage(message.from, message.clientId!, {
 						chat,
 						text: `Estamos transferindo você para um atendente...\nVocê será atendido em instantes.`,
 						quotedId: message.id

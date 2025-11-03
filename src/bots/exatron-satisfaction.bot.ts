@@ -12,6 +12,7 @@ import parametersService from "../services/parameters.service";
 
 type RunningSession = {
 	chatId: number;
+	sectorId?: number; // optional sector ID for fetching client
 	userId: number | null;
 	step: number; // 0 -> espera nota inicial; 1 -> respondendo perguntas; 2 -> finalização
 	questionIndex: number;
@@ -79,7 +80,7 @@ class ExatronSatisfactionBot {
 		const timeoutms = Number(userParams["satisfaction_survey_timeout_ms"] || INACTIVITY_TIMEOUT_MS);
 
 		if (!s) {
-			s = {
+			const newSession: RunningSession = {
 				chatId: chat.id,
 				userId: chat.contactId,
 				step: 0,
@@ -87,6 +88,10 @@ class ExatronSatisfactionBot {
 				lastActivity: Date.now(),
 				timeoutms
 			};
+			if (chat.sectorId) {
+				newSession.sectorId = chat.sectorId;
+			}
+			s = newSession;
 			this.sessions.set(chat.id, s);
 			store.scheduleSave(() => this.sessions.values());
 		}
@@ -102,7 +107,14 @@ class ExatronSatisfactionBot {
 	/** Permite resetar o fluxo manualmente (ex.: intervenção humana). */
 	public async reset(chatId: number, userId: number) {
 		await this.ensureLoaded();
-		this.sessions.set(chatId, { chatId, step: 0, questionIndex: 0, lastActivity: Date.now(), userId });
+		const newSession: RunningSession = { 
+			chatId, 
+			step: 0, 
+			questionIndex: 0, 
+			lastActivity: Date.now(), 
+			userId 
+		};
+		this.sessions.set(chatId, newSession);
 		store.scheduleSave(() => this.sessions.values());
 	}
 
@@ -111,43 +123,59 @@ class ExatronSatisfactionBot {
 		this.watcherStarted = true;
 
 		setInterval(async () => {
-			const now = Date.now();
-
-			for (const s of Array.from(this.sessions.values())) {
-				const timeoutms = s.timeoutms ?? INACTIVITY_TIMEOUT_MS;
-
-				if (s.step < 2 && now - s.lastActivity >= timeoutms) {
-					try {
-						const chat = await prismaService.wppChat.findUnique({ where: { id: s.chatId } });
-						if (!chat || chat.isFinished) {
-							this.remove(s.chatId);
-							continue;
-						}
-						const logger = new ProcessingLogger(
-							chat.instance,
-							"exatron-satisfaction",
-							`timeout-${chat.id}-${now}`,
-							{
-								chatId: chat.id,
-								step: s.step,
-								reason: "inactivity-timeout"
-							}
-						);
-						logger.log("Sessão expirada por inatividade. Finalizando.");
-						await this.finishChat(chat, logger);
-						const contact = chat.contactId
-							? await prismaService.wppContact.findUnique({ where: { id: chat.contactId } })
-							: null;
-						const from = contact?.phone || "";
-						await this.sendBotText(from, chat, TIMEOUT_MSG);
-						this.remove(s.chatId);
-						logger.success({ finished: true });
-					} catch (e) {
-						// silêncio: próxima iteração tentará novamente se ainda existir
-					}
-				}
+			try {
+				await this.checkSessionTimeouts();
+			} catch (err) {
+				console.error("Error in timeout watcher:", err);
 			}
 		}, 60_000); // verifica a cada 1 min
+	}
+
+	private async checkSessionTimeouts(): Promise<void> {
+		const now = Date.now();
+
+		for (const s of Array.from(this.sessions.values())) {
+			const timeoutms = s.timeoutms ?? INACTIVITY_TIMEOUT_MS;
+
+			if (s.step < 2 && now - s.lastActivity >= timeoutms) {
+				await this.handleSessionTimeout(s, now);
+			}
+		}
+	}
+
+	private async handleSessionTimeout(session: RunningSession, now: number): Promise<void> {
+		try {
+			const chat = await prismaService.wppChat.findUnique({ where: { id: session.chatId } });
+			if (!chat || chat.isFinished) {
+				this.remove(session.chatId);
+				return;
+			}
+
+			const logger = new ProcessingLogger(
+				chat.instance,
+				"exatron-satisfaction",
+				`timeout-${chat.id}-${now}`,
+				{
+					chatId: chat.id,
+					step: session.step,
+					reason: "inactivity-timeout"
+				}
+			);
+			logger.log("Sessão expirada por inatividade. Finalizando.");
+
+			await this.finishChat(chat, logger);
+
+			const contact = chat.contactId
+				? await prismaService.wppContact.findUnique({ where: { id: chat.contactId } })
+				: null;
+			const from = contact?.phone || "";
+
+			await this.sendBotText(from, chat, TIMEOUT_MSG);
+			this.remove(session.chatId);
+			logger.success({ finished: true });
+		} catch (err) {
+			// Silently continue - will retry on next interval if session still exists
+		}
 	}
 
 	private getRating(text: string): number | null {
@@ -160,7 +188,8 @@ class ExatronSatisfactionBot {
 
 	/** Helper para enviar texto do bot, citando opcionalmente a mensagem do cliente. */
 	private async sendBotText(from: string, chat: WppChat, text: string, quotedId?: number) {
-		await whatsappService.sendBotMessage(from, { chat, text, quotedId: quotedId ?? null });
+		const clientId = chat.sectorId || 1; // Fallback to 1 if sector not available
+		await whatsappService.sendBotMessage(from, clientId, { chat, text, quotedId: quotedId ?? null });
 	}
 
 	/** Envia a pergunta pelo índice. */
@@ -323,7 +352,6 @@ class ExatronSatisfactionBot {
 		store.scheduleSave(() => this.sessions.values());
 
 		const instance = chat.instance;
-		const from = message.from;
 
 		const logger = new ProcessingLogger(instance, "exatron-satisfaction", `chat-${chat.id}-${Date.now()}`, {
 			chatId: chat.id,
@@ -332,70 +360,102 @@ class ExatronSatisfactionBot {
 			step: session.step,
 			questionIndex: session.questionIndex
 		});
+
 		try {
-			if (session.step === 0) {
-				// Espera a primeira nota (1-10)
-				logger.log("Step 0: aguardando nota inicial");
-				const rating = this.getRating(message.body);
-				if (rating === null) {
-					logger.log("Nota inválida recebida");
-					await this.sendBotText(from, chat, INVALID_RATING_MSG, message.id);
-					return;
-				}
-
-				logger.log("Nota válida recebida", { rating });
-				await this.tryStoreInitialRating(instance, chat, message.body, rating, logger);
-
-				session.step = 1;
-				session.questionIndex = 0;
-				session.lastActivity = Date.now();
-				store.scheduleSave(() => this.sessions.values());
-				logger.log("Enviando primeira pergunta", { index: session.questionIndex });
-				await this.sendQuestion(from, chat, session.questionIndex, message.id);
-				logger.success({ step: session.step, questionIndex: session.questionIndex });
-				return;
-			}
-
-			if (session.step === 1) {
-				logger.log("Step 1: aguardando resposta da pergunta", { index: session.questionIndex });
-				const rating = this.getRating(message.body);
-				if (rating === null) {
-					logger.log("Resposta inválida para pergunta", { index: session.questionIndex });
-					await this.sendBotText(from, chat, INVALID_RATING_MSG, message.id);
-					return;
-				}
-
-				const question = QUESTIONS[session.questionIndex]!;
-				logger.log("Resposta válida recebida para pergunta", { index: session.questionIndex, rating });
-				await this.tryStoreQuestionAnswer(instance, chat, contact, question, message.body, rating, logger);
-
-				session.questionIndex++;
-				session.lastActivity = Date.now();
-				store.scheduleSave(() => this.sessions.values());
-				if (session.questionIndex < QUESTIONS.length) {
-					logger.log("Enviando próxima pergunta", { index: session.questionIndex });
-					await this.sendQuestion(from, chat, session.questionIndex, message.id);
-					logger.success({ step: session.step, questionIndex: session.questionIndex });
-					return;
-				}
-
-				// Sem mais perguntas -> finaliza
-				session.step = 2;
-				session.lastActivity = Date.now();
-				store.scheduleSave(() => this.sessions.values());
-				logger.log("Todas perguntas respondidas, avançando para finalização");
-			}
-
-			if (session.step === 2) {
-				await this.finishChat(chat, logger);
-				await this.sendBotText(from, chat, THANKS_MSG, message.id);
-				this.remove(chat.id);
-				logger.success({ step: session.step, finished: true });
-				return;
+			switch (session.step) {
+				case 0:
+					await this.handleInitialRating(chat, session, message, logger);
+					break;
+				case 1:
+					await this.handleQuestionAnswer(chat, contact, session, message, logger);
+					break;
+				case 2:
+					await this.handleCompletion(chat, session, message, logger);
+					break;
+				default:
+					logger.log(`Unknown step: ${session.step}`);
 			}
 		} catch (err) {
 			logger.failed(err);
 		}
+	}
+
+	private async handleInitialRating(
+		chat: WppChat,
+		session: RunningSession,
+		message: WppMessage,
+		logger: ProcessingLogger
+	): Promise<void> {
+		logger.log("Step 0: aguardando nota inicial");
+		const rating = this.getRating(message.body);
+
+		if (rating === null) {
+			logger.log("Nota inválida recebida");
+			await this.sendBotText(message.from, chat, INVALID_RATING_MSG, message.id);
+			return;
+		}
+
+		logger.log("Nota válida recebida", { rating });
+		await this.tryStoreInitialRating(chat.instance, chat, message.body, rating, logger);
+
+		// Advance to questions
+		session.step = 1;
+		session.questionIndex = 0;
+		session.lastActivity = Date.now();
+		store.scheduleSave(() => this.sessions.values());
+
+		logger.log("Enviando primeira pergunta", { index: session.questionIndex });
+		await this.sendQuestion(message.from, chat, session.questionIndex, message.id);
+		logger.success({ step: session.step, questionIndex: session.questionIndex });
+	}
+
+	private async handleQuestionAnswer(
+		chat: WppChat,
+		contact: WppContact,
+		session: RunningSession,
+		message: WppMessage,
+		logger: ProcessingLogger
+	): Promise<void> {
+		logger.log("Step 1: aguardando resposta da pergunta", { index: session.questionIndex });
+		const rating = this.getRating(message.body);
+
+		if (rating === null) {
+			logger.log("Resposta inválida para pergunta", { index: session.questionIndex });
+			await this.sendBotText(message.from, chat, INVALID_RATING_MSG, message.id);
+			return;
+		}
+
+		const question = QUESTIONS[session.questionIndex]!;
+		logger.log("Resposta válida recebida para pergunta", { index: session.questionIndex, rating });
+		await this.tryStoreQuestionAnswer(chat.instance, chat, contact, question, message.body, rating, logger);
+
+		session.questionIndex++;
+		session.lastActivity = Date.now();
+		store.scheduleSave(() => this.sessions.values());
+
+		if (session.questionIndex < QUESTIONS.length) {
+			logger.log("Enviando próxima pergunta", { index: session.questionIndex });
+			await this.sendQuestion(message.from, chat, session.questionIndex, message.id);
+			logger.success({ step: session.step, questionIndex: session.questionIndex });
+		} else {
+			// No more questions - advance to completion
+			session.step = 2;
+			session.lastActivity = Date.now();
+			store.scheduleSave(() => this.sessions.values());
+			logger.log("Todas perguntas respondidas, avançando para finalização");
+		}
+	}
+
+	private async handleCompletion(
+		chat: WppChat,
+		session: RunningSession,
+		message: WppMessage,
+		logger: ProcessingLogger
+	): Promise<void> {
+		await this.finishChat(chat, logger);
+		await this.sendBotText(message.from, chat, THANKS_MSG, message.id);
+		this.remove(chat.id);
+		logger.success({ step: session.step, finished: true });
 	}
 }
 

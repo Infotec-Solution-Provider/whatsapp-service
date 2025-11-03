@@ -80,8 +80,7 @@ class MessagesDistributionService {
 	private async getSectors(clientId: number) {
 		const sectors = await prismaService.wppSector.findMany({
 			where: {
-				wppInstanceId: clientId,
-				receiveChats: true
+				defaultClientId: clientId
 			}
 		});
 
@@ -430,12 +429,7 @@ class MessagesDistributionService {
 		}
 	}
 
-	public async insertAndNotify(
-		logger: ProcessingLogger,
-		chat: WppChat,
-		msg: WppMessage,
-		isChatNew: boolean = false
-	) {
+	public async insertAndNotify(logger: ProcessingLogger, chat: WppChat, msg: WppMessage, isChatNew: boolean = false) {
 		const insertedMsg = await this.insertMessageOnChat(logger, msg, chat);
 		if (isChatNew) {
 			await this.notifyChatStarted(logger, chat);
@@ -613,7 +607,8 @@ class MessagesDistributionService {
 			sentAt: now,
 			type: "chat",
 			chatId: chat.id,
-			contactId: chat.contactId
+			contactId: chat.contactId,
+			clientId: null
 		});
 
 		if (notify) {
@@ -646,7 +641,8 @@ class MessagesDistributionService {
 			type: "error",
 			chatId: chat?.id || null,
 			contactId: contact.id,
-			quotedId: quoteMessageId || null
+			quotedId: quoteMessageId || null,
+			clientId: null
 		});
 
 		if (notify && chat) {

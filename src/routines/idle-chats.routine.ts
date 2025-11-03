@@ -3,6 +3,7 @@ import prismaService from "../services/prisma.service";
 import chooseSectorBot from "../bots/choose-sector.bot";
 import { Logger } from "@in.pulse-crm/utils";
 import chatsService from "../services/chats.service";
+import whatsappService from "../services/whatsapp.service";
 
 interface MessageLike {
 	sentAt: Date;
@@ -59,8 +60,18 @@ export default async function runIdleChatsJob() {
 		const alreadySentQuestion = chooseSectorBot.checkIfAlreadyAskedToBackToMenu(chat);
 
 		if (!alreadySentQuestion) {
+			const sector = await prismaService.wppSector.findUnique({ where: { id: chat.sectorId! } });
+
+			if (!sector || !sector.defaultClientId) {
+				continue;
+			}
+			const client = await whatsappService.getClient(sector.defaultClientId);
+
+			if (!client) {
+				continue;
+			}
 			Logger.info(`Chat ${chat.id} está ocioso. Enviando mensagem para o contato.`);
-			await chooseSectorBot.askIfWantsToBackToMenu(chat, chat.contact);
+			await chooseSectorBot.askIfWantsToBackToMenu(client.id, chat, chat.contact);
 			return;
 		}
 

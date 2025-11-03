@@ -22,5 +22,5 @@ export default interface CreateMessageDto {
 	fileType?: null | string;
 	fileSize?: null | string;
 	isForwarded?: false | boolean;
-	clientId: number;
+	clientId: number | null;
 }

@@ -101,50 +101,63 @@ class CustomerLinkingBot {
 		this.watcherStarted = true;
 
 		setInterval(async () => {
-			const now = Date.now();
-
-			for (const s of Array.from(this.sessions.values())) {
-				const timeoutms = s.timeoutms ?? INACTIVITY_TIMEOUT_MS;
-
-				if (s.step < 2 && now - s.lastActivity >= timeoutms) {
-					try {
-						const chat = await prismaService.wppChat.findUnique({ where: { id: s.chatId } });
-						if (!chat || chat.isFinished) {
-							this.remove(s.chatId);
-							continue;
-						}
-
-						const logger = new ProcessingLogger(
-							chat.instance,
-							"customer-linking",
-							`timeout-${chat.id}-${now}`,
-							{
-								chatId: chat.id,
-								step: s.step,
-								reason: "inactivity-timeout"
-							}
-						);
-
-						logger.log("Sessão expirada por inatividade. Direcionando para atendimento humano.");
-						await this.transferToHuman(chat, logger);
-
-						const contact = await prismaService.wppContact.findUnique({ where: { id: s.contactId } });
-						const from = contact?.phone || "";
-						await this.sendBotText(from, chat, TIMEOUT_MSG);
-
-						this.remove(s.chatId);
-						logger.success({ finished: true });
-					} catch (e) {
-						// silêncio: próxima iteração tentará novamente se ainda existir
-					}
-				}
+			try {
+				await this.checkSessionTimeouts();
+			} catch (err) {
+				console.error("Error in timeout watcher:", err);
 			}
 		}, 60_000); // verifica a cada 1 min
 	}
 
+	private async checkSessionTimeouts(): Promise<void> {
+		const now = Date.now();
+
+		for (const s of Array.from(this.sessions.values())) {
+			const timeoutms = s.timeoutms ?? INACTIVITY_TIMEOUT_MS;
+
+			if (s.step < 2 && now - s.lastActivity >= timeoutms) {
+				await this.handleSessionTimeout(s, now);
+			}
+		}
+	}
+
+	private async handleSessionTimeout(session: RunningSession, now: number): Promise<void> {
+		try {
+			const chat = await prismaService.wppChat.findUnique({ where: { id: session.chatId } });
+			if (!chat || chat.isFinished) {
+				this.remove(session.chatId);
+				return;
+			}
+
+			const logger = new ProcessingLogger(
+				chat.instance,
+				"customer-linking",
+				`timeout-${chat.id}-${now}`,
+				{
+					chatId: chat.id,
+					step: session.step,
+					reason: "inactivity-timeout"
+				}
+			);
+
+			logger.log("Sessão expirada por inatividade. Direcionando para atendimento humano.");
+			await this.transferToHuman(chat, logger);
+
+			const contact = await prismaService.wppContact.findUnique({ where: { id: session.contactId } });
+			const from = contact?.phone || "";
+			await this.sendBotText(from, chat, TIMEOUT_MSG);
+
+			this.remove(session.chatId);
+			logger.success({ finished: true });
+		} catch (err) {
+			// Silently continue - will retry on next interval if session still exists
+		}
+	}
+
 	/** Helper para enviar texto do bot */
 	private async sendBotText(from: string, chat: WppChat, text: string, quotedId?: number) {
-		await whatsappService.sendBotMessage(from, { chat, text, quotedId: quotedId ?? null });
+		const clientId = chat.sectorId || 1; // Fallback to 1 if sector not available
+		await whatsappService.sendBotMessage(from, clientId, { chat, text, quotedId: quotedId ?? null });
 	}
 
 	/** Valida e normaliza CNPJ */
@@ -335,7 +348,6 @@ class CustomerLinkingBot {
 		store.scheduleSave(() => this.sessions.values());
 
 		const instance = chat.instance;
-		const from = message.from;
 
 		const logger = new ProcessingLogger(instance, "customer-linking", `chat-${chat.id}-${Date.now()}`, {
 			chatId: chat.id,
@@ -346,72 +358,92 @@ class CustomerLinkingBot {
 
 		try {
 			if (session.step === 0) {
-				// Aguardando CNPJ
-				logger.log("Step 0: aguardando CNPJ");
-
-				const cnpj = this.validateAndNormalizeCnpj(message.body);
-
-				if (!cnpj) {
-					logger.log("CNPJ inválido recebido");
-					await this.sendBotText(from, chat, INVALID_CNPJ_MSG, message.id);
-					return;
-				}
-
-				logger.log("CNPJ válido recebido", { cnpj });
-				session.cnpj = cnpj;
-
-				// Busca o cliente na base de dados
-				const customerId = await this.findCustomerByCnpj(instance, cnpj, logger);
-
-				if (customerId) {
-					// Cliente encontrado
-					logger.log("Cliente encontrado, vinculando");
-					session.foundCustomerId = customerId;
-
-					await this.sendBotText(from, chat, CUSTOMER_FOUND_MSG, message.id);
-
-					// Vincula o cliente ao contato
-					await this.linkCustomerToContact(contact.id, customerId, logger);
-
-					await this.sendBotText(from, chat, CUSTOMER_LINKED_MSG);
-
-					// Finaliza o bot
-					session.step = 2;
-					session.lastActivity = Date.now();
-					store.scheduleSave(() => this.sessions.values());
-
-					await this.finishBot(chat, logger);
-					this.remove(chat.id);
-
-					logger.success({ step: session.step, customerId, linked: true });
-				} else {
-					// Cliente não encontrado
-					logger.log("Cliente não encontrado, transferindo para atendimento humano");
-
-					await this.sendBotText(from, chat, CUSTOMER_NOT_FOUND_MSG, message.id);
-
-					// Transfere para atendimento humano
-					session.step = 2;
-					session.lastActivity = Date.now();
-					store.scheduleSave(() => this.sessions.values());
-
-					await this.transferToHuman(chat, logger);
-					this.remove(chat.id);
-
-					logger.success({ step: session.step, customerNotFound: true });
-				}
-
-				return;
-			}
-
-			if (session.step === 2) {
-				// Bot já finalizado, não deve processar mais mensagens
+				await this.handleCnpjInput(chat, contact, session, message, logger);
+			} else if (session.step === 2) {
 				logger.log("Step 2: bot já finalizado, ignorando mensagem");
-				return;
 			}
 		} catch (err) {
 			logger.failed(err);
 		}
+	}
+
+	private async handleCnpjInput(
+		chat: WppChat,
+		contact: WppContact,
+		session: RunningSession,
+		message: WppMessage,
+		logger: ProcessingLogger
+	): Promise<void> {
+		logger.log("Step 0: aguardando CNPJ");
+
+		const cnpj = this.validateAndNormalizeCnpj(message.body);
+
+		if (!cnpj) {
+			logger.log("CNPJ inválido recebido");
+			await this.sendBotText(message.from, chat, INVALID_CNPJ_MSG, message.id);
+			return;
+		}
+
+		logger.log("CNPJ válido recebido", { cnpj });
+		session.cnpj = cnpj;
+
+		// Busca o cliente na base de dados
+		const customerId = await this.findCustomerByCnpj(chat.instance, cnpj, logger);
+
+		if (customerId) {
+			await this.handleCustomerFound(chat, contact, session, message, customerId, logger);
+		} else {
+			await this.handleCustomerNotFound(chat, session, message, logger);
+		}
+	}
+
+	private async handleCustomerFound(
+		chat: WppChat,
+		contact: WppContact,
+		session: RunningSession,
+		message: WppMessage,
+		customerId: number,
+		logger: ProcessingLogger
+	): Promise<void> {
+		logger.log("Cliente encontrado, vinculando", { customerId });
+		session.foundCustomerId = customerId;
+
+		await this.sendBotText(message.from, chat, CUSTOMER_FOUND_MSG, message.id);
+
+		// Vincula o cliente ao contato
+		await this.linkCustomerToContact(contact.id, customerId, logger);
+		await this.sendBotText(message.from, chat, CUSTOMER_LINKED_MSG);
+
+		// Finaliza o bot
+		session.step = 2;
+		session.lastActivity = Date.now();
+		store.scheduleSave(() => this.sessions.values());
+
+		await this.finishBot(chat, logger);
+		this.remove(chat.id);
+
+		logger.success({ step: session.step, customerId, linked: true });
+	}
+
+	private async handleCustomerNotFound(
+		chat: WppChat,
+		session: RunningSession,
+		message: WppMessage,
+		logger: ProcessingLogger
+	): Promise<void> {
+		logger.log("Cliente não encontrado, transferindo para atendimento humano");
+
+		await this.sendBotText(message.from, chat, CUSTOMER_NOT_FOUND_MSG, message.id);
+
+		// Transfere para atendimento humano
+		session.step = 2;
+		session.lastActivity = Date.now();
+		store.scheduleSave(() => this.sessions.values());
+
+		await this.transferToHuman(chat, logger);
+		this.remove(chat.id);
+
+		logger.success({ step: session.step, customerNotFound: true });
 	}
 
 	/**

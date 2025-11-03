@@ -15,6 +15,7 @@ import usersService from "./users.service";
 import whatsappService, { SendTemplateData } from "./whatsapp.service";
 import ProcessingLogger from "../utils/processing-logger";
 import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
+import { BadRequestError } from "@rgranatodutra/http-errors";
 
 interface InpulseResult {
 	CODIGO: number;
@@ -65,9 +66,7 @@ class ChatsService {
 				contactId: contact.id,
 				isFinished: false,
 				sector: {
-					WppInstance: {
-						id: clientId
-					}
+					defaultClientId: clientId
 				}
 			}
 		});
@@ -481,10 +480,21 @@ class ChatsService {
 
 			const message = `Atendimento iniciado por ${user.NOME}.`;
 			await messagesDistributionService.addSystemMessage(newChat as WppChat, message, true);
+			const sector = await prismaService.wppSector.findUnique({ where: { id: session.sectorId } });
+
+			if (!sector || !sector.defaultClientId) {
+				throw new BadRequestError("Nenhum cliente WhatsApp padrão configurado para o setor do usuário.");
+			}
+			const client = whatsappService.getClient(sector.defaultClientId);
+
+			if (!client) {
+				throw new BadRequestError("Nenhum cliente WhatsApp encontrado para o setor especificado.");
+			}
 
 			if (template && newChat.contact) {
 				await whatsappService.sendTemplate(
 					session,
+					client.id,
 					newChat.contact.phone,
 					template,
 					newChat.id,
