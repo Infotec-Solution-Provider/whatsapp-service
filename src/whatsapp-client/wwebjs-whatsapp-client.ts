@@ -208,14 +208,6 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				return process.log("Message ignored: it is broadcast.");
 			}
 
-			console.log("Chegou até aqui", msg.from);
-
-			if (msg.from !== "555131346499@c.us") {
-				return process.log("Message ignored: it is not infotec.");
-			}
-
-			console.log("Chegou até aqui 2");
-
 			const parsedMsg = await MessageParser.parse(
 				this.id,
 				process,
