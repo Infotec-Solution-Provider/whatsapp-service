@@ -95,15 +95,10 @@ class ContactsController {
 	}
 
 	private async updateContact(req: Request, res: Response) {
-
-		
 		const contactId = Number(req.params["contactId"]);
-		// Allow optional sectorIds in body to update sectors
 		const { sectorIds, ...updateData } = req.body;
 		const parsedSectorIds = Array.isArray(sectorIds) ? sectorIds.map((s: any) => Number(s)) : undefined;
-		console.log('Update Data:', updateData);
-		console.log('Parsed Sector IDs:', parsedSectorIds);
-		console.log('Body:', req.body);
+
 		const updatedContact = await contactsService.updateContact(contactId, updateData, parsedSectorIds);
 
 		res.status(200).send({

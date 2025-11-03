@@ -132,35 +132,17 @@ class WhatsappService {
 		return this.clients.get(id);
 	}
 
-	public async getClientBySector(instance: string, sectorId: number) {
-		console.log({
-				instance,
-				isActive: true,
-				WppSector: {
-					some: {
-						id: sectorId
-					}
-				}
-			})
-		const dbClient = await prismaService.wppClient.findFirstOrThrow({
-			where: {
-				instance,
-				isActive: true,
-				WppSector: {
-					some: {
-						id: sectorId
-					}
-				}
-			}
+	public async getClientsBySector(sectorId: number) {
+		const sector = await prismaService.wppSector.findUniqueOrThrow({
+			where: { id: sectorId },
+			include: { clients: true }
 		});
 
-		const client = this.getClient(dbClient.id);
-
-		if (!client) {
-			throw new BadRequestError("Sector has no active whatsapp client!");
-		}
-
-		return client;
+		return sector.clients.map((c) => ({
+			id: c.id,
+			name: c.name,
+			type: c.type
+		}));
 	}
 
 	public async editMessage({ session, options }: EditMessageData) {
@@ -172,8 +154,20 @@ class WhatsappService {
 		);
 		process.log("Iniciando o processo de edição de mensagem.");
 		try {
+			const message = await prismaService.wppMessage.findUniqueOrThrow({
+				where: { id: +options.messageId }
+			});
+
+			if (!message.clientId) {
+				throw new BadRequestError("Mensagem não possui client associado.");
+			}
+
 			process.log("Obtendo client do whatsapp...");
-			const client = await this.getClientBySector(session.instance, session.sectorId);
+			const client = this.getClient(message.clientId);
+
+			if (!client) {
+				throw new BadRequestError("Client do WhatsApp não encontrado.");
+			}
 
 			process.log(`Client obtido para o setor: ${session.sectorId}`);
 			const editedMsg = await client.editMessage(options);
@@ -186,14 +180,21 @@ class WhatsappService {
 		}
 	}
 
-	public async sendMessage(session: SessionData, to: string, data: SendMessageData) {
+	public async sendMessage(session: SessionData, clientId: number, to: string, data: SendMessageData) {
 		const { file, ...logData } = data;
 		const process = new ProcessingLogger(session.instance, "send-message", `${to}-${Date.now()}`, logData);
+
+		Logger.debug(`Enviando mensagem para ${to} via WhatsApp (Client ID: ${clientId})`)
 
 		process.log("Iniciando o envio da mensagem.");
 		try {
 			process.log("Obtendo client do whatsapp...");
-			const client = await this.getClientBySector(session.instance, session.sectorId);
+			const client = this.getClient(clientId);
+
+			if (!client) {
+				throw new BadRequestError("Client do WhatsApp não encontrado.");
+			}
+
 			process.log(`Client obtido para o setor: ${session.sectorId}`);
 			const text = `*${session.name}*: ${data.text || ""}`;
 			const now = new Date();
@@ -366,13 +367,17 @@ class WhatsappService {
 		}
 	}
 
-	public async sendBotMessage(to: string, data: SendBotMessageData) {
+	public async sendBotMessage(to: string, clientId: number, data: SendBotMessageData) {
 		const process = new ProcessingLogger(data.chat.instance, "send-bot-message", `${to}-${Date.now()}`, data);
 
 		process.log("Iniciando o envio da mensagem.");
 		try {
 			process.log("Obtendo client do whatsapp...");
-			const client = await this.getClientBySector(data.chat.instance, data.chat.sectorId || 1);
+			const client = this.getClient(clientId);
+			if (!client) {
+				throw new BadRequestError("Client do WhatsApp não encontrado.");
+			}
+
 			process.log(`Client obtido para o setor: ${data.chat.sectorId || 1}`);
 			const now = new Date();
 
@@ -509,8 +514,8 @@ class WhatsappService {
 		}
 	}
 
-	public async getGroups(instance: string, sectorId: number) {
-		const client = await this.getClientBySector(instance, sectorId);
+	public async getGroups(clientId: number) {
+		const client = this.getClient(clientId);
 		if (!(client instanceof WWEBJSWhatsappClient)) {
 			throw new BadRequestError("Client is not WWEBJS client");
 		}
@@ -522,6 +527,7 @@ class WhatsappService {
 
 	public async sendTemplate(
 		session: SessionData,
+		clientId: number,
 		to: string,
 		data: SendTemplateData,
 		chatId: number,
@@ -530,7 +536,11 @@ class WhatsappService {
 		const process = new ProcessingLogger(session.instance, "send-template", `${to}-${Date.now()}`, data);
 
 		try {
-			const client = await this.getClientBySector(session.instance, session.sectorId);
+			const client = this.getClient(clientId);
+
+			if (!client) {
+				throw new BadRequestError("Client do WhatsApp não encontrado.");
+			}
 
 			const message = await client.sendTemplate(
 				{
@@ -553,8 +563,11 @@ class WhatsappService {
 		}
 	}
 
-	public async getTemplates(session: SessionData) {
-		const client = await this.getClientBySector(session.instance, session.sectorId);
+	public async getTemplates(clientId: number) {
+		const client = this.getClient(clientId);
+		if (!client) {
+			throw new BadRequestError("Client do WhatsApp não encontrado.");
+		}
 		const templates = await client.getTemplates();
 
 		return templates;
@@ -562,6 +575,7 @@ class WhatsappService {
 
 	public async forwardMessages(
 		session: SessionData,
+		clientId: number,
 		messageIds: number[],
 		sourceType: "whatsapp" | "internal",
 		whatsappTargets?: WhatsappForwardTarget[],
@@ -600,7 +614,7 @@ class WhatsappService {
 
 		if (whatsappTargets && whatsappTargets.length > 0) {
 			try {
-				const client = await this.getClientBySector(session.instance, session.sectorId);
+				const client = await this.getClient(clientId);
 
 				if (!(client instanceof WWEBJSWhatsappClient)) {
 					throw new BadRequestError(
@@ -630,6 +644,7 @@ class WhatsappService {
 						for (const originalMsg of originalMessages) {
 							const now = new Date();
 							const messageToSave: CreateMessageDto = {
+								clientId: clientId,
 								instance: session.instance,
 								status: "SENT",
 								timestamp: now.getTime().toString(),
@@ -758,6 +773,7 @@ class WhatsappService {
 			// Cria o objeto para salvar no histórico do banco de dados
 			const now = new Date();
 			const messageToSave: CreateMessageDto = {
+				clientId: client.id,
 				instance,
 				from: "system:auto-reply",
 				to: to,

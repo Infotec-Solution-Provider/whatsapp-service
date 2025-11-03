@@ -27,6 +27,7 @@ export default class WABAMessageParser {
 	}
 
 	static async parse(
+		clientId: number,
 		recipient: string,
 		instance: string,
 		data: Message,
@@ -42,7 +43,8 @@ export default class WABAMessageParser {
 			timestamp: String(timestampMs),
 			sentAt: new Date(timestampMs),
 			status: WppMessageStatus.RECEIVED,
-			body: ""
+			body: "",
+			clientId
 		};
 
 		if (data.context?.id) {

@@ -11,7 +11,7 @@ import prismaService from "../services/prisma.service";
 import ProcessingLogger from "../utils/processing-logger";
 
 class GUPSHUPMessageParser {
-	public static async parse(recipient: string, instance: string, data: GSMessageData, process?: ProcessingLogger) {
+	public static async parse(clientId: number, recipient: string, instance: string, data: GSMessageData, process?: ProcessingLogger) {
 		const parsedMessage: CreateMessageDto = {
 			instance,
 			wabaId: data.id,
@@ -21,7 +21,8 @@ class GUPSHUPMessageParser {
 			timestamp: String(+data.timestamp * 1000),
 			sentAt: new Date(+data.timestamp * 1000),
 			status: "RECEIVED",
-			body: ""
+			body: "",
+			clientId
 		};
 		let fileUrl: string | null = null;
 		let fileType: string | null = null;

@@ -113,6 +113,7 @@ class WABAWhatsappClient implements WhatsappClient {
 			Logger.debug("Message sent successfully, response:", response.data);
 			const now = new Date();
 			const dto: CreateMessageDto = {
+				clientId: this.id,
 				instance: this.instance,
 				from: `me:${this.phone}`,
 				to: options.to,
@@ -349,6 +350,7 @@ class WABAWhatsappClient implements WhatsappClient {
 
 			const now = new Date();
 			const message: CreateMessageDto = {
+				clientId: this.id,
 				instance: this.instance,
 				from: `me:${this.phone}`,
 				to: options.to,

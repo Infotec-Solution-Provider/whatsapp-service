@@ -76,12 +76,12 @@ class GupshupService {
 			const recipient = change.value.metadata.display_phone_number;
 
 			logger.log("Mensagem recebida");
-			const parsedMsg = await GUPSHUPMessageParser.parse(recipient, instance, message, logger);
+			const data = { message, recipient } as const;
 			logger.log("Mensagem parseada com sucesso");
 
 			return {
 				type: "message" as const,
-				data: parsedMsg,
+				data,
 				appId: input.gs_app_id
 			};
 		}
@@ -126,7 +126,14 @@ class GupshupService {
 				case "message":
 					logger.processName = logger.processName + "/message";
 					logger.log("processando mensagem recebida");
-					const msg = await messagesService.insertMessage(data);
+					const parsedMsg = await GUPSHUPMessageParser.parse(
+						client.id,
+						data.recipient,
+						instance,
+						data.message,
+						logger
+					);
+					const msg = await messagesService.insertMessage(parsedMsg);
 					await mdservice.processMessage(instance, client.id, msg);
 					logger.log("mensagem processada com sucesso");
 					break;

@@ -13,8 +13,9 @@ CREATE TABLE `clients` (
     `gupshup_app_name` VARCHAR(191) NULL,
     `gupshup_app_id` VARCHAR(191) NULL,
 
+    UNIQUE INDEX `clients_instance_key`(`instance`),
     INDEX `clients_is_active_idx`(`is_active`),
-    UNIQUE INDEX `clients_instance_name_key`(`instance`, `name`),
+    UNIQUE INDEX `clients_name_key`(`name`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -46,13 +47,16 @@ CREATE TABLE `messages` (
     `wwebjs_id` VARCHAR(191) NULL,
     `wwebjs_id_stanza` VARCHAR(191) NULL,
     `waba_id` VARCHAR(191) NULL,
+    `gupshup_id` VARCHAR(191) NULL,
+    `gupshup_request_id` VARCHAR(191) NULL,
     `from` VARCHAR(191) NOT NULL,
     `to` VARCHAR(191) NOT NULL,
     `type` VARCHAR(191) NOT NULL,
     `quoted_id` INTEGER NULL,
     `chat_id` INTEGER NULL,
     `contact_id` INTEGER NULL,
-    `is_forwarded` BOOLEAN NULL,
+    `is_forwarded` BOOLEAN NOT NULL DEFAULT false,
+    `is_edited` BOOLEAN NOT NULL DEFAULT false,
     `body` VARCHAR(191) NOT NULL,
     `timestamp` VARCHAR(191) NOT NULL,
     `sent_at` DATETIME(3) NOT NULL,
@@ -63,10 +67,12 @@ CREATE TABLE `messages` (
     `file_size` VARCHAR(191) NULL,
     `user_id` INTEGER NULL,
     `billing_category` VARCHAR(191) NULL,
+    `client_id` INTEGER NULL,
 
     UNIQUE INDEX `messages_wwebjs_id_key`(`wwebjs_id`),
     UNIQUE INDEX `messages_wwebjs_id_stanza_key`(`wwebjs_id_stanza`),
     UNIQUE INDEX `messages_waba_id_key`(`waba_id`),
+    UNIQUE INDEX `messages_gupshup_id_key`(`gupshup_id`),
     INDEX `messages_from_to_chat_id_idx`(`from`, `to`, `chat_id`),
     INDEX `messages_chat_id_user_id_idx`(`chat_id`, `user_id`),
     INDEX `messages_contact_id_fkey`(`contact_id`),
@@ -105,7 +111,8 @@ CREATE TABLE `internalmessages` (
     `from` VARCHAR(191) NOT NULL,
     `type` VARCHAR(191) NOT NULL,
     `quoted_id` INTEGER NULL,
-    `is_forwarded` BOOLEAN NULL,
+    `is_forwarded` BOOLEAN NOT NULL,
+    `is_edited` BOOLEAN NOT NULL,
     `wwebjs_id` VARCHAR(191) NULL,
     `wwebjs_id_stanza` VARCHAR(191) NULL,
     `internalchat_id` INTEGER NOT NULL,
@@ -185,8 +192,16 @@ CREATE TABLE `sectors` (
     `start_chats` BOOLEAN NOT NULL,
     `receive_chats` BOOLEAN NOT NULL,
 
-    UNIQUE INDEX `sectors_instance_name_key`(`instance`, `name`),
+    UNIQUE INDEX `sectors_name_key`(`name`),
     PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `contacts_sectors` (
+    `contactId` INTEGER NOT NULL,
+    `sectorId` INTEGER NOT NULL,
+
+    PRIMARY KEY (`contactId`, `sectorId`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
@@ -205,12 +220,19 @@ CREATE TABLE `message_flows` (
 -- CreateTable
 CREATE TABLE `message_flows_steps` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
-    `type` ENUM('CHECK_AVAILABLE_USERS', 'CHECK_LOALTY', 'CHECK_ONLY_ADMIN', 'SEND_TO_ADMIN') NOT NULL,
+    `type` ENUM('CONDITION', 'QUERY', 'ROUTER', 'ASSIGN', 'CHECK_AVAILABLE_USERS', 'CHECK_LOALTY', 'CHECK_ONLY_ADMIN', 'SEND_TO_ADMIN', 'SEND_TO_SECTOR_USER', 'SEND_TO_SPECIFIC_USER', 'CHECK_CUSTOMER_CAMPAIGN_TYPE') NOT NULL,
     `message_flow_id` INTEGER NOT NULL,
     `step_number` INTEGER NOT NULL,
+    `config` JSON NULL,
+    `connections` JSON NULL,
+    `next_step_id` INTEGER NULL,
+    `fallback_step_id` INTEGER NULL,
+    `enabled` BOOLEAN NOT NULL DEFAULT true,
+    `description` VARCHAR(191) NULL,
     `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updated_at` DATETIME(3) NOT NULL,
 
+    INDEX `message_flows_steps_message_flow_id_enabled_idx`(`message_flow_id`, `enabled`),
     UNIQUE INDEX `message_flows_steps_message_flow_id_step_number_key`(`message_flow_id`, `step_number`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -243,7 +265,14 @@ CREATE TABLE `automatic_response_rule_users` (
 CREATE TABLE `automatic_response_schedules` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
     `ruleId` INTEGER NOT NULL,
-    `dayOfWeek` INTEGER NOT NULL,
+    `frequency` ENUM('ONCE', 'DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY') NOT NULL DEFAULT 'WEEKLY',
+    `daysOfWeek` JSON NULL,
+    `dayOfMonth` INTEGER NULL,
+    `month` INTEGER NULL,
+    `timezone` VARCHAR(191) NOT NULL DEFAULT 'America/Fortaleza',
+    `startDate` DATETIME(3) NULL,
+    `endDate` DATETIME(3) NULL,
+    `dayOfWeek` INTEGER NULL,
     `startTime` VARCHAR(191) NOT NULL,
     `endTime` VARCHAR(191) NOT NULL,
 
@@ -257,6 +286,14 @@ CREATE TABLE `wallets` (
     `name` VARCHAR(191) NOT NULL,
 
     PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `sectors_clients` (
+    `sectorId` INTEGER NOT NULL,
+    `clientId` INTEGER NOT NULL,
+
+    PRIMARY KEY (`sectorId`, `clientId`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
@@ -314,6 +351,53 @@ CREATE TABLE `notifications` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `message_flow_metrics` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `flow_id` INTEGER NOT NULL,
+    `step_id` INTEGER NOT NULL,
+    `contact_id` INTEGER NOT NULL,
+    `duration_ms` INTEGER NOT NULL,
+    `result` VARCHAR(191) NOT NULL,
+    `error` VARCHAR(191) NULL,
+    `timestamp` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `message_flow_metrics_flow_id_timestamp_idx`(`flow_id`, `timestamp`),
+    INDEX `message_flow_metrics_step_id_result_idx`(`step_id`, `result`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `message_flow_versions` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `flow_id` INTEGER NOT NULL,
+    `version` INTEGER NOT NULL,
+    `config` JSON NOT NULL,
+    `created_by` INTEGER NULL,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `description` VARCHAR(191) NULL,
+
+    UNIQUE INDEX `message_flow_versions_flow_id_version_key`(`flow_id`, `version`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `ready_messages` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `instance` VARCHAR(191) NOT NULL,
+    `sector_id` INTEGER NOT NULL,
+    `title` VARCHAR(191) NOT NULL,
+    `message` TEXT NOT NULL,
+    `file_id` INTEGER NULL,
+    `file_name` VARCHAR(191) NULL,
+    `only_admin` BOOLEAN NOT NULL DEFAULT false,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updated_at` DATETIME(3) NOT NULL,
+
+    INDEX `ready_messages_instance_sector_id_idx`(`instance`, `sector_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `_WppChatToWppTag` (
     `A` INTEGER NOT NULL,
     `B` INTEGER NOT NULL,
@@ -327,6 +411,9 @@ ALTER TABLE `messages` ADD CONSTRAINT `messages_chat_id_fkey` FOREIGN KEY (`chat
 
 -- AddForeignKey
 ALTER TABLE `messages` ADD CONSTRAINT `messages_contact_id_fkey` FOREIGN KEY (`contact_id`) REFERENCES `contacts`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `messages` ADD CONSTRAINT `messages_client_id_fkey` FOREIGN KEY (`client_id`) REFERENCES `clients`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `chats` ADD CONSTRAINT `chats_contact_id_fkey` FOREIGN KEY (`contact_id`) REFERENCES `contacts`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
@@ -350,7 +437,10 @@ ALTER TABLE `internal_chat_members` ADD CONSTRAINT `internal_chat_members_intern
 ALTER TABLE `internal_mentions` ADD CONSTRAINT `internal_mentions_internalmessage_id_fkey` FOREIGN KEY (`internalmessage_id`) REFERENCES `internalmessages`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE `sectors` ADD CONSTRAINT `sectors_wpp_instance_id_fkey` FOREIGN KEY (`wpp_instance_id`) REFERENCES `clients`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE `contacts_sectors` ADD CONSTRAINT `contacts_sectors_contactId_fkey` FOREIGN KEY (`contactId`) REFERENCES `contacts`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `contacts_sectors` ADD CONSTRAINT `contacts_sectors_sectorId_fkey` FOREIGN KEY (`sectorId`) REFERENCES `sectors`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `message_flows_steps` ADD CONSTRAINT `message_flows_steps_message_flow_id_fkey` FOREIGN KEY (`message_flow_id`) REFERENCES `message_flows`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
@@ -360,6 +450,12 @@ ALTER TABLE `automatic_response_rule_users` ADD CONSTRAINT `automatic_response_r
 
 -- AddForeignKey
 ALTER TABLE `automatic_response_schedules` ADD CONSTRAINT `automatic_response_schedules_ruleId_fkey` FOREIGN KEY (`ruleId`) REFERENCES `automatic_response_rules`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `sectors_clients` ADD CONSTRAINT `sectors_clients_sectorId_fkey` FOREIGN KEY (`sectorId`) REFERENCES `sectors`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `sectors_clients` ADD CONSTRAINT `sectors_clients_clientId_fkey` FOREIGN KEY (`clientId`) REFERENCES `clients`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `schedules` ADD CONSTRAINT `schedules_chat_id_fkey` FOREIGN KEY (`chat_id`) REFERENCES `chats`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;

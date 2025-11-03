@@ -8,21 +8,23 @@ datasource db {
 }
 
 model WppClient {
-  id             Int           @id @default(autoincrement())
-  name           String
-  phone          String?
-  instance       String        @map("instance")
-  type           WppClientType
-  isActive       Boolean       @map("is_active")
-  WABAPhoneId    String?       @map("waba_phone_id")
-  WABAAccountId  String?       @map("waba_account_id")
-  WABAToken      String?       @map("waba_token")
-  gupshupToken   String?       @map("gupshup_token")
-  gupshupAppName String?       @map("gupshup_app_name")
-  gupshupAppId   String?       @map("gupshup_app_id")
-  WppSector      WppSector[]
+  id                Int           @id @default(autoincrement())
+  name              String
+  phone             String?
+  instance          String        @map("instance")
+  type              WppClientType
+  isActive          Boolean       @map("is_active")
+  WABAPhoneId       String?       @map("waba_phone_id")
+  WABAAccountId     String?       @map("waba_account_id")
+  WABAToken         String?       @map("waba_token")
+  gupshupToken      String?       @map("gupshup_token")
+  gupshupAppName    String?       @map("gupshup_app_name")
+  gupshupAppId      String?       @map("gupshup_app_id")
+  sectors           WppSector[]   @relation("sector_clients")
+  defaultForSectors WppSector[]   @relation("sector_default_client")
+  messages          WppMessage[]
 
-  @@unique([instance, name])
+  @@unique([name])
   @@index([isActive])
   @@map("clients")
 }
@@ -45,7 +47,6 @@ model WppContact {
   WppChat     WppChat[]
   WppMessage  WppMessage[]
   WppSchedule WppSchedule[]
-  // Relação com setores (um contato pode pertencer a vários setores)
   sectors     WppContactSector[]
 
   @@unique([instance, phone])
@@ -79,8 +80,10 @@ model WppMessage {
   fileSize         String?          @map("file_size")
   userId           Int?             @map("user_id")
   billingCategory  String?          @map("billing_category")
+  clientId         Int?             @map("client_id")
   WppChat          WppChat?         @relation(fields: [chatId], references: [id])
   WppContact       WppContact?      @relation(fields: [contactId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  client           WppClient?       @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@index([from, to, chatId])
   @@index([chatId, userId])
@@ -207,21 +210,21 @@ model WppTag {
 }
 
 model WppSector {
-  id            Int     @id @default(autoincrement())
-  name          String
-  instance      String  @map("instance")
-  wppInstanceId Int?    @map("wpp_instance_id")
-  startChats    Boolean @map("start_chats")
-  receiveChats  Boolean @map("receive_chats")
+  id              Int     @id @default(autoincrement())
+  name            String
+  instance        String  @map("instance")
+  startChats      Boolean @map("start_chats")
+  receiveChats    Boolean @map("receive_chats")
+  defaultClientId Int?    @map("default_client_id")
 
-  WppInstance  WppClient?     @relation(fields: [wppInstanceId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  WppChat      WppChat[]
-  WppSchedule  WppSchedule[]
-  InternalChat InternalChat[]
-  // Relação com contatos (um setor pode ter vários contatos)
-  contacts     WppContactSector[]
+  defaultClient WppClient?         @relation("sector_default_client", fields: [defaultClientId], references: [id])
+  clients       WppClient[]        @relation("sector_clients")
+  chats         WppChat[]
+  internalChats InternalChat[]
+  schedules     WppSchedule[]
+  contacts      WppContactSector[]
 
-  @@unique([instance, name])
+  @@unique([name])
   @@map("sectors")
 }
 
@@ -252,21 +255,21 @@ model WppMessageFlow {
 }
 
 model WppMessageFlowStep {
-  id             Int                    @id @default(autoincrement())
-  type           WppMessageFlowStepType
-  messageFlowId  Int                    @map("message_flow_id")
-  stepNumber     Int                    @map("step_number")
-  
+  id            Int                    @id @default(autoincrement())
+  type          WppMessageFlowStepType
+  messageFlowId Int                    @map("message_flow_id")
+  stepNumber    Int                    @map("step_number")
+
   // Novos campos para configuração avançada
-  config         Json?                  @map("config")          // Configuração específica do step em JSON (sem conexões)
-  connections    Json?                  @map("connections")     // Conexões condicionais/dinâmicas (onTrue, onFalse, routes)
-  nextStepId     Int?                   @map("next_step_id")    // ID do próximo step (permite fluxos não-lineares)
-  fallbackStepId Int?                   @map("fallback_step_id") // Step alternativo em caso de erro
-  enabled        Boolean                @default(true) @map("enabled") // Habilitar/desabilitar step
-  description    String?                @map("description")     // Descrição do que o step faz
-  
-  createdAt      DateTime               @default(now()) @map("created_at")
-  updatedAt      DateTime               @updatedAt @map("updated_at")
+  config         Json?   @map("config") // Configuração específica do step em JSON (sem conexões)
+  connections    Json?   @map("connections") // Conexões condicionais/dinâmicas (onTrue, onFalse, routes)
+  nextStepId     Int?    @map("next_step_id") // ID do próximo step (permite fluxos não-lineares)
+  fallbackStepId Int?    @map("fallback_step_id") // Step alternativo em caso de erro
+  enabled        Boolean @default(true) @map("enabled") // Habilitar/desabilitar step
+  description    String? @map("description") // Descrição do que o step faz
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   WppMessageFlow WppMessageFlow @relation(fields: [messageFlowId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
@@ -343,11 +346,12 @@ model WppWallet {
 }
 
 model WppSchedule {
-  instance     String
-  id           Int      @id @default(autoincrement())
-  description  String?
-  contactId    Int      @map("contact_id")
-  chatId       Int?     @unique @map("chat_id")
+  instance    String
+  id          Int     @id @default(autoincrement())
+  description String?
+  contactId   Int     @map("contact_id")
+  chatId      Int?    @unique @map("chat_id")
+
   scheduledAt  DateTime @map("scheduled_at")
   scheduleDate DateTime @map("schedule_date")
   scheduledBy  Int      @map("scheduled_by")
@@ -460,13 +464,13 @@ enum WppMessageFlowStepType {
   QUERY
   ROUTER
   ASSIGN
-  
+
   // Steps específicos (compatibilidade)
   CHECK_AVAILABLE_USERS
   CHECK_LOALTY
   CHECK_ONLY_ADMIN
   SEND_TO_ADMIN
-  
+
   // Outros steps específicos
   SEND_TO_SECTOR_USER
   SEND_TO_SPECIFIC_USER
@@ -481,11 +485,11 @@ model WppMessageFlowMetric {
   flowId    Int      @map("flow_id")
   stepId    Int      @map("step_id")
   contactId Int      @map("contact_id")
-  duration  Int      @map("duration_ms")    // Duração em millisegundos
-  result    String   @map("result")         // 'success' | 'failure' | 'skipped'
-  error     String?  @map("error")          // Mensagem de erro se houver
+  duration  Int      @map("duration_ms") // Duração em millisegundos
+  result    String   @map("result") // 'success' | 'failure' | 'skipped'
+  error     String?  @map("error") // Mensagem de erro se houver
   timestamp DateTime @default(now()) @map("timestamp")
-  
+
   @@index([flowId, timestamp])
   @@index([stepId, result])
   @@map("message_flow_metrics")
@@ -496,11 +500,11 @@ model WppMessageFlowVersion {
   id          Int      @id @default(autoincrement())
   flowId      Int      @map("flow_id")
   version     Int      @map("version")
-  config      Json     @map("config")         // Snapshot completo do fluxo
+  config      Json     @map("config") // Snapshot completo do fluxo
   createdBy   Int?     @map("created_by")
   createdAt   DateTime @default(now()) @map("created_at")
   description String?  @map("description")
-  
+
   @@unique([flowId, version])
   @@map("message_flow_versions")
 }

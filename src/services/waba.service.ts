@@ -85,6 +85,7 @@ class WABAService {
 					logger.processName += "/message";
 					logger.log("Processando mensagem WABA");
 					const parsedMsg = await WABAMessageParser.parse(
+						client.id,
 						validated.recipient,
 						instance,
 						validated.data,
@@ -204,9 +205,7 @@ class WABAService {
 			if (!message?.WppContact) return;
 
 			const contact = message.WppContact;
-			const currentExpiration = contact.conversationExpiration
-				? Number(contact.conversationExpiration)
-				: null;
+			const currentExpiration = contact.conversationExpiration ? Number(contact.conversationExpiration) : null;
 			const newExpiration = Number(statusData.conversation.expiration_timestamp) * 1000;
 
 			if (Number.isNaN(newExpiration)) {

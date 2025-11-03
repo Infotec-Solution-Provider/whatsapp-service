@@ -7,6 +7,7 @@ import { EditMessageOptions, SendMessageOptions, SendTemplateOptions } from "../
  * This class defines the structure for interacting with WhatsApp,
  */
 abstract class WhatsappClient {
+	public abstract readonly id: number;
 	/**
 	 * The phone number associated with the WhatsApp instance.
 	 */

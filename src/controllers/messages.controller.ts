@@ -10,11 +10,11 @@ class MessagesController {
 	constructor(public readonly router: Router) {
 		this.router.get("/api/whatsapp/messages/:id", isAuthenticated, this.getMessageById);
 		this.router.patch("/api/whatsapp/messages/mark-as-read", isAuthenticated, this.readContactMessages);
-		this.router.post("/api/whatsapp/messages", upload.single("file"), isAuthenticated, this.sendMessage);
-		this.router.post("/api/whatsapp/messages/forward", isAuthenticated, this.forwardMessages.bind(this));
+		this.router.post("/api/whatsapp/:clientId/messages", upload.single("file"), isAuthenticated, this.sendMessage);
+		this.router.post("/api/whatsapp/:clientId/messages/forward", isAuthenticated, this.forwardMessages.bind(this));
 		this.router.get("/api/whatsapp/messages", isAuthenticated, this.fetchMessages);
 
-		this.router.put("/api/whatsapp/messages/:id", isAuthenticated, this.editMessage);
+		this.router.put("/api/whatsapp/:clientId/messages/:id", isAuthenticated, this.editMessage);
 	}
 
 	private async getMessageById(req: Request, res: Response) {
@@ -53,6 +53,7 @@ class MessagesController {
 
 	private async sendMessage(req: Request, res: Response) {
 		try {
+			const clientId = Number(req.params["clientId"]);
 			const { to, ...data } = req.body;
 			const file = req.file;
 
@@ -60,7 +61,7 @@ class MessagesController {
 				data.file = file;
 			}
 
-			const message = await whatsappService.sendMessage(req.session, to, data);
+			const message = await whatsappService.sendMessage(req.session, clientId, to, data);
 
 			res.status(201).send({
 				message: "Message sent successfully!",
@@ -74,6 +75,7 @@ class MessagesController {
 		}
 	}
 	private async forwardMessages(req: Request, res: Response) {
+		const clientId = Number(req.params["clientId"]);
 		const { messageIds, whatsappTargets, internalTargets, sourceType } = req.body;
 
 		if (!Array.isArray(messageIds) || messageIds.length === 0) {
@@ -95,7 +97,14 @@ class MessagesController {
 			sourceType,
 			whatsappTargets
 		}); */
-		await whatsappService.forwardMessages(req.session, messageIds, sourceType, whatsappTargets, internalTargets);
+		await whatsappService.forwardMessages(
+			req.session,
+			clientId,
+			messageIds,
+			sourceType,
+			whatsappTargets,
+			internalTargets
+		);
 
 		res.status(200).send({
 			message: "Mensagens enviadas para a fila de encaminhamento com sucesso!"

@@ -104,6 +104,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 
 			const now = new Date();
 			const message: CreateMessageDto = {
+				clientId: this.id,
 				instance: this.instance,
 				from: `me:${this.phone}`,
 				to: options.to,
@@ -167,6 +168,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 		const now = new Date();
 
 		const message: CreateMessageDto = {
+			clientId: this.id,
 			instance: this.instance,
 			from: `me:${this.phone}`,
 			to: options.to,
