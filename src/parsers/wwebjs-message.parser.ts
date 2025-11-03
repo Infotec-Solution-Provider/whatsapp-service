@@ -10,6 +10,7 @@ import parseVCard from "../utils/parse-wwebjs-vcard";
 
 class WWEBJSMessageParser {
 	public static async parse(
+		clientId: number,
 		logger: ProcessingLogger,
 		instance: string,
 		message: WAWebJS.Message,
@@ -32,7 +33,8 @@ class WWEBJSMessageParser {
 			type: message.type,
 			timestamp: String(message.timestamp * 1000),
 			sentAt: new Date(message.timestamp * 1000),
-			status: WWEBJSMessageParser.getMessageStatus(message.ack)
+			status: WWEBJSMessageParser.getMessageStatus(message.ack),
+			clientId
 		};
 		if (!skipParsingFile && message.hasMedia) {
 			logger.log(

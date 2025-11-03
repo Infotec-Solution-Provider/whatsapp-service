@@ -154,7 +154,6 @@ class ContactsService {
 		// 5) Enriquecimento: chats + customers + users (sempre escopados)
 		// Se seu chatsService aceitar instance (recomendado), passamos:
 		const chatsPromise = chatsService.getChats({ isFinished: "false" });
-
 		const uniqueCustomerIds = [...new Set(contacts.map((c) => c.customerId).filter(Boolean))] as number[];
 
 		const [chats, customersMap] = await Promise.all([
@@ -170,7 +169,6 @@ class ContactsService {
 		const chatsMap = new Map<number, any>(
 			(Array.isArray(chats) ? chats : []).map((chat: any) => [chat.contactId, chat])
 		);
-
 		const relevantChats = contacts.map((c) => chatsMap.get(c.id)).filter(Boolean) as any[];
 		const uniqueUserIds = [...new Set(relevantChats.map((c) => c.userId).filter(Boolean))] as number[];
 
@@ -438,6 +436,9 @@ class ContactsService {
 				instance,
 				customerId,
 				isDeleted: false
+			},
+			include: {
+				sectors: true
 			}
 		});
 
@@ -449,61 +450,202 @@ class ContactsService {
 			where: {
 				instance,
 				isDeleted: false
+			},
+			include: {
+				sectors: true
 			}
 		});
 		return contacts;
 	}
 
-	public async createContact(instance: string, name: string, phone: string, customerId?: number) {
+	/**
+	 * Create contact with optional sector assignment.
+	 * Business rules:
+	 * - A contact may belong to multiple sectors.
+	 * - If a contact has no sectors, it's considered global.
+	 * - When creating a contact, if the phone already exists linked to other sector(s) (or global), return an error.
+	 */
+	public async createContact(
+		instance: string,
+		name: string,
+		phone: string,
+		customerId?: number,
+		sectorIds?: number[]
+	) {
 		const validPhone = await whatsappService.getValidWhatsappPhone(instance, phone);
 		if (!validPhone) {
 			throw new BadRequestError("Esse número não é um WhatsApp válido!");
 		}
+
 		const existingContact = await prismaService.wppContact.findUnique({
 			where: {
 				instance_phone: {
 					instance,
 					phone: validPhone
 				}
-			}
+			},
+			// include sectors - cast to any because Prisma client types must be regenerated after schema change
+			include: { sectors: true }
 		});
 
-		if (existingContact && !!existingContact.customerId) {
+		// If contact exists and mapped to a customer, keep old behavior
+		if (
+			existingContact &&
+			!!existingContact.customerId &&
+			customerId &&
+			existingContact.customerId !== customerId
+		) {
 			const message = `Este número já está cadastrado no cliente de código ${existingContact.customerId}`;
 			throw new ConflictError(message);
 		}
 
-		const createdContact = await prismaService.wppContact.upsert({
-			where: {
-				instance_phone: {
-					instance,
-					phone: validPhone
+		// If contact exists, we must enforce sector rules
+		if (existingContact) {
+			const existingSectorIds = (existingContact.sectors || []).map((s) => s.sectorId);
+
+			// If creating global (no sectorIds provided)
+			if (!sectorIds || sectorIds.length === 0) {
+				// If there are sectors linked already, it's a conflict (would create a global contact while it exists in other sectors)
+				if (existingSectorIds.length > 0) {
+					throw new ConflictError("Este número já está cadastrado em outro(s) setor(es)");
 				}
-			},
-			update: {
-				name,
-				customerId: customerId || null
-			},
-			create: {
-				instance,
-				name,
-				phone: validPhone,
-				customerId: customerId || null
+
+				// Otherwise it's already global: update and return
+				const updated = await prismaService.wppContact.update({
+					where: { id: existingContact.id },
+					data: { name, customerId: customerId || null }
+				});
+				return updated;
 			}
+
+			// Creating with sectors: if existing is global -> conflict
+			if (existingSectorIds.length === 0) {
+				throw new ConflictError("Este número já está cadastrado globalmente");
+			}
+
+			// If existing sectors differ from requested sectors -> conflict
+			const requested = [...new Set(sectorIds)];
+			const missingInRequested = existingSectorIds.filter((id: number) => !requested.includes(id));
+			const extraInRequested = requested.filter((id: number) => !existingSectorIds.includes(id));
+
+			if (missingInRequested.length > 0 || extraInRequested.length > 0) {
+				throw new ConflictError("Este número já está cadastrado em outro(s) setor(es)");
+			}
+
+			// Sectors match: update name/customerId and return
+			const updated = await prismaService.wppContact.update({
+				where: { id: existingContact.id },
+				data: { name, customerId: customerId || null }
+			});
+
+			return updated;
+		}
+
+		// Contact does not exist: create new and optionally link sectors
+		const createData: any = {
+			instance,
+			name,
+			phone: validPhone,
+			customerId: customerId || null
+		};
+
+		if (sectorIds && sectorIds.length > 0) {
+			// create nested rows in the join table
+			createData.sectors = {
+				create: sectorIds.map((id) => ({ sectorId: id }))
+			};
+		}
+
+		const createdContact = await prismaService.wppContact.create({
+			data: createData,
+			// include sectors - cast to any because Prisma client types must be regenerated after schema change
+			include: { sectors: true }
 		});
 
 		return createdContact;
 	}
 
-	public async updateContact(contactId: number, data: Prisma.WppContactUpdateInput) {
+	/**
+	 * Update contact fields and optionally replace sector associations.
+	 * If sectorIds is provided, all existing sector links will be replaced by the provided list.
+	 */
+	public async updateContact(contactId: number, data: Prisma.WppContactUpdateInput, sectorIds?: number[]) {
+		// If sectorIds is not provided, simple update
+		if (!sectorIds) {
+			const contact = await prismaService.wppContact.update({
+				where: { id: contactId },
+				data
+			});
+
+			return contact;
+		}
+
+		// When sectorIds provided, replace relations in the join table
+		const cleanedSectorIds = [...new Set(sectorIds)];
+
+		const updatePayload: Prisma.WppContactUpdateInput = {
+			...data,
+			// Replace sectors: delete existing and create new ones
+			sectors: {
+				deleteMany: {},
+				create: cleanedSectorIds.map((id) => ({ sectorId: id }))
+			}
+		};
+
 		const contact = await prismaService.wppContact.update({
-			where: {
-				id: contactId
-			},
-			data
+			where: { id: contactId },
+			data: updatePayload,
+			// include sectors for convenience (cast to any until prisma client is regenerated)
+			include: { sectors: true }
 		});
 
 		return contact;
+	}
+
+	/**
+	 * Add a single sector to a contact.
+	 * Rules:
+	 * - If the contact is global (no sectors), don't allow adding a sector (keeps consistency with create rules).
+	 * - If the sector already exists for the contact, return the contact unchanged.
+	 * - Otherwise, create the association and return the updated contact (including sectors).
+	 */
+	public async addSectorToContact(contactId: number, sectorId: number) {
+		const contact = await prismaService.wppContact.findUnique({
+			where: { id: contactId },
+			include: { sectors: true }
+		});
+
+		if (!contact) {
+			throw new BadRequestError("Contato não encontrado");
+		}
+
+		const existingSectorIds = (contact.sectors || []).map((s: any) => s.sectorId);
+
+		// If contact is global (no sectors), do not allow adding sector (matching create conflict rule)
+		if (existingSectorIds.length === 0) {
+			throw new ConflictError("Este número já está cadastrado globalmente");
+		}
+
+		if (existingSectorIds.includes(sectorId)) {
+			// nothing to do, return contact with sectors
+			return await prismaService.wppContact.findUnique({
+				where: { id: contactId },
+				include: { sectors: true }
+			});
+		}
+
+		// Add new sector association
+		await prismaService.wppContact.update({
+			where: { id: contactId },
+			data: { sectors: { create: { sectorId } } }
+		});
+
+		const updated = await prismaService.wppContact.findUnique({
+			where: { id: contactId },
+			include: { sectors: true }
+		});
+
+		return updated;
 	}
 
 	public async deleteContact(contactId: number) {

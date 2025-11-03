@@ -116,7 +116,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 					id: this.id
 				},
 				include: {
-					WppSector: true
+					sectors: true
 				}
 			});
 
@@ -129,7 +129,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 						id: this.id
 					}
 				});
-				client.WppSector.forEach((sector) => {
+				client.sectors.forEach((sector) => {
 					const room: SocketServerAdminRoom = `${this.instance}:${sector.id}:admin`;
 
 					socketService.emit(SocketEventType.WwebjsQr, room, {
@@ -151,12 +151,12 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				id: this.id
 			},
 			include: {
-				WppSector: true
+				sectors: true
 			}
 		});
 
 		if (client) {
-			client.WppSector.forEach((sector) => {
+			client.sectors.forEach((sector) => {
 				const room: SocketServerAdminRoom = `${this.instance}:${sector.id}:admin`;
 
 				socketService.emit(SocketEventType.WwebjsAuth, room, {
@@ -207,7 +207,24 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			if (msg.from === "status@broadcast") {
 				return process.log("Message ignored: it is broadcast.");
 			}
-			const parsedMsg = await MessageParser.parse(process, this.instance, msg, false, false, chat.isGroup);
+
+			console.log("Chegou até aqui", msg.from);
+
+			if (msg.from !== "555131346499@c.us") {
+				return process.log("Message ignored: it is not infotec.");
+			}
+
+			console.log("Chegou até aqui 2");
+
+			const parsedMsg = await MessageParser.parse(
+				this.id,
+				process,
+				this.instance,
+				msg,
+				false,
+				false,
+				chat.isGroup
+			);
 			process.log(`Message is successfully parsed!`, parsedMsg);
 
 			if (!chat.isGroup) {
@@ -362,7 +379,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			const sentMsg = await this.wwebjs.sendMessage(to, content, params);
 			process.log("Mensagem enviada com sucesso.", sentMsg);
 
-			const parsedMsg = await MessageParser.parse(process, this.instance, sentMsg, true, true);
+			const parsedMsg = await MessageParser.parse(this.id, process, this.instance, sentMsg, true, true);
 
 			process.success(parsedMsg);
 			return parsedMsg;

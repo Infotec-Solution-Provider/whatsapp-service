@@ -265,6 +265,10 @@ class ChooseSectorBot {
 
 		return currentStep >= 2;
 	}
+
+	async shouldActivate(chat: WppChat): Promise<boolean> {
+		return chat.instance === "nunes";
+	}
 }
 
 export default new ChooseSectorBot();

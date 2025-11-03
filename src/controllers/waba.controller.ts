@@ -27,6 +27,8 @@ class WABAController {
 			const challenge = req.query["hub.challenge"];
 			const instance = req.params["instance"] as string;
 
+			console.log(token);
+			console.log(process.env["WABA_WEBHOOK_TOKEN"]);
 			if (mode === "subscribe" && token === process.env["WABA_WEBHOOK_TOKEN"]) {
 				Logger.info("WABA Webhook verified successfully for instance " + instance);
 				res.status(200).send(challenge);
