@@ -230,7 +230,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			}
 			if (chat.isGroup) {
 				const contact = await msg.getContact();
-				internalChatsService.receiveMessage(
+				await internalChatsService.receiveMessage(
 					chat.id.user,
 					parsedMsg,
 					contact?.number || contact?.pushname || msg.from.split("@")[0]!

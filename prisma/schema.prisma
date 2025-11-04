@@ -8,21 +8,22 @@ datasource db {
 }
 
 model WppClient {
-  id                Int           @id @default(autoincrement())
+  id                Int               @id @default(autoincrement())
   name              String
   phone             String?
-  instance          String        @map("instance")
+  instance          String            @map("instance")
   type              WppClientType
-  isActive          Boolean       @map("is_active")
-  WABAPhoneId       String?       @map("waba_phone_id")
-  WABAAccountId     String?       @map("waba_account_id")
-  WABAToken         String?       @map("waba_token")
-  gupshupToken      String?       @map("gupshup_token")
-  gupshupAppName    String?       @map("gupshup_app_name")
-  gupshupAppId      String?       @map("gupshup_app_id")
-  sectors           WppSector[]   @relation("sector_clients")
-  defaultForSectors WppSector[]   @relation("sector_default_client")
+  isActive          Boolean           @map("is_active")
+  WABAPhoneId       String?           @map("waba_phone_id")
+  WABAAccountId     String?           @map("waba_account_id")
+  WABAToken         String?           @map("waba_token")
+  gupshupToken      String?           @map("gupshup_token")
+  gupshupAppName    String?           @map("gupshup_app_name")
+  gupshupAppId      String?           @map("gupshup_app_id")
+  sectors           WppSector[]       @relation("sector_clients")
+  defaultForSectors WppSector[]       @relation("sector_default_client")
   messages          WppMessage[]
+  internalMessages  InternalMessage[]
 
   @@unique([name])
   @@index([isActive])
@@ -143,9 +144,11 @@ model InternalMessage {
   fileType       String?           @map("file_type")
   fileSize       String?           @map("file_size")
   mentions       InternalMention[]
+  clientId       Int?              @map("client_id")
 
   // Relações
-  chat InternalChat? @relation(fields: [internalChatId], references: [id])
+  chat   InternalChat? @relation(fields: [internalChatId], references: [id])
+  client WppClient?    @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@index([from, internalChatId])
   @@map("internalmessages")
