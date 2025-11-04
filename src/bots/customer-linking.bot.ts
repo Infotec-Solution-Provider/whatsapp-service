@@ -129,16 +129,11 @@ class CustomerLinkingBot {
 				return;
 			}
 
-			const logger = new ProcessingLogger(
-				chat.instance,
-				"customer-linking",
-				`timeout-${chat.id}-${now}`,
-				{
-					chatId: chat.id,
-					step: session.step,
-					reason: "inactivity-timeout"
-				}
-			);
+			const logger = new ProcessingLogger(chat.instance, "customer-linking", `timeout-${chat.id}-${now}`, {
+				chatId: chat.id,
+				step: session.step,
+				reason: "inactivity-timeout"
+			});
 
 			logger.log("Sessão expirada por inatividade. Direcionando para atendimento humano.");
 			await this.transferToHuman(chat, logger);
@@ -283,20 +278,22 @@ class CustomerLinkingBot {
 	 * Verifica se o bot deve ser ativado para este chat
 	 */
 	public async shouldActivate(chat: WppChat, contact: WppContact): Promise<boolean> {
-		// Verifica se o contato já tem cliente vinculado
-		if (await CustomerLinkingBot.hasCustomerLinked(contact)) {
-			return false;
-		}
-
-		// Verifica se o bot está habilitado nos parâmetros
 		const params = await parametersService.getSessionParams({
 			instance: chat.instance,
 			sectorId: chat.sectorId!,
 			userId: -1
 		});
 
-		const enabled = params["customer_linking_bot_enabled"];
-		return enabled === "true" || enabled === "1";
+		if (params["customer_linking_bot_enabled"] != "true") {
+			return false;
+		}
+
+		// Verifica se o contato já tem cliente vinculado
+		if (await CustomerLinkingBot.hasCustomerLinked(contact)) {
+			return false;
+		}
+
+		return true;
 	}
 
 	/**
