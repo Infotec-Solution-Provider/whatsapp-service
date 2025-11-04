@@ -150,8 +150,21 @@ class CustomerLinkingBot {
 	}
 
 	/** Helper para enviar texto do bot */
-	private async sendBotText(from: string, chat: WppChat, text: string, quotedId?: number) {
-		const clientId = chat.sectorId || 1; // Fallback to 1 if sector not available
+	private async sendBotText(from: string, chat: WppChat, text: string, quotedId?: number, clientId?: number) {
+		if (!clientId) {
+			const sector = await prismaService.wppSector.findUnique({ where: { id: chat.sectorId || 0 } });
+
+			if (!sector || !sector.defaultClientId) {
+				return;
+			}
+			const client = whatsappService.getClient(sector.defaultClientId);
+
+			if (!client) {
+				return;
+			}
+			clientId = client.id;
+		}
+
 		await whatsappService.sendBotMessage(from, clientId, { chat, text, quotedId: quotedId ?? null });
 	}
 
@@ -299,7 +312,7 @@ class CustomerLinkingBot {
 	/**
 	 * Inicia o fluxo do bot solicitando o CNPJ
 	 */
-	public async startBot(chat: WppChat, contact: WppContact, to: string, quotedId?: number) {
+	public async startBot(chat: WppChat, contact: WppContact, to: string) {
 		await this.ensureLoaded();
 		const session = await this.getOrCreate(chat, contact);
 
@@ -317,17 +330,12 @@ class CustomerLinkingBot {
 				false
 			);
 
-			await prismaService.wppChat.update({
-				where: { id: chat.id },
-				data: { botId: 3 } // Usar um ID único para este bot
-			});
-
 			session.step = 0;
 			session.lastActivity = Date.now();
 			store.scheduleSave(() => this.sessions.values());
 
 			logger.log("Solicitando CNPJ ao cliente");
-			await this.sendBotText(to, chat, ASK_CNPJ_MSG, quotedId);
+			await this.sendBotText(to, chat, ASK_CNPJ_MSG);
 
 			logger.success({ step: session.step });
 		} catch (err) {

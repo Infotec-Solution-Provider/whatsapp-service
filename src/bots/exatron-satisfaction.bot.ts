@@ -107,12 +107,12 @@ class ExatronSatisfactionBot {
 	/** Permite resetar o fluxo manualmente (ex.: intervenção humana). */
 	public async reset(chatId: number, userId: number) {
 		await this.ensureLoaded();
-		const newSession: RunningSession = { 
-			chatId, 
-			step: 0, 
-			questionIndex: 0, 
-			lastActivity: Date.now(), 
-			userId 
+		const newSession: RunningSession = {
+			chatId,
+			step: 0,
+			questionIndex: 0,
+			lastActivity: Date.now(),
+			userId
 		};
 		this.sessions.set(chatId, newSession);
 		store.scheduleSave(() => this.sessions.values());
@@ -151,16 +151,11 @@ class ExatronSatisfactionBot {
 				return;
 			}
 
-			const logger = new ProcessingLogger(
-				chat.instance,
-				"exatron-satisfaction",
-				`timeout-${chat.id}-${now}`,
-				{
-					chatId: chat.id,
-					step: session.step,
-					reason: "inactivity-timeout"
-				}
-			);
+			const logger = new ProcessingLogger(chat.instance, "exatron-satisfaction", `timeout-${chat.id}-${now}`, {
+				chatId: chat.id,
+				step: session.step,
+				reason: "inactivity-timeout"
+			});
 			logger.log("Sessão expirada por inatividade. Finalizando.");
 
 			await this.finishChat(chat, logger);
@@ -188,8 +183,17 @@ class ExatronSatisfactionBot {
 
 	/** Helper para enviar texto do bot, citando opcionalmente a mensagem do cliente. */
 	private async sendBotText(from: string, chat: WppChat, text: string, quotedId?: number) {
-		const clientId = chat.sectorId || 1; // Fallback to 1 if sector not available
-		await whatsappService.sendBotMessage(from, clientId, { chat, text, quotedId: quotedId ?? null });
+		const sector = await prismaService.wppSector.findUnique({ where: { id: chat.sectorId || 0 } });
+
+		if (!sector || !sector.defaultClientId) {
+			return;
+		}
+		const client = whatsappService.getClient(sector.defaultClientId);
+
+		if (!client) {
+			return;
+		}
+		await whatsappService.sendBotMessage(from, client.id, { chat, text, quotedId: quotedId ?? null });
 	}
 
 	/** Envia a pergunta pelo índice. */
