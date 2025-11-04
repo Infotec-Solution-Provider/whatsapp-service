@@ -334,8 +334,12 @@ class InternalChatsService {
 			logData
 		);
 
-		process.log(`Iniciando envio de mensagem interna. Usuário: ${session.userId} (${session.name}), Chat ID: ${data.chatId}`);
-		process.log(`Dados da requisição - Tipo de mensagem: ${data.sendAsAudio ? 'áudio' : data.sendAsDocument ? 'documento' : 'texto'}, Com arquivo: ${!!file}, Com citação: ${!!data.quotedId}, Menções: ${data.mentions?.length || 0}`);
+		process.log(
+			`Iniciando envio de mensagem interna. Usuário: ${session.userId} (${session.name}), Chat ID: ${data.chatId}`
+		);
+		process.log(
+			`Dados da requisição - Tipo de mensagem: ${data.sendAsAudio ? "áudio" : data.sendAsDocument ? "documento" : "texto"}, Com arquivo: ${!!file}, Com citação: ${!!data.quotedId}, Menções: ${data.mentions?.length || 0}`
+		);
 
 		try {
 			let mentionsText = "";
@@ -400,16 +404,22 @@ class InternalChatsService {
 			}
 
 			if ("file" in data && !!data.file) {
-				process.log(`Processando arquivo anexado: ${data.file.originalname} (${data.file.size} bytes, mime: ${data.file.mimetype})`);
+				process.log(
+					`Processando arquivo anexado: ${data.file.originalname} (${data.file.size} bytes, mime: ${data.file.mimetype})`
+				);
 
 				if (data.sendAsAudio) {
-					process.log(`Convertendo arquivo para áudio compatível (extensão: ${data.file.originalname.split('.').pop()})`);
+					process.log(
+						`Convertendo arquivo para áudio compatível (extensão: ${data.file.originalname.split(".").pop()})`
+					);
 					const convertedAudio = await WhatsappAudioConverter.convertToCompatible(
 						data.file.buffer,
 						data.file.mimetype
 					);
 
-					process.log(`Arquivo de áudio convertido para ${convertedAudio.extension} (${convertedAudio.size} bytes)`);
+					process.log(
+						`Arquivo de áudio convertido para ${convertedAudio.extension} (${convertedAudio.size} bytes)`
+					);
 
 					data.file.buffer = convertedAudio.buffer;
 					data.file.mimetype = convertedAudio.mimeType;
@@ -429,7 +439,9 @@ class InternalChatsService {
 					dirType: FileDirType.PUBLIC
 				});
 
-				process.log(`Arquivo enviado com sucesso. File ID: ${file.id}, Nome: ${file.name}, Tamanho: ${file.size} bytes`);
+				process.log(
+					`Arquivo enviado com sucesso. File ID: ${file.id}, Nome: ${file.name}, Tamanho: ${file.size} bytes`
+				);
 
 				message.fileId = file.id;
 				message.fileName = file.name;
@@ -442,7 +454,9 @@ class InternalChatsService {
 			const savedMsg = await prismaService.internalMessage.create({
 				data: message
 			});
-			process.log(`Mensagem salva com sucesso. ID da mensagem: ${savedMsg.id}, Tipo: ${savedMsg.type}, Status: ${savedMsg.status}`);
+			process.log(
+				`Mensagem salva com sucesso. ID da mensagem: ${savedMsg.id}, Tipo: ${savedMsg.type}, Status: ${savedMsg.status}`
+			);
 
 			if (data.mentions?.length) {
 				process.log(`Processando ${data.mentions.length} menção(ões)`);
@@ -463,7 +477,9 @@ class InternalChatsService {
 				}
 			}
 
-			process.log(`Emitindo evento de mensagem interna via socket para a sala: ${session.instance}:internal-chat:${data.chatId}`);
+			process.log(
+				`Emitindo evento de mensagem interna via socket para a sala: ${session.instance}:internal-chat:${data.chatId}`
+			);
 			const room = `${session.instance}:internal-chat:${data.chatId}` as SocketServerInternalChatRoom;
 			await socketService.emit(SocketEventType.InternalMessage, room, {
 				message: savedMsg
@@ -476,11 +492,15 @@ class InternalChatsService {
 			});
 
 			if (chat?.wppGroupId) {
-				process.log(`Chat está associado a um grupo WhatsApp. Tentando enviar para grupo ID: ${chat.wppGroupId}`);
+				process.log(
+					`Chat está associado a um grupo WhatsApp. Tentando enviar para grupo ID: ${chat.wppGroupId}`
+				);
 				const sentMsg = await this.sendMessageToWppGroup(session, chat.wppGroupId, data, savedMsg);
 
 				if (sentMsg?.wwebjsId) {
-					process.log(`Mensagem enviada para WhatsApp com sucesso. wwebjsId: ${sentMsg.wwebjsId}, wwebjsIdStanza: ${sentMsg.wwebjsIdStanza || 'N/A'}`);
+					process.log(
+						`Mensagem enviada para WhatsApp com sucesso. wwebjsId: ${sentMsg.wwebjsId}, wwebjsIdStanza: ${sentMsg.wwebjsIdStanza || "N/A"}`
+					);
 					await prismaService.internalMessage.update({
 						where: { id: savedMsg.id },
 						data: {
@@ -507,10 +527,11 @@ class InternalChatsService {
 	}
 
 	public async receiveMessage(groupId: string, msg: CreateMessageDto, authorName: string | null = null) {
+		const cleanGroupId = groupId.replace(/[/:]/g, "-");
 		const process = new ProcessingLogger(
 			msg.instance,
 			"receive-internal-message",
-			`group:${groupId}-${Date.now()}`,
+			`group_${cleanGroupId}_${Date.now()}`,
 			{ groupId, from: msg.from, authorName }
 		);
 
@@ -557,15 +578,19 @@ class InternalChatsService {
 	}
 
 	public async receiveMessageEdit(groupId: string, msgId: string, newText: string) {
+		const cleanGroupId = groupId.replace(/[/:]/g, "-");
+		const cleanMsgId = msgId.replace(/[/:]/g, "-");
 		const process = new ProcessingLogger(
 			"internal-service",
 			"receive-message-edit",
-			`group:${groupId}-${msgId}`,
+			`group_${cleanGroupId}_msg_${cleanMsgId}`,
 			{ groupId, messageId: msgId, textLength: newText.length }
 		);
 
 		try {
-			process.log(`Recebendo edição de mensagem de grupo WhatsApp. Grupo ID: ${groupId}, Mensagem Stanza ID: ${msgId}`);
+			process.log(
+				`Recebendo edição de mensagem de grupo WhatsApp. Grupo ID: ${groupId}, Mensagem Stanza ID: ${msgId}`
+			);
 
 			const chat = await prismaService.internalChat.findUnique({
 				where: {
@@ -591,7 +616,9 @@ class InternalChatsService {
 				process.log(`Mensagem não encontrada. Ignorando edição.`);
 				return;
 			}
-			process.log(`Mensagem encontrada. Mensagem ID: ${message.id}, Texto anterior: "${message.body.substring(0, 50)}${message.body.length > 50 ? '...' : ''}"`);
+			process.log(
+				`Mensagem encontrada. Mensagem ID: ${message.id}, Texto anterior: "${message.body.substring(0, 50)}${message.body.length > 50 ? "..." : ""}"`
+			);
 
 			process.log(`Atualizando mensagem com novo texto`);
 			const updatedMsg = await this.updateMessage(message.id, {
@@ -599,7 +626,9 @@ class InternalChatsService {
 				isEdited: true
 			});
 
-			process.log(`Mensagem atualizada com sucesso. Novo texto: "${newText.substring(0, 50)}${newText.length > 50 ? '...' : ''}"`);
+			process.log(
+				`Mensagem atualizada com sucesso. Novo texto: "${newText.substring(0, 50)}${newText.length > 50 ? "..." : ""}"`
+			);
 
 			const room: SocketServerInternalChatRoom = `${chat.instance}:internal-chat:${chat.id}`;
 			process.log(`Emitindo evento de edição via socket para sala: ${room}`);
@@ -623,15 +652,18 @@ class InternalChatsService {
 		data: InternalSendMessageData,
 		message: InternalMessage
 	) {
+		const cleanGroupId = groupId.replace(/[/:]/g, "-");
 		const process = new ProcessingLogger(
 			session.instance,
 			"wpp-group-message",
-			`group:${groupId}-${Date.now()}`,
+			`group_${cleanGroupId}_${Date.now()}`,
 			{ groupId, userId: session.userId, messageId: message.id }
 		);
 
 		try {
-			process.log(`Iniciando envio de mensagem para grupo WhatsApp. Grupo ID: ${groupId}, Mensagem Interna ID: ${message.id}`);
+			process.log(
+				`Iniciando envio de mensagem para grupo WhatsApp. Grupo ID: ${groupId}, Mensagem Interna ID: ${message.id}`
+			);
 
 			process.log(`Buscando setor padrão do usuário. Setor ID: ${session.sectorId}`);
 			const sector = await prismaService.wppSector.findUnique({ where: { id: session.sectorId } });
@@ -672,7 +704,7 @@ class InternalChatsService {
 			}
 
 			const text = `*${session.name}*: ${message.body}`;
-			process.log(`Texto da mensagem formatado: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+			process.log(`Texto da mensagem formatado: "${text.substring(0, 50)}${text.length > 50 ? "..." : ""}"`);
 
 			if (data.quotedId) {
 				process.log(`Processando resposta para mensagem ID: ${data.quotedId}`);
@@ -695,40 +727,53 @@ class InternalChatsService {
 				process.log(`URL do arquivo gerada: ${fileUrl}`);
 
 				process.log(`Enviando mensagem com arquivo para grupo ${groupId}`);
-				const result = await client.sendMessage({
-					fileName: message.fileName!,
-					fileUrl,
-					to: groupId,
-					quotedId: data.quotedId || null,
-					sendAsAudio: data.sendAsAudio === "true",
-					sendAsDocument: data.sendAsDocument === "true",
-					text,
-					mentions: waMentions
-				});
-				process.log(`Mensagem com arquivo enviada com sucesso. wwebjsId: ${result?.wwebjsId || 'N/A'}, wwebjsIdStanza: ${result?.wwebjsIdStanza || 'N/A'}`);
+				const result = await client.sendMessage(
+					{
+						fileName: message.fileName!,
+						fileUrl,
+						to: groupId,
+						quotedId: data.quotedId || null,
+						sendAsAudio: data.sendAsAudio === "true",
+						sendAsDocument: data.sendAsDocument === "true",
+						text,
+						mentions: waMentions
+					},
+					true
+				);
+				process.log(
+					`Mensagem com arquivo enviada com sucesso. wwebjsId: ${result?.wwebjsId || "N/A"}, wwebjsIdStanza: ${result?.wwebjsIdStanza || "N/A"}`
+				);
 				process.success(`Mensagem com arquivo enviada para grupo ${groupId}`);
 				return result;
 			} else if (groupId && client) {
 				process.log(`Enviando mensagem de texto para grupo ${groupId} (sem arquivo)`);
-				const result = await client.sendMessage({
-					to: groupId,
-					quotedId: data.quotedId || null,
-					text,
-					mentions: waMentions
-				});
-				process.log(`Mensagem de texto enviada com sucesso. wwebjsId: ${result?.wwebjsId || 'N/A'}, wwebjsIdStanza: ${result?.wwebjsIdStanza || 'N/A'}`);
+				const result = await client.sendMessage(
+					{
+						to: groupId,
+						quotedId: data.quotedId || null,
+						text,
+						mentions: waMentions
+					},
+					true
+				);
+				process.log(
+					`Mensagem de texto enviada com sucesso. wwebjsId: ${result?.wwebjsId || "N/A"}, wwebjsIdStanza: ${result?.wwebjsIdStanza || "N/A"}`
+				);
 				process.success(`Mensagem de texto enviada para grupo ${groupId}`);
 				return result;
 			}
 
 			process.log(`Cenário não esperado. Enviando mensagem com fallback`);
-			const result = await client.sendMessage({
-				to: groupId,
-				quotedId: data.quotedId || null,
-				text: data.text,
-				mentions: waMentions
-			});
-			process.log(`Mensagem enviada com sucesso (fallback). wwebjsId: ${result?.wwebjsId || 'N/A'}`);
+			const result = await client.sendMessage(
+				{
+					to: groupId,
+					quotedId: data.quotedId || null,
+					text: data.text,
+					mentions: waMentions
+				},
+				true
+			);
+			process.log(`Mensagem enviada com sucesso (fallback). wwebjsId: ${result?.wwebjsId || "N/A"}`);
 			process.success(`Mensagem enviada para grupo ${groupId}`);
 			return result;
 		} catch (err) {

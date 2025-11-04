@@ -306,6 +306,8 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		process.log("Iniciando envio de mensagem.", options);
 
 		const to = `${options.to}${isGroup ? "@g.us" : "@c.us"}`;
+
+		console.log("to:", to);	
 		const params: WAWebJS.MessageSendOptions = {};
 
 		if (options.quotedId) {

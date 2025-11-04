@@ -57,7 +57,7 @@ abstract class WhatsappClient {
 	 * @param props - An object containing message details.
 	 * @returns - A promise resolved when the message is sent.
 	 */
-	public abstract sendMessage(props: SendMessageOptions): Promise<CreateMessageDto>;
+	public abstract sendMessage(props: SendMessageOptions, isGroup?: boolean): Promise<CreateMessageDto>;
 
 	/**
 	 * Edits a previously sent message.

@@ -184,7 +184,7 @@ class WhatsappService {
 		const { file, ...logData } = data;
 		const process = new ProcessingLogger(session.instance, "send-message", `${to}-${Date.now()}`, logData);
 
-		Logger.debug(`Enviando mensagem para ${to} via WhatsApp (Client ID: ${clientId})`)
+		Logger.debug(`Enviando mensagem para ${to} via WhatsApp (Client ID: ${clientId})`);
 
 		process.log("Iniciando o envio da mensagem.");
 		try {
