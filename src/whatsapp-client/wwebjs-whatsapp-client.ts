@@ -1,24 +1,24 @@
-import "dotenv/config";
-import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
-import WhatsappClient from "./whatsapp-client";
-import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
-import { randomUUID } from "node:crypto";
 import { SocketEventType, SocketServerAdminRoom } from "@in.pulse-crm/sdk";
+import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import "dotenv/config";
+import { randomUUID } from "node:crypto";
+import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
+import CreateMessageDto from "../dtos/create-message.dto";
 import MessageParser from "../parsers/wwebjs-message.parser";
+import runFixLidMessagesRoutine from "../routines/fix-lid-messages.routine";
+import internalChatsService from "../services/internal-chats.service";
+import messagesDistributionService from "../services/messages-distribution.service";
+import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
 import socketService from "../services/socket.service";
-import ProcessingLogger from "../utils/processing-logger";
-import messagesService from "../services/messages.service";
-import messagesDistributionService from "../services/messages-distribution.service";
 import {
 	EditMessageOptions,
 	Mentions,
 	SendMessageOptions,
 	SendTemplateOptions
 } from "../types/whatsapp-instance.types";
-import internalChatsService from "../services/internal-chats.service";
-import CreateMessageDto from "../dtos/create-message.dto";
-import runFixLidMessagesRoutine from "../routines/fix-lid-messages.routine";
+import ProcessingLogger from "../utils/processing-logger";
+import WhatsappClient from "./whatsapp-client";
 
 const PUPPETEER_ARGS = {
 	headless: true,
@@ -92,6 +92,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		this.wwebjs.on("message_ack", this.handleMessageAck.bind(this));
 		this.wwebjs.on("message_reaction", this.handleMessageReaction.bind(this));
 		this.wwebjs.on("message_revoke_everyone", this.handleMessageRevoked.bind(this));
+		this.wwebjs.on("group_join", this.handleGroupJoin.bind(this));
 	}
 
 	private log(type: "info" | "error" | "debug", message: string, err?: Error) {
@@ -282,6 +283,12 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		this.log("info", "Message revoked! " + id._serialized);
 	}
 
+	private async handleGroupJoin(notification: WAWebJS.GroupNotification) {
+		const contact = await notification.getContact();
+		console.log(contact);
+		await internalChatsService.addParticipantToInternalChat(notification.chatId, `external:${contact.id.user}`);
+	}
+
 	public async getProfilePictureUrl(phone: string) {
 		return await this.wwebjs
 			.getProfilePicUrl(phone + "@c.us")
@@ -307,7 +314,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 		const to = `${options.to}${isGroup ? "@g.us" : "@c.us"}`;
 
-		console.log("to:", to);	
+		console.log("to:", to);
 		const params: WAWebJS.MessageSendOptions = {};
 
 		if (options.quotedId) {

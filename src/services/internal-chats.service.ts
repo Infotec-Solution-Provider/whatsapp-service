@@ -1,4 +1,3 @@
-import { InternalChat, Prisma } from "@prisma/client";
 import {
 	FileDirType,
 	InternalChatMember,
@@ -9,18 +8,19 @@ import {
 	SocketServerUserRoom,
 	User
 } from "@in.pulse-crm/sdk";
-import socketService from "./socket.service";
-import ProcessingLogger from "../utils/processing-logger";
-import filesService from "./files.service";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { InternalChat, Prisma } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
-import prismaService from "./prisma.service";
-import whatsappService, { getMessageType } from "./whatsapp.service";
 import CreateMessageDto from "../dtos/create-message.dto";
-import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 import { Mention, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
+import ProcessingLogger from "../utils/processing-logger";
 import WhatsappAudioConverter from "../utils/whatsapp-audio-converter";
+import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
+import filesService from "./files.service";
 import instancesService from "./instances.service";
+import prismaService from "./prisma.service";
+import socketService from "./socket.service";
+import whatsappService, { getMessageType } from "./whatsapp.service";
 
 interface ChatsFilters {
 	userId?: string;
@@ -40,7 +40,7 @@ interface InternalSendMessageData {
 
 interface UpdateInternalGroupData {
 	name: string;
-	participants: number[];
+	participants: string[];
 	wppGroupId: string | null;
 }
 
@@ -52,13 +52,13 @@ class InternalChatsService {
 	// Cria um grupo interno com um nome e participantes
 	public async createInternalChat(
 		session: SessionData,
-		participantIds: number[],
+		participants: string[],
 		isGroup: boolean = false,
 		groupName: string | null = null,
 		groupId: string | null = null,
 		groupImage: Express.Multer.File | null = null
 	) {
-		const uniqueIds = new Set(participantIds);
+		const uniqueIds = new Set(participants);
 		let fileId: number | null = null;
 
 		if (groupImage) {
@@ -84,9 +84,9 @@ class InternalChatsService {
 			}
 		});
 
-		await prismaService.internalChatMember.createMany({
+		await prismaService.internalChatParticipant.createMany({
 			data: Array.from(uniqueIds).map((id) => ({
-				userId: id,
+				participantId: id,
 				internalChatId: internalChat.id,
 				joinedAt: new Date()
 			}))
@@ -101,14 +101,17 @@ class InternalChatsService {
 		});
 
 		for (const id of uniqueIds) {
-			const room: SocketServerUserRoom = `${session.instance}:user:${id}`;
+			if (id.includes("user:")) {
+				const userId = Number(id.replace("user:", ""));
+				const room: SocketServerUserRoom = `${session.instance}:user:${userId}`;
 
-			await socketService.emit(SocketEventType.InternalChatStarted, room, {
-				chat: result as unknown as InternalChat & {
-					participants: InternalChatMember[];
-					messages: InternalMessage[];
-				}
-			});
+				await socketService.emit(SocketEventType.InternalChatStarted, room, {
+					chat: result as unknown as InternalChat & {
+						participants: InternalChatMember[];
+						messages: InternalMessage[];
+					}
+				});
+			}
 		}
 
 		return result;
@@ -116,14 +119,16 @@ class InternalChatsService {
 
 	// Sobrescreve os participantes de um grupo interno
 	public async updateInternalGroup(groupId: number, data: UpdateInternalGroupData) {
-		const currentParticipants = await prismaService.internalChatMember.findMany({
+		const currentParticipants = await prismaService.internalChatParticipant.findMany({
 			where: {
 				internalChatId: groupId
 			}
 		});
 
-		const idsToAdd = data.participants.filter((p) => !currentParticipants.some((c) => c.userId === p));
-		const idsToRemove = currentParticipants.filter((p) => !data.participants.includes(p.userId));
+		const idsToAdd = data.participants.filter((p) => !currentParticipants.some((c) => c.participantId === p));
+		const idsToRemove = currentParticipants
+			.filter((p) => !data.participants.includes(p.participantId))
+			.map((p) => p.participantId);
 
 		const group = await prismaService.internalChat.update({
 			where: { id: groupId },
@@ -133,14 +138,14 @@ class InternalChatsService {
 				participants: {
 					createMany: {
 						data: idsToAdd.map((id) => ({
-							userId: id,
+							participantId: id,
 							joinedAt: new Date()
 						}))
 					},
 					deleteMany: {
 						internalChatId: groupId,
-						userId: {
-							in: idsToRemove.map((p) => p.userId)
+						participantId: {
+							in: idsToRemove
 						}
 					}
 				}
@@ -148,24 +153,65 @@ class InternalChatsService {
 			include: { participants: true, messages: true }
 		});
 
-		for (const id of idsToAdd) {
-			const room: SocketServerUserRoom = `${group.instance}:user:${id}`;
+		for (const participantId of idsToAdd) {
+			this.notifyInternalChatAddParticipant(group.instance, participantId, group);
+		}
+		for (const participantId of idsToRemove) {
+			this.notifyInternalChatRemoveParticipant(group.instance, participantId, group);
+		}
+
+		return group;
+	}
+
+	public async addParticipantToInternalChat(wwebjsGroupId: string, participantId: string) {
+		const group = await prismaService.internalChat.update({
+			where: { wppGroupId: wwebjsGroupId },
+			data: {
+				participants: {
+					create: {
+						participantId,
+						joinedAt: new Date()
+					}
+				}
+			}
+		});
+
+		return group;
+	}
+
+	public async notifyInternalChatAddParticipant(instance: string, participantId: string, group: InternalChat) {
+		try {
+			if (!participantId.startsWith("user:")) return;
+			const userId = Number(participantId.replace("user:", ""));
+			const room: SocketServerUserRoom = `${instance}:user:${userId}`;
 			await socketService.emit(SocketEventType.InternalChatStarted, room, {
 				chat: group as unknown as InternalChat & {
 					participants: InternalChatMember[];
 					messages: InternalMessage[];
 				}
 			});
+		} catch (err) {
+			throw new Error(
+				`Error notifying user ${participantId} about being added to internal chat ${group.id}: ${sanitizeErrorMessage(err)}`,
+				{ cause: err }
+			);
 		}
+	}
 
-		for (const id of idsToRemove) {
-			const room: SocketServerUserRoom = `${group.instance}:user:${id.userId}`;
+	public async notifyInternalChatRemoveParticipant(instance: string, participantId: string, group: InternalChat) {
+		try {
+			if (!participantId.startsWith("user:")) return;
+			const userId = Number(participantId.replace("user:", ""));
+			const room: SocketServerUserRoom = `${instance}:user:${userId}`;
 			await socketService.emit(SocketEventType.InternalChatFinished, room, {
-				chatId: groupId
+				chatId: group.id
 			});
+		} catch (err) {
+			throw new Error(
+				`Error notifying user ${participantId} about being removed from internal chat ${group.id}: ${sanitizeErrorMessage(err)}`,
+				{ cause: err }
+			);
 		}
-
-		return group;
 	}
 
 	public async updateGroupImage(session: SessionData, groupId: number, file: Express.Multer.File) {
@@ -194,7 +240,7 @@ class InternalChatsService {
 			throw new BadRequestError("Chat not found");
 		}
 
-		await prismaService.internalChatMember.deleteMany({
+		await prismaService.internalChatParticipant.deleteMany({
 			where: {
 				internalChatId: id
 			}
@@ -222,7 +268,7 @@ class InternalChatsService {
 			where: {
 				instance: session.instance,
 				participants: {
-					some: { userId: session.userId }
+					some: { participantId: `user:${session.userId}` }
 				}
 			},
 			include: {
@@ -304,7 +350,7 @@ class InternalChatsService {
 		if (filters.userId) {
 			whereClause.participants = {
 				some: {
-					userId: +filters.userId
+					participantId: `user:${+filters.userId}`
 				}
 			};
 		}
@@ -906,14 +952,14 @@ class InternalChatsService {
 			}
 		});
 
-		await prismaService.internalChatMember.update({
+		await prismaService.internalChatParticipant.update({
 			data: {
 				lastReadAt: lastMsg?.timestamp ? new Date(+lastMsg.timestamp) : new Date()
 			},
 			where: {
-				internalChatId_userId: {
+				internalChatId_participantId: {
 					internalChatId: chatId,
-					userId
+					participantId: `user:${userId}`
 				}
 			}
 		});

@@ -170,24 +170,24 @@ model InternalChat {
   groupImageFileId Int?    @map("group_image_file_id")
   wppGroupId       String? @unique @map("wpp_group_id")
 
-  sector       WppSector?           @relation(fields: [sectorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  sector       WppSector?                @relation(fields: [sectorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   messages     InternalMessage[]
-  participants InternalChatMember[]
+  participants InternalChatParticipant[]
 
   @@index([creatorId])
   @@map("internalchats")
 }
 
-model InternalChatMember {
-  internalChatId Int       @map("internalchatId")
-  userId         Int       @map("internalcontactId")
+model InternalChatParticipant {
+  internalChatId Int       @map("internalchat_id")
+  participantId  String    @map("participant_id")
   joinedAt       DateTime  @default(now()) @map("joined_at")
   lastReadAt     DateTime? @map("last_read_at")
 
   chat InternalChat @relation(fields: [internalChatId], references: [id], onDelete: Cascade)
 
-  @@id([internalChatId, userId])
-  @@map("internal_chat_members")
+  @@id([internalChatId, participantId])
+  @@map("internal_chat_participants")
 }
 
 model InternalMention {
