@@ -8,6 +8,7 @@ import JsonSessionStore from "../utils/json-session-store";
 import ProcessingLogger from "../utils/processing-logger";
 import parametersService from "../services/parameters.service";
 import chatsService from "../services/chats.service";
+import { Customer } from "@in.pulse-crm/sdk";
 
 type RunningSession = {
 	chatId: number;
@@ -196,12 +197,14 @@ class CustomerLinkingBot {
 			logger?.log("Buscando cliente por CNPJ", { cnpj });
 
 			// Busca na tabela de clientes da instância
-			const result = await instancesService.executeQuery<
-				Array<{ CODIGO: number; NOME: string; CPF_CNPJ: string }>
-			>(instance, "SELECT CODIGO, NOME, CPF_CNPJ FROM clientes WHERE CPF_CNPJ = ? LIMIT 1", [cnpj]);
+			const result = await instancesService.executeQuery<Array<Customer>>(
+				instance,
+				"SELECT CODIGO, RAZAO, CPF_CNPJ FROM clientes WHERE CPF_CNPJ = ? LIMIT 1",
+				[cnpj]
+			);
 
 			if (result && result.length > 0 && result[0]) {
-				logger?.log("Cliente encontrado", { customerId: result[0].CODIGO, name: result[0].NOME });
+				logger?.log("Cliente encontrado", { customerId: result[0].CODIGO, name: result[0].RAZAO });
 				return result[0].CODIGO;
 			}
 
