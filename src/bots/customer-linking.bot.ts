@@ -24,7 +24,7 @@ const ASK_CNPJ_MSG = "Para prosseguir, preciso vincular seu cadastro. Por favor,
 const INVALID_CNPJ_MSG =
 	"CNPJ inválido. Por favor, digite um CNPJ válido (apenas números ou com formatação XX.XXX.XXX/XXXX-XX).";
 const CUSTOMER_FOUND_MSG = "Cliente encontrado! Vinculando seu cadastro...";
-const CUSTOMER_LINKED_MSG = "Cadastro vinculado com sucesso! Você já pode prosseguir com o atendimento.";
+const CUSTOMER_LINKED_MSG = "Cadastro vinculado com sucesso! Você será direcionado para atendimento humano.";
 const CUSTOMER_NOT_FOUND_MSG =
 	"Cliente não encontrado em nossa base de dados. Você será direcionado para atendimento humano.";
 const TIMEOUT_MSG = "Atendimento finalizado por inatividade.";
@@ -272,24 +272,6 @@ class CustomerLinkingBot {
 		}
 	}
 
-	/** Finaliza o fluxo do bot com sucesso */
-	private async finishBot(chat: WppChat, logger?: ProcessingLogger) {
-		try {
-			logger?.log("Finalizando bot com sucesso");
-
-			// Remove o botId para liberar o chat
-			await prismaService.wppChat.update({
-				where: { id: chat.id },
-				data: { botId: null }
-			});
-
-			logger?.log("Bot finalizado");
-		} catch (e) {
-			logger?.log("Erro ao finalizar bot", { error: e });
-			throw e;
-		}
-	}
-
 	/**
 	 * Verifica se o bot deve ser ativado para este chat
 	 */
@@ -422,15 +404,15 @@ class CustomerLinkingBot {
 		await this.linkCustomerToContact(contact.id, customerId, logger);
 		await this.sendBotText(message.from, chat, CUSTOMER_LINKED_MSG);
 
-		// Finaliza o bot
+		// Transfere para atendimento humano
 		session.step = 2;
 		session.lastActivity = Date.now();
 		store.scheduleSave(() => this.sessions.values());
 
-		await this.finishBot(chat, logger);
+		await this.transferToHuman(chat, logger);
 		this.remove(chat.id);
 
-		logger.success({ step: session.step, customerId, linked: true });
+		logger.success({ step: session.step, customerId, linked: true, transferredToHuman: true });
 	}
 
 	private async handleCustomerNotFound(
