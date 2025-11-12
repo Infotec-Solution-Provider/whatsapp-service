@@ -88,12 +88,20 @@ class MessagesService {
 	}
 
 	public async fetchMessages(session: SessionData, filters: FetchMessagesFilter) {
+		// Garante que a data mínima comece em 00:00:00
+		const minDate = new Date(filters.minDate);
+		minDate.setHours(0, 0, 0, 0);
+
+		// Garante que a data máxima termine em 23:59:59
+		const maxDate = new Date(filters.maxDate);
+		maxDate.setHours(23, 59, 59, 999);
+
 		const messages = await prismaService.wppMessage.findMany({
 			where: {
 				instance: session.instance,
 				sentAt: {
-					gte: new Date(filters.minDate),
-					lte: new Date(filters.maxDate)
+					gte: minDate,
+					lte: maxDate
 				},
 				...(filters.userId ? { userId: Number(filters.userId) } : {})
 			},
@@ -128,7 +136,9 @@ class MessagesService {
 					messageId: originalMessage.wwebjsId,
 					text: options.text,
 					mentions: options.mentions || null
-				}, session, logger: process
+				},
+				session,
+				logger: process
 			});
 			process.log("Mensagem editada com sucesso.");
 
