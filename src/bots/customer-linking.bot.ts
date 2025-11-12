@@ -20,7 +20,12 @@ type RunningSession = {
 	timeoutms?: number;
 };
 
-const ASK_CNPJ_MSG = "Para prosseguir, preciso vincular seu cadastro. Por favor, informe o CNPJ da sua empresa.";
+const ASK_CNPJ_MSG = (instance: string) => {
+	if (instance === "exatron") {
+		return "Bem Vindo(a) a Exatron!\nDigite seu CNPJ para iniciarmos seu atendimento";
+	}
+	return "Bem Vindo(a) a Exatron!\nDigite seu CNPJ para iniciarmos seu atendimento";
+};
 const INVALID_CNPJ_MSG =
 	"CNPJ inválido. Por favor, digite um CNPJ válido (apenas números ou com formatação XX.XXX.XXX/XXXX-XX).";
 const CUSTOMER_FOUND_MSG = "Cliente encontrado! Vinculando seu cadastro...";
@@ -320,7 +325,7 @@ class CustomerLinkingBot {
 			store.scheduleSave(() => this.sessions.values());
 
 			logger.log("Solicitando CNPJ ao cliente");
-			await this.sendBotText(to, chat, ASK_CNPJ_MSG);
+			await this.sendBotText(to, chat, ASK_CNPJ_MSG(chat.instance));
 
 			logger.success({ step: session.step });
 		} catch (err) {
