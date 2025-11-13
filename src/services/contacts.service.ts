@@ -177,8 +177,18 @@ class ContactsService {
 
 			let chatingWith = null;
 			if (chat?.userId) {
-				const usersMap = await this.getUsersByIds(instance, [chat.userId]);
-				chatingWith = usersMap.get(chat.userId)?.NOME || "Supervisão";
+				try {
+					const user = await usersService.getUserById(chat.userId);
+					if (user?.NOME) {
+						chatingWith = user.NOME;
+					} else {
+						console.log(`[getContactsWithCustomer] usuário ${chat.userId} não possui NOME, usando Supervisão`);
+						chatingWith = "Supervisão";
+					}
+				} catch (error) {
+					console.log(`[getContactsWithCustomer] erro ao buscar usuário ${chat.userId}, usando Supervisão`);
+					chatingWith = "Supervisão";
+				}
 			}
 
 			return {
