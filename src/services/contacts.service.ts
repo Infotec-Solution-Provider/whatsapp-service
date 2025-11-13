@@ -169,24 +169,24 @@ class ContactsService {
 		const chatsMap = new Map<number, any>(
 			(Array.isArray(chats) ? chats : []).map((chat: any) => [chat.contactId, chat])
 		);
-		const relevantChats = contacts.map((c) => chatsMap.get(c.id)).filter(Boolean) as any[];
-		const uniqueUserIds = [...new Set(relevantChats.map((c) => c.userId).filter(Boolean))] as number[];
+		console.log("[getContactsWithCustomer] chats mapped", chatsMap.size);
 
-		const usersMap = await this.getUsersByIds(instance, uniqueUserIds);
-		console.log("[getContactsWithCustomer] usersMap size", usersMap.size);
-
-		const mappedContacts = contacts.map((contact) => {
+		const mappedContacts = await Promise.all(contacts.map(async (contact) => {
 			const customer = contact.customerId ? customersMap.get(contact.customerId) : null;
 			const chat = chatsMap.get(contact.id);
-			const user = chat ? usersMap.get(chat.userId || -200)?.NOME || "Supervisão" : null;
+
+			let chatingWith = null;
+			if (chat?.userId) {
+				const usersMap = await this.getUsersByIds(instance, [chat.userId]);
+				chatingWith = usersMap.get(chat.userId)?.NOME || "Supervisão";
+			}
 
 			return {
 				...contact,
 				customer: customer || null,
-				chatingWith: user
+				chatingWith
 			};
-		});
-
+		}));
 		const totalPages = Math.ceil(total / perPage);
 
 		return {
