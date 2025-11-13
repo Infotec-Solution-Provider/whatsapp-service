@@ -1,4 +1,4 @@
-import { Customer, User } from "@in.pulse-crm/sdk";
+import { Customer } from "@in.pulse-crm/sdk";
 import { Prisma } from "@prisma/client";
 import { BadRequestError, ConflictError } from "@rgranatodutra/http-errors";
 import chatsService from "./chats.service";
@@ -174,7 +174,6 @@ class ContactsService {
 		const mappedContacts = await Promise.all(contacts.map(async (contact) => {
 			const customer = contact.customerId ? customersMap.get(contact.customerId) : null;
 			const chat = chatsMap.get(contact.id);
-
 			let chatingWith = null;
 			if (chat?.userId) {
 				try {
