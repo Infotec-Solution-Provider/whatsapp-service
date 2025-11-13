@@ -380,7 +380,7 @@ class ContactsService {
 	/**
 	 * Busca usuários por IDs, com cache Redis por instance e chamada à API escopada por instance.
 	 */
-	private async getUsersByIds(instance: string, userIds: number[]): Promise<Map<number, User>> {
+/* 	private async getUsersByIds(instance: string, userIds: number[]): Promise<Map<number, User>> {
 		const result = new Map<number, User>();
 
 		if (userIds.length === 0) {
