@@ -22,7 +22,7 @@ export interface ContactsFilters {
 
 class ContactsService {
 	private readonly CUSTOMER_CACHE_TTL = 5 * 60; // 5 minutos em segundos
-	private readonly USER_CACHE_TTL = 5 * 60; // 5 minutos em segundos
+	//private readonly USER_CACHE_TTL = 5 * 60; // 5 minutos em segundos
 
 	public async getOrCreateContact(instance: string, name: string, phone: string) {
 		const contact = await prismaService.wppContact.findUnique({
@@ -438,7 +438,7 @@ class ContactsService {
 		}
 
 		return result;
-	}
+	} */
 
 	public async getCustomerContacts(instance: string, customerId: number) {
 		const contacts = await prismaService.wppContact.findMany({
