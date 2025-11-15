@@ -1,4 +1,4 @@
-import { Customer, User } from "@in.pulse-crm/sdk";
+import { Customer } from "@in.pulse-crm/sdk";
 import { Prisma } from "@prisma/client";
 import { BadRequestError, ConflictError } from "@rgranatodutra/http-errors";
 import chatsService from "./chats.service";
@@ -22,7 +22,7 @@ export interface ContactsFilters {
 
 class ContactsService {
 	private readonly CUSTOMER_CACHE_TTL = 5 * 60; // 5 minutos em segundos
-	private readonly USER_CACHE_TTL = 5 * 60; // 5 minutos em segundos
+	//private readonly USER_CACHE_TTL = 5 * 60; // 5 minutos em segundos
 
 	public async getOrCreateContact(instance: string, name: string, phone: string) {
 		const contact = await prismaService.wppContact.findUnique({
@@ -154,23 +154,32 @@ class ContactsService {
 		const chatsMap = new Map<number, any>(
 			(Array.isArray(chats) ? chats : []).map((chat: any) => [chat.contactId, chat])
 		);
-		const relevantChats = contacts.map((c) => chatsMap.get(c.id)).filter(Boolean) as any[];
-		const uniqueUserIds = [...new Set(relevantChats.map((c) => c.userId).filter(Boolean))] as number[];
 
-		const usersMap = await this.getUsersByIds(instance, uniqueUserIds);
+		const mappedContacts = await Promise.all(
+			contacts.map(async (contact) => {
+				const customer = contact.customerId ? customersMap.get(contact.customerId) : null;
+				const chat = chatsMap.get(contact.id);
+				let chatingWith = null;
+				if (chat?.userId) {
+					try {
+						const user = await usersService.getUserById(chat.userId);
+						if (user?.NOME) {
+							chatingWith = user.NOME;
+						} else {
+							chatingWith = "Supervisão";
+						}
+					} catch (error) {
+						chatingWith = "Supervisão";
+					}
+				}
 
-		const mappedContacts = contacts.map((contact) => {
-			const customer = contact.customerId ? customersMap.get(contact.customerId) : null;
-			const chat = chatsMap.get(contact.id);
-			const user = chat ? usersMap.get(chat.userId || -200)?.NOME || "Supervisão" : null;
-
-			return {
-				...contact,
-				customer: customer || null,
-				chatingWith: user
-			};
-		});
-
+				return {
+					...contact,
+					customer: customer || null,
+					chatingWith
+				};
+			})
+		);
 		const totalPages = Math.ceil(total / perPage);
 
 		return {
@@ -341,7 +350,7 @@ class ContactsService {
 	/**
 	 * Busca usuários por IDs, com cache Redis por instance e chamada à API escopada por instance.
 	 */
-	private async getUsersByIds(instance: string, userIds: number[]): Promise<Map<number, User>> {
+	/* 	private async getUsersByIds(instance: string, userIds: number[]): Promise<Map<number, User>> {
 		const result = new Map<number, User>();
 
 		if (userIds.length === 0) {
@@ -399,7 +408,7 @@ class ContactsService {
 		}
 
 		return result;
-	}
+	} */
 
 	public async getCustomerContacts(instance: string, customerId: number) {
 		const contacts = await prismaService.wppContact.findMany({
