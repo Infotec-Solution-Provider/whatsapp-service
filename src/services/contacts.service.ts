@@ -4,9 +4,9 @@ import { BadRequestError, ConflictError } from "@rgranatodutra/http-errors";
 import chatsService from "./chats.service";
 import customersService from "./customers.service";
 import prismaService from "./prisma.service";
+import redisService from "./redis.service";
 import usersService from "./users.service";
 import whatsappService from "./whatsapp.service";
-import redisService from "./redis.service";
 
 export interface ContactsFilters {
 	name: string | null;
@@ -61,12 +61,9 @@ class ContactsService {
 		customersService.setAuth(token);
 		usersService.setAuth(token);
 
-		console.log("[getContactsWithCustomer] start", { instance, filters });
-
 		// paginação normalizada
 		const page = Math.max(1, filters.page);
 		const perPage = Math.max(1, Math.min(100, filters.perPage));
-		console.log("[getContactsWithCustomer] pagination", { page, perPage });
 
 		// where base SEMPRE inclui instance
 		const whereConditions: Prisma.WppContactWhereInput = {
@@ -78,7 +75,6 @@ class ContactsService {
 		const hasCustomerSideFilters = !!(filters.customerErp || filters.customerCnpj || filters.customerName);
 		if (hasCustomerSideFilters) {
 			const matchedCustomerIds = await this.searchCustomerIdsByFilters(instance, filters);
-			console.log("[getContactsWithCustomer] matchedCustomerIds", matchedCustomerIds);
 
 			if (matchedCustomerIds.length === 0) {
 				return {
@@ -131,12 +127,6 @@ class ContactsService {
 			prismaService.wppContact.count({ where: whereConditions })
 		]);
 
-		console.log("[getContactsWithCustomer] db result", {
-			resultCount: contacts.length,
-			totalCount: total,
-			sampleIds: contacts.slice(0, 10).map((c) => c.id)
-		});
-
 		if (contacts.length === 0) {
 			return {
 				data: [],
@@ -161,11 +151,6 @@ class ContactsService {
 			this.getCustomersByIds(instance, uniqueCustomerIds)
 		]);
 
-		console.log("[getContactsWithCustomer] enrichment fetched", {
-			chatsCount: Array.isArray(chats) ? chats.length : 0,
-			customersFound: customersMap.size
-		});
-
 		const chatsMap = new Map<number, any>(
 			(Array.isArray(chats) ? chats : []).map((chat: any) => [chat.contactId, chat])
 		);
@@ -173,7 +158,6 @@ class ContactsService {
 		const uniqueUserIds = [...new Set(relevantChats.map((c) => c.userId).filter(Boolean))] as number[];
 
 		const usersMap = await this.getUsersByIds(instance, uniqueUserIds);
-		console.log("[getContactsWithCustomer] usersMap size", usersMap.size);
 
 		const mappedContacts = contacts.map((contact) => {
 			const customer = contact.customerId ? customersMap.get(contact.customerId) : null;
@@ -248,10 +232,7 @@ class ContactsService {
 	 * - Filtra via API com parâmetros mapeados (inclui instance).
 	 * - Reforça o match localmente (ERP/CNPJ/NOME) para robustez.
 	 */
-	private async searchCustomerIdsByFilters(
-		instance: string,
-		filters: ContactsFilters
-	): Promise<number[]> {
+	private async searchCustomerIdsByFilters(instance: string, filters: ContactsFilters): Promise<number[]> {
 		const params = this.mapCustomerFilters(instance, filters);
 
 		try {
@@ -267,18 +248,11 @@ class ContactsService {
 				let ok = true;
 
 				if (erp) {
-					ok = ok && (
-						c?.COD_ERP?.toString().includes(erp) ||
-						c?.ERP?.toString().includes(erp)
-					);
+					ok = ok && (c?.COD_ERP?.toString().includes(erp) || c?.ERP?.toString().includes(erp));
 				}
 
 				if (cnpj) {
-					ok = ok && (
-						c?.CPF_CNPJ?.includes(cnpj) ||
-						c?.CNPJ?.includes(cnpj) ||
-						c?.cnpj?.includes(cnpj)
-					);
+					ok = ok && (c?.CPF_CNPJ?.includes(cnpj) || c?.CNPJ?.includes(cnpj) || c?.cnpj?.includes(cnpj));
 				}
 
 				if (name) {
@@ -303,10 +277,7 @@ class ContactsService {
 	/**
 	 * Busca clientes por IDs, com cache Redis por instance e chamada à API escopada por instance.
 	 */
-	private async getCustomersByIds(
-		instance: string,
-		customerIds: number[]
-	): Promise<Map<number, Customer>> {
+	private async getCustomersByIds(instance: string, customerIds: number[]): Promise<Map<number, Customer>> {
 		const result = new Map<number, Customer>();
 
 		if (customerIds.length === 0) {
@@ -341,7 +312,7 @@ class ContactsService {
 
 				// Fallback universal (escopado por instance):
 				const { data: customers } = await customersService.getCustomers({
-					perPage: batch.length.toString(),
+					perPage: batch.length.toString()
 				});
 
 				const requestedCustomers = (customers || []).filter((c: any) => batch.includes(c.CODIGO));
@@ -404,7 +375,7 @@ class ContactsService {
 
 				// Fallback universal (escopado por instance):
 				const { data: users } = await usersService.getUsers({
-					perPage: batch.length.toString(),
+					perPage: batch.length.toString()
 				});
 
 				const requestedUsers = (users || []).filter((u: any) => batch.includes(u.CODIGO));

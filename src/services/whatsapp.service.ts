@@ -443,7 +443,7 @@ class WhatsappService {
 	}
 
 	public async getResults(instance: string) {
-		const query = "SELECT CODIGO AS id, NOME AS name FROM resultados";
+		const query = "SELECT CODIGO AS id, NOME AS name, COD_ACAO FROM resultados";
 		const result = await instancesService.executeQuery<{ id: number; name: string }[]>(instance, query, []);
 
 		return result;

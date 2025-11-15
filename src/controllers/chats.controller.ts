@@ -5,47 +5,19 @@ import isAuthenticated from "../middlewares/is-authenticated.middleware";
 
 class ChatsController {
 	constructor(public readonly router: Router) {
-		this.router.get(
-			"/api/whatsapp/session/chats",
-			isAuthenticated,
-			this.getChatsBySession
-		);
-		this.router.get(
-			"/api/whatsapp/chats/:id",
-			isAuthenticated,
-			this.getChatById
-		);
-		this.router.post(
-			"/api/whatsapp/chats/:id/finish",
-			isAuthenticated,
-			this.finishChatById
-		);
-		this.router.post(
-			"/api/whatsapp/chats",
-			isAuthenticated,
-			this.startChatByContactId
-		);
-		this.router.get(
-			"/api/whatsapp/session/monitor",
-			isAuthenticated,
-			this.getChatsMonitor
-		);
-		this.router.post(
-			"/api/whatsapp/chats/:id/transfer",
-			isAuthenticated,
-			this.transferAttendance
-		);
+		this.router.get("/api/whatsapp/session/chats", isAuthenticated, this.getChatsBySession);
+		this.router.get("/api/whatsapp/chats/:id", isAuthenticated, this.getChatById);
+		this.router.post("/api/whatsapp/chats/:id/finish", isAuthenticated, this.finishChatById);
+		this.router.post("/api/whatsapp/chats", isAuthenticated, this.startChatByContactId);
+		this.router.get("/api/whatsapp/session/monitor", isAuthenticated, this.getChatsMonitor);
+		this.router.post("/api/whatsapp/chats/:id/transfer", isAuthenticated, this.transferAttendance);
 	}
 
 	private async getChatsBySession(req: Request, res: Response) {
 		const includeMessages = Boolean(req.query["messages"] === "true");
 		const includeContact = Boolean(req.query["contact"] === "true");
 
-		const data = await chatsService.getUserChatsBySession(
-			req.session,
-			includeMessages,
-			includeContact
-		);
+		const data = await chatsService.getUserChatsBySession(req.session, includeMessages, includeContact);
 
 		res.status(200).send({
 			message: "Chats retrieved successfully!",
@@ -93,12 +65,7 @@ class ChatsController {
 
 		const session = req.session;
 
-		await chatsService.transferAttendance(
-			req.headers["authorization"] as string,
-			session,
-			Number(id),
-			+userId
-		);
+		await chatsService.transferAttendance(req.headers["authorization"] as string, session, Number(id), +userId);
 
 		res.status(200).send({
 			message: "Attendance transfer successfully!"
@@ -108,7 +75,7 @@ class ChatsController {
 	private async finishChatById(req: Request, res: Response) {
 		const { id } = req.params;
 		const resultId = req.body.resultId;
-		const triggerSatisfactionBot = req.body.triggerSatisfactionBot === true;
+		const scheduleDate = req.body.scheduleDate ? new Date(req.body.scheduleDate) : null;
 
 		if (!id || isNaN(Number(id))) {
 			throw new BadRequestError("Chat ID is required!");
@@ -125,7 +92,7 @@ class ChatsController {
 			session,
 			Number(id),
 			+resultId,
-			triggerSatisfactionBot
+			scheduleDate
 		);
 
 		res.status(200).send({
