@@ -9,7 +9,8 @@ import instancesService from "../services/instances.service";
 
 const OPERATORS: Record<string, { name: string; id: number }> = {
 	"1": { name: "Aline", id: 13 },
-	"2": { name: "Nathalia", id: 4 }
+	"2": { name: "Nathalia", id: 4 },
+	"3": { name: "Rafaela", id: 16 }
 };
 
 class ChooseSellerBot {
@@ -58,7 +59,7 @@ class ChooseSellerBot {
 		switch (session.step) {
 			case 1: {
 				const welcome =
-					"Olá! 😊\n\nCom qual das nossas vendedoras você gostaria de falar?\n\n1 - Aline\n2 - Nathalia\n\nFico no aguardo da sua escolha!";
+					"Olá! 😊\n\nCom qual das nossas vendedoras você gostaria de falar?\n\n1 - Aline\n2 - Nathalia\n3 - Rafaela\n\nFico no aguardo da sua escolha!";
 
 				await whatsappService.sendBotMessage(message.from, message.clientId!, {
 					chat,
