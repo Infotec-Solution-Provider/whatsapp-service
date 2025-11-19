@@ -36,7 +36,7 @@ const TIMEOUT_MSG = "Atendimento finalizado por inatividade.";
 
 const INACTIVITY_TIMEOUT_MS = process.env["CUSTOMER_LINKING_TIMEOUT_MS"]
 	? parseInt(process.env["CUSTOMER_LINKING_TIMEOUT_MS"])
-	: 10 * 60 * 1000; // 10 minutos
+	: 5 * 60 * 1000; // 10 minutos
 
 const store = new JsonSessionStore<RunningSession>({ filename: "customer-linking.sessions.json" });
 
