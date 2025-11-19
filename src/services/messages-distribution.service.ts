@@ -474,12 +474,12 @@ class MessagesDistributionService {
 
 			const findMsg = await prismaService.wppMessage.findFirst({
 				where: {
-					OR: [{ gupshupId: gs_id }, { wabaId: gs_id }]
+					OR: [{ gupshupId: gs_id }, { wabaId: id }]
 				}
 			});
 
 			if (!findMsg) {
-				logger.log("Mensagem não encontrada para atualizar status", { triedKeys: [gs_id] });
+				logger.log("Mensagem não encontrada para atualizar status", { triedKeys: [gs_id, id] });
 				return;
 			}
 

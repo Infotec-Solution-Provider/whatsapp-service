@@ -36,7 +36,8 @@ interface ProcessFailedStatusProps {
 interface ProcessConversationStateProps {
 	logger: ProcessingLogger;
 	conversation: GSConversationState;
-	messageId: string;
+	wabaId: string;
+	gupshupId: string;
 	client: WppClient;
 }
 
@@ -163,7 +164,8 @@ class GupshupService {
 						await this.processConversationState({
 							logger,
 							conversation,
-							messageId: entry.data.gs_id,
+							gupshupId: entry.data.gs_id,
+							wabaId: entry.data.meta_msg_id,
 							client
 						});
 					}
@@ -255,12 +257,12 @@ class GupshupService {
 		}
 	}
 
-	private async processConversationState({ logger, conversation, messageId }: ProcessConversationStateProps) {
+	private async processConversationState({ logger, conversation, wabaId, gupshupId }: ProcessConversationStateProps) {
 		try {
 			logger.log("Processando estado da conversa");
-			const message = await prismaService.wppMessage.findUniqueOrThrow({
+			const message = await prismaService.wppMessage.findFirstOrThrow({
 				where: {
-					wabaId: messageId
+					OR: [{ gupshupId: gupshupId }, { wabaId: wabaId }]
 				},
 				include: {
 					WppContact: true
@@ -286,7 +288,6 @@ class GupshupService {
 			logger.log("Estado da conversa processado com sucesso");
 		} catch (err: any) {
 			logger.log("Erro ao processar estado da conversa");
-			throw err;
 		}
 	}
 }
