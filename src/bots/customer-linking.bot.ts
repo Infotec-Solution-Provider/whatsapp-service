@@ -32,7 +32,7 @@ const CUSTOMER_FOUND_MSG = "Cliente encontrado! Vinculando seu cadastro...";
 const CUSTOMER_LINKED_MSG = "Cadastro vinculado com sucesso! Você será direcionado para atendimento humano.";
 const CUSTOMER_NOT_FOUND_MSG =
 	"Cliente não encontrado em nossa base de dados. Você será direcionado para atendimento humano.";
-const TIMEOUT_MSG = "Atendimento finalizado por inatividade.";
+const TIMEOUT_MSG = "Tempo esgotado por inatividade. Você será direcionado para atendimento humano.";
 
 const INACTIVITY_TIMEOUT_MS = process.env["CUSTOMER_LINKING_TIMEOUT_MS"]
 	? parseInt(process.env["CUSTOMER_LINKING_TIMEOUT_MS"])
