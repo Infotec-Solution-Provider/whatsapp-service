@@ -779,6 +779,7 @@ class MessagesDistributionService {
 		const applicable: Applicable[] = [];
 
 		for (const r of rules) {
+			console.log(r);
 			const activeSched = r.schedules.find((s) => scheduleMatchesNow(s, now));
 			if (!activeSched) continue;
 
@@ -846,8 +847,17 @@ class MessagesDistributionService {
 			}
 		}
 
+		const sector = await prismaService.wppSector.findUnique({
+			where: { id: currChat?.sectorId || -1 }
+		});
 		// 7) Envia e atualiza "último envio"
-		await whatsappService.sendAutoReplyMessage(instance, contact.phone, ruleToApply.message, ruleToApply.fileId);
+		await whatsappService.sendAutoReplyMessage(
+			instance,
+			sector!,
+			contact.phone,
+			ruleToApply.message,
+			ruleToApply.fileId
+		);
 
 		await prismaService.wppContact.update({
 			where: { id: contact.id },

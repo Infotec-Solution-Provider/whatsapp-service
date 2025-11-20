@@ -1,8 +1,8 @@
 import "dotenv/config";
 import { FileDirType, SessionData } from "@in.pulse-crm/sdk";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
-import { InternalMessage, WppChat, WppClientType, WppMessage } from "@prisma/client";
-import { BadRequestError } from "@rgranatodutra/http-errors";
+import { InternalMessage, WppChat, WppClientType, WppMessage, WppSector } from "@prisma/client";
+import { BadRequestError, InternalServerError } from "@rgranatodutra/http-errors";
 import CreateMessageDto from "../dtos/create-message.dto";
 import {
 	EditMessageOptions,
@@ -721,27 +721,22 @@ class WhatsappService {
 		process.success("Processo de encaminhamento concluído.");
 	}
 
-	private async _getPrimaryClientForInstance(instance: string): Promise<WhatsappClient> {
-		const dbClient = await prismaService.wppClient.findFirstOrThrow({
-			where: {
-				instance,
-				isActive: true
-			}
-		});
-
-		const client = this.getClient(dbClient.id);
-		if (!client) {
-			throw new BadRequestError(`Nenhum cliente de WhatsApp ativo encontrado para a instância: ${instance}`);
-		}
-		return client;
-	}
-
-	public async sendAutoReplyMessage(instance: string, to: string, text: string, fileId?: number | null) {
+	public async sendAutoReplyMessage(
+		instance: string,
+		sector: WppSector,
+		to: string,
+		text: string,
+		fileId?: number | null
+	) {
 		const process = new ProcessingLogger(instance, "send-auto-reply", `${to}-${Date.now()}`, { to, text, fileId });
 
 		try {
 			process.log(`Iniciando envio de resposta automática para ${to}`);
-			const client = await this._getPrimaryClientForInstance(instance);
+			const client = this.getClient(sector.defaultClientId!);
+
+			if (!client) {
+				throw new InternalServerError("Client do WhatsApp não encontrado.");
+			}
 			const contact = await prismaService.wppContact.findUnique({
 				where: { instance_phone: { instance, phone: to } }
 			});
