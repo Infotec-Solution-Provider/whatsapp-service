@@ -19,14 +19,14 @@ class ContactsController {
 		const sectorId = req.body && req.body.sectorId ? Number(req.body.sectorId) : undefined;
 
 		if (!sectorId) {
-			res.status(400).send({ message: 'sectorId is required' });
+			res.status(400).send({ message: "sectorId is required" });
 			return;
 		}
 
 		const contact = await contactsService.addSectorToContact(contactId, sectorId);
 
 		res.status(200).send({
-			message: 'Sector added to contact successfully!',
+			message: "Sector added to contact successfully!",
 			data: contact
 		});
 	}
@@ -34,7 +34,7 @@ class ContactsController {
 	private async getCustomerContacts(req: Request, res: Response) {
 		const data = await contactsService.getCustomerContacts(req.session.instance, Number(req.params["id"]));
 
-		console.log(data)
+		console.log(data);
 
 		res.status(200).send({
 			message: "Chats retrieved successfully!",
@@ -45,7 +45,7 @@ class ContactsController {
 	private async getContacts(req: Request, res: Response) {
 		const data = await contactsService.getContacts(req.session.instance);
 
-		console.log(data[0])
+		console.log(data[0]);
 
 		res.status(200).send({
 			message: "Chats retrieved successfully!",
@@ -55,15 +55,15 @@ class ContactsController {
 
 	private async getContactsWithCustomer(req: Request, res: Response) {
 		const filters = {
-			name: (req.query['name'] as string) || null,
-			phone: (req.query['phone'] as string) || null,
-			customerId: req.query['customerId'] ? Number(req.query['customerId']) : null,
-			customerErp: (req.query['customerErp'] as string) || null,
-			customerCnpj: (req.query['customerCnpj'] as string) || null,
-			customerName: (req.query['customerName'] as string) || null,
-			hasCustomer: req.query['hasCustomer'] ? req.query['hasCustomer'] === 'true' : null,
-			page: req.query['page'] ? Number(req.query['page']) : 1,
-			perPage: req.query['perPage'] ? Number(req.query['perPage']) : 50
+			name: (req.query["name"] as string) || null,
+			phone: (req.query["phone"] as string) || null,
+			customerId: req.query["customerId"] ? Number(req.query["customerId"]) : null,
+			customerErp: (req.query["customerErp"] as string) || null,
+			customerCnpj: (req.query["customerCnpj"] as string) || null,
+			customerName: (req.query["customerName"] as string) || null,
+			hasCustomer: req.query["hasCustomer"] ? req.query["hasCustomer"] === "true" : null,
+			page: req.query["page"] ? Number(req.query["page"]) : 1,
+			perPage: req.query["perPage"] ? Number(req.query["perPage"]) : 50
 		};
 
 		const result = await contactsService.getContactsWithCustomer(
@@ -75,7 +75,7 @@ class ContactsController {
 		const resBody = {
 			message: "Contacts retrieved successfully!",
 			...result
-		}
+		};
 		res.status(200).send(resBody);
 	}
 
@@ -86,7 +86,13 @@ class ContactsController {
 		// sectorIds is optional and should be an array of numbers when provided
 		const parsedSectorIds = Array.isArray(sectorIds) ? sectorIds.map((s: any) => Number(s)) : undefined;
 
-		const contact = await contactsService.createContact(req.session.instance, name, phone, customerId, parsedSectorIds);
+		const contact = await contactsService.createContact(
+			req.session.instance,
+			name,
+			phone,
+			customerId,
+			parsedSectorIds
+		);
 
 		res.status(200).send({
 			message: "Contact created successfully!",
@@ -99,7 +105,12 @@ class ContactsController {
 		const { sectorIds, ...updateData } = req.body;
 		const parsedSectorIds = Array.isArray(sectorIds) ? sectorIds.map((s: any) => Number(s)) : undefined;
 
-		const updatedContact = await contactsService.updateContact(contactId, updateData, parsedSectorIds);
+		const updatedContact = await contactsService.updateContactWrapper(
+			req.session,
+			contactId,
+			updateData,
+			parsedSectorIds
+		);
 
 		res.status(200).send({
 			message: "Contact updated successfully!",

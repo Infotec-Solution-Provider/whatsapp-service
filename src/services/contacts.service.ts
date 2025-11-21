@@ -1,5 +1,5 @@
-import { Customer } from "@in.pulse-crm/sdk";
-import { Prisma } from "@prisma/client";
+import { Customer, SessionData } from "@in.pulse-crm/sdk";
+import { Prisma, WppContact, WppContactSector } from "@prisma/client";
 import { BadRequestError, ConflictError } from "@rgranatodutra/http-errors";
 import chatsService from "./chats.service";
 import customersService from "./customers.service";
@@ -7,6 +7,10 @@ import prismaService from "./prisma.service";
 import redisService from "./redis.service";
 import usersService from "./users.service";
 import whatsappService from "./whatsapp.service";
+import parametersService from "./parameters.service";
+import CheckLoaltyStep from "../message-flow/steps/check-loalty.step";
+import { CustomerSchedule } from "../message-flow/base/base.step";
+import instancesService from "./instances.service";
 
 export interface ContactsFilters {
 	name: string | null;
@@ -580,6 +584,47 @@ class ContactsService {
 		});
 
 		return contact;
+	}
+
+	public async updateContactWrapper(
+		session: SessionData,
+		contactId: number,
+		data: Prisma.WppContactUpdateInput,
+		sectorIds?: number[]
+	) {
+		const parameters = await parametersService.getSessionParams(session);
+		if (parameters["update_only_own_contacts"] === "true" && session.role !== "ADMIN") {
+			const contact: WppContact = (await prismaService.wppContact.findUnique({
+				where: { id: contactId }
+			})) as WppContact;
+			const loalty = await this.getContactLoalty(contact);
+			if (!loalty || loalty.userId !== session.userId) {
+				throw new BadRequestError("Você só pode atualizar contatos que estão fidelizados com você.");
+			}
+		}
+		return this.updateContact(contactId, data, sectorIds);
+	}
+
+	public async getContactLoalty(contact: WppContact) {
+		if (!contact.customerId) {
+			return null;
+		}
+		const schedule = await this.fetchCustomerSchedule(contact.instance, contact.customerId);
+		if (!schedule) {
+			return null;
+		}
+
+		return { userId: schedule.OPERADOR };
+	}
+
+	private async fetchCustomerSchedule(instance: string, customerId: number): Promise<CustomerSchedule | null> {
+		const CHECK_LOALTY_QUERY = `SELECT * FROM campanhas_clientes cc
+            WHERE cc.CLIENTE = ?
+            ORDER BY CODIGO DESC LIMIT 1;`;
+		const result = await instancesService.executeQuery<Array<CustomerSchedule>>(instance, CHECK_LOALTY_QUERY, [
+			customerId
+		]);
+		return result[0] || null;
 	}
 
 	/**
