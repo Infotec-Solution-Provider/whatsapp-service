@@ -1,16 +1,15 @@
 import { Customer, SessionData } from "@in.pulse-crm/sdk";
-import { Prisma, WppContact, WppContactSector } from "@prisma/client";
+import { Prisma, WppContact } from "@prisma/client";
 import { BadRequestError, ConflictError } from "@rgranatodutra/http-errors";
+import { CustomerSchedule } from "../message-flow/base/base.step";
 import chatsService from "./chats.service";
 import customersService from "./customers.service";
+import instancesService from "./instances.service";
+import parametersService from "./parameters.service";
 import prismaService from "./prisma.service";
 import redisService from "./redis.service";
 import usersService from "./users.service";
 import whatsappService from "./whatsapp.service";
-import parametersService from "./parameters.service";
-import CheckLoaltyStep from "../message-flow/steps/check-loalty.step";
-import { CustomerSchedule } from "../message-flow/base/base.step";
-import instancesService from "./instances.service";
 
 export interface ContactsFilters {
 	name: string | null;
