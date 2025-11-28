@@ -596,9 +596,12 @@ class ContactsService {
 			const contact: WppContact = (await prismaService.wppContact.findUnique({
 				where: { id: contactId }
 			})) as WppContact;
-			const loalty = await this.getContactLoalty(contact);
-			if (!loalty || loalty.userId !== session.userId) {
-				throw new BadRequestError("Você só pode atualizar contatos que estão fidelizados com você.");
+
+			if (contact.customerId) {
+				const loalty = await this.getContactLoalty(contact);
+				if (!loalty || loalty.userId !== session.userId) {
+					throw new BadRequestError("Você só pode atualizar contatos que estão fidelizados com você.");
+				}
 			}
 		}
 		return this.updateContact(contactId, data, sectorIds);
