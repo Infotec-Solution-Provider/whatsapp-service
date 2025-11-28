@@ -220,7 +220,11 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			process.log(`Message is successfully parsed!`, parsedMsg);
 			const contact = await this.safeGetContact(msg.from);
 			const contactName =
-				contact?.name || contact?.verifiedName || contact?.pushname || msg.from.replace(/D/g, "");
+				contact?.name ||
+				contact?.verifiedName ||
+				contact?.pushname ||
+				(msg.rawData as any)?.["notifyName"] ||
+				msg.from.replace(/D/g, "");
 
 			if (!chat.isGroup) {
 				const savedMsg = await messagesService.insertMessage(parsedMsg);
