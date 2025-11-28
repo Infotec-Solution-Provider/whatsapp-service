@@ -218,27 +218,33 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				chat.isGroup
 			);
 			process.log(`Message is successfully parsed!`, parsedMsg);
+			const contact = await this.safeGetContact(msg.from);
+			const contactName =
+				contact?.name || contact?.verifiedName || contact?.pushname || msg.from.replace(/D/g, "");
 
 			if (!chat.isGroup) {
 				const savedMsg = await messagesService.insertMessage(parsedMsg);
 				process.log(`Message is successfully saved!`);
-				const contact = await msg.getContact();
-				const contactName = contact?.name || contact?.verifiedName || contact?.pushname || null;
+
 				process.log(`Message sent to distribution service!`);
 				await messagesDistributionService.processMessage(this.instance, this.id, savedMsg, contactName);
 				process.success(savedMsg);
 			}
 			if (chat.isGroup) {
-				const contact = await msg.getContact();
-				await internalChatsService.receiveMessage(
-					chat.id.user,
-					parsedMsg,
-					contact?.number || contact?.pushname || msg.from.split("@")[0]!
-				);
+				await internalChatsService.receiveMessage(chat.id.user, parsedMsg, contactName);
 			}
 		} catch (err) {
 			process.log(`Error while processing message: ${sanitizeErrorMessage(err)}`);
 			process.failed(err);
+		}
+	}
+
+	private async safeGetContact(id: string): Promise<WAWebJS.Contact | null> {
+		try {
+			const contact = await this.wwebjs.getContactById(id);
+			return contact;
+		} catch {
+			return null;
 		}
 	}
 
@@ -307,7 +313,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 		const to = `${options.to}${isGroup ? "@g.us" : "@c.us"}`;
 
-		console.log("to:", to);	
+		console.log("to:", to);
 		const params: WAWebJS.MessageSendOptions = {};
 
 		if (options.quotedId) {
