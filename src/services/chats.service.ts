@@ -76,12 +76,23 @@ function formatDateForMySQL(date: Date): string {
 
 class ChatsService {
 	public async getChatForContact(clientId: number, contact: WppContact): Promise<WppChat | null> {
+		const client = await prismaService.wppClient.findUnique({
+			where: { id: clientId },
+			include: { sectors: true }
+		});
+
+		if (!client || !client.sectors || client.sectors.length === 0) {
+			return null;
+		}
+
+		const sectorIds = client.sectors.map(s => s.id);
+
 		return await prismaService.wppChat.findFirst({
 			where: {
 				contactId: contact.id,
 				isFinished: false,
-				sector: {
-					defaultClientId: clientId
+				sectorId: {
+					in: sectorIds
 				}
 			}
 		});
