@@ -207,7 +207,8 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			if (msg.from === "status@broadcast") {
 				return process.log("Message ignored: it is broadcast.");
 			}
-
+			const contact = await this.safeGetContact(msg.from);
+			
 			const parsedMsg = await MessageParser.parse(
 				this.id,
 				process,
@@ -215,16 +216,17 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				msg,
 				false,
 				false,
-				chat.isGroup
+				chat.isGroup,
+				contact?.number?.replace(/\D/g, "") || null
 			);
 			process.log(`Message is successfully parsed!`, parsedMsg);
-			const contact = await this.safeGetContact(msg.from);
+
 			const contactName =
 				contact?.name ||
 				contact?.verifiedName ||
 				contact?.pushname ||
 				(msg.rawData as any)?.["notifyName"] ||
-				msg.from.replace(/D/g, "");
+				msg.from.replace(/\D/g, "");
 
 			if (!chat.isGroup) {
 				const savedMsg = await messagesService.insertMessage(parsedMsg);
