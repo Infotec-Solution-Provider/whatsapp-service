@@ -78,17 +78,16 @@ class MessagesDistributionService {
 	}
 
 	private async getSectors(clientId: number) {
-		const sectors = await prismaService.wppSector.findMany({
-			where: {
-				defaultClientId: clientId
-			}
+		const client = await prismaService.wppClient.findUnique({
+			where: { id: clientId },
+			include: { sectors: true }
 		});
 
-		if (!sectors || sectors.length === 0) {
+		if (!client || !client.sectors || client.sectors.length === 0) {
 			throw new Error("Setor não encontrado para esta instância.");
 		}
 
-		return sectors;
+		return client.sectors;
 	}
 
 	/**

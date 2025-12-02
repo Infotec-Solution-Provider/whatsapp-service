@@ -195,7 +195,7 @@ class WhatsappService {
 				throw new BadRequestError("Client do WhatsApp não encontrado.");
 			}
 
-			process.log(`Client obtido para o setor: ${session.sectorId}`);
+			process.log(`Client obtido | clientId: ${clientId} | instance: ${session.instance}`);
 			const text = `*${session.name}*: ${data.text || ""}`;
 			const now = new Date();
 
