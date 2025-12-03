@@ -279,15 +279,6 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		}
 	}
 
-	private async safeGetContact(id: string): Promise<WAWebJS.Contact | null> {
-		try {
-			const contact = await this.wwebjs.getContactById(id);
-			return contact;
-		} catch {
-			return null;
-		}
-	}
-
 	private async handleMessageEdit(message: WAWebJS.Message) {
 		this.log("info", "Message edited! " + message.id._serialized);
 		const process = new ProcessingLogger(this.instance, "wwebjs-message-edit", message.id._serialized, message);
