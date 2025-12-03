@@ -3,6 +3,9 @@ import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
 import WhatsappClient from "./whatsapp-client";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { randomUUID } from "node:crypto";
+import HumanBehaviorSimulator, { HumanBehaviorConfig } from "../utils/human-behavior.simulator";
+import MessageQueue from "../utils/message-queue";
+import humanBehaviorConfigService from "../services/human-behavior-config.service";
 import { SocketEventType, SocketServerAdminRoom } from "@in.pulse-crm/sdk";
 import MessageParser from "../parsers/wwebjs-message.parser";
 import prismaService from "../services/prisma.service";
@@ -19,6 +22,7 @@ import {
 import internalChatsService from "../services/internal-chats.service";
 import CreateMessageDto from "../dtos/create-message.dto";
 import runFixLidMessagesRoutine from "../routines/fix-lid-messages.routine";
+import { scheduleMessageQueueCleanup } from "../routines/clean-message-queue.routine";
 
 const PUPPETEER_ARGS = {
 	headless: true,
@@ -39,6 +43,11 @@ const BROWSER_PATH = process.env["WWEBJS_BROWSER_PATH"]!;
 class WWEBJSWhatsappClient implements WhatsappClient {
 	public wwebjs: Client;
 	public isReady: boolean = false;
+	private messageQueue: MessageQueue = new MessageQueue();
+	private cleanupInterval?: NodeJS.Timeout;
+	private humanBehaviorConfig?: HumanBehaviorConfig;
+	private contactCache: Map<string, { contact: WAWebJS.Contact; expiresAt: number }> = new Map();
+	private readonly CONTACT_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 	constructor(
 		public readonly id: number,
@@ -180,9 +189,38 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			}
 		});
 
+		// Inicializa a fila de mensagens
+		await this.messageQueue.initialize(this.instance, this.id);
+		this.log("info", "MessageQueue inicializada");
+
+		// Carrega configuração de comportamento humano
+		this.humanBehaviorConfig = await humanBehaviorConfigService.getConfig(this.instance);
+		this.log("info", `Comportamento humano: ${this.humanBehaviorConfig.enabled ? "ATIVADO" : "DESATIVADO"}`);
+
+		// Agenda limpeza automática da fila (a cada 6 horas, remove mensagens > 7 dias)
+		this.cleanupInterval = scheduleMessageQueueCleanup(this.instance, 6, 7);
+
 		if (this.instance === "nunes") {
 			runFixLidMessagesRoutine(this.instance, this.wwebjs);
 		}
+	}
+
+	private async getContactById(id: string): Promise<WAWebJS.Contact> {
+		const cached = this.contactCache.get(id);
+		if (cached && cached.expiresAt > Date.now()) {
+			return cached.contact;
+		}
+
+		// Fetch from WhatsApp
+		const contact = await this.wwebjs.getContactById(id);
+
+		// Store in cache
+		this.contactCache.set(id, {
+			contact,
+			expiresAt: Date.now() + this.CONTACT_CACHE_TTL
+		});
+
+		return contact;
 	}
 
 	private async handleMessage(msg: WAWebJS.Message) {
@@ -207,8 +245,8 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			if (msg.from === "status@broadcast") {
 				return process.log("Message ignored: it is broadcast.");
 			}
-			const contact = await this.safeGetContact(msg.from);
-			
+			const contact = await this.getContactById(chat.isGroup ? msg.author || msg.from : msg.from);
+
 			const parsedMsg = await MessageParser.parse(
 				this.id,
 				process,
@@ -217,16 +255,12 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				false,
 				false,
 				chat.isGroup,
-				contact?.number?.replace(/\D/g, "") || null
+				contact?.number || null
 			);
 			process.log(`Message is successfully parsed!`, parsedMsg);
 
 			const contactName =
-				contact?.name ||
-				contact?.verifiedName ||
-				contact?.pushname ||
-				(msg.rawData as any)?.["notifyName"] ||
-				msg.from.replace(/\D/g, "");
+				contact?.verifiedName || contact?.name || contact?.pushname || contact?.number || msg.from;
 
 			if (!chat.isGroup) {
 				const savedMsg = await messagesService.insertMessage(parsedMsg);
@@ -318,8 +352,34 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		process.log("Iniciando envio de mensagem.", options);
 
 		const to = `${options.to}${isGroup ? "@g.us" : "@c.us"}`;
+		const chatId = options.to;
 
-		console.log("to:", to);
+		// Payload para persistir no banco
+		const payload = {
+			to: options.to,
+			text: options.text,
+			fileUrl: "fileUrl" in options ? options.fileUrl : undefined,
+			fileName: "fileName" in options ? options.fileName : undefined,
+			sendAsAudio: "sendAsAudio" in options ? options.sendAsAudio : undefined,
+			sendAsDocument: "sendAsDocument" in options ? options.sendAsDocument : undefined,
+			quotedId: options.quotedId,
+			mentions: options.mentions,
+			isGroup
+		};
+
+		// Enfileira a mensagem para envio sequencial com persistência
+		return this.messageQueue.enqueue(this.instance, this.id, chatId, id, payload, isGroup, async () => {
+			return await this.executeSendMessage(to, options, isGroup, process, id);
+		});
+	}
+
+	private async executeSendMessage(
+		to: string,
+		options: SendMessageOptions,
+		_isGroup: boolean,
+		process: ProcessingLogger,
+		_id: string
+	) {
 		const params: WAWebJS.MessageSendOptions = {};
 
 		if (options.quotedId) {
@@ -381,8 +441,37 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 		process.log("Conteúdo final:", { content, params });
 
+		// Simula comportamento humano antes de enviar
+		const messageText = typeof content === "string" ? content : params.caption || "";
+		const config = this.humanBehaviorConfig;
+
+		if (config?.enabled) {
+			process.log("Simulando comportamento humano...");
+			await HumanBehaviorSimulator.simulateHumanDelay(null, messageText, this.instance, config);
+		}
+
 		try {
+			// Obtém o chat e define estado de digitação
+			const chat = await this.wwebjs.getChatById(to);
+
+			if (config?.enabled && config.sendTypingState) {
+				process.log("Enviando estado de digitação...");
+				await chat.sendStateTyping();
+
+				// Aguarda um pouco enquanto "digita"
+				const typingDuration =
+					config.typingStateDuration.min +
+					Math.random() * (config.typingStateDuration.max - config.typingStateDuration.min);
+				await HumanBehaviorSimulator.sleep(typingDuration);
+			}
+
+			process.log("Enviando mensagem...");
 			const sentMsg = await this.wwebjs.sendMessage(to, content, params);
+
+			if (config?.enabled && config.sendTypingState) {
+				// Limpa estado de digitação
+				await chat.clearState();
+			}
 			process.log("Mensagem enviada com sucesso.", sentMsg);
 
 			const parsedMsg = await MessageParser.parse(this.id, process, this.instance, sentMsg, true, true);
@@ -417,8 +506,36 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			const { text, mentions } = await this.getTextWithMentions(options.text, options.mentions || []);
 			process.log("Texto gerado:", text);
 			process.log("IDs das menções:", mentions);
+
+			// Simula comportamento humano antes de editar
+			const config = this.humanBehaviorConfig;
+
+			if (config?.enabled) {
+				process.log("Simulando tempo de pensamento antes de editar...");
+				await HumanBehaviorSimulator.simulateHumanDelay(null, text, this.instance, config);
+			}
+
+			// Obtém o chat e envia estado de digitação
+			const chat = await wwebjsMsg.getChat();
+
+			if (config?.enabled && config.sendTypingState) {
+				process.log("Enviando estado de digitação...");
+				await chat.sendStateTyping();
+
+				// Aguarda um pouco enquanto "digita"
+				const typingDuration =
+					config.typingStateDuration.min +
+					Math.random() * (config.typingStateDuration.max - config.typingStateDuration.min);
+				await HumanBehaviorSimulator.sleep(typingDuration);
+			}
+
 			process.log("Editando mensagem...");
 			const editedMsg = await wwebjsMsg.edit(text, { mentions });
+
+			if (config?.enabled && config.sendTypingState) {
+				// Limpa estado de digitação
+				await chat.clearState();
+			}
 
 			if (!editedMsg) {
 				process.log("Falha ao editar mensagem.");
@@ -505,6 +622,29 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		_contactId: number
 	): Promise<CreateMessageDto> {
 		throw new Error("Not supported by WWEBJS");
+	}
+
+	/**
+	 * Cleanup ao destruir o cliente
+	 */
+	public async destroy(): Promise<void> {
+		this.log("info", "Destruindo cliente e limpando recursos...");
+
+		// Para a rotina de limpeza agendada
+		if (this.cleanupInterval) {
+			clearInterval(this.cleanupInterval);
+			this.log("info", "Rotina de limpeza cancelada");
+		}
+
+		// Limpa o cache de contatos
+		this.contactCache.clear();
+
+		// Destroi o cliente wwebjs
+		await this.wwebjs.destroy().catch((err) => {
+			this.log("error", "Erro ao destruir cliente wwebjs", err);
+		});
+
+		this.log("info", "Cliente destruído");
 	}
 }
 
