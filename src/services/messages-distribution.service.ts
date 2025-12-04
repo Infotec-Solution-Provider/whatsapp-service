@@ -31,7 +31,6 @@ import chooseSectorBot from "../bots/choose-sector.bot";
 import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
 import customerLinkingBot from "../bots/customer-linking.bot";
 import { InternalServerError } from "@rgranatodutra/http-errors";
-import chooseSellerBot from "../bots/seller-vollo.bot";
 
 // Interface para bots que processam mensagens
 interface BotProcessor {
