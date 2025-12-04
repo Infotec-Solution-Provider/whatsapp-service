@@ -59,7 +59,6 @@ class MessagesDistributionService {
 		this.botRegistry.set(1, chooseSectorBot);
 		this.botRegistry.set(2, exatronSatisfactionBot);
 		this.botRegistry.set(3, customerLinkingBot);
-		this.botRegistry.set(4, chooseSellerBot); // Bot Vollo para tratamento específico de instância Vollo
 		// Adicionar novos bots aqui é simples: this.botRegistry.set(5, newBot);
 	}
 
