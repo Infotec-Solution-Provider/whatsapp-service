@@ -5,13 +5,14 @@ import { MessageQueueStatus } from "@prisma/client";
 /**
  * Rotina de limpeza automática da fila de mensagens
  * Remove mensagens antigas já processadas para evitar crescimento excessivo do banco
+ * LIMPEZA AGRESSIVA: remove mensagens processadas após apenas 1 hora
  */
-export async function cleanMessageQueueRoutine(instance: string, daysOld: number = 7): Promise<void> {
-	Logger.info(`[CleanMessageQueue] Iniciando limpeza de mensagens antigas (>${daysOld} dias)...`);
+export async function cleanMessageQueueRoutine(instance: string, hoursOld: number = 1): Promise<void> {
+	Logger.info(`[CleanMessageQueue] Iniciando limpeza de mensagens antigas (>${hoursOld}h)...`);
 
 	try {
 		const cutoffDate = new Date();
-		cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+		cutoffDate.setHours(cutoffDate.getHours() - hoursOld);
 
 		// Remove mensagens completadas/falhas/canceladas antigas
 		const result = await prismaService.messageQueueItem.deleteMany({
@@ -26,7 +27,9 @@ export async function cleanMessageQueueRoutine(instance: string, daysOld: number
 			}
 		});
 
-		Logger.info(`[CleanMessageQueue] Removidas ${result.count} mensagens antigas`);
+		if (result.count > 0) {
+			Logger.info(`[CleanMessageQueue] Removidas ${result.count} mensagens processadas há mais de ${hoursOld}h`);
+		}
 
 		// Verifica mensagens travadas em PROCESSING há muito tempo (possível queda não detectada)
 		const stuckCutoff = new Date();
@@ -84,27 +87,27 @@ export async function cleanMessageQueueRoutine(instance: string, daysOld: number
 /**
  * Agenda execução periódica da rotina de limpeza
  * @param instance - Instância do WhatsApp
- * @param intervalHours - Intervalo em horas (padrão: 6 horas)
- * @param daysOld - Dias para considerar mensagem antiga (padrão: 7 dias)
+ * @param intervalMinutes - Intervalo em minutos (padrão: 30 minutos)
+ * @param hoursOld - Horas para considerar mensagem antiga (padrão: 1 hora)
  */
 export function scheduleMessageQueueCleanup(
 	instance: string,
-	intervalHours: number = 6,
-	daysOld: number = 7
+	intervalMinutes: number = 30,
+	hoursOld: number = 1
 ): NodeJS.Timeout {
 	Logger.info(
-		`[CleanMessageQueue] Agendando limpeza automática a cada ${intervalHours}h (remove mensagens >${daysOld} dias)`
+		`[CleanMessageQueue] Agendando limpeza automática a cada ${intervalMinutes}min (remove mensagens >${hoursOld}h)`
 	);
 
 	// Executa imediatamente
-	cleanMessageQueueRoutine(instance, daysOld);
+	cleanMessageQueueRoutine(instance, hoursOld);
 
 	// Agenda execução periódica
 	return setInterval(
 		() => {
-			cleanMessageQueueRoutine(instance, daysOld);
+			cleanMessageQueueRoutine(instance, hoursOld);
 		},
-		intervalHours * 60 * 60 * 1000
+		intervalMinutes * 60 * 1000
 	);
 }
 

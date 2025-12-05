@@ -24,6 +24,8 @@ export class MessageQueue {
 	private queues: Map<string, QueuedMessage[]> = new Map();
 	private processing: Set<string> = new Set();
 	private initialized: boolean = false;
+	private readonly WARN_QUEUE_SIZE_PER_CHAT = 50; // Alerta se ultrapassar
+	private readonly WARN_TOTAL_QUEUED = 500; // Alerta se ultrapassar
 
 	/**
 	 * Inicializa a fila recuperando mensagens pendentes do banco
@@ -65,9 +67,35 @@ export class MessageQueue {
 			// Por enquanto, apenas logamos. A reprocessamento precisa ser implementado
 			// com acesso ao client WhatsApp apropriado
 			if (pendingMessages.length > 0) {
-				Logger.error(
+				Logger.info(
 					`[MessageQueue] Existem ${pendingMessages.length} mensagens pendentes que precisam ser reprocessadas manualmente`
 				);
+
+				// FIXME: Limpa mensagens muito antigas (> 24h) para evitar acúmulo
+				const oneDayAgo = new Date();
+				oneDayAgo.setHours(oneDayAgo.getHours() - 24);
+
+				const oldPending = await prismaService.messageQueueItem.updateMany({
+					where: {
+						instance,
+						clientId,
+						status: MessageQueueStatus.PENDING,
+						createdAt: {
+							lt: oneDayAgo
+						}
+					},
+					data: {
+						status: MessageQueueStatus.FAILED,
+						error: "Message expired - not processed within 24 hours",
+						processedAt: new Date()
+					}
+				});
+
+				if (oldPending.count > 0) {
+					Logger.info(
+						`[MessageQueue] ${oldPending.count} mensagens pendentes antigas foram marcadas como falhas`
+					);
+				}
 			}
 
 			this.initialized = true;
@@ -98,6 +126,17 @@ export class MessageQueue {
 		options: EnqueueOptions = {}
 	): Promise<T> {
 		const { priority = 0, maxRetries = 3 } = options;
+
+		// Monitora uso de memória (apenas aviso, não bloqueia)
+		const totalQueued = Array.from(this.queues.values()).reduce((sum, q) => sum + q.length, 0);
+		if (totalQueued >= this.WARN_TOTAL_QUEUED) {
+			Logger.info(`[MessageQueue] ⚠️ Alto volume de mensagens em fila: ${totalQueued}`);
+		}
+
+		const currentQueueSize = this.queues.get(chatId)?.length || 0;
+		if (currentQueueSize >= this.WARN_QUEUE_SIZE_PER_CHAT) {
+			Logger.info(`[MessageQueue] ⚠️ Chat ${chatId} com ${currentQueueSize} mensagens em fila`);
+		}
 
 		// Persiste no banco antes de adicionar à fila em memória
 		const dbItem = await prismaService.messageQueueItem.create({
@@ -132,7 +171,7 @@ export class MessageQueue {
 			}
 
 			const queue = this.queues.get(chatId)!;
-			
+
 			// Insere respeitando prioridade (maior prioridade no início)
 			if (priority > 0) {
 				queue.unshift(queuedMessage);
@@ -165,31 +204,40 @@ export class MessageQueue {
 				const message = queue.shift()!;
 				Logger.debug(`[MessageQueue] Processando mensagem ${message.id} do chat ${chatId}`);
 
-				// Atualiza status no banco
-				await prismaService.messageQueueItem.update({
-					where: { id: message.dbId },
-					data: {
-						status: MessageQueueStatus.PROCESSING,
-						processingStartedAt: new Date()
-					}
-				});
+				try {
+					// Atualiza status no banco
+					await prismaService.messageQueueItem.update({
+						where: { id: message.dbId },
+						data: {
+							status: MessageQueueStatus.PROCESSING,
+							processingStartedAt: new Date()
+						}
+					});
+				} catch (dbErr) {
+					Logger.error(`[MessageQueue] Erro ao atualizar status no banco: ${sanitizeErrorMessage(dbErr)}`);
+					// Continua mesmo com erro no banco
+				}
 
 				try {
 					const result = await message.execute();
 
-					// Marca como concluída no banco
-					await prismaService.messageQueueItem.update({
-						where: { id: message.dbId },
-						data: {
-							status: MessageQueueStatus.COMPLETED,
-							processedAt: new Date()
-						}
-					});
+					// Marca como concluída e deleta imediatamente do banco (não precisa manter histórico)
+					await prismaService.messageQueueItem
+						.delete({
+							where: { id: message.dbId }
+						})
+						.catch((err) => {
+							Logger.debug(
+								`[MessageQueue] Não foi possível deletar item ${message.dbId}: ${sanitizeErrorMessage(err)}`
+							);
+						});
 
 					message.resolve(result);
-					Logger.debug(`[MessageQueue] Mensagem ${message.id} processada com sucesso`);
+					Logger.debug(`[MessageQueue] Mensagem ${message.id} processada e removida do banco`);
 				} catch (error) {
-					Logger.error(`[MessageQueue] Erro ao processar mensagem ${message.id}: ${sanitizeErrorMessage(error)}`);
+					Logger.error(
+						`[MessageQueue] Erro ao processar mensagem ${message.id}: ${sanitizeErrorMessage(error)}`
+					);
 
 					// Busca configuração de retries
 					const dbItem = await prismaService.messageQueueItem.findUnique({
@@ -198,7 +246,9 @@ export class MessageQueue {
 
 					if (dbItem && dbItem.retryCount < dbItem.maxRetries) {
 						// Tenta novamente
-						Logger.info(`[MessageQueue] Reagendando mensagem ${message.id} (tentativa ${dbItem.retryCount + 1}/${dbItem.maxRetries})`);
+						Logger.info(
+							`[MessageQueue] Reagendando mensagem ${message.id} (tentativa ${dbItem.retryCount + 1}/${dbItem.maxRetries})`
+						);
 
 						await prismaService.messageQueueItem.update({
 							where: { id: message.dbId },
@@ -213,15 +263,17 @@ export class MessageQueue {
 						// Reagenda para tentar novamente
 						queue.push(message);
 					} else {
-						// Falha definitiva
-						await prismaService.messageQueueItem.update({
-							where: { id: message.dbId },
-							data: {
-								status: MessageQueueStatus.FAILED,
-								error: sanitizeErrorMessage(error),
-								processedAt: new Date()
-							}
-						});
+						// Falha definitiva - marca como falha mas mantém por 1h para debug
+						await prismaService.messageQueueItem
+							.update({
+								where: { id: message.dbId },
+								data: {
+									status: MessageQueueStatus.FAILED,
+									error: sanitizeErrorMessage(error),
+									processedAt: new Date()
+								}
+							})
+							.catch(() => {});
 
 						message.reject(error);
 						Logger.error(`[MessageQueue] Mensagem ${message.id} falhou após todas as tentativas`);
@@ -236,9 +288,11 @@ export class MessageQueue {
 		} finally {
 			this.processing.delete(chatId);
 
-			// Limpa fila vazia
-			if (this.queues.get(chatId)?.length === 0) {
+			// Limpa fila vazia imediatamente para liberar memória
+			const queue = this.queues.get(chatId);
+			if (!queue || queue.length === 0) {
 				this.queues.delete(chatId);
+				Logger.debug(`[MessageQueue] Fila do chat ${chatId} removida da memória (vazia)`);
 			}
 		}
 	}
@@ -316,12 +370,13 @@ export class MessageQueue {
 	}
 
 	/**
-	 * Remove mensagens antigas já processadas (limpeza)
+	 * Remove mensagens antigas já processadas (limpeza agressiva)
 	 */
-	public async cleanOldMessages(instance: string, daysOld: number = 7): Promise<number> {
+	public async cleanOldMessages(instance: string, hoursOld: number = 1): Promise<number> {
 		const cutoffDate = new Date();
-		cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+		cutoffDate.setHours(cutoffDate.getHours() - hoursOld);
 
+		// Limpa mensagens completadas e falhas antigas
 		const result = await prismaService.messageQueueItem.deleteMany({
 			where: {
 				instance,
@@ -334,8 +389,22 @@ export class MessageQueue {
 			}
 		});
 
-		Logger.info(`[MessageQueue] Removidas ${result.count} mensagens antigas da instância ${instance}`);
+		if (result.count > 0) {
+			Logger.info(`[MessageQueue] Removidas ${result.count} mensagens processadas há mais de ${hoursOld}h`);
+		}
 		return result.count;
+	}
+
+	/**
+	 * Retorna estatísticas de uso de memória da fila
+	 */
+	public getMemoryStats(): { totalChats: number; totalQueued: number; processing: number } {
+		const totalQueued = Array.from(this.queues.values()).reduce((sum, q) => sum + q.length, 0);
+		return {
+			totalChats: this.queues.size,
+			totalQueued,
+			processing: this.processing.size
+		};
 	}
 }
 

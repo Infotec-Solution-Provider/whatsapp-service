@@ -47,7 +47,8 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 	private cleanupInterval?: NodeJS.Timeout;
 	private humanBehaviorConfig?: HumanBehaviorConfig;
 	private contactCache: Map<string, { contact: WAWebJS.Contact; expiresAt: number }> = new Map();
-	private readonly CONTACT_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+	private readonly CONTACT_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+	private readonly MAX_CONTACT_CACHE_SIZE = 1000; // Limite de contatos em cache
 
 	constructor(
 		public readonly id: number,
@@ -197,8 +198,23 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		this.humanBehaviorConfig = await humanBehaviorConfigService.getConfig(this.instance);
 		this.log("info", `Comportamento humano: ${this.humanBehaviorConfig.enabled ? "ATIVADO" : "DESATIVADO"}`);
 
-		// Agenda limpeza automática da fila (a cada 6 horas, remove mensagens > 7 dias)
-		this.cleanupInterval = scheduleMessageQueueCleanup(this.instance, 6, 7);
+		// Agenda limpeza automática da fila (a cada 30min, remove mensagens > 1h)
+		this.cleanupInterval = scheduleMessageQueueCleanup(this.instance, 30, 1);
+
+		// Monitora uso de memória a cada 15 minutos
+		setInterval(() => {
+			const queueStats = this.messageQueue.getMemoryStats();
+			const cacheSize = this.contactCache.size;
+			this.log("debug", `Memória - Fila: ${queueStats.totalQueued} msgs em ${queueStats.totalChats} chats | Cache: ${cacheSize} contatos`);
+			
+			// Alerta se passar de volumes consideráveis (sem bloquear)
+			if (queueStats.totalQueued > 500) {
+				this.log("error", `⚠️ ALTO VOLUME NA FILA - ${queueStats.totalQueued} mensagens enfileiradas`);
+			}
+			if (cacheSize > 800) {
+				this.log("error", `⚠️ CACHE GRANDE - ${cacheSize} contatos em memória`);
+			}
+		}, 15 * 60 * 1000);
 
 		if (this.instance === "nunes") {
 			runFixLidMessagesRoutine(this.instance, this.wwebjs);
@@ -206,6 +222,11 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 	}
 
 	private async getContactById(id: string): Promise<WAWebJS.Contact> {
+		// Limpa cache expirado se estiver muito grande
+		if (this.contactCache.size > this.MAX_CONTACT_CACHE_SIZE) {
+			this.cleanExpiredContactCache();
+		}
+
 		const cached = this.contactCache.get(id);
 		if (cached && cached.expiresAt > Date.now()) {
 			return cached.contact;
@@ -214,13 +235,32 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		// Fetch from WhatsApp
 		const contact = await this.wwebjs.getContactById(id);
 
-		// Store in cache
+		// Store in cache com LRU (remove mais antigo se atingir limite)
+		if (this.contactCache.size >= this.MAX_CONTACT_CACHE_SIZE) {
+			const firstKey = this.contactCache.keys().next().value;
+			if (firstKey) this.contactCache.delete(firstKey);
+		}
+
 		this.contactCache.set(id, {
 			contact,
 			expiresAt: Date.now() + this.CONTACT_CACHE_TTL
 		});
 
 		return contact;
+	}
+
+	private cleanExpiredContactCache(): void {
+		const now = Date.now();
+		let cleaned = 0;
+		for (const [id, cached] of this.contactCache.entries()) {
+			if (cached.expiresAt <= now) {
+				this.contactCache.delete(id);
+				cleaned++;
+			}
+		}
+		if (cleaned > 0) {
+			this.log("debug", `Limpou ${cleaned} contatos expirados do cache`);
+		}
 	}
 
 	private async handleMessage(msg: WAWebJS.Message) {
