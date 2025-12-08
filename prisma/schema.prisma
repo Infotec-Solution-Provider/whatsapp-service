@@ -89,7 +89,6 @@ model WppMessage {
 
   @@index([from, to, chatId])
   @@index([chatId, userId])
-  @@index([contactId], map: "messages_contact_id_fkey")
   @@map("messages")
 }
 
