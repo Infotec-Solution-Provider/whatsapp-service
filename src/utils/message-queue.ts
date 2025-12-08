@@ -23,6 +23,7 @@ interface EnqueueOptions {
 export class MessageQueue {
 	private queues: Map<string, QueuedMessage[]> = new Map();
 	private processing: Set<string> = new Set();
+	private processingPromises: Map<string, Promise<void>> = new Map(); // Rastreia promises de processamento
 	private initialized: boolean = false;
 	private readonly WARN_QUEUE_SIZE_PER_CHAT = 50; // Alerta se ultrapassar
 	private readonly WARN_TOTAL_QUEUED = 500; // Alerta se ultrapassar
@@ -183,7 +184,17 @@ export class MessageQueue {
 
 			// Inicia processamento se não estiver em andamento
 			if (!this.processing.has(chatId)) {
-				this.processQueue(instance, chatId);
+				// Cria promise de processamento e a rastreia
+				const processingPromise = this.processQueue(instance, chatId).catch((err) => {
+					Logger.error(`[MessageQueue] Erro crítico ao processar fila do chat ${chatId}: ${sanitizeErrorMessage(err)}`);
+				});
+
+				this.processingPromises.set(chatId, processingPromise);
+
+				// Limpa registro quando termina
+				processingPromise.finally(() => {
+					this.processingPromises.delete(chatId);
+				});
 			}
 		});
 	}
@@ -370,6 +381,24 @@ export class MessageQueue {
 	}
 
 	/**
+	 * Retorna estatísticas de memória da fila
+	 */
+	public getMemoryStats(): { 
+		totalChats: number; 
+		totalQueued: number; 
+		processing: number;
+		pendingPromises: number;
+	} {
+		const totalQueued = Array.from(this.queues.values()).reduce((sum, q) => sum + q.length, 0);
+		return {
+			totalChats: this.queues.size,
+			totalQueued,
+			processing: this.processing.size,
+			pendingPromises: this.processingPromises.size
+		};
+	}
+
+	/**
 	 * Remove mensagens antigas já processadas (limpeza agressiva)
 	 */
 	public async cleanOldMessages(instance: string, hoursOld: number = 1): Promise<number> {
@@ -393,18 +422,6 @@ export class MessageQueue {
 			Logger.info(`[MessageQueue] Removidas ${result.count} mensagens processadas há mais de ${hoursOld}h`);
 		}
 		return result.count;
-	}
-
-	/**
-	 * Retorna estatísticas de uso de memória da fila
-	 */
-	public getMemoryStats(): { totalChats: number; totalQueued: number; processing: number } {
-		const totalQueued = Array.from(this.queues.values()).reduce((sum, q) => sum + q.length, 0);
-		return {
-			totalChats: this.queues.size,
-			totalQueued,
-			processing: this.processing.size
-		};
 	}
 }
 

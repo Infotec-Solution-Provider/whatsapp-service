@@ -205,11 +205,14 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		setInterval(() => {
 			const queueStats = this.messageQueue.getMemoryStats();
 			const cacheSize = this.contactCache.size;
-			this.log("debug", `Memória - Fila: ${queueStats.totalQueued} msgs em ${queueStats.totalChats} chats | Cache: ${cacheSize} contatos`);
+			this.log("debug", `Memória - Fila: ${queueStats.totalQueued} msgs em ${queueStats.totalChats} chats | Processing: ${queueStats.processing} | Promises: ${queueStats.pendingPromises} | Cache: ${cacheSize} contatos`);
 			
 			// Alerta se passar de volumes consideráveis (sem bloquear)
 			if (queueStats.totalQueued > 500) {
 				this.log("error", `⚠️ ALTO VOLUME NA FILA - ${queueStats.totalQueued} mensagens enfileiradas`);
+			}
+			if (queueStats.pendingPromises > 100) {
+				this.log("error", `⚠️ MUITAS PROMISES PENDENTES - ${queueStats.pendingPromises} promises. Possível vazamento!`);
 			}
 			if (cacheSize > 800) {
 				this.log("error", `⚠️ CACHE GRANDE - ${cacheSize} contatos em memória`);
