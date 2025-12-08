@@ -3,7 +3,7 @@
 }
 
 datasource db {
-  provider = "mysql"
+  provider = "postgres"
   url      = env("WHATSAPP_DATABASE_URL")
 }
 
