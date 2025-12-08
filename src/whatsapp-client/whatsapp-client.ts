@@ -24,7 +24,7 @@ abstract class WhatsappClient {
 	 *
 	 * @readonly
 	 */
-	public abstract readonly phone: string;
+	public abstract readonly _phone: string;
 
 	/**
 	 * Fetches the WhatsApp profile picture URL by phone number.

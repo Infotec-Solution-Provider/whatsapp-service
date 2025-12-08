@@ -240,7 +240,7 @@ class MessageForwardingService {
 			status: "SENT",
 			timestamp: now.getTime().toString(),
 			sentAt: now,
-			from: `me:${client.phone}`,
+			from: `me:${client._phone}`,
 			to: target.id,
 			type: originalMessage.type,
 			body: originalMessage.body,

@@ -570,10 +570,13 @@ class InternalChatsService {
 				message: savedMsg
 			});
 			process.success(`Mensagem recebida e processada com sucesso`);
+
+			return savedMsg;
 		} catch (err) {
 			const errorMsg = sanitizeErrorMessage(err) || "Erro desconhecido";
 			process.log(`Erro ao receber mensagem: ${errorMsg}`);
 			process.failed(err);
+			throw err;
 		}
 	}
 

@@ -23,6 +23,7 @@ import walletsController from "./controllers/wallets.controller";
 import whatsappController from "./controllers/whatsapp.controller";
 import whatsappService from "./services/whatsapp.service";
 import { registerAllSteps } from "./message-flow/register-steps";
+import remoteClientController from "./controllers/remote-client.controller";
 
 whatsappService.buildClients();
 const app = express();
@@ -58,6 +59,7 @@ app.use(logRoute(gupshupController.router));
 app.use(logRoute(autoResponseController.router));
 app.use(logRoute(wabaController.router));
 app.use(logRoute(messageFlowsController.router));
+app.use(logRoute(remoteClientController.router));
 
 logRoutes("", routesToLog);
 

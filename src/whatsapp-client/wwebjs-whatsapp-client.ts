@@ -1,28 +1,28 @@
-import "dotenv/config";
-import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
-import WhatsappClient from "./whatsapp-client";
-import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
-import { randomUUID } from "node:crypto";
-import HumanBehaviorSimulator, { HumanBehaviorConfig } from "../utils/human-behavior.simulator";
-import MessageQueue from "../utils/message-queue";
-import humanBehaviorConfigService from "../services/human-behavior-config.service";
 import { SocketEventType, SocketServerAdminRoom } from "@in.pulse-crm/sdk";
+import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import "dotenv/config";
+import { randomUUID } from "node:crypto";
+import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
+import CreateMessageDto from "../dtos/create-message.dto";
 import MessageParser from "../parsers/wwebjs-message.parser";
+import { scheduleMessageQueueCleanup } from "../routines/clean-message-queue.routine";
+import runFixLidMessagesRoutine from "../routines/fix-lid-messages.routine";
+import humanBehaviorConfigService from "../services/human-behavior-config.service";
+import internalChatsService from "../services/internal-chats.service";
+import messagesDistributionService from "../services/messages-distribution.service";
+import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
 import socketService from "../services/socket.service";
-import ProcessingLogger from "../utils/processing-logger";
-import messagesService from "../services/messages.service";
-import messagesDistributionService from "../services/messages-distribution.service";
 import {
 	EditMessageOptions,
 	Mentions,
 	SendMessageOptions,
 	SendTemplateOptions
 } from "../types/whatsapp-instance.types";
-import internalChatsService from "../services/internal-chats.service";
-import CreateMessageDto from "../dtos/create-message.dto";
-import runFixLidMessagesRoutine from "../routines/fix-lid-messages.routine";
-import { scheduleMessageQueueCleanup } from "../routines/clean-message-queue.routine";
+import HumanBehaviorSimulator, { HumanBehaviorConfig } from "../utils/human-behavior.simulator";
+import MessageQueue from "../utils/message-queue";
+import ProcessingLogger from "../utils/processing-logger";
+import WhatsappClient from "./whatsapp-client";
 
 const PUPPETEER_ARGS = {
 	headless: true,
@@ -73,7 +73,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		});
 	}
 
-	get phone(): string {
+	get _phone(): string {
 		return this.wwebjs.info.wid.user;
 	}
 
@@ -202,22 +202,31 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		this.cleanupInterval = scheduleMessageQueueCleanup(this.instance, 30, 1);
 
 		// Monitora uso de memória a cada 15 minutos
-		setInterval(() => {
-			const queueStats = this.messageQueue.getMemoryStats();
-			const cacheSize = this.contactCache.size;
-			this.log("debug", `Memória - Fila: ${queueStats.totalQueued} msgs em ${queueStats.totalChats} chats | Processing: ${queueStats.processing} | Promises: ${queueStats.pendingPromises} | Cache: ${cacheSize} contatos`);
-			
-			// Alerta se passar de volumes consideráveis (sem bloquear)
-			if (queueStats.totalQueued > 500) {
-				this.log("error", `⚠️ ALTO VOLUME NA FILA - ${queueStats.totalQueued} mensagens enfileiradas`);
-			}
-			if (queueStats.pendingPromises > 100) {
-				this.log("error", `⚠️ MUITAS PROMISES PENDENTES - ${queueStats.pendingPromises} promises. Possível vazamento!`);
-			}
-			if (cacheSize > 800) {
-				this.log("error", `⚠️ CACHE GRANDE - ${cacheSize} contatos em memória`);
-			}
-		}, 15 * 60 * 1000);
+		setInterval(
+			() => {
+				const queueStats = this.messageQueue.getMemoryStats();
+				const cacheSize = this.contactCache.size;
+				this.log(
+					"debug",
+					`Memória - Fila: ${queueStats.totalQueued} msgs em ${queueStats.totalChats} chats | Processing: ${queueStats.processing} | Promises: ${queueStats.pendingPromises} | Cache: ${cacheSize} contatos`
+				);
+
+				// Alerta se passar de volumes consideráveis (sem bloquear)
+				if (queueStats.totalQueued > 500) {
+					this.log("error", `⚠️ ALTO VOLUME NA FILA - ${queueStats.totalQueued} mensagens enfileiradas`);
+				}
+				if (queueStats.pendingPromises > 100) {
+					this.log(
+						"error",
+						`⚠️ MUITAS PROMISES PENDENTES - ${queueStats.pendingPromises} promises. Possível vazamento!`
+					);
+				}
+				if (cacheSize > 800) {
+					this.log("error", `⚠️ CACHE GRANDE - ${cacheSize} contatos em memória`);
+				}
+			},
+			15 * 60 * 1000
+		);
 
 		if (this.instance === "nunes") {
 			runFixLidMessagesRoutine(this.instance, this.wwebjs);

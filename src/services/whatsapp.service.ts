@@ -24,6 +24,7 @@ import messagesService from "./messages.service";
 import prismaService from "./prisma.service";
 import { TemplateMessage } from "../adapters/template.adapter";
 import { TemplateVariables } from "../types/whatsapp-api.types";
+import RemoteWhatsappClient from "../whatsapp-client/remote-whatsapp-client";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -122,6 +123,16 @@ class WhatsappService {
 					);
 					this.clients.set(client.id, GUPSHUPClient);
 					break;
+				case WppClientType.REMOTE:
+					const RemoteClient = new RemoteWhatsappClient(
+						client.id,
+						client.instance,
+						client.name,
+						client.phone || "",
+						client.remoteClientUrl || ""
+					);
+					this.clients.set(client.id, RemoteClient);
+					break;
 				default:
 					break;
 			}
@@ -204,7 +215,7 @@ class WhatsappService {
 				status: "PENDING",
 				timestamp: now.getTime().toString(),
 				sentAt: now,
-				from: `me:${client.phone}`,
+				from: `me:${client._phone}`,
 				to: `${to}`,
 				type: "chat",
 				body: data.text || "",
@@ -386,7 +397,7 @@ class WhatsappService {
 				status: "PENDING",
 				timestamp: now.getTime().toString(),
 				sentAt: now,
-				from: `bot:${client.phone}`,
+				from: `bot:${client._phone}`,
 				to: `${to}`,
 				type: "chat",
 				body: data.text || ""
@@ -649,7 +660,7 @@ class WhatsappService {
 								status: "SENT",
 								timestamp: now.getTime().toString(),
 								sentAt: now,
-								from: `me:${client.phone}`,
+								from: `me:${client._phone}`,
 								to: target.id,
 								type: originalMsg.type,
 								body: originalMsg.body,

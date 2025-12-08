@@ -18,7 +18,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 		public readonly id: number,
 		public readonly instance: string,
 		public readonly name: string,
-		public readonly phone: string,
+		public readonly _phone: string,
 		private readonly apiKey: string,
 		private readonly appName: string,
 		private readonly appId: string
@@ -49,7 +49,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 
 			data.append("channel", "whatsapp");
 			data.append("src.name", this.appName);
-			data.append("source", this.phone);
+			data.append("source", this._phone);
 			data.append("destination", options.to);
 
 			const msgType = (() => {
@@ -106,7 +106,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 			const message: CreateMessageDto = {
 				clientId: this.id,
 				instance: this.instance,
-				from: `me:${this.phone}`,
+				from: `me:${this._phone}`,
 				to: options.to,
 				body: options.text || "",
 				status: "PENDING",
@@ -143,7 +143,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 
 		data.append("channel", "whatsapp");
 		data.append("src.name", this.appName);
-		data.append("source", this.phone);
+		data.append("source", this._phone);
 		data.append("destination", options.to);
 		data.append(
 			"template",
@@ -170,7 +170,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 		const message: CreateMessageDto = {
 			clientId: this.id,
 			instance: this.instance,
-			from: `me:${this.phone}`,
+			from: `me:${this._phone}`,
 			to: options.to,
 			body: replacedText,
 			status: "SENT",

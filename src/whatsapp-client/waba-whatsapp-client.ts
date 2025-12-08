@@ -29,7 +29,7 @@ class WABAWhatsappClient implements WhatsappClient {
 		public readonly id: number,
 		public readonly instance: string,
 		public readonly name: string,
-		public readonly phone: string,
+		public readonly _phone: string,
 		private readonly wabaPhoneId: string,
 		private readonly wabaAccountId: string,
 		private readonly wabaToken: string
@@ -37,7 +37,7 @@ class WABAWhatsappClient implements WhatsappClient {
 		Logger.info(
 			[
 				`WABA Client initialized for instance ${instance}!`,
-				`Phone: ${phone}`,
+				`Phone: ${_phone}`,
 				`WABA Account ID: ${this.wabaAccountId}`,
 				`WABA Phone ID: ${this.wabaPhoneId}`
 			].join("\n")
@@ -115,7 +115,7 @@ class WABAWhatsappClient implements WhatsappClient {
 			const dto: CreateMessageDto = {
 				clientId: this.id,
 				instance: this.instance,
-				from: `me:${this.phone}`,
+				from: `me:${this._phone}`,
 				to: options.to,
 				body: options.text || "",
 				status: "PENDING",
@@ -352,7 +352,7 @@ class WABAWhatsappClient implements WhatsappClient {
 			const message: CreateMessageDto = {
 				clientId: this.id,
 				instance: this.instance,
-				from: `me:${this.phone}`,
+				from: `me:${this._phone}`,
 				to: options.to,
 				body: replacedText,
 				status: "PENDING",
