@@ -576,6 +576,7 @@ class WhatsappService {
 
 	public async getTemplates(clientId: number) {
 		const client = this.getClient(clientId);
+		console.log("Fetching templates for clientId:", clientId, "Client found:", !!client);
 		if (!client) {
 			throw new BadRequestError("Client do WhatsApp não encontrado.");
 		}
