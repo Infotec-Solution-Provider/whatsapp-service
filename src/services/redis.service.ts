@@ -1,11 +1,24 @@
 import Redis from "ioredis";
+import MemoryCacheService from "./memory-cache.service";
+
+type CacheProvider = "redis" | "memory";
 
 class RedisService {
 	private client: Redis | null = null;
 	private isConnected: boolean = false;
+	private provider: CacheProvider = "redis";
+	private useMemoryCache: boolean = false;
 
 	constructor() {
-		this.connect();
+		this.provider = (process.env["CACHE_PROVIDER"] || "redis") as CacheProvider;
+		this.useMemoryCache = this.provider === "memory";
+		
+		if (this.useMemoryCache) {
+			console.log("📦 Using in-memory cache");
+			this.isConnected = true;
+		} else {
+			this.connect();
+		}
 	}
 
 	private connect() {
@@ -48,16 +61,23 @@ class RedisService {
 	}
 
 	/**
-	 * Verifica se o Redis está conectado
+	 * Verifica se o Redis/Cache está conectado
 	 */
 	public isReady(): boolean {
+		if (this.useMemoryCache) {
+			return MemoryCacheService.isReady();
+		}
 		return this.isConnected && this.client !== null;
 	}
 
 	/**
-	 * Armazena um valor no Redis com expiração opcional
+	 * Armazena um valor no Redis/Cache com expiração opcional
 	 */
 	public async set(key: string, value: any, ttlSeconds?: number): Promise<boolean> {
+		if (this.useMemoryCache) {
+			return MemoryCacheService.set(key, value, ttlSeconds);
+		}
+
 		if (!this.isReady()) {
 			console.warn("Redis not ready, skipping set operation");
 			return false;
@@ -78,9 +98,13 @@ class RedisService {
 	}
 
 	/**
-	 * Busca um valor do Redis
+	 * Busca um valor do Redis/Cache
 	 */
 	public async get<T>(key: string): Promise<T | null> {
+		if (this.useMemoryCache) {
+			return MemoryCacheService.get<T>(key);
+		}
+
 		if (!this.isReady()) {
 			return null;
 		}
@@ -98,9 +122,13 @@ class RedisService {
 	}
 
 	/**
-	 * Busca múltiplos valores do Redis
+	 * Busca múltiplos valores do Redis/Cache
 	 */
 	public async mget<T>(keys: string[]): Promise<(T | null)[]> {
+		if (this.useMemoryCache) {
+			return MemoryCacheService.mget<T>(keys);
+		}
+
 		if (!this.isReady() || keys.length === 0) {
 			return keys.map(() => null);
 		}
@@ -124,9 +152,13 @@ class RedisService {
 	}
 
 	/**
-	 * Armazena múltiplos valores no Redis
+	 * Armazena múltiplos valores no Redis/Cache
 	 */
 	public async mset(items: Array<{ key: string; value: any; ttl?: number }>): Promise<boolean> {
+		if (this.useMemoryCache) {
+			return MemoryCacheService.mset(items);
+		}
+
 		if (!this.isReady() || items.length === 0) {
 			return false;
 		}
@@ -152,9 +184,13 @@ class RedisService {
 	}
 
 	/**
-	 * Remove um valor do Redis
+	 * Remove um valor do Redis/Cache
 	 */
 	public async del(key: string): Promise<boolean> {
+		if (this.useMemoryCache) {
+			return MemoryCacheService.del(key);
+		}
+
 		if (!this.isReady()) {
 			return false;
 		}
@@ -169,9 +205,13 @@ class RedisService {
 	}
 
 	/**
-	 * Remove múltiplos valores do Redis
+	 * Remove múltiplos valores do Redis/Cache
 	 */
 	public async mdel(keys: string[]): Promise<boolean> {
+		if (this.useMemoryCache) {
+			return MemoryCacheService.mdel(keys);
+		}
+
 		if (!this.isReady() || keys.length === 0) {
 			return false;
 		}
@@ -189,6 +229,10 @@ class RedisService {
 	 * Verifica se uma chave existe
 	 */
 	public async exists(key: string): Promise<boolean> {
+		if (this.useMemoryCache) {
+			return MemoryCacheService.exists(key);
+		}
+
 		if (!this.isReady()) {
 			return false;
 		}
@@ -206,6 +250,10 @@ class RedisService {
 	 * Define o tempo de expiração de uma chave
 	 */
 	public async expire(key: string, seconds: number): Promise<boolean> {
+		if (this.useMemoryCache) {
+			return MemoryCacheService.expire(key, seconds);
+		}
+
 		if (!this.isReady()) {
 			return false;
 		}
@@ -223,6 +271,10 @@ class RedisService {
 	 * Limpa todas as chaves que correspondem ao padrão
 	 */
 	public async clear(pattern: string): Promise<number> {
+		if (this.useMemoryCache) {
+			return MemoryCacheService.clear(pattern);
+		}
+
 		if (!this.isReady()) {
 			return 0;
 		}
@@ -241,10 +293,12 @@ class RedisService {
 	}
 
 	/**
-	 * Fecha a conexão com o Redis
+	 * Fecha a conexão com o Redis/Cache
 	 */
 	public async disconnect(): Promise<void> {
-		if (this.client) {
+		if (this.useMemoryCache) {
+			await MemoryCacheService.disconnect();
+		} else if (this.client) {
 			await this.client.quit();
 			this.isConnected = false;
 		}
