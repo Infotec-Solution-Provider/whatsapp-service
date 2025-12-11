@@ -19,6 +19,7 @@ export interface ContactsFilters {
 	customerCnpj: string | null;
 	customerName: string | null;
 	hasCustomer: boolean | null;
+	sectorIds: number[] | null;
 	page: number;
 	perPage: number;
 }
@@ -104,7 +105,10 @@ class ContactsService {
 		}
 
 		if (filters.phone) {
-			whereConditions.phone = { contains: filters.phone };
+			const phoneDigits = filters.phone.replace(/\D/g, "");
+			if (phoneDigits) {
+				whereConditions.phone = { contains: phoneDigits };
+			}
 		}
 
 		// 3) Vínculo com cliente: customerId / hasCustomer
@@ -119,10 +123,19 @@ class ContactsService {
 			whereConditions.customerId = null;
 		}
 
+		if (filters.sectorIds && filters.sectorIds.length > 0) {
+			(whereConditions as any).sectors = {
+				some: {
+					sectorId: { in: filters.sectorIds }
+				}
+			};
+		}
+
 		// 4) Consulta SEMPRE paginada no DB (sem overfetch de contatos)
 		const [contacts, total] = await Promise.all([
 			prismaService.wppContact.findMany({
 				where: whereConditions,
+				include: { sectors: true } as any,
 				skip: (page - 1) * perPage,
 				take: perPage,
 				orderBy: { id: "desc" }
@@ -422,7 +435,7 @@ class ContactsService {
 			},
 			include: {
 				sectors: true
-			}
+			} as any
 		});
 
 		return contacts;
@@ -436,7 +449,7 @@ class ContactsService {
 			},
 			include: {
 				sectors: true
-			}
+			} as any
 		});
 		return contacts;
 	}
@@ -468,7 +481,7 @@ class ContactsService {
 				}
 			},
 			// include sectors - cast to any because Prisma client types must be regenerated after schema change
-			include: { sectors: true }
+			include: { sectors: true } as any
 		});
 
 		// If contact exists and mapped to a customer, keep old behavior
@@ -484,7 +497,7 @@ class ContactsService {
 
 		// If contact exists, we must enforce sector rules
 		if (existingContact) {
-			const existingSectorIds = (existingContact.sectors || []).map((s) => s.sectorId);
+			const existingSectorIds = ((existingContact as any).sectors || []).map((s: any) => s.sectorId);
 
 			// If creating global (no sectorIds provided)
 			if (!sectorIds || sectorIds.length === 0) {
@@ -542,7 +555,7 @@ class ContactsService {
 		const createdContact = await prismaService.wppContact.create({
 			data: createData,
 			// include sectors - cast to any because Prisma client types must be regenerated after schema change
-			include: { sectors: true }
+			include: { sectors: true } as any
 		});
 
 		return createdContact;
@@ -573,13 +586,13 @@ class ContactsService {
 				deleteMany: {},
 				create: cleanedSectorIds.map((id) => ({ sectorId: id }))
 			}
-		};
+		} as any;
 
 		const contact = await prismaService.wppContact.update({
 			where: { id: contactId },
 			data: updatePayload,
 			// include sectors for convenience (cast to any until prisma client is regenerated)
-			include: { sectors: true }
+			include: { sectors: true } as any
 		});
 
 		return contact;
@@ -639,14 +652,14 @@ class ContactsService {
 	public async addSectorToContact(contactId: number, sectorId: number) {
 		const contact = await prismaService.wppContact.findUnique({
 			where: { id: contactId },
-			include: { sectors: true }
+			include: { sectors: true } as any
 		});
 
 		if (!contact) {
 			throw new BadRequestError("Contato não encontrado");
 		}
 
-		const existingSectorIds = (contact.sectors || []).map((s: any) => s.sectorId);
+		const existingSectorIds = ((contact as any).sectors || []).map((s: any) => s.sectorId);
 
 		// If contact is global (no sectors), do not allow adding sector (matching create conflict rule)
 		if (existingSectorIds.length === 0) {
@@ -657,19 +670,19 @@ class ContactsService {
 			// nothing to do, return contact with sectors
 			return await prismaService.wppContact.findUnique({
 				where: { id: contactId },
-				include: { sectors: true }
+				include: { sectors: true } as any
 			});
 		}
 
 		// Add new sector association
 		await prismaService.wppContact.update({
 			where: { id: contactId },
-			data: { sectors: { create: { sectorId } } }
+			data: { sectors: { create: { sectorId } } } as any
 		});
 
 		const updated = await prismaService.wppContact.findUnique({
 			where: { id: contactId },
-			include: { sectors: true }
+			include: { sectors: true } as any
 		});
 
 		return updated;
