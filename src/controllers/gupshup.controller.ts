@@ -20,12 +20,11 @@ class GupshupController {
 
 			if (instance === "exatron" && redirectExatron) {
 				await this.redirectExatronWebhook(req, res);
-				return;
+				await gupshupService.handleWebhookEntry(instance, req.body);
+			} else {
+				await gupshupService.handleWebhookEntry(instance, req.body);
+				res.status(200).send();
 			}
-
-			await gupshupService.handleWebhookEntry(instance, req.body);
-
-			res.status(200).send();
 		} catch (err: any) {
 			res.status(500).send({ message: err?.message });
 		}
