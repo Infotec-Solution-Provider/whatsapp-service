@@ -271,7 +271,15 @@ class MonitorController {
 
 			const nameCandidates: Array<string | null | undefined> = [
 				chat?.contact?.name,
-				chat?.customer?.RAZAO
+				chat?.customer?.RAZAO,
+				chat?.contact?.phone,
+				chat?.contact?.phoneNumber,
+				chat?.contact?.phone_number,
+				chat?.contact?.formattedPhone,
+				chat?.contact?.formattedPhoneNumber,
+				chat?.contact?.phoneFormatted,
+				chat?.contact?.shortName,
+				chat?.contact?.shortPhone
 			];
 			const lastMessageCandidates: Array<string | null | undefined> = [
 				chat?.lastMessageBody,
@@ -328,6 +336,12 @@ class MonitorController {
 
 			return matchesSearch([
 				schedule?.contact?.name,
+				schedule?.contact?.phone,
+				schedule?.contact?.phoneNumber,
+				schedule?.contact?.phone_number,
+				schedule?.contact?.formattedPhone,
+				schedule?.contact?.formattedPhoneNumber,
+				schedule?.contact?.phoneFormatted,
 				schedule?.customer?.RAZAO,
 				schedule?.customer?.CPF_CNPJ
 			]);
