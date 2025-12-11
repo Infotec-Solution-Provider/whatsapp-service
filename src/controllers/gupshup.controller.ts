@@ -19,7 +19,7 @@ class GupshupController {
 			const redirectExatron = process.env["REDIRECT_EXATRON_GUPSHUP_WEBHOOK"] === "true";
 
 			if (instance === "exatron" && redirectExatron) {
-				await this.redirectExatronWebhook(req, res);
+				await this.redirectExatronWebhook(req);
 				await gupshupService.handleWebhookEntry(instance, req.body);
 				return; // Evita enviar resposta duas vezes
 			}
@@ -33,7 +33,7 @@ class GupshupController {
 		}
 	};
 
-	private redirectExatronWebhook = async (req: Request, res: Response) => {
+	private redirectExatronWebhook = async (req: Request) => {
 		const exatronWebhookUrl = process.env["EXATRON_GUPSHUP_WEBHOOK_URL"];
 		if (!exatronWebhookUrl) {
 			throw new Error("Exatron webhook URL is not configured");
