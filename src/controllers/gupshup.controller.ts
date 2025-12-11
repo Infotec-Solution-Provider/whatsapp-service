@@ -21,40 +21,37 @@ class GupshupController {
 			if (instance === "exatron" && redirectExatron) {
 				await this.redirectExatronWebhook(req, res);
 				await gupshupService.handleWebhookEntry(instance, req.body);
-			} else {
-				await gupshupService.handleWebhookEntry(instance, req.body);
-				res.status(200).send();
+				return; // Evita enviar resposta duas vezes
 			}
+
+			await gupshupService.handleWebhookEntry(instance, req.body);
+			res.status(200).send();
 		} catch (err: any) {
-			res.status(500).send({ message: err?.message });
+			if (!res.headersSent) {
+				res.status(500).send({ message: err?.message });
+			}
 		}
 	};
 
 	private redirectExatronWebhook = async (req: Request, res: Response) => {
-		try {
-			const exatronWebhookUrl = process.env["EXATRON_GUPSHUP_WEBHOOK_URL"];
-			if (!exatronWebhookUrl) {
-				throw new Error("Exatron webhook URL is not configured");
-			}
-			const response = await fetch(exatronWebhookUrl, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(req.body)
-			});
-			if (!response.ok) {
-				throw new Error(`Failed to redirect to Exatron webhook: ${response.statusText}`);
-			}
-			res.status(200).send();
-		} catch (err: any) {
-			res.status(500).send({ message: err?.message });
+		const exatronWebhookUrl = process.env["EXATRON_GUPSHUP_WEBHOOK_URL"];
+		if (!exatronWebhookUrl) {
+			throw new Error("Exatron webhook URL is not configured");
 		}
+		await fetch(exatronWebhookUrl, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(req.body)
+		});
 	};
 
 	private webhookChallenge = async (_: Request, res: Response) => {
 		try {
 			res.status(200).send();
 		} catch (err: any) {
-			res.status(500).send({ message: err?.message });
+			if (!res.headersSent) {
+				res.status(500).send({ message: err?.message });
+			}
 		}
 	};
 }
