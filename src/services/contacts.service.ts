@@ -200,12 +200,10 @@ class ContactsService {
 		};
 	}
 
-
 	private mapCustomerFilters(instance: string, filters: ContactsFilters): Record<string, string> {
 		const params: Record<string, string> = {};
 
 		params["instance"] = instance;
-
 
 		if (filters.customerErp) {
 			params["COD_ERP"] = filters.customerErp;
@@ -230,7 +228,6 @@ class ContactsService {
 
 		return params;
 	}
-
 
 	private async searchCustomerIdsByFilters(instance: string, filters: ContactsFilters): Promise<number[]> {
 		const params = this.mapCustomerFilters(instance, filters);
@@ -271,7 +268,6 @@ class ContactsService {
 			return [];
 		}
 	}
-
 
 	private async getCustomersByIds(instance: string, customerIds: number[]): Promise<Map<number, Customer>> {
 		const result = new Map<number, Customer>();
@@ -451,11 +447,7 @@ class ContactsService {
 		});
 
 		// If contact exists and mapped to a customer, keep old behavior
-		if (
-			existingContact &&
-			!!existingContact.customerId &&
-			customerId
-		) {
+		if (existingContact && !!existingContact.customerId && customerId) {
 			const message = `Este número já está cadastrado no cliente de código ${existingContact.customerId}`;
 			throw new ConflictError(message);
 		}
@@ -659,9 +651,8 @@ class ContactsService {
 				id: contactId
 			},
 			data: {
-				isDeleted: true
-				customerId: null,
-				isDeleted: true
+				isDeleted: true,
+				customerId: null
 			}
 		});
 
