@@ -659,7 +659,6 @@ class ContactsService {
 				id: contactId
 			},
 			data: {
-				isDeleted: true
 				customerId: null,
 				isDeleted: true
 			}
