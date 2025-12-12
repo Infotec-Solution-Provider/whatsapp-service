@@ -19,6 +19,7 @@ export interface ContactsFilters {
 	customerCnpj: string | null;
 	customerName: string | null;
 	hasCustomer: boolean | null;
+	sectorIds: number[] | null;
 	page: number;
 	perPage: number;
 }
@@ -64,17 +65,14 @@ class ContactsService {
 		customersService.setAuth(token);
 		usersService.setAuth(token);
 
-		// paginação normalizada
 		const page = Math.max(1, filters.page);
 		const perPage = Math.max(1, Math.min(100, filters.perPage));
 
-		// where base SEMPRE inclui instance
 		const whereConditions: Prisma.WppContactWhereInput = {
 			instance,
 			isDeleted: false
 		};
 
-		// 1) Filtros do "lado do cliente": ERP/CNPJ/NOME
 		const hasCustomerSideFilters = !!(filters.customerErp || filters.customerCnpj || filters.customerName);
 		if (hasCustomerSideFilters) {
 			const matchedCustomerIds = await this.searchCustomerIdsByFilters(instance, filters);
@@ -93,22 +91,20 @@ class ContactsService {
 				};
 			}
 
-			// aplica customerId IN [...] no mesmo instance
 			whereConditions.customerId = { in: matchedCustomerIds };
 		}
 
-		// 2) Filtros do "lado do contato": name/phone
 		if (filters.name) {
-			// Case-insensitive via collation/ci no DB se necessário.
 			whereConditions.name = { contains: filters.name };
 		}
 
 		if (filters.phone) {
-			whereConditions.phone = { contains: filters.phone };
+			const phoneDigits = filters.phone.replace(/\D/g, "");
+			if (phoneDigits) {
+				whereConditions.phone = { contains: phoneDigits };
+			}
 		}
 
-		// 3) Vínculo com cliente: customerId / hasCustomer
-		// Mantém a precedência da versão original: hasCustomer pode sobrescrever.
 		if (typeof filters.customerId === "number" && Number.isFinite(filters.customerId)) {
 			whereConditions.customerId = filters.customerId;
 		}
@@ -119,10 +115,18 @@ class ContactsService {
 			whereConditions.customerId = null;
 		}
 
-		// 4) Consulta SEMPRE paginada no DB (sem overfetch de contatos)
+		if (filters.sectorIds && filters.sectorIds.length > 0) {
+			(whereConditions as any).sectors = {
+				some: {
+					sectorId: { in: filters.sectorIds }
+				}
+			};
+		}
+
 		const [contacts, total] = await Promise.all([
 			prismaService.wppContact.findMany({
 				where: whereConditions,
+				include: { sectors: true } as any,
 				skip: (page - 1) * perPage,
 				take: perPage,
 				orderBy: { id: "desc" }
@@ -144,8 +148,6 @@ class ContactsService {
 			};
 		}
 
-		// 5) Enriquecimento: chats + customers + users (sempre escopados)
-		// Se seu chatsService aceitar instance (recomendado), passamos:
 		const chatsPromise = chatsService.getChats({ isFinished: "false" });
 		const uniqueCustomerIds = [...new Set(contacts.map((c) => c.customerId).filter(Boolean))] as number[];
 
@@ -198,20 +200,12 @@ class ContactsService {
 		};
 	}
 
-	/**
-	 * Mapeia filtros para possíveis parâmetros aceitos pela API de clientes.
-	 * -> Inclui sempre o escopo de `instance` para evitar vazamento multi-tenant.
-	 * Ajuste as chaves se o backend usar nomes diferentes (tenant/empresa/filial...).
-	 */
+
 	private mapCustomerFilters(instance: string, filters: ContactsFilters): Record<string, string> {
 		const params: Record<string, string> = {};
 
-		// Escopo de tenant / instancia — ajuste conforme sua API:
 		params["instance"] = instance;
-		// Alternativas comuns (descomente e/ou ajuste se seu backend usar outra chave):
-		// params["tenant"] = instance;
-		// params["empresa"] = instance;
-		// params["FILIAL"] = instance;
+
 
 		if (filters.customerErp) {
 			params["COD_ERP"] = filters.customerErp;
@@ -226,24 +220,18 @@ class ContactsService {
 		}
 
 		if (filters.customerName) {
-			// ajuste para o campo que seu backend usa (RAZAO, FANTASIA, search, name...)
 			params["RAZAO"] = filters.customerName;
 			// params["FANTASIA"] = filters.customerName;
 			// params["search"] = filters.customerName;
 			// params["name"] = filters.customerName;
 		}
 
-		// Janela controlada para reduzir roundtrips
 		params["perPage"] = "500";
 
 		return params;
 	}
 
-	/**
-	 * Busca IDs (CODIGO) de clientes conforme filtros (ERP/CNPJ/NOME), sempre escopado por `instance`.
-	 * - Filtra via API com parâmetros mapeados (inclui instance).
-	 * - Reforça o match localmente (ERP/CNPJ/NOME) para robustez.
-	 */
+
 	private async searchCustomerIdsByFilters(instance: string, filters: ContactsFilters): Promise<number[]> {
 		const params = this.mapCustomerFilters(instance, filters);
 
@@ -251,7 +239,6 @@ class ContactsService {
 			const response = await customersService.getCustomers(params as any);
 			const customers: any[] = response?.data ?? [];
 
-			// Reforço local (caso a API seja elástica nos filtros)
 			const erp = (filters.customerErp ?? "").toString().trim();
 			const cnpj = (filters.customerCnpj ?? "").toString().trim();
 			const name = (filters.customerName ?? "").toString().trim().toLowerCase();
@@ -278,7 +265,6 @@ class ContactsService {
 			});
 
 			const ids = matches.map((c: any) => c?.CODIGO).filter((x: any) => Number.isFinite(x));
-			// Set para deduplicar
 			return Array.from(new Set<number>(ids));
 		} catch (error) {
 			console.error("[searchCustomerIdsByFilters] erro na API de clientes", error);
@@ -286,9 +272,7 @@ class ContactsService {
 		}
 	}
 
-	/**
-	 * Busca clientes por IDs, com cache Redis por instance e chamada à API escopada por instance.
-	 */
+
 	private async getCustomersByIds(instance: string, customerIds: number[]): Promise<Map<number, Customer>> {
 		const result = new Map<number, Customer>();
 
@@ -296,7 +280,6 @@ class ContactsService {
 			return result;
 		}
 
-		// Redis por instance
 		const cacheKeys = customerIds.map((id) => `customer:${instance}:${id}`);
 		const cachedCustomers = await redisService.mget<Customer>(cacheKeys);
 
@@ -319,10 +302,6 @@ class ContactsService {
 			for (let i = 0; i < idsToFetch.length; i += batchSize) {
 				const batch = idsToFetch.slice(i, i + batchSize);
 
-				// Ideal: endpoint byIds (se tiver, use-o e passe instance).
-				// const { data: customers } = await customersService.getCustomers({ ids: batch.join(","), perPage: batch.length.toString(), instance });
-
-				// Fallback universal (escopado por instance):
 				const { data: customers } = await customersService.getCustomers({
 					perPage: batch.length.toString()
 				});
@@ -422,7 +401,7 @@ class ContactsService {
 			},
 			include: {
 				sectors: true
-			}
+			} as any
 		});
 
 		return contacts;
@@ -436,7 +415,7 @@ class ContactsService {
 			},
 			include: {
 				sectors: true
-			}
+			} as any
 		});
 		return contacts;
 	}
@@ -468,15 +447,14 @@ class ContactsService {
 				}
 			},
 			// include sectors - cast to any because Prisma client types must be regenerated after schema change
-			include: { sectors: true }
+			include: { sectors: true } as any
 		});
 
 		// If contact exists and mapped to a customer, keep old behavior
 		if (
 			existingContact &&
 			!!existingContact.customerId &&
-			customerId &&
-			existingContact.customerId !== customerId
+			customerId
 		) {
 			const message = `Este número já está cadastrado no cliente de código ${existingContact.customerId}`;
 			throw new ConflictError(message);
@@ -484,7 +462,7 @@ class ContactsService {
 
 		// If contact exists, we must enforce sector rules
 		if (existingContact) {
-			const existingSectorIds = (existingContact.sectors || []).map((s) => s.sectorId);
+			const existingSectorIds = ((existingContact as any).sectors || []).map((s: any) => s.sectorId);
 
 			// If creating global (no sectorIds provided)
 			if (!sectorIds || sectorIds.length === 0) {
@@ -542,7 +520,7 @@ class ContactsService {
 		const createdContact = await prismaService.wppContact.create({
 			data: createData,
 			// include sectors - cast to any because Prisma client types must be regenerated after schema change
-			include: { sectors: true }
+			include: { sectors: true } as any
 		});
 
 		return createdContact;
@@ -573,13 +551,13 @@ class ContactsService {
 				deleteMany: {},
 				create: cleanedSectorIds.map((id) => ({ sectorId: id }))
 			}
-		};
+		} as any;
 
 		const contact = await prismaService.wppContact.update({
 			where: { id: contactId },
 			data: updatePayload,
 			// include sectors for convenience (cast to any until prisma client is regenerated)
-			include: { sectors: true }
+			include: { sectors: true } as any
 		});
 
 		return contact;
@@ -639,14 +617,14 @@ class ContactsService {
 	public async addSectorToContact(contactId: number, sectorId: number) {
 		const contact = await prismaService.wppContact.findUnique({
 			where: { id: contactId },
-			include: { sectors: true }
+			include: { sectors: true } as any
 		});
 
 		if (!contact) {
 			throw new BadRequestError("Contato não encontrado");
 		}
 
-		const existingSectorIds = (contact.sectors || []).map((s: any) => s.sectorId);
+		const existingSectorIds = ((contact as any).sectors || []).map((s: any) => s.sectorId);
 
 		// If contact is global (no sectors), do not allow adding sector (matching create conflict rule)
 		if (existingSectorIds.length === 0) {
@@ -657,19 +635,19 @@ class ContactsService {
 			// nothing to do, return contact with sectors
 			return await prismaService.wppContact.findUnique({
 				where: { id: contactId },
-				include: { sectors: true }
+				include: { sectors: true } as any
 			});
 		}
 
 		// Add new sector association
 		await prismaService.wppContact.update({
 			where: { id: contactId },
-			data: { sectors: { create: { sectorId } } }
+			data: { sectors: { create: { sectorId } } } as any
 		});
 
 		const updated = await prismaService.wppContact.findUnique({
 			where: { id: contactId },
-			include: { sectors: true }
+			include: { sectors: true } as any
 		});
 
 		return updated;
@@ -681,6 +659,8 @@ class ContactsService {
 				id: contactId
 			},
 			data: {
+				isDeleted: true
+				customerId: null,
 				isDeleted: true
 			}
 		});

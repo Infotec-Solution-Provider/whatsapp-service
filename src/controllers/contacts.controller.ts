@@ -54,6 +54,14 @@ class ContactsController {
 	}
 
 	private async getContactsWithCustomer(req: Request, res: Response) {
+		const sectorIdsParam = req.query["sectorIds"] as string | undefined;
+		const sectorIds = sectorIdsParam
+			? sectorIdsParam
+				.split(",")
+				.map((id) => Number(id))
+				.filter((id) => !Number.isNaN(id))
+			: null;
+
 		const filters = {
 			name: (req.query["name"] as string) || null,
 			phone: (req.query["phone"] as string) || null,
@@ -62,6 +70,7 @@ class ContactsController {
 			customerCnpj: (req.query["customerCnpj"] as string) || null,
 			customerName: (req.query["customerName"] as string) || null,
 			hasCustomer: req.query["hasCustomer"] ? req.query["hasCustomer"] === "true" : null,
+			sectorIds,
 			page: req.query["page"] ? Number(req.query["page"]) : 1,
 			perPage: req.query["perPage"] ? Number(req.query["perPage"]) : 50
 		};

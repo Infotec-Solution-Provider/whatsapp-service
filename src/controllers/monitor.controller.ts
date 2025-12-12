@@ -11,6 +11,12 @@ class MonitorController {
 			isAuthenticated,
 			this.getMonitorData
 		);
+
+		this.router.post(
+			"/api/whatsapp/monitor/search",
+			isAuthenticated,
+			this.searchMonitorData
+		);
 	}
 
 	private async getMonitorData(req: Request, res: Response) {
@@ -20,7 +26,7 @@ class MonitorController {
 		);
 		const { chats: whatsappChats } = await chatsService.getChatsMonitor(
 			req.session,
-			false,
+			true,
 			true
 		);
 		const { chats: internalChats } =
@@ -35,6 +41,358 @@ class MonitorController {
 		res.status(200).send({
 			message: "Monitor data retrieved successfully!",
 			data: responseData
+		});
+	}
+
+	private async searchMonitorData(req: Request, res: Response) {
+		const page = Number(req.body.page) || 1;
+		const pageSize = Number(req.body.pageSize) || 20;
+		const filters = (req.body.filters as Record<string, any>) || {};
+
+		const schedules = await schedulesService.getSchedulesBySession(
+			req.session,
+			{}
+		);
+		const { chats: whatsappChatsRaw } = await chatsService.getChatsMonitor(
+			req.session,
+			true,
+			true
+		);
+		const { chats: internalChatsRaw } =
+			await internalChatsService.getInternalChatsMonitor(req.session);
+
+		const whatsappChats = whatsappChatsRaw.map((chat: any) => {
+			const messages = chat?.contact?.WppMessage || chat?.messages || [];
+			const lastMessage = messages.reduce((prev: any, curr: any) => {
+				if (!prev) return curr;
+				return (curr?.timestamp || 0) > (prev?.timestamp || 0) ? curr : prev;
+			}, null);
+
+			const isUnread = messages.some((m: any) => {
+				const from = String(m.from || "");
+				const isFromUs =
+					from.startsWith("me:") ||
+					from.startsWith("system:") ||
+					from.startsWith("bot") ||
+					from.startsWith("thirdparty") ||
+					from.startsWith("user:");
+				return m.status !== "READ" && !isFromUs;
+			});
+
+			return {
+				...chat,
+				messages,
+				chatType: "wpp",
+				lastMessage,
+				isUnread
+			};
+		});
+
+		const internalChats = internalChatsRaw.map((chat: any) => {
+			const messages = chat.messages || [];
+			const lastMessage = messages.reduce((prev: any, curr: any) => {
+				if (!prev) return curr;
+				return (curr?.timestamp || 0) > (prev?.timestamp || 0) ? curr : prev;
+			}, null);
+			const isUnread = messages.some((m: any) => m.status !== "READ");
+
+			return {
+				...chat,
+				chatType: "internal",
+				lastMessage,
+				isUnread
+			};
+		});
+
+		const normalizedFilters = {
+			searchText: filters["searchText"] || "",
+			categories: {
+				showCustomerChats: filters["categories"]?.showCustomerChats ?? true,
+				showInternalChats: filters["categories"]?.showInternalChats ?? true,
+				showInternalGroups: filters["categories"]?.showInternalGroups ?? true,
+				showSchedules: filters["categories"]?.showSchedules ?? true
+			},
+			user: filters["user"] ?? "all",
+			showBots: !!filters["showBots"],
+			showOngoing: filters["showOngoing"] ?? true,
+			showFinished: filters["showFinished"] ?? true,
+			showOnlyScheduled: !!filters["showOnlyScheduled"],
+			showUnreadOnly: !!filters["showUnreadOnly"],
+			showPendingResponseOnly: !!filters["showPendingResponseOnly"],
+			sortBy: filters["sortBy"] || "startedAt",
+			sortOrder: filters["sortOrder"] || "desc",
+			startedAt: filters["startedAt"] || { from: null, to: null },
+			finishedAt: filters["finishedAt"] || { from: null, to: null },
+			scheduledAt: filters["scheduledAt"] || { from: null, to: null },
+			scheduledTo: filters["scheduledTo"] || { from: null, to: null },
+			scheduledBy: filters["scheduledBy"] ?? "all",
+			scheduledFor: filters["scheduledFor"] ?? "all"
+		};
+
+		const normalize = (s?: string | null) =>
+			(s ?? "")
+				.toString()
+				.normalize("NFD")
+				.replace(/[\u0300-\u036f]/g, "")
+				.toLowerCase();
+
+		const onlyDigits = (s?: string | null) => (s ?? "").toString().replace(/\D/g, "");
+
+		const search = normalize(normalizedFilters.searchText);
+
+		const matchesSearch = (values: Array<string | null | undefined>) => {
+			if (!search) return true;
+			const joined = values.filter(Boolean).map(String);
+			const haystack = normalize(joined.join(" "));
+			if (haystack.includes(search)) return true;
+
+			const searchDigits = onlyDigits(normalizedFilters.searchText);
+			if (searchDigits.length >= 3) {
+				return values.some((v) => onlyDigits(v).includes(searchDigits));
+			}
+
+			return false;
+		};
+
+		const filteredInternal = internalChats.filter((chat: any) => {
+			if (chat.isGroup && !normalizedFilters.categories.showInternalGroups) return false;
+			if (!chat.isGroup && !normalizedFilters.categories.showInternalChats) return false;
+			if (
+				normalizedFilters.user !== "all" &&
+				!chat.participants?.some((p: any) => p.userId === normalizedFilters.user)
+			) {
+				return false;
+			}
+			if (normalizedFilters.showOnlyScheduled) return false;
+
+			const chatStartedAt = chat.startedAt ? new Date(chat.startedAt) : null;
+			if (
+				normalizedFilters.startedAt?.from &&
+				chatStartedAt &&
+				chatStartedAt < new Date(normalizedFilters.startedAt.from)
+			) {
+				return false;
+			}
+			if (
+				normalizedFilters.startedAt?.to &&
+				chatStartedAt &&
+				chatStartedAt > new Date(normalizedFilters.startedAt.to)
+			) {
+				return false;
+			}
+
+			const anyChat: any = chat;
+			const nameCandidates: Array<string | null | undefined> = [
+				anyChat?.name,
+				anyChat?.title,
+				anyChat?.groupName
+			];
+			if (Array.isArray(anyChat?.participants)) {
+				nameCandidates.push(
+					...anyChat.participants
+						.map((p: any) => p.name || p.NOME || p?.user?.name)
+						.filter(Boolean)
+				);
+			}
+			const lastMessageCandidates: Array<string | null | undefined> = [
+				anyChat?.lastMessageBody,
+				anyChat?.lastMessage?.body,
+				anyChat?.lastMessageText,
+				anyChat?.lastMsg?.body,
+				anyChat?.messages?.[anyChat?.messages?.length - 1]?.body,
+				anyChat?.messages?.[0]?.body
+			];
+
+			return matchesSearch([...nameCandidates, ...lastMessageCandidates]);
+		});
+
+		const filteredWpp = whatsappChats.filter((chat: any) => {
+			if (!normalizedFilters.categories.showCustomerChats) return false;
+			if (
+				normalizedFilters.user !== "all" &&
+				chat.userId !== normalizedFilters.user
+			)
+				return false;
+			if (!normalizedFilters.showBots && chat.botId !== null) return false;
+			if (normalizedFilters.showOnlyScheduled && !chat.isSchedule) return false;
+			if (
+				normalizedFilters.scheduledFor !== "all" &&
+				"schedule" in chat &&
+				chat.schedule?.scheduledFor !== normalizedFilters.scheduledFor
+			) {
+				return false;
+			}
+
+			const isOngoing = chat.finishedAt === null && chat.startedAt !== null;
+			const isFinished = chat.finishedAt !== null;
+
+			if (!normalizedFilters.showOngoing && !normalizedFilters.showFinished) return false;
+			if (normalizedFilters.showOngoing && !normalizedFilters.showFinished && !isOngoing)
+				return false;
+			if (!normalizedFilters.showOngoing && normalizedFilters.showFinished && !isFinished)
+				return false;
+
+			if (normalizedFilters.showUnreadOnly && !chat.isUnread) return false;
+
+			if (normalizedFilters.showPendingResponseOnly) {
+				const lastMsg = chat.lastMessage || chat.lastMsg;
+				if (!lastMsg) return false;
+				const from = String(lastMsg.from || "");
+				const isFromAgent = from.startsWith("me:") || from.startsWith("user:");
+				if (isFromAgent) return false;
+			}
+
+			const chatStartedAt = chat.startedAt ? new Date(chat.startedAt) : null;
+			if (
+				normalizedFilters.startedAt?.from &&
+				chatStartedAt &&
+				chatStartedAt < new Date(normalizedFilters.startedAt.from)
+			)
+				return false;
+			if (
+				normalizedFilters.startedAt?.to &&
+				chatStartedAt &&
+				chatStartedAt > new Date(normalizedFilters.startedAt.to)
+			)
+				return false;
+
+			if (chat.finishedAt) {
+				const chatFinishedAt = new Date(chat.finishedAt);
+				if (
+					normalizedFilters.finishedAt?.from &&
+					chatFinishedAt < new Date(normalizedFilters.finishedAt.from)
+				)
+					return false;
+				if (
+					normalizedFilters.finishedAt?.to &&
+					chatFinishedAt > new Date(normalizedFilters.finishedAt.to)
+				)
+					return false;
+			}
+
+			const nameCandidates: Array<string | null | undefined> = [
+				chat?.contact?.name,
+				chat?.customer?.RAZAO,
+				chat?.contact?.phone,
+				chat?.contact?.phoneNumber,
+				chat?.contact?.phone_number,
+				chat?.contact?.formattedPhone,
+				chat?.contact?.formattedPhoneNumber,
+				chat?.contact?.phoneFormatted,
+				chat?.contact?.shortName,
+				chat?.contact?.shortPhone
+			];
+			const lastMessageCandidates: Array<string | null | undefined> = [
+				chat?.lastMessageBody,
+				chat?.lastMessage?.body,
+				chat?.lastMessageText,
+				chat?.lastMsg?.body,
+				chat?.messages?.[chat?.messages?.length - 1]?.body,
+				chat?.messages?.[0]?.body
+			];
+
+			return matchesSearch([...nameCandidates, ...lastMessageCandidates]);
+		});
+
+		const filteredSchedules = schedules.filter((schedule: any) => {
+			if (!normalizedFilters.categories.showSchedules) return false;
+			if (
+				normalizedFilters.scheduledFor !== "all" &&
+				schedule.scheduledFor !== normalizedFilters.scheduledFor
+			)
+				return false;
+			if (
+				normalizedFilters.scheduledBy !== "all" &&
+				schedule.scheduledBy !== normalizedFilters.scheduledBy
+			)
+				return false;
+
+			const scheduledAt = schedule.scheduledAt ? new Date(schedule.scheduledAt) : null;
+			if (
+				normalizedFilters.scheduledAt?.from &&
+				scheduledAt &&
+				scheduledAt < new Date(normalizedFilters.scheduledAt.from)
+			)
+				return false;
+			if (
+				normalizedFilters.scheduledAt?.to &&
+				scheduledAt &&
+				scheduledAt > new Date(normalizedFilters.scheduledAt.to)
+			)
+				return false;
+
+			const scheduledTo = schedule.scheduleDate ? new Date(schedule.scheduleDate) : null;
+			if (
+				normalizedFilters.scheduledTo?.from &&
+				scheduledTo &&
+				scheduledTo < new Date(normalizedFilters.scheduledTo.from)
+			)
+				return false;
+			if (
+				normalizedFilters.scheduledTo?.to &&
+				scheduledTo &&
+				scheduledTo > new Date(normalizedFilters.scheduledTo.to)
+			)
+				return false;
+
+			return matchesSearch([
+				schedule?.contact?.name,
+				schedule?.contact?.phone,
+				schedule?.contact?.phoneNumber,
+				schedule?.contact?.phone_number,
+				schedule?.contact?.formattedPhone,
+				schedule?.contact?.formattedPhoneNumber,
+				schedule?.contact?.phoneFormatted,
+				schedule?.customer?.RAZAO,
+				schedule?.customer?.CPF_CNPJ
+			]);
+		});
+
+		const allItems = [...filteredInternal, ...filteredWpp, ...filteredSchedules];
+
+		const sortedItems = allItems.sort((a: any, b: any) => {
+			const sortBy = normalizedFilters.sortBy;
+			const sortOrder = normalizedFilters.sortOrder === "asc" ? 1 : -1;
+
+			const getValue = (item: any) => {
+				switch (sortBy) {
+					case "finishedAt":
+						return item.finishedAt ? new Date(item.finishedAt).getTime() : 0;
+					case "lastMessage":
+						return item.lastMessage?.timestamp || item.lastMsg?.timestamp || 0;
+					case "scheduledAt":
+						if (item.schedule?.scheduledAt) return new Date(item.schedule.scheduledAt).getTime();
+						if (item.scheduleDate) return new Date(item.scheduleDate).getTime();
+						if (item.scheduledAt) return new Date(item.scheduledAt).getTime();
+						return 0;
+					case "name":
+						return normalize(item?.contact?.name || item?.groupName || item?.name || "");
+					default:
+						return item.startedAt ? new Date(item.startedAt).getTime() : 0;
+				}
+			};
+
+			const aVal = getValue(a);
+			const bVal = getValue(b);
+
+			if (typeof aVal === "string" && typeof bVal === "string") {
+				return aVal.localeCompare(bVal) * sortOrder;
+			}
+
+			return (aVal > bVal ? 1 : -1) * sortOrder;
+		});
+
+		const totalCount = sortedItems.length;
+		const start = (page - 1) * pageSize;
+		const end = start + pageSize;
+		const items = sortedItems.slice(start, end);
+
+		res.status(200).send({
+			message: "Monitor data retrieved successfully!",
+			data: {
+				items,
+				totalCount
+			}
 		});
 	}
 }

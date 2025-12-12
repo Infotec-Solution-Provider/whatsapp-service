@@ -70,7 +70,9 @@ export default class ProcessingLogger {
 				? path.join(LOGS_PATH, this.instance, this.processName, "errors")
 				: path.join(LOGS_PATH, this.instance, this.processName);
 
-			const logFileName = `${this.processId}.json`;
+		// Sanitize processId to remove invalid filename characters (especially colons on Windows)
+		const sanitizedProcessId = this.processId.replace(/[<>:"/\\|?*]/g, '_');
+		const logFileName = `${sanitizedProcessId}.json`;
 			const logFilePath = path.join(logDir, logFileName);
 
 			await mkdir(logDir, { recursive: true });
