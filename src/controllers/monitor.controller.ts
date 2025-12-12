@@ -26,7 +26,7 @@ class MonitorController {
 		);
 		const { chats: whatsappChats } = await chatsService.getChatsMonitor(
 			req.session,
-			false,
+			true,
 			true
 		);
 		const { chats: internalChats } =
@@ -81,6 +81,7 @@ class MonitorController {
 
 			return {
 				...chat,
+				messages,
 				chatType: "wpp",
 				lastMessage,
 				isUnread
