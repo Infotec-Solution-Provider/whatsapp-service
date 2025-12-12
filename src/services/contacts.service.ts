@@ -454,8 +454,7 @@ class ContactsService {
 		if (
 			existingContact &&
 			!!existingContact.customerId &&
-			customerId &&
-			existingContact.customerId !== customerId
+			customerId
 		) {
 			const message = `Este número já está cadastrado no cliente de código ${existingContact.customerId}`;
 			throw new ConflictError(message);
@@ -660,6 +659,8 @@ class ContactsService {
 				id: contactId
 			},
 			data: {
+				isDeleted: true
+				customerId: null,
 				isDeleted: true
 			}
 		});
