@@ -7,7 +7,6 @@ import customersService from "./customers.service";
 import instancesService from "./instances.service";
 import parametersService from "./parameters.service";
 import prismaService from "./prisma.service";
-import redisService from "./redis.service";
 import usersService from "./users.service";
 import whatsappService from "./whatsapp.service";
 
@@ -25,9 +24,6 @@ export interface ContactsFilters {
 }
 
 class ContactsService {
-	private readonly CUSTOMER_CACHE_TTL = 5 * 60; // 5 minutos em segundos
-	//private readonly USER_CACHE_TTL = 5 * 60; // 5 minutos em segundos
-
 	public async getOrCreateContact(instance: string, name: string, phone: string) {
 		const contact = await prismaService.wppContact.findUnique({
 			where: {
@@ -153,7 +149,7 @@ class ContactsService {
 
 		const [chats, customersMap] = await Promise.all([
 			chatsPromise,
-			this.getCustomersByIds(instance, uniqueCustomerIds)
+			this.getCustomersByIds(uniqueCustomerIds)
 		]);
 
 		const chatsMap = new Map<number, any>(
@@ -273,57 +269,32 @@ class ContactsService {
 	}
 
 
-	private async getCustomersByIds(instance: string, customerIds: number[]): Promise<Map<number, Customer>> {
+	private async getCustomersByIds(customerIds: number[]): Promise<Map<number, Customer>> {
 		const result = new Map<number, Customer>();
 
 		if (customerIds.length === 0) {
 			return result;
 		}
 
-		const cacheKeys = customerIds.map((id) => `customer:${instance}:${id}`);
-		const cachedCustomers = await redisService.mget<Customer>(cacheKeys);
+		const uniqueIds = Array.from(new Set(customerIds));
+		const batchSize = 100;
 
-		const idsToFetch: number[] = [];
+		for (let i = 0; i < uniqueIds.length; i += batchSize) {
+			const batch = uniqueIds.slice(i, i + batchSize);
 
-		cachedCustomers.forEach((customer, index) => {
-			if (customer) {
-				result.set(customerIds[index]!, customer);
-			} else {
-				idsToFetch.push(customerIds[index]!);
-			}
-		});
-
-		if (idsToFetch.length === 0) {
-			return result;
-		}
-
-		try {
-			const batchSize = 100;
-			for (let i = 0; i < idsToFetch.length; i += batchSize) {
-				const batch = idsToFetch.slice(i, i + batchSize);
-
+			try {
 				const { data: customers } = await customersService.getCustomers({
 					perPage: batch.length.toString()
 				});
 
-				const requestedCustomers = (customers || []).filter((c: any) => batch.includes(c.CODIGO));
-
-				const cacheItems = requestedCustomers.map((customer: any) => ({
-					key: `customer:${instance}:${customer.CODIGO}`,
-					value: customer,
-					ttl: this.CUSTOMER_CACHE_TTL
-				}));
-
-				if (cacheItems.length) {
-					await redisService.mset(cacheItems);
-				}
-
-				requestedCustomers.forEach((customer: any) => {
-					result.set(customer.CODIGO, customer);
-				});
+				(customers || [])
+					.filter((c: any) => batch.includes(c.CODIGO))
+					.forEach((customer: any) => {
+						result.set(customer.CODIGO, customer);
+					});
+			} catch (error) {
+				console.error("Erro ao buscar clientes:", error);
 			}
-		} catch (error) {
-			console.error("Erro ao buscar clientes:", error);
 		}
 
 		return result;
