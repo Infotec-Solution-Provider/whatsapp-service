@@ -8,6 +8,7 @@ import { randomUUID } from "crypto";
 import TemplateAdapter from "../adapters/template.adapter";
 import filesService from "../services/files.service";
 import prismaService from "../services/prisma.service";
+import "dotenv/config";
 
 const GUP_URL = "https://api.gupshup.io";
 
@@ -70,7 +71,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 				const urlKey = options.fileType === "image" ? "originalUrl" : "url";
 				const updatedFileUrl = options.fileUrl.replace(
 					"http://localhost:8003",
-					"https://inpulse.infotecrs.inf.br"
+					process.env["FILE_SERVER_URL"] || ""
 				);
 				logger.log("[Gupshup] Montando payload de mídia.", updatedFileUrl);
 
