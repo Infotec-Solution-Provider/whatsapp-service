@@ -2,6 +2,7 @@ import { Request, Response, Router } from "express";
 import gupshupService from "../services/gupshup.service";
 import "dotenv/config";
 import { Logger } from "@in.pulse-crm/utils";
+import axios from "axios";
 
 const ENDPOINT = "/api/whatsapp/meta/:instance";
 const ENDPOINT_NEW = "/api/whatsapp/gupshup/:instance";
@@ -41,12 +42,14 @@ class GupshupController {
 			Logger.debug("Exatron webhook URL is not configured");
 			throw new Error("Exatron webhook URL is not configured");
 		}
-		await fetch(exatronWebhookUrl, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(req.body)
+		const response = await axios.post(exatronWebhookUrl, req.body, {
+			headers: { "Content-Type": "application/json" }
 		});
-		Logger.debug("Exatron Gupshup webhook redirected successfully");
+		Logger.debug("Exatron webhook response", {
+			status: response.status,
+			statusText: response.statusText,
+			data: response.data
+		});
 	};
 
 	private webhookChallenge = async (_: Request, res: Response) => {
