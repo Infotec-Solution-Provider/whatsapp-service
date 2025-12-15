@@ -272,29 +272,27 @@ class ContactsService {
 	private async getCustomersByIds(customerIds: number[]): Promise<Map<number, Customer>> {
 		const result = new Map<number, Customer>();
 
-		if (customerIds.length === 0) {
+		const uniqueIds = Array.from(new Set(customerIds)).filter((id) => Number.isFinite(id));
+		if (uniqueIds.length === 0) {
 			return result;
 		}
 
-		const uniqueIds = Array.from(new Set(customerIds));
-		const batchSize = 100;
-
-		for (let i = 0; i < uniqueIds.length; i += batchSize) {
-			const batch = uniqueIds.slice(i, i + batchSize);
-
-			try {
-				const { data: customers } = await customersService.getCustomers({
-					perPage: batch.length.toString()
-				});
-
-				(customers || [])
-					.filter((c: any) => batch.includes(c.CODIGO))
-					.forEach((customer: any) => {
-						result.set(customer.CODIGO, customer);
-					});
-			} catch (error) {
-				console.error("Erro ao buscar clientes:", error);
-			}
+		const concurrency = 10;
+		for (let i = 0; i < uniqueIds.length; i += concurrency) {
+			const batch = uniqueIds.slice(i, i + concurrency);
+			await Promise.all(
+				batch.map(async (id) => {
+					try {
+						const response = await customersService.getCustomerById(id);
+						const customer = (response as any)?.data ?? response;
+						if (customer?.CODIGO) {
+							result.set(customer.CODIGO, customer);
+						}
+					} catch (error) {
+						console.error(`Erro ao buscar cliente ${id}:`, error);
+					}
+				})
+			);
 		}
 
 		return result;
