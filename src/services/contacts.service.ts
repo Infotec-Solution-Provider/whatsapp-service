@@ -149,7 +149,7 @@ class ContactsService {
 
 		const [chats, customersMap] = await Promise.all([
 			chatsPromise,
-			this.getCustomersByIds(uniqueCustomerIds)
+			this.getCustomersByIds(instance, uniqueCustomerIds)
 		]);
 
 		const chatsMap = new Map<number, any>(
@@ -269,7 +269,7 @@ class ContactsService {
 	}
 
 
-	private async getCustomersByIds(customerIds: number[]): Promise<Map<number, Customer>> {
+	private async getCustomersByIds(instance: string, customerIds: number[]): Promise<Map<number, Customer>> {
 		const result = new Map<number, Customer>();
 
 		const uniqueIds = Array.from(new Set(customerIds)).filter((id) => Number.isFinite(id));
@@ -283,8 +283,12 @@ class ContactsService {
 			await Promise.all(
 				batch.map(async (id) => {
 					try {
-						const response = await customersService.getCustomerById(id);
-						const customer = (response as any)?.data ?? response;
+						const response = await customersService.getCustomers({
+							instance,
+							CODIGO: id.toString(),
+							perPage: "1"
+						} as any);
+						const customer = (response as any)?.data?.[0];
 						if (customer?.CODIGO) {
 							result.set(customer.CODIGO, customer);
 						}
