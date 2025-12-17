@@ -48,8 +48,11 @@ class ContactsService {
 	}
 
 	public async getContactsWithCustomer(instance: string, token: string, filters: ContactsFilters) {
-		customersService.setAuth(token);
-		usersService.setAuth(token);
+		const normalizedToken = (token || "").replace(/^Bearer\s+/i, "");
+		if (normalizedToken) {
+			customersService.setAuth(normalizedToken);
+			usersService.setAuth(normalizedToken);
+		}
 
 		const page = Math.max(1, filters.page);
 		const perPage = Math.max(1, Math.min(100, filters.perPage));
@@ -187,24 +190,14 @@ class ContactsService {
 	}
 
 
-	private mapCustomerFilters(instance: string, filters: ContactsFilters): Record<string, string> {
+	private mapCustomerFilters(instance: string, filters: ContactsFilters, page = 1): Record<string, string> {
 		const params: Record<string, string> = {
 			instance,
-			perPage: "100"
+			page: page.toString(),
+			perPage: "50"
 		};
 
-		const erp = (filters.customerErp ?? "").trim();
-		const cnpjDigits = (filters.customerCnpj ?? "").replace(/\D/g, "");
 		const name = (filters.customerName ?? "").trim();
-
-		if (erp) {
-			params["COD_ERP"] = erp;
-		}
-
-		if (cnpjDigits) {
-			params["CPF_CNPJ"] = cnpjDigits;
-		}
-
 		if (name) {
 			params["RAZAO"] = name;
 		}
@@ -214,17 +207,83 @@ class ContactsService {
 
 
 	private async searchCustomerIdsByFilters(instance: string, filters: ContactsFilters): Promise<number[]> {
-		const params = this.mapCustomerFilters(instance, filters);
+		const ids = new Set<number>();
 
-		try {
-			const response = await customersService.getCustomers(params as any);
-			const customers: any[] = response?.data ?? [];
-			const ids = customers.map((c: any) => c?.CODIGO).filter((x: any) => Number.isFinite(x));
-			return Array.from(new Set<number>(ids));
-		} catch (error) {
-			console.error("[searchCustomerIdsByFilters] erro na API de clientes", error);
-			return [];
+		// ERP (exato). Se numérico, tenta por ID direto também.
+		const erpRaw = (filters.customerErp ?? "").trim();
+		if (erpRaw) {
+			try {
+				const { data } = await customersService.getCustomers({
+					instance,
+					COD_ERP: erpRaw,
+					perPage: "1"
+				} as any);
+				(data || [])
+					.map((c: any) => c?.CODIGO)
+					.filter((x: any) => Number.isFinite(x))
+					.forEach((id: number) => ids.add(id));
+			} catch (err) {
+				console.error("[searchCustomerIdsByFilters] erro ERP", err);
+			}
+
+			const erpDigits = erpRaw.replace(/\D/g, "");
+			if (erpDigits) {
+				try {
+					const { data } = await customersService.getCustomers({
+						instance,
+						CODIGO: erpDigits,
+						perPage: "1"
+					} as any);
+					(data || [])
+						.map((c: any) => c?.CODIGO)
+						.filter((x: any) => Number.isFinite(x))
+						.forEach((id: number) => ids.add(id));
+				} catch (_) {
+					// ignora
+				}
+			}
 		}
+
+		// CPF/CNPJ (exato, dígitos)
+		const cnpjDigits = (filters.customerCnpj ?? "").replace(/\D/g, "");
+		if (cnpjDigits) {
+			try {
+				const { data } = await customersService.getCustomers({
+					instance,
+					CPF_CNPJ: cnpjDigits,
+					perPage: "1"
+				} as any);
+				(data || [])
+					.map((c: any) => c?.CODIGO)
+					.filter((x: any) => Number.isFinite(x))
+					.forEach((id: number) => ids.add(id));
+			} catch (err) {
+				console.error("[searchCustomerIdsByFilters] erro CPF_CNPJ", err);
+			}
+		}
+
+		// Razão social (parcial) se ainda não achou nada: paginar até 5 páginas
+		const name = (filters.customerName ?? "").trim();
+		if (!ids.size && name) {
+			for (let page = 1; page <= 5; page++) {
+				const params = this.mapCustomerFilters(instance, filters, page);
+				try {
+					const response = await customersService.getCustomers(params as any);
+					const customers: any[] = response?.data ?? [];
+					customers
+						.map((c: any) => c?.CODIGO)
+						.filter((x: any) => Number.isFinite(x))
+						.forEach((id: number) => ids.add(id));
+
+					if (ids.size > 0) break;
+				} catch (error) {
+					console.error("[searchCustomerIdsByFilters] erro RAZAO", error);
+					break;
+				}
+			}
+		}
+
+		return Array.from(ids);
 	}
 
 
@@ -242,16 +301,17 @@ class ContactsService {
 			await Promise.all(
 				batch.map(async (id) => {
 					try {
-						const response = await customersService.getCustomers({
+						const resp = await customersService.getCustomers({
 							instance,
 							CODIGO: id.toString(),
 							perPage: "1"
 						} as any);
-						const customer = (response as any)?.data?.[0];
+						const customer = (resp as any)?.data?.[0];
 						if (customer?.CODIGO) {
 							result.set(customer.CODIGO, customer);
 						}
-					} catch (error) {
+					} catch (error: any) {
+						// Apenas loga outros erros e continua
 						console.error(`Erro ao buscar cliente ${id}:`, error);
 					}
 				})
