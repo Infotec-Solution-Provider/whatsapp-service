@@ -1,5 +1,3 @@
-import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
-import prismaService from "./prisma.service";
 import {
 	Customer,
 	SessionData,
@@ -7,17 +5,18 @@ import {
 	SocketServerMonitorRoom,
 	SocketServerUserRoom
 } from "@in.pulse-crm/sdk";
-import customersService from "./customers.service";
+import { Logger } from "@in.pulse-crm/utils";
+import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
+import { BadRequestError } from "@rgranatodutra/http-errors";
+import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
+import { CustomerSchedule } from "../message-flow/base/base.step";
+import ProcessingLogger from "../utils/processing-logger";
 import instancesService from "./instances.service";
-import socketService from "./socket.service";
 import messagesDistributionService from "./messages-distribution.service";
+import prismaService from "./prisma.service";
+import socketService from "./socket.service";
 import usersService from "./users.service";
 import whatsappService, { SendTemplateData } from "./whatsapp.service";
-import ProcessingLogger from "../utils/processing-logger";
-import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
-import { BadRequestError } from "@rgranatodutra/http-errors";
-import { CustomerSchedule } from "../message-flow/base/base.step";
-import { Logger } from "@in.pulse-crm/utils";
 
 interface InpulseResult {
 	CODIGO: number;
