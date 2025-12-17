@@ -47,16 +47,6 @@ class ContactsService {
 		});
 	}
 
-	/**
-	 * getContactsWithCustomer — versão otimizada e multi-tenant
-	 * Regras:
-	 * - Filtros de CLIENTE (ERP/CNPJ/NOME): buscar clientes (scoped por instance) -> pegar CODIGO -> filtrar contatos no DB (customerId IN [...]) + instance.
-	 * - Filtros de CONTATO (name/phone): aplicar direto em wppContact no DB
-	 * - Nenhum filtro: paginação direta no DB
-	 * - hasCustomer/customerId: aplicados direto no where
-	 * - Enriquecimento (chats/usuários) preservado; todos escopados por instance.
-	 * - Removido `mode: 'insensitive'` do Prisma (evita TS2353). Case-insensitive deve ser via collation/ci.
-	 */
 	public async getContactsWithCustomer(instance: string, token: string, filters: ContactsFilters) {
 		customersService.setAuth(token);
 		usersService.setAuth(token);
@@ -198,31 +188,26 @@ class ContactsService {
 
 
 	private mapCustomerFilters(instance: string, filters: ContactsFilters): Record<string, string> {
-		const params: Record<string, string> = {};
+		const params: Record<string, string> = {
+			instance,
+			perPage: "100"
+		};
 
-		params["instance"] = instance;
+		const erp = (filters.customerErp ?? "").trim();
+		const cnpjDigits = (filters.customerCnpj ?? "").replace(/\D/g, "");
+		const name = (filters.customerName ?? "").trim();
 
-
-		if (filters.customerErp) {
-			params["COD_ERP"] = filters.customerErp;
-			// params["ERP"] = filters.customerErp;
-			// params["erp"] = filters.customerErp;
+		if (erp) {
+			params["COD_ERP"] = erp;
 		}
 
-		if (filters.customerCnpj) {
-			params["CPF_CNPJ"] = filters.customerCnpj;
-			// params["CNPJ"] = filters.customerCnpj;
-			// params["cnpj"] = filters.customerCnpj;
+		if (cnpjDigits) {
+			params["CPF_CNPJ"] = cnpjDigits;
 		}
 
-		if (filters.customerName) {
-			params["RAZAO"] = filters.customerName;
-			// params["FANTASIA"] = filters.customerName;
-			// params["search"] = filters.customerName;
-			// params["name"] = filters.customerName;
+		if (name) {
+			params["RAZAO"] = name;
 		}
-
-		params["perPage"] = "500";
 
 		return params;
 	}
@@ -234,33 +219,7 @@ class ContactsService {
 		try {
 			const response = await customersService.getCustomers(params as any);
 			const customers: any[] = response?.data ?? [];
-
-			const erp = (filters.customerErp ?? "").toString().trim();
-			const cnpj = (filters.customerCnpj ?? "").toString().trim();
-			const name = (filters.customerName ?? "").toString().trim().toLowerCase();
-
-			const matches = customers.filter((c: any) => {
-				let ok = true;
-
-				if (erp) {
-					ok = ok && (c?.COD_ERP?.toString().includes(erp) || c?.ERP?.toString().includes(erp));
-				}
-
-				if (cnpj) {
-					ok = ok && (c?.CPF_CNPJ?.includes(cnpj) || c?.CNPJ?.includes(cnpj) || c?.cnpj?.includes(cnpj));
-				}
-
-				if (name) {
-					const fantasia = (c?.FANTASIA ?? "").toString().toLowerCase();
-					const razao = (c?.RAZAO ?? "").toString().toLowerCase();
-					const nome = (c?.NOME ?? "").toString().toLowerCase();
-					ok = ok && (fantasia.includes(name) || razao.includes(name) || nome.includes(name));
-				}
-
-				return ok;
-			});
-
-			const ids = matches.map((c: any) => c?.CODIGO).filter((x: any) => Number.isFinite(x));
+			const ids = customers.map((c: any) => c?.CODIGO).filter((x: any) => Number.isFinite(x));
 			return Array.from(new Set<number>(ids));
 		} catch (error) {
 			console.error("[searchCustomerIdsByFilters] erro na API de clientes", error);
