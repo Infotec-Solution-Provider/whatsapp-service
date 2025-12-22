@@ -11,6 +11,7 @@ import usersService from "./users.service";
 import whatsappService from "./whatsapp.service";
 
 export interface ContactsFilters {
+	id?: number | null;
 	name: string | null;
 	phone: string | null;
 	customerId: number | null;
@@ -85,6 +86,10 @@ class ContactsService {
 
 		if (filters.name) {
 			whereConditions.name = { contains: filters.name };
+		}
+
+		if (typeof (filters as any).id === "number" && Number.isFinite((filters as any).id)) {
+			(whereConditions as any).id = (filters as any).id;
 		}
 
 		if (filters.phone) {

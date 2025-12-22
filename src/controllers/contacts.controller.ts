@@ -54,6 +54,8 @@ class ContactsController {
 	}
 
 	private async getContactsWithCustomer(req: Request, res: Response) {
+		const idParam = req.query["id"] as string | undefined;
+		const id = idParam ? Number(idParam) : null;
 		const sectorIdsParam = req.query["sectorIds"] as string | undefined;
 		const sectorIds = sectorIdsParam
 			? sectorIdsParam
@@ -63,6 +65,7 @@ class ContactsController {
 			: null;
 
 		const filters = {
+			id,
 			name: (req.query["name"] as string) || null,
 			phone: (req.query["phone"] as string) || null,
 			customerId: req.query["customerId"] ? Number(req.query["customerId"]) : null,
