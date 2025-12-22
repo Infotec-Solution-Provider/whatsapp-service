@@ -141,7 +141,11 @@ class MessagesDistributionService {
 	): Promise<number | null> {
 		// Verifica bots com método shouldActivate (ordem de prioridade)
 		for (const [botId, bot] of this.botRegistry.entries()) {
-			if (bot.shouldActivate) {
+			if (!bot) {
+				logger.log(`Bot ID ${botId} não está registrado corretamente (undefined)`);
+				continue;
+			}
+			if (bot?.shouldActivate) {
 				const shouldActivate = await bot.shouldActivate(chat, contact);
 				if (shouldActivate) {
 					logger.log(`Bot ID ${botId} será ativado (via shouldActivate)`);

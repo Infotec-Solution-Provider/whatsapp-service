@@ -21,7 +21,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 		public readonly name: string,
 		public _phone: string,
 		private readonly clientUrl: string
-	) {}
+	) { }
 
 	public async handleQr(qr: string) {
 		const client = await prismaService.wppClient.findUnique({
@@ -155,6 +155,10 @@ class RemoteWhatsappClient implements WhatsappClient {
 
 		try {
 			process.log("Sending message via wwebjs-api");
+
+			if ("fileUrl" in props && props.fileUrl) {
+				props.fileUrl = props.fileUrl.replace("http://localhost:8003", "https://inpulse.infotecrs.inf.br")
+			}
 
 			const response = await axios.post<CreateMessageDto>(`${this.clientUrl}/api/send-message`, props);
 

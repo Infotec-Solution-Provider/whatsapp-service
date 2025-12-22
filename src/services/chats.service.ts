@@ -1,5 +1,3 @@
-import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
-import prismaService from "./prisma.service";
 import {
 	Customer,
 	SessionData,
@@ -7,16 +5,18 @@ import {
 	SocketServerMonitorRoom,
 	SocketServerUserRoom
 } from "@in.pulse-crm/sdk";
-import customersService from "./customers.service";
+import { Logger } from "@in.pulse-crm/utils";
+import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
+import { BadRequestError } from "@rgranatodutra/http-errors";
+import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
+import { CustomerSchedule } from "../message-flow/base/base.step";
+import ProcessingLogger from "../utils/processing-logger";
 import instancesService from "./instances.service";
-import socketService from "./socket.service";
 import messagesDistributionService from "./messages-distribution.service";
+import prismaService from "./prisma.service";
+import socketService from "./socket.service";
 import usersService from "./users.service";
 import whatsappService, { SendTemplateData } from "./whatsapp.service";
-import ProcessingLogger from "../utils/processing-logger";
-import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
-import { BadRequestError } from "@rgranatodutra/http-errors";
-import { CustomerSchedule } from "../message-flow/base/base.step";
 
 interface InpulseResult {
 	CODIGO: number;
@@ -153,16 +153,16 @@ class ChatsService {
 		const messages: Array<WppMessage> = [];
 		const customerIds = includeContact
 			? foundChats
-					.filter((chat) => typeof chat.contact?.customerId === "number")
-					.map((c) => c.contact!.customerId!)
+				.filter((chat) => typeof chat.contact?.customerId === "number")
+				.map((c) => c.contact!.customerId!)
 			: [];
 
 		const customers = customerIds.length
 			? await instancesService.executeQuery<Array<Customer>>(session.instance, FETCH_CUSTOMERS_QUERY, [
-					foundChats
-						.filter((chat) => typeof chat.contact?.customerId === "number")
-						.map((c) => c.contact!.customerId!)
-				])
+				foundChats
+					.filter((chat) => typeof chat.contact?.customerId === "number")
+					.map((c) => c.contact!.customerId!)
+			])
 			: [];
 
 		for (const foundChat of foundChats) {
@@ -232,16 +232,16 @@ class ChatsService {
 		const messages: Array<WppMessage> = [];
 		const customerIds = includeCustomer
 			? ongoingChats
-					.filter((chat) => typeof chat.contact?.customerId === "number")
-					.map((c) => c.contact!.customerId!)
+				.filter((chat) => typeof chat.contact?.customerId === "number")
+				.map((c) => c.contact!.customerId!)
 			: [];
 
 		const customers = customerIds.length
 			? await instancesService.executeQuery<Array<Customer>>(session.instance, FETCH_CUSTOMERS_QUERY, [
-					ongoingChats
-						.filter((chat) => typeof chat.contact?.customerId === "number")
-						.map((c) => c.contact!.customerId!)
-				])
+				ongoingChats
+					.filter((chat) => typeof chat.contact?.customerId === "number")
+					.map((c) => c.contact!.customerId!)
+			])
 			: [];
 
 		for (const foundChat of ongoingChats) {
@@ -322,17 +322,24 @@ class ChatsService {
 
 		const messages = chat?.contactId
 			? await prismaService.wppMessage.findMany({
-					where: { contactId: chat?.contactId },
-					orderBy: { timestamp: "asc" }
-				})
+				where: { contactId: chat?.contactId },
+				orderBy: { timestamp: "asc" }
+			})
 			: [];
 
 		if (chat?.contact?.customerId) {
+
 			try {
-				const customer = await customersService.getCustomerById(chat.contact.customerId);
+				const customerRes = await instancesService.executeQuery<Customer[]>(
+					chat.instance,
+					FETCH_CUSTOMERS_QUERY,
+					[[chat.contact.customerId]]
+				);
+				const customer = customerRes[0];
 
 				return { ...chat, customer, messages };
-			} catch (err) {
+			} catch (err: any) {
+				Logger.error("Erro ao buscar cliente para o chat:", err);
 				return { ...chat, messages };
 			}
 		}
