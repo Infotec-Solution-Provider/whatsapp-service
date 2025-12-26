@@ -32,6 +32,17 @@ class ParametersService {
 		return instanceParams;
 	}
 
+	public async getParameter(instance: string, parameter: string) {
+		const param = await prismaService.parameter.findFirst({
+			where: {
+				instance,
+				key: parameter
+			}
+		});
+
+		return param?.value || null;
+	}
+
 	public async getSessionParams({
 		instance,
 		sectorId,

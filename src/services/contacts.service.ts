@@ -9,6 +9,7 @@ import parametersService from "./parameters.service";
 import prismaService from "./prisma.service";
 import usersService from "./users.service";
 import whatsappService from "./whatsapp.service";
+import * as dbSyncService from "./db-sync.service";
 
 export interface ContactsFilters {
 	id?: number | null;
@@ -39,13 +40,16 @@ class ContactsService {
 			return contact;
 		}
 
-		return await prismaService.wppContact.create({
+		const newContact = await prismaService.wppContact.create({
 			data: {
 				instance,
 				name,
 				phone
 			}
 		});
+
+		await dbSyncService.syncContact(instance, newContact);
+		return newContact;
 	}
 
 	public async getContactsWithCustomer(instance: string, token: string, filters: ContactsFilters) {
@@ -473,6 +477,8 @@ class ContactsService {
 					where: { id: existingContact.id },
 					data: { name, customerId: customerId || null }
 				});
+
+				await dbSyncService.syncContact(instance, updated);
 				return updated;
 			}
 
@@ -496,6 +502,7 @@ class ContactsService {
 				data: { name, customerId: customerId || null }
 			});
 
+			await dbSyncService.syncContact(instance, updated);
 			return updated;
 		}
 
@@ -520,6 +527,7 @@ class ContactsService {
 			include: { sectors: true } as any
 		});
 
+		await dbSyncService.syncContact(instance, createdContact);
 		return createdContact;
 	}
 
@@ -535,6 +543,7 @@ class ContactsService {
 				data
 			});
 
+			await dbSyncService.syncContact(contact.instance, contact);
 			return contact;
 		}
 
@@ -557,6 +566,7 @@ class ContactsService {
 			include: { sectors: true } as any
 		});
 
+		await dbSyncService.syncContact(contact.instance, contact);
 		return contact;
 	}
 
@@ -661,6 +671,7 @@ class ContactsService {
 			}
 		});
 
+		await dbSyncService.syncContact(contact.instance, contact);
 		return contact;
 	}
 }

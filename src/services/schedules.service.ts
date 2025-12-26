@@ -6,6 +6,8 @@ import cron from "node-cron";
 import instancesService from "./instances.service";
 import runIdleChatsJob from "../routines/idle-chats.routine";
 import runSchedulesJob from "../routines/schedules.routine";
+import parametersService from "./parameters.service";
+import * as dbSyncService from "./db-sync.service";
 
 interface ChatsFilters {
 	userId?: string;
@@ -114,6 +116,8 @@ class SchedulesService {
 			}
 		});
 
+		await dbSyncService.syncSchedule(session.instance, schedules);
+
 		if (chat) {
 			const systemMsg = `Esse atendimento foi agendado para retorno em ${date.toLocaleString('pt-BR')}.\nAgendado por ${session.name}.`;
 			await chatsService.systemFinishChatById(chat.id, systemMsg);
@@ -146,14 +150,24 @@ class SchedulesService {
 			data: scheduleData
 		});
 
+		await dbSyncService.syncSchedule(schedules.instance, schedules);
 		return schedules;
 	}
 
 	public async deleteSchedule(scheduleId: number) {
+		const schedule = await prismaService.wppSchedule.findUnique({
+			where: { id: scheduleId }
+		});
+
+		if (!schedule) {
+			throw new Error("Schedule not found");
+		}
+
 		const schedules = await prismaService.wppSchedule.delete({
 			where: { id: scheduleId }
 		});
 
+		await dbSyncService.syncDeleteSchedule(schedule.instance, scheduleId);
 		return schedules;
 	}
 }

@@ -7,6 +7,22 @@ datasource db {
   url      = env("WHATSAPP_DATABASE_URL")
 }
 
+model PendingSynchronization {
+  id         Int      @id @default(autoincrement())
+  instance   String   @map("instance")
+  entityType String   @map("entity_type")
+  entityId   Int      @map("entity_id")
+  operation  String   @map("operation")
+  query      String   @map("query") @db.Text
+  values     Json?    @map("values")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([instance, entityType])
+  @@index([entityType, createdAt])
+  @@index([entityType, entityId])
+  @@map("pending_syncs")
+}
+
 model WppClient {
   id                Int               @id @default(autoincrement())
   name              String
@@ -72,7 +88,7 @@ model WppMessage {
   contactId        Int?             @map("contact_id")
   isForwarded      Boolean          @default(false) @map("is_forwarded")
   isEdited         Boolean          @default(false) @map("is_edited")
-  body             String
+  body             String           @db.Text
   timestamp        String
   sentAt           DateTime         @map("sent_at")
   status           WppMessageStatus
@@ -136,7 +152,7 @@ model InternalMessage {
   wwebjsId       String?           @unique @map("wwebjs_id")
   wwebjsIdStanza String?           @unique @map("wwebjs_id_stanza")
   internalChatId Int               @map("internalchat_id")
-  body           String
+  body           String            @db.Text
   timestamp      String            @map("timestamp")
   status         WppMessageStatus
   fileId         Int?              @map("file_id")

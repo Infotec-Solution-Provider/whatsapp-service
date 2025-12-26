@@ -1,4 +1,3 @@
-import { InternalChat, Prisma } from "@prisma/client";
 import {
 	FileDirType,
 	InternalChatMember,
@@ -9,18 +8,20 @@ import {
 	SocketServerUserRoom,
 	User
 } from "@in.pulse-crm/sdk";
-import socketService from "./socket.service";
-import ProcessingLogger from "../utils/processing-logger";
-import filesService from "./files.service";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { InternalChat, Prisma } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
-import prismaService from "./prisma.service";
-import whatsappService, { getMessageType } from "./whatsapp.service";
 import CreateMessageDto from "../dtos/create-message.dto";
-import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 import { Mention, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
+import ProcessingLogger from "../utils/processing-logger";
 import WhatsappAudioConverter from "../utils/whatsapp-audio-converter";
+import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
+import * as dbSyncService from "./db-sync.service";
+import filesService from "./files.service";
 import instancesService from "./instances.service";
+import prismaService from "./prisma.service";
+import socketService from "./socket.service";
+import whatsappService, { getMessageType } from "./whatsapp.service";
 
 interface ChatsFilters {
 	userId?: string;
@@ -84,6 +85,8 @@ class InternalChatsService {
 			}
 		});
 
+		await dbSyncService.syncInternalChat(session.instance, internalChat);
+
 		await prismaService.internalChatMember.createMany({
 			data: Array.from(uniqueIds).map((id) => ({
 				userId: id,
@@ -92,26 +95,35 @@ class InternalChatsService {
 			}))
 		});
 
-		const result = await prismaService.internalChat.findUnique({
+		// add members
+		for (const id of uniqueIds) {
+			const member = {
+				userId: id,
+				internalChatId: internalChat.id,
+				joinedAt: new Date(),
+				lastReadAt: null
+			};
+			await dbSyncService.syncInternalChatMember(session.instance, member as any);
+		}
+
+		const updatedChat = await prismaService.internalChat.findUnique({
 			where: { id: internalChat.id },
-			include: {
-				messages: true,
-				participants: true
-			}
+			include: { participants: true, messages: true }
 		});
 
+		// notify members
 		for (const id of uniqueIds) {
 			const room: SocketServerUserRoom = `${session.instance}:user:${id}`;
 
 			await socketService.emit(SocketEventType.InternalChatStarted, room, {
-				chat: result as unknown as InternalChat & {
+				chat: updatedChat as unknown as InternalChat & {
 					participants: InternalChatMember[];
 					messages: InternalMessage[];
 				}
 			});
-		}
 
-		return result;
+		}
+		return updatedChat;
 	}
 
 	// Sobrescreve os participantes de um grupo interno
@@ -148,6 +160,8 @@ class InternalChatsService {
 			include: { participants: true, messages: true }
 		});
 
+		await dbSyncService.syncInternalChat(group.instance, group);
+
 		for (const id of idsToAdd) {
 			const room: SocketServerUserRoom = `${group.instance}:user:${id}`;
 			await socketService.emit(SocketEventType.InternalChatStarted, room, {
@@ -177,12 +191,16 @@ class InternalChatsService {
 			dirType: FileDirType.PUBLIC
 		});
 
-		return await prismaService.internalChat.update({
+		const updatedChat = await prismaService.internalChat.update({
 			where: { id: groupId },
 			data: {
 				groupImageFileId: fileData.id
 			}
 		});
+
+		await dbSyncService.syncInternalChat(session.instance, updatedChat);
+
+		return updatedChat;
 	}
 
 	public async deleteInternalChat(id: number) {
@@ -454,6 +472,9 @@ class InternalChatsService {
 			const savedMsg = await prismaService.internalMessage.create({
 				data: message
 			});
+
+			await dbSyncService.syncInternalMessage(session.instance, savedMsg);
+
 			process.log(
 				`Mensagem salva com sucesso. ID da mensagem: ${savedMsg.id}, Tipo: ${savedMsg.type}, Status: ${savedMsg.status}`
 			);
@@ -473,6 +494,17 @@ class InternalChatsService {
 					await prismaService.internalMention.createMany({
 						data: mentionData
 					});
+
+					// Buscar as mentions criadas para obter os IDs e sincronizar
+					const createdMentions = await prismaService.internalMention.findMany({
+						where: {
+							messageId: savedMsg.id
+						}
+					});
+					for (const mention of createdMentions) {
+						await dbSyncService.syncInternalMention(session.instance, mention);
+					}
+
 					process.log(`Menções salvas com sucesso`);
 				}
 			}
@@ -561,6 +593,8 @@ class InternalChatsService {
 					isEdited: false
 				}
 			});
+
+			await dbSyncService.syncInternalMessage(msg.instance, savedMsg);
 
 			process.log(`Mensagem salva com sucesso. Mensagem ID: ${savedMsg.id}`);
 
@@ -788,10 +822,14 @@ class InternalChatsService {
 	}
 
 	public async updateMessage(id: number, data: Partial<InternalMessage>) {
-		return await prismaService.internalMessage.update({
+		const message = await prismaService.internalMessage.update({
 			where: { id },
 			data
 		});
+
+		await dbSyncService.syncInternalMessage(message.instance, message);
+
+		return message;
 	}
 
 	public async getInternalMessageById(session: SessionData, id: number) {

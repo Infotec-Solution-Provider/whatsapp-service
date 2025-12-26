@@ -7,6 +7,8 @@ import socketService from "./socket.service";
 import { Mentions } from "../types/whatsapp-instance.types";
 import whatsappService from "./whatsapp.service";
 import ProcessingLogger from "../utils/processing-logger";
+import parametersService from "./parameters.service";
+import * as dbSyncService from "./db-sync.service";
 
 interface FetchMessagesFilter {
 	minDate: string;
@@ -22,17 +24,22 @@ interface EditMessageOptions {
 
 class MessagesService {
 	public async insertMessage(data: CreateMessageDto) {
-		return await prismaService.wppMessage.create({ data });
+		const message = await prismaService.wppMessage.create({ data });
+		await dbSyncService.syncMessage(message.instance, message);
+		return message;
 	}
 
 	public async updateMessage(id: number, data: Partial<WppMessage>) {
-		return await prismaService.wppMessage.update({
+		const message = await prismaService.wppMessage.update({
 			where: { id },
 			data,
 			include: {
 				WppChat: true
 			}
 		});
+
+		await dbSyncService.syncMessage(message.instance, message);
+		return message;
 	}
 
 	public async markContactMessagesAsRead(instance: string, contactId: number) {

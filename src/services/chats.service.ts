@@ -17,6 +17,7 @@ import prismaService from "./prisma.service";
 import socketService from "./socket.service";
 import usersService from "./users.service";
 import whatsappService, { SendTemplateData } from "./whatsapp.service";
+import * as dbSyncService from "./db-sync.service";
 
 interface InpulseResult {
 	CODIGO: number;
@@ -368,6 +369,8 @@ class ChatsService {
 				userId
 			}
 		});
+
+		await dbSyncService.syncChat(chat.instance, chat);
 		const event = SocketEventType.WppChatTransfer;
 		const monitorRoom: SocketServerMonitorRoom = `${chat.instance}:${chat.sectorId!}:monitor`;
 
@@ -444,6 +447,8 @@ class ChatsService {
 					contact: true
 				}
 			});
+
+			await dbSyncService.syncChat(chat.instance, chat);
 			logger.log(
 				`Chat atualizado com sucesso. Chat ID: ${chat.id}, Status: finalizado, Resultado ID: ${chat.resultId}`
 			);
@@ -864,6 +869,7 @@ class ChatsService {
 				}
 			});
 
+			await dbSyncService.syncChat(session.instance, newChat);
 			usersService.setAuth(token);
 			const user = await usersService.getUserById(session.userId);
 
@@ -930,6 +936,8 @@ class ChatsService {
 					}
 				}
 			});
+
+			await dbSyncService.syncChat(instance, newChat);
 			process.log(`Chat created with ID ${newChat.id}`);
 
 			const message = systemMessage || `Atendimento iniciado pelo sistema.`;

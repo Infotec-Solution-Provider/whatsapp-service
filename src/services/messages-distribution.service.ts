@@ -31,6 +31,7 @@ import chooseSectorBot from "../bots/choose-sector.bot";
 import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
 import customerLinkingBot from "../bots/customer-linking.bot";
 import { InternalServerError } from "@rgranatodutra/http-errors";
+import * as dbSyncService from "./db-sync.service";
 
 // Interface para bots que processam mensagens
 interface BotProcessor {
@@ -180,6 +181,7 @@ class MessagesDistributionService {
 					botId: 1
 				}
 			});
+			await dbSyncService.syncChat(instance, chat);
 			return { chat, systemMessage: null };
 		}
 
@@ -220,6 +222,7 @@ class MessagesDistributionService {
 				const chat = await prismaService.wppChat.create({
 					data: chatData
 				});
+				await dbSyncService.syncChat(instance, chat);
 				return { chat, systemMessage: null };
 			}
 		}
@@ -237,6 +240,7 @@ class MessagesDistributionService {
 			}
 		});
 
+		await dbSyncService.syncChat(instance, chat);
 		return { chat, systemMessage: systemMessage || null };
 	}
 
@@ -283,10 +287,11 @@ class MessagesDistributionService {
 
 			const avatarUrl = await whatsappService.getProfilePictureUrl(instance, msg.from);
 			if (avatarUrl) {
-				await prismaService.wppChat.update({
+				const updatedChat = await prismaService.wppChat.update({
 					data: { avatarUrl },
 					where: { id: newChat.id }
 				});
+				await dbSyncService.syncChat(instance, updatedChat);
 			}
 
 			const finalSystemMessage = systemMessage || "Atendimento iniciado pelo cliente!";
@@ -318,6 +323,7 @@ class MessagesDistributionService {
 				data: { ...data, botId: null }
 			});
 
+			await dbSyncService.syncChat(sector.instance, updatedChat);
 			await this.addSystemMessage(updatedChat, `Transferido para o setor ${sector.name}!`);
 
 			await this.notifyChatStarted(logger, updatedChat);
@@ -345,6 +351,7 @@ class MessagesDistributionService {
 				data: { ...data, userId: operador.CODIGO, botId: null }
 			});
 
+			await dbSyncService.syncChat(sector.instance, updatedChat);
 			await this.addSystemMessage(updatedChat, `Transferido para o setor ${sector.name}!`);
 
 			await this.notifyChatStarted(logger, updatedChat);
@@ -421,6 +428,7 @@ class MessagesDistributionService {
 				}
 			});
 
+			await dbSyncService.syncMessage(chat.instance, insertedMessage);
 			logger.log("Mensagem inserida no chat.", insertedMessage);
 			return insertedMessage;
 		} catch (err) {
@@ -451,6 +459,8 @@ class MessagesDistributionService {
 					status
 				}
 			});
+
+			await dbSyncService.syncMessage(message.instance, message);
 
 			if (message.chatId === null) {
 				return;
@@ -500,6 +510,8 @@ class MessagesDistributionService {
 					gupshupId: gs_id
 				}
 			});
+
+			await dbSyncService.syncMessage(findMsg.instance, updatedMsg);
 
 			logger.log("Status da mensagem atualizado", {
 				dbId: updatedMsg.id,
@@ -571,6 +583,7 @@ class MessagesDistributionService {
 				}
 			});
 
+			await dbSyncService.syncMessage(originalMessage.instance, updatedMessage);
 			logger.log("Mensagem atualizada com sucesso.", updatedMessage);
 
 			// Se a mensagem pertence a um chat, notifica via socket
@@ -860,10 +873,12 @@ class MessagesDistributionService {
 			ruleToApply.fileId
 		);
 
-		await prismaService.wppContact.update({
+		const updatedContact = await prismaService.wppContact.update({
 			where: { id: contact.id },
 			data: { lastOutOfHoursReplySentAt: new Date() }
 		});
+
+		await dbSyncService.syncContact(instance, updatedContact);
 	}
 }
 
