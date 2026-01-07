@@ -258,9 +258,12 @@ class WhatsappService {
 					fileType = "audio";
 				}
 
+				const fileUrl = filesService.getFileDownloadUrl(data.fileId);
+				Logger.debug("File URL: " + fileUrl)
+
 				options = {
 					...options,
-					fileUrl: filesService.getFileDownloadUrl(data.fileId),
+					fileUrl,
 					sendAsAudio: !!data.sendAsAudio,
 					sendAsDocument: !!data.sendAsDocument,
 					fileName: fileData.name,

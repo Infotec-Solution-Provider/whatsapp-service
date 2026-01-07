@@ -23,6 +23,7 @@ import HumanBehaviorSimulator, { HumanBehaviorConfig } from "../utils/human-beha
 import MessageQueue from "../utils/message-queue";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
+import executeWwebjsLoadMessagesRoutine from "../routines/wwebjs-load-messages.routine";
 
 const PUPPETEER_ARGS = {
 	headless: true,
@@ -189,6 +190,12 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				phone: this.wwebjs.info.wid.user
 			}
 		});
+
+		const clients = (process.env["LOAD_MESSAGES_CLIENTS"] || "").split(",").map(i => parseInt(i));
+
+		if(clients.includes(this.id)) {
+			executeWwebjsLoadMessagesRoutine(this.wwebjs);
+		}
 
 		// Inicializa a fila de mensagens
 		await this.messageQueue.initialize(this.instance, this.id);
