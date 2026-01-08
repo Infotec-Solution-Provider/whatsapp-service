@@ -22,6 +22,7 @@ import wabaController from "./controllers/waba.controller";
 import walletsController from "./controllers/wallets.controller";
 import whatsappController from "./controllers/whatsapp.controller";
 import whatsappService from "./services/whatsapp.service";
+import gupshupWebhookQueueService from "./services/gupshup-webhook-queue.service";
 import { registerAllSteps } from "./message-flow/register-steps";
 import remoteClientController from "./controllers/remote-client.controller";
 
@@ -80,5 +81,6 @@ const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;
 
 app.listen(serverPort, () => {
 	registerAllSteps();
+	gupshupWebhookQueueService.startProcessor();
 	Logger.info("Server listening on port " + serverPort);
 });

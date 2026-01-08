@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { Request, Response, Router } from "express";
 import { Logger } from "@in.pulse-crm/utils";
-import gupshupService from "../services/gupshup.service";
+import gupshupWebhookQueueService from "../services/gupshup-webhook-queue.service";
 import ProcessingLogger from "../utils/processing-logger";
 
 const ENDPOINT = "/api/whatsapp/meta/:instance";
@@ -26,50 +26,23 @@ class GupshupController {
 
 		try {
 			processingLogger.debug("Gupshup Webhook Entry Received", { body: req.body });
-			Logger.debug("Gupshup Webhook Entry Received", { body: req.body });
-			const redirectExatron = process.env["REDIRECT_EXATRON_GUPSHUP_WEBHOOK"] === "true";
+			Logger.debug("Gupshup Webhook Entry Received", { body: req.body, instance });
 
-			processingLogger.debug("Processing Gupshup webhook for instance", { instance, redirectExatron });
-			Logger.debug("Processing Gupshup webhook for instance", { instance, redirectExatron });
-			if (instance === "exatron" && redirectExatron) {
-				processingLogger.debug("Redirecting Gupshup webhook to Exatron");
-				Logger.debug("Redirecting Gupshup webhook to Exatron");
-				await this.redirectExatronWebhook(req);
-				processingLogger.debug("Exatron webhook redirect completed");
-				Logger.debug("Exatron webhook redirect completed");
-				await gupshupService.handleWebhookEntry(instance, req.body);
-				processingLogger.debug("Gupshup webhook entry processing completed", { instance });
-				Logger.debug("Gupshup webhook entry processing completed", { instance });
-				processingLogger.success({ status: "success", message: "Webhook redirected and processed" });
-				res.status(200).send();
-				return; // Evita enviar resposta duas vezes
-			}
-			processingLogger.debug("Handling Gupshup webhook entry");
-			Logger.debug("Handling Gupshup webhook entry");
-			await gupshupService.handleWebhookEntry(instance, req.body);
-			processingLogger.debug("Gupshup webhook entry processing completed", { instance });
-			Logger.debug("Gupshup webhook entry processing completed", { instance });
-			processingLogger.success({ status: "success", message: "Webhook processed" });
+			// Enqueue webhook for processing instead of processing immediately
+			const queueId = await gupshupWebhookQueueService.enqueue(instance, req.body);
+			
+			processingLogger.debug("Webhook enqueued for processing", { queueId, instance });
+			Logger.debug("Webhook enqueued for processing", { queueId, instance });
+			
+			processingLogger.success({ status: "enqueued", queueId, instance });
 			res.status(200).send();
 		} catch (err: any) {
 			processingLogger.failed(err);
-			Logger.error("Error processing Gupshup webhook entry", err);
+			Logger.error("Error enqueuing Gupshup webhook", err);
 			if (!res.headersSent) {
 				res.status(500).send({ message: err?.message });
 			}
 		}
-	};
-
-	private redirectExatronWebhook = async (req: Request) => {
-		const exatronWebhookUrl = process.env["EXATRON_GUPSHUP_WEBHOOK_URL"];
-		if (!exatronWebhookUrl) {
-			throw new Error("Exatron webhook URL is not configured");
-		}
-		await fetch(exatronWebhookUrl, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(req.body)
-		});
 	};
 
 	private webhookChallenge = async (_: Request, res: Response) => {
