@@ -1,6 +1,7 @@
 import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import contactsService from "../services/contacts.service";
+import contactSearchService from "../services/contact-search.service";
 
 class ContactsController {
 	constructor(public readonly router: Router) {
@@ -73,15 +74,20 @@ class ContactsController {
 			customerCnpj: (req.query["customerCnpj"] as string) || null,
 			customerName: (req.query["customerName"] as string) || null,
 			hasCustomer: req.query["hasCustomer"] ? req.query["hasCustomer"] === "true" : null,
-			sectorIds,
+			sectorIds
+		};
+
+		const pagination = {
 			page: req.query["page"] ? Number(req.query["page"]) : 1,
 			perPage: req.query["perPage"] ? Number(req.query["perPage"]) : 50
 		};
 
-		const result = await contactsService.getContactsWithCustomer(
+		// Configura autenticação e executa busca
+		contactSearchService.setAuth(req.headers["authorization"] || "");
+		const result = await contactSearchService.search(
 			req.session.instance,
-			req.headers["authorization"] as string,
-			filters
+			filters,
+			pagination
 		);
 
 		const resBody = {
