@@ -9,6 +9,7 @@ import parametersService from "./parameters.service";
 import prismaService from "./prisma.service";
 import usersService from "./users.service";
 import whatsappService from "./whatsapp.service";
+import { Logger } from "@in.pulse-crm/utils";
 
 export interface ContactsFilters {
 	id?: number | null;
@@ -49,14 +50,20 @@ class ContactsService {
 	}
 
 	public async getContactsWithCustomer(instance: string, token: string, filters: ContactsFilters) {
+		const startTime = Date.now();
+		Logger.debug(`[getContactsWithCustomer] START - instance: ${instance}`);
+		Logger.debug(`[getContactsWithCustomer] filters: ${JSON.stringify(filters, null, 2)}`);
+
 		const normalizedToken = (token || "").replace(/^Bearer\s+/i, "");
 		if (normalizedToken) {
 			customersService.setAuth(normalizedToken);
 			usersService.setAuth(normalizedToken);
+			Logger.debug("[getContactsWithCustomer] Auth token set for customersService and usersService");
 		}
 
 		const page = Math.max(1, filters.page);
 		const perPage = Math.max(1, Math.min(100, filters.perPage));
+		Logger.debug(`[getContactsWithCustomer] Pagination - page: ${page}, perPage: ${perPage}`);
 
 		const whereConditions: Prisma.WppContactWhereInput = {
 			instance,
@@ -64,10 +71,16 @@ class ContactsService {
 		};
 
 		const hasCustomerSideFilters = !!(filters.customerErp || filters.customerCnpj || filters.customerName);
+		Logger.debug(`[getContactsWithCustomer] hasCustomerSideFilters: ${hasCustomerSideFilters}`);
+
 		if (hasCustomerSideFilters) {
+			const searchStart = Date.now();
 			const matchedCustomerIds = await this.searchCustomerIdsByFilters(instance, filters);
+			Logger.debug(`[getContactsWithCustomer] searchCustomerIdsByFilters took: ${Date.now() - searchStart}ms`);
+			Logger.debug(`[getContactsWithCustomer] matchedCustomerIds: ${JSON.stringify(matchedCustomerIds)}`);
 
 			if (matchedCustomerIds.length === 0) {
+				Logger.debug("[getContactsWithCustomer] No matched customer IDs, returning empty result");
 				return {
 					data: [],
 					pagination: {
@@ -86,27 +99,33 @@ class ContactsService {
 
 		if (filters.name) {
 			whereConditions.name = { contains: filters.name };
+			Logger.debug(`[getContactsWithCustomer] Added name filter: ${filters.name}`);
 		}
 
 		if (typeof (filters as any).id === "number" && Number.isFinite((filters as any).id)) {
 			(whereConditions as any).id = (filters as any).id;
+			Logger.debug(`[getContactsWithCustomer] Added id filter: ${(filters as any).id}`);
 		}
 
 		if (filters.phone) {
 			const phoneDigits = filters.phone.replace(/\D/g, "");
 			if (phoneDigits) {
 				whereConditions.phone = { contains: phoneDigits };
+				Logger.debug(`[getContactsWithCustomer] Added phone filter: ${phoneDigits}`);
 			}
 		}
 
 		if (typeof filters.customerId === "number" && Number.isFinite(filters.customerId)) {
 			whereConditions.customerId = filters.customerId;
+			Logger.debug(`[getContactsWithCustomer] Added customerId filter: ${filters.customerId}`);
 		}
 
 		if (filters.hasCustomer === true) {
 			whereConditions.customerId = { not: null };
+			Logger.debug("[getContactsWithCustomer] Filter hasCustomer: true");
 		} else if (filters.hasCustomer === false) {
 			whereConditions.customerId = null;
+			Logger.debug("[getContactsWithCustomer] Filter hasCustomer: false");
 		}
 
 		if (filters.sectorIds && filters.sectorIds.length > 0) {
@@ -115,8 +134,12 @@ class ContactsService {
 					sectorId: { in: filters.sectorIds }
 				}
 			};
+			Logger.debug(`[getContactsWithCustomer] Added sectorIds filter: ${JSON.stringify(filters.sectorIds)}`);
 		}
 
+		Logger.debug(`[getContactsWithCustomer] Final whereConditions: ${JSON.stringify(whereConditions, null, 2)}`);
+
+		const dbQueryStart = Date.now();
 		const [contacts, total] = await Promise.all([
 			prismaService.wppContact.findMany({
 				where: whereConditions,
@@ -127,8 +150,11 @@ class ContactsService {
 			}),
 			prismaService.wppContact.count({ where: whereConditions })
 		]);
+		Logger.debug(`[getContactsWithCustomer] DB query took: ${Date.now() - dbQueryStart}ms`);
+		Logger.debug(`[getContactsWithCustomer] Found contacts: ${contacts.length}, total: ${total}`);
 
 		if (contacts.length === 0) {
+			Logger.debug(`[getContactsWithCustomer] No contacts found, returning empty result. Total time: ${Date.now() - startTime}ms`);
 			return {
 				data: [],
 				pagination: {
@@ -144,16 +170,22 @@ class ContactsService {
 
 		const chatsPromise = chatsService.getChats({ isFinished: "false" });
 		const uniqueCustomerIds = [...new Set(contacts.map((c) => c.customerId).filter(Boolean))] as number[];
+		Logger.debug(`[getContactsWithCustomer] uniqueCustomerIds to fetch: ${uniqueCustomerIds.length}`);
 
+		const enrichStart = Date.now();
 		const [chats, customersMap] = await Promise.all([
 			chatsPromise,
 			this.getCustomersByIds(instance, uniqueCustomerIds)
 		]);
+		Logger.debug(`[getContactsWithCustomer] Chats and customers fetch took: ${Date.now() - enrichStart}ms`);
+		Logger.debug(`[getContactsWithCustomer] Chats fetched: ${Array.isArray(chats) ? chats.length : 0}`);
+		Logger.debug(`[getContactsWithCustomer] Customers fetched: ${customersMap.size}`);
 
 		const chatsMap = new Map<number, any>(
 			(Array.isArray(chats) ? chats : []).map((chat: any) => [chat.contactId, chat])
 		);
 
+		const mappingStart = Date.now();
 		const mappedContacts = await Promise.all(
 			contacts.map(async (contact) => {
 				const customer = contact.customerId ? customersMap.get(contact.customerId) : null;
@@ -168,6 +200,7 @@ class ContactsService {
 							chatingWith = "Supervisão";
 						}
 					} catch (error) {
+						Logger.debug(`[getContactsWithCustomer] Error fetching user for chat: ${chat.userId} - ${error}`);
 						chatingWith = "Supervisão";
 					}
 				}
@@ -179,7 +212,12 @@ class ContactsService {
 				};
 			})
 		);
+		Logger.debug(`[getContactsWithCustomer] Contact mapping took: ${Date.now() - mappingStart}ms`);
+
 		const totalPages = Math.ceil(total / perPage);
+
+		Logger.debug(`[getContactsWithCustomer] END - Total execution time: ${Date.now() - startTime}ms`);
+		Logger.debug(`[getContactsWithCustomer] Returning ${mappedContacts.length} contacts, totalPages: ${totalPages}`);
 
 		return {
 			data: mappedContacts,
@@ -451,6 +489,7 @@ class ContactsService {
 		if (
 			existingContact &&
 			!!existingContact.customerId &&
+			existingContact.customerId !== -1 &&
 			customerId
 		) {
 			const message = `Este número já está cadastrado no cliente de código ${existingContact.customerId}`;
