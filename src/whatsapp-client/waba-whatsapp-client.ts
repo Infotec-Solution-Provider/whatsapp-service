@@ -59,15 +59,15 @@ class WABAWhatsappClient implements WhatsappClient {
 			Logger.debug("WABA Send Message Options:", options);
 			process.log("Iniciando envio de mensagem...", options);
 
-			const isConversationWindowOpen = await whatsappService.isConversationWindowOpen(this.instance, options.to);
-			Logger.debug("isConversationWindowOpen:", isConversationWindowOpen);
+			/* 			const isConversationWindowOpen = await whatsappService.isConversationWindowOpen(this.instance, options.to);
+						Logger.debug("isConversationWindowOpen:", isConversationWindowOpen); */
 
-			if (!isConversationWindowOpen) {
-				process.log("Janela de conversa não está aberta. ");
-				throw new Error(
-					"A janela de conversa com o contato não está aberta. Não é possível enviar a mensagem."
-				);
-			}
+			/* 			if (!isConversationWindowOpen ) {
+							process.log("Janela de conversa não está aberta. ");
+							throw new Error(
+								"A janela de conversa com o contato não está aberta. Não é possível enviar a mensagem."
+							);
+						} */
 
 			const reqUrl = `${GRAPH_API_URL}/${this.wabaPhoneId}/messages`;
 			const reqBody: any = {
@@ -141,7 +141,7 @@ class WABAWhatsappClient implements WhatsappClient {
 		}
 	}
 
-	public async editMessage({}: EditMessageOptions): Promise<void> {
+	public async editMessage({ }: EditMessageOptions): Promise<void> {
 		throw new Error("Method not implemented.");
 	}
 
