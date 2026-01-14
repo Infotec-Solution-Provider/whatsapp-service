@@ -4,8 +4,9 @@ import CreateMessageDto from "../dtos/create-message.dto";
 import messagesService from "../services/messages.service";
 import messagesDistributionService from "../services/messages-distribution.service";
 import prismaService from "../services/prisma.service";
+import contactsService from "../services/contacts.service";
 import ProcessingLogger from "../utils/processing-logger";
-import { Logger } from "@in.pulse-crm/utils";
+import { Logger, Formatter } from "@in.pulse-crm/utils";
 
 const ENDPOINT = "/api/whatsapp/parsed-messages";
 
@@ -103,6 +104,40 @@ class ParsedMessagesController {
 				);
 			}
 
+			// Verifica se é uma mensagem enviada pelo operador (from começa com "me:")
+			if (messageDto.from.startsWith("me:")) {
+				logger.log("Mensagem enviada pelo operador detectada, buscando contato pelo destinatário");
+
+				// Busca o contato pelo número de destino (to)
+				const contact = await contactsService.getOrCreateContact(
+					messageDto.instance,
+					contactName || Formatter.phone(messageDto.to),
+					messageDto.to
+				);
+				logger.log("Contato encontrado", { contactId: contact.id });
+
+				// Insere a mensagem com o contactId, sem processar distribuição
+				const inserted = await messagesService.insertMessage({
+					...messageDto,
+					contactId: contact.id
+				});
+				logger.log("Mensagem inserida (sem distribuição)", { messageId: inserted.id });
+				logger.success("Mensagem do operador salva com sucesso");
+
+				const response: ProcessMessageResponse = {
+					success: true,
+					message: "Operator message saved successfully (no distribution)",
+					data: {
+						messageId: inserted.id,
+						chatId: inserted.chatId || 0,
+						contactId: contact.id
+					}
+				};
+
+				res.status(201).send(response);
+				return;
+			}
+
 			// Insere a mensagem no banco
 			logger.log("Inserindo mensagem no banco");
 			const inserted = await messagesService.insertMessage(messageDto);
@@ -189,6 +224,29 @@ class ParsedMessagesController {
 						throw new BadRequestError(
 							`Client instance mismatch: expected '${client.instance}', got '${messageDto.instance}'`
 						);
+					}
+
+					// Verifica se é uma mensagem enviada pelo operador (from começa com "me:")
+					if (messageDto.from.startsWith("me:")) {
+						// Busca o contato pelo número de destino (to)
+						const contact = await contactsService.getOrCreateContact(
+							messageDto.instance,
+							contactName || Formatter.phone(messageDto.to),
+							messageDto.to
+						);
+
+						// Insere a mensagem com o contactId, sem processar distribuição
+						const inserted = await messagesService.insertMessage({
+							...messageDto,
+							contactId: contact.id
+						});
+
+						results.push({
+							index: i,
+							success: true,
+							messageId: inserted.id
+						});
+						continue;
 					}
 
 					const inserted = await messagesService.insertMessage(messageDto);
