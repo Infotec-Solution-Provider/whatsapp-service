@@ -15,7 +15,6 @@ import {
 import generateUID from "../utils/generate-uid";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
-import whatsappService from "../services/whatsapp.service";
 
 interface GetTemplateVariablesProps {
 	template: WABAMessageTemplate;
