@@ -509,7 +509,7 @@ class WhatsappService {
 
 	public async getValidWhatsappPhone(instance: string, phone: string) {
 		const wwebjs = this.unsafeGetWwebjsClient(instance);
-		const validPhone = wwebjs ? await wwebjs?.getValidWhatsapp(phone) : null;
+		const validPhone = wwebjs ? await wwebjs?.getValidWhatsapp(phone) : phone;
 
 		return validPhone;
 	}
