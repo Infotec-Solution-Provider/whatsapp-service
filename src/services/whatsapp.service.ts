@@ -512,7 +512,7 @@ class WhatsappService {
 
 	public async getValidWhatsappPhone(instance: string, phone: string) {
 		const wwebjs = this.unsafeGetWwebjsClient(instance);
-		const validPhone = wwebjs ? await wwebjs?.getValidWhatsapp(phone) : null;
+		const validPhone = wwebjs ? await wwebjs?.getValidWhatsapp(phone) : phone;
 
 		return validPhone;
 	}
@@ -649,11 +649,11 @@ class WhatsappService {
 						});
 						const chat = contact
 							? await prismaService.wppChat.findFirst({
-									where: {
-										instance: session.instance,
-										contactId: contact.id
-									}
-								})
+								where: {
+									instance: session.instance,
+									contactId: contact.id
+								}
+							})
 							: null;
 
 						for (const originalMsg of originalMessages) {
@@ -757,8 +757,8 @@ class WhatsappService {
 			});
 			const chat = contact
 				? await prismaService.wppChat.findFirst({
-						where: { contactId: contact.id, isFinished: false }
-					})
+					where: { contactId: contact.id, isFinished: false }
+				})
 				: null;
 
 			// Prepara as opções de envio (texto ou arquivo)
