@@ -513,7 +513,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			}
 
 			process.log("Enviando mensagem...");
-			const sentMsg = await this.wwebjs.sendMessage(to, content, params);
+			const sentMsg = await this.wwebjs.sendMessage(to, content, { sendSeen: false, ...params });
 
 			if (config?.enabled && config.sendTypingState) {
 				// Limpa estado de digitação
