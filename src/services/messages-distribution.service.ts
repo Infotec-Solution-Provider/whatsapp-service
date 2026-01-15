@@ -432,7 +432,11 @@ class MessagesDistributionService {
 			await this.notifyChatStarted(logger, chat);
 		}
 		await this.notifyMessage(logger, insertedMsg);
-		logger.success(insertedMsg);
+		
+		// Só salva log quando é um novo chat (evita poluir logs com mensagens de atendimentos existentes)
+		if (isChatNew) {
+			logger.success(insertedMsg);
+		}
 
 		return insertedMsg;
 	}
