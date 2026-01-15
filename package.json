@@ -55,7 +55,7 @@
 		"react": "^19.2.0",
 		"react-dom": "^19.2.0",
 		"reactflow": "^11.11.4",
-		"whatsapp-web.js": "github:BenyFilho/whatsapp-web.js#fix-getContact"
+		"whatsapp-web.js": "^1.34.4"
 	},
 	"devDependencies": {
 		"@types/cors": "^2.8.17",
