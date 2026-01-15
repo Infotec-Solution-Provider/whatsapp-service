@@ -62,7 +62,11 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			puppeteer: {
 				...PUPPETEER_ARGS,
 				executablePath: BROWSER_PATH
-			}
+			},
+			webVersionCache: {
+				type: 'remote',
+				remotePath: `https://raw.githubusercontent.com/wppconnect-team/wa-version/refs/heads/main/html/2.3000.1031490220-alpha.html`,
+			},
 		});
 
 		// Log events
@@ -365,7 +369,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		}
 	}
 
-	private handleMessageReaction(_reaction: WAWebJS.Reaction) {}
+	private handleMessageReaction(_reaction: WAWebJS.Reaction) { }
 
 	private handleMessageRevoked({ id }: WAWebJS.Message) {
 		this.log("info", "Message revoked! " + id._serialized);
