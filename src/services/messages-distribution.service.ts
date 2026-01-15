@@ -436,7 +436,10 @@ class MessagesDistributionService {
 			await this.notifyChatStarted(logger, chat);
 		}
 		await this.notifyMessage(logger, insertedMsg);
-		logger.success(insertedMsg);
+		
+		if (isChatNew) {
+			logger.success(insertedMsg);
+		}
 
 		return insertedMsg;
 	}
