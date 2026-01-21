@@ -9,7 +9,6 @@ import parametersService from "./parameters.service";
 import prismaService from "./prisma.service";
 import redisService from "./redis.service";
 import usersService from "./users.service";
-import whatsappService from "./whatsapp.service";
 
 export interface ContactsFilters {
 	name: string | null;
@@ -430,16 +429,11 @@ class ContactsService {
 		customerId?: number,
 		sectorIds?: number[]
 	) {
-		const validPhone = await whatsappService.getValidWhatsappPhone(instance, phone);
-		if (!validPhone) {
-			throw new BadRequestError("Esse número não é um WhatsApp válido!");
-		}
-
 		const existingContact = await prismaService.wppContact.findUnique({
 			where: {
 				instance_phone: {
 					instance,
-					phone: validPhone
+					phone
 				}
 			},
 			// include sectors - cast to any because Prisma client types must be regenerated after schema change
@@ -498,7 +492,7 @@ class ContactsService {
 		const createData: any = {
 			instance,
 			name,
-			phone: validPhone,
+			phone,
 			customerId: customerId || null
 		};
 
