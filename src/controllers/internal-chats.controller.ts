@@ -37,6 +37,13 @@ class InternalChatsController {
 			this.deleteInternalChat
 		);
 
+		// Finalizar chat interno (sem excluir)
+		this.router.post(
+			"/api/internal/chats/:id/finish",
+			isAuthenticated,
+			this.finishInternalChat
+		);
+
 		// Envia mensagem para um chat interno
 		this.router.post(
 			"/api/internal/chats/:id/messages",
@@ -230,6 +237,20 @@ class InternalChatsController {
 
 		res.status(200).send({
 			message: "Chat deleted successfully!"
+		});
+	}
+
+	private async finishInternalChat(req: Request, res: Response) {
+		const chatId = Number(req.params["id"]);
+
+		if (!chatId || Number.isNaN(chatId)) {
+			throw new BadRequestError("Chat ID is required!");
+		}
+
+		await internalChatsService.finishInternalChat(req.session, chatId);
+
+		res.status(200).send({
+			message: "Chat finished successfully!"
 		});
 	}
 

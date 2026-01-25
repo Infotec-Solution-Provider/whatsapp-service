@@ -216,6 +216,41 @@ class InternalChatsService {
 		});
 	}
 
+	public async finishInternalChat(session: SessionData, id: number) {
+		const chat = await prismaService.internalChat.findUnique({
+			where: { id }
+		});
+
+		if (!chat) {
+			throw new BadRequestError("Chat not found");
+		}
+
+		if (chat.isGroup) {
+			throw new BadRequestError("Group chats cannot be finished by this endpoint");
+		}
+
+		if (chat.isFinished) {
+			return chat;
+		}
+
+		const updated = await prismaService.internalChat.update({
+			where: { id },
+			data: {
+				isFinished: true,
+				finishedAt: new Date(),
+				finishedBy: session.userId
+			}
+		});
+
+		const room: SocketServerInternalChatRoom =
+			`${chat.instance}:internal-chat:${id}` as SocketServerInternalChatRoom;
+		await socketService.emit(SocketEventType.InternalChatFinished, room, {
+			chatId: id
+		});
+
+		return updated;
+	}
+
 	// Obtém todos os chats internos do usuário
 	public async getInternalChatsBySession(session: SessionData) {
 		const result = await prismaService.internalChat.findMany({
