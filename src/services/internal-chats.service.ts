@@ -256,6 +256,7 @@ class InternalChatsService {
 		const result = await prismaService.internalChat.findMany({
 			where: {
 				instance: session.instance,
+				isFinished: false,
 				participants: {
 					some: { userId: session.userId }
 				}
