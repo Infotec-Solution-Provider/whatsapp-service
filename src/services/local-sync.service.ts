@@ -4,17 +4,20 @@ import prismaService from "./prisma.service";
 class LocalSyncService {
 	/**
 	 * Remove emojis and special characters that MySQL utf8 can't handle
+	 * Keep ASCII (0-127) and Latin-1 (128-255) which includes accents and ç
 	 */
 	private removeEmojis(str: string): string {
 		if (!str) return str;
 		
-		// Remove emojis and other characters outside BMP (Basic Multilingual Plane)
-		// Regex to match emojis and special Unicode characters
-		return str
-			.replace(/[\u{1F300}-\u{1F9FF}]/gu, "") // Emojis
-			.replace(/[\u{2600}-\u{27BF}]/gu, "") // Miscellaneous Symbols
-			.replace(/[\u{2300}-\u{23FF}]/gu, "") // Miscellaneous Technical
-			.replace(/[\u{2000}-\u{206F}]/gu, "") // General Punctuation (some problematic chars)
+		// Use Array.from to properly handle surrogate pairs
+		return Array.from(str)
+			.filter(char => {
+				const code = char.codePointAt(0) || 0;
+				// Keep ASCII (0-127) and Latin-1 Supplement (128-255)
+				// This includes acentos, ç, é, í, ó, ú, à, etc.
+				return code < 256;
+			})
+			.join('')
 			.trim();
 	}
 
