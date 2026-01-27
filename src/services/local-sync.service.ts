@@ -3,13 +3,31 @@ import prismaService from "./prisma.service";
 
 class LocalSyncService {
 	/**
+	 * Remove emojis and special characters that MySQL utf8 can't handle
+	 */
+	private removeEmojis(str: string): string {
+		if (!str) return str;
+		
+		// Remove emojis and other characters outside BMP (Basic Multilingual Plane)
+		// Regex to match emojis and special Unicode characters
+		return str
+			.replace(/[\u{1F300}-\u{1F9FF}]/gu, "") // Emojis
+			.replace(/[\u{2600}-\u{27BF}]/gu, "") // Miscellaneous Symbols
+			.replace(/[\u{2300}-\u{23FF}]/gu, "") // Miscellaneous Technical
+			.replace(/[\u{2000}-\u{206F}]/gu, "") // General Punctuation (some problematic chars)
+			.trim();
+	}
+
+	/**
 	 * Escape string for SQL queries
 	 */
 	private escapeSQL(value: string): string {
 		if (value === null || value === undefined) {
 			return "NULL";
 		}
-		return "'" + value.toString().replace(/'/g, "''").replace(/\\/g, "\\\\") + "'";
+		// Remove emojis first
+		const cleaned = this.removeEmojis(value.toString());
+		return "'" + cleaned.replace(/'/g, "''").replace(/\\/g, "\\\\") + "'";
 	}
 
 	/**
