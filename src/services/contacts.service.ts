@@ -390,8 +390,8 @@ class ContactsService {
 					: null;
 
 			// Parsear sector_ids do GROUP_CONCAT
-			const sectorIds = row.sector_ids
-				? row.sector_ids?.split(',').map((id: string) => parseInt(id, 10)) || []
+			const sectorIds = typeof row.sector_ids === "string"
+				? row.sector_ids.split(',').map((id: string) => parseInt(id, 10))
 				: [];
 
 			const chatingWith = row.operator_NOME || null;
