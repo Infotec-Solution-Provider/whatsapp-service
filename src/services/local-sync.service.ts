@@ -30,7 +30,7 @@ class LocalSyncService {
 				UNIQUE KEY unique_instance_phone (instance, phone),
 				INDEX idx_customer_id (customer_id),
 				INDEX idx_phone (phone)
-			) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 		`;
 
 		const createContactSectorsTableQuery = `
@@ -39,7 +39,7 @@ class LocalSyncService {
 				sector_id INT NOT NULL,
 				PRIMARY KEY (contact_id, sector_id),
 				INDEX idx_sector_id (sector_id)
-			) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 		`;
 
 		const createChatsTableQuery = `
@@ -63,7 +63,7 @@ class LocalSyncService {
 				INDEX idx_user_id (user_id),
 				INDEX idx_is_finished (is_finished),
 				INDEX idx_sector_id (sector_id)
-			) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 		`;
 
 		try {
@@ -75,6 +75,37 @@ class LocalSyncService {
 
 			await instancesService.executeQuery(instance, createChatsTableQuery, []);
 			console.log(`[LocalSync] Tabela wpp_chats verificada/criada`);
+
+			// Alter table charset to utf8 if needed
+			try {
+				const alterContactsQuery = `ALTER TABLE wpp_contacts CONVERT TO CHARACTER SET utf8`;
+				await instancesService.executeQuery(instance, alterContactsQuery, []);
+				console.log(`[LocalSync] Charset de wpp_contacts alterado para utf8`);
+			} catch (err: any) {
+				if (!err.message.includes("already exists")) {
+					console.log(`[LocalSync] wpp_contacts charset já é utf8 ou erro ao alterar`);
+				}
+			}
+
+			try {
+				const alterSectorsQuery = `ALTER TABLE wpp_contact_sectors CONVERT TO CHARACTER SET utf8`;
+				await instancesService.executeQuery(instance, alterSectorsQuery, []);
+				console.log(`[LocalSync] Charset de wpp_contact_sectors alterado para utf8`);
+			} catch (err: any) {
+				if (!err.message.includes("already exists")) {
+					console.log(`[LocalSync] wpp_contact_sectors charset já é utf8 ou erro ao alterar`);
+				}
+			}
+
+			try {
+				const alterChatsQuery = `ALTER TABLE wpp_chats CONVERT TO CHARACTER SET utf8`;
+				await instancesService.executeQuery(instance, alterChatsQuery, []);
+				console.log(`[LocalSync] Charset de wpp_chats alterado para utf8`);
+			} catch (err: any) {
+				if (!err.message.includes("already exists")) {
+					console.log(`[LocalSync] wpp_chats charset já é utf8 ou erro ao alterar`);
+				}
+			}
 
 			// Ensure original_id column exists - with proper migration
 			try {
