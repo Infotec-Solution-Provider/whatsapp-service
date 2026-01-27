@@ -66,6 +66,9 @@ class ContactsController {
 				.filter((id) => !Number.isNaN(id))
 			: null;
 
+		const page = req.query["page"] ? Number(req.query["page"]) : 1;
+		const perPage = req.query["perPage"] ? Number(req.query["perPage"]) : 20;
+
 		const filters = {
 			id,
 			name: (req.query["name"] as string) || null,
@@ -75,12 +78,9 @@ class ContactsController {
 			customerCnpj: (req.query["customerCnpj"] as string) || null,
 			customerName: (req.query["customerName"] as string) || null,
 			hasCustomer: req.query["hasCustomer"] ? req.query["hasCustomer"] === "true" : null,
-			sectorIds
-		};
-
-		const pagination = {
-			page: req.query["page"] ? Number(req.query["page"]) : 1,
-			perPage: req.query["perPage"] ? Number(req.query["perPage"]) : 50
+			sectorIds,
+			page,
+			perPage
 		};
 
 		// Check if local sync is enabled via parameter
@@ -100,7 +100,7 @@ class ContactsController {
 			result = await contactSearchService.search(
 				req.session.instance,
 				filters,
-				pagination
+				{ page, perPage }
 			);
 		}
 

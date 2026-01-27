@@ -310,6 +310,7 @@ class ContactsService {
 			countQuery,
 			queryParams
 		);
+
 		const total = countResult[0]?.total || 0;
 
 		if (total === 0) {
