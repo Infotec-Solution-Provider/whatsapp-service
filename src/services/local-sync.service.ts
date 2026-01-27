@@ -30,7 +30,7 @@ class LocalSyncService {
 				UNIQUE KEY unique_instance_phone (instance, phone),
 				INDEX idx_customer_id (customer_id),
 				INDEX idx_phone (phone)
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+			) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 		`;
 
 		const createContactSectorsTableQuery = `
@@ -39,7 +39,7 @@ class LocalSyncService {
 				sector_id INT NOT NULL,
 				PRIMARY KEY (contact_id, sector_id),
 				INDEX idx_sector_id (sector_id)
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+			) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 		`;
 
 		const createChatsTableQuery = `
@@ -63,7 +63,7 @@ class LocalSyncService {
 				INDEX idx_user_id (user_id),
 				INDEX idx_is_finished (is_finished),
 				INDEX idx_sector_id (sector_id)
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+			) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 		`;
 
 		try {
