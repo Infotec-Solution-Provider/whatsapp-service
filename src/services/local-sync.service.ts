@@ -52,7 +52,7 @@ class LocalSyncService {
 				user_id INT NULL,
 				contact_id INT NULL,
 				sector_id INT NULL,
-				started_at DATETIME NOT NULL,
+				started_at DATETIME NULL,
 				finished_at DATETIME NULL,
 				finished_by INT NULL,
 				result_id INT NULL,
