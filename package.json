@@ -16,6 +16,8 @@
 		"dev:customers": "cd ../customers-service && npm run dev",
 		"dev:files": "cd ../files-service && npm run dev",
 		"dev:socket": "cd ../socket-service && npm run dev",
+		"sync:local": "ts-node src/routines/local-sync.routine.ts",
+		"sync:local:instance": "ts-node src/routines/local-sync.routine.ts",
 		"redis:start": "bash scripts/redis.sh start",
 		"redis:stop": "bash scripts/redis.sh stop",
 		"redis:restart": "bash scripts/redis.sh restart",

@@ -1,6 +1,7 @@
 import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import contactsService from "../services/contacts.service";
+import parametersService from "../services/parameters.service";
 
 class ContactsController {
 	constructor(public readonly router: Router) {
@@ -75,11 +76,20 @@ class ContactsController {
 			perPage: req.query["perPage"] ? Number(req.query["perPage"]) : 50
 		};
 
-		const result = await contactsService.getContactsWithCustomer(
-			req.session.instance,
-			req.headers["authorization"] as string,
-			filters
-		);
+		// Check if local sync is enabled via parameter
+		const parameters = await parametersService.getSessionParams(req.session);
+		const useLocalSync = parameters["use_local_contacts_sync"] === "true";
+
+		const result = useLocalSync
+			? await contactsService.getContactsWithCustomerLocally(
+				req.session.instance,
+				filters
+			)
+			: await contactsService.getContactsWithCustomer(
+				req.session.instance,
+				req.headers["authorization"] as string,
+				filters
+			);
 
 		const resBody = {
 			message: "Contacts retrieved successfully!",

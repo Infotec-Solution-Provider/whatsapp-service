@@ -361,6 +361,9 @@ class ChatsService {
 				userId
 			}
 		});
+
+		await this.syncChatToLocal(chat);
+
 		const event = SocketEventType.WppChatTransfer;
 		const monitorRoom: SocketServerMonitorRoom = `${chat.instance}:${chat.sectorId!}:monitor`;
 
@@ -437,6 +440,9 @@ class ChatsService {
 					contact: true
 				}
 			});
+
+			await this.syncChatToLocal(chat);
+
 			logger.log(
 				`Chat atualizado com sucesso. Chat ID: ${chat.id}, Status: finalizado, Resultado ID: ${chat.resultId}`
 			);
@@ -826,6 +832,8 @@ class ChatsService {
 		);
 
 		try {
+			console.log(`[startChatByContactId] Iniciando chat. Instance: ${session.instance}, ContactId: ${contactId}`);
+			
 			const contact = await prismaService.wppContact.findUnique({
 				where: { id: contactId }
 			});
@@ -857,6 +865,12 @@ class ChatsService {
 				}
 			});
 
+			console.log(`[startChatByContactId] Chat criado no Prisma: ${newChat.id}. Iniciando sincronização...`);
+			
+			await this.syncChatToLocal(newChat);
+
+			console.log(`[startChatByContactId] Sincronização concluída para chat ${newChat.id}`);
+
 			usersService.setAuth(token);
 			const user = await usersService.getUserById(session.userId);
 
@@ -885,9 +899,15 @@ class ChatsService {
 			}
 
 			await messagesDistributionService.notifyChatStarted(process, newChat as WppChat);
+
+			console.log(`[startChatByContactId] Chat ${newChat.id} finalizado com sucesso`);
+			
+			return newChat;
 		} catch (err) {
 			process.log("Erro ao iniciar o atendimento ");
 			process.failed(err);
+			console.error(`[startChatByContactId] Erro:`, err);
+			throw err;
 		}
 	}
 
@@ -924,6 +944,8 @@ class ChatsService {
 				}
 			});
 			process.log(`Chat created with ID ${newChat.id}`);
+
+			await this.syncChatToLocal(newChat);
 
 			const message = systemMessage || `Atendimento iniciado pelo sistema.`;
 			await messagesDistributionService.addSystemMessage(newChat as WppChat, message, true);
@@ -996,6 +1018,8 @@ class ChatsService {
 				}
 			});
 
+			await this.syncChatToLocal(newChat);
+
 			const message = `Atendimento iniciado pelo sistema.\nMotivo: Retorno agendado.`;
 			await messagesDistributionService.addSystemMessage(newChat, message, true);
 
@@ -1034,6 +1058,76 @@ class ChatsService {
 			process.failed(err);
 
 			return null;
+		}
+	}
+
+	/**
+	 * Sync chat to local database
+	 */
+	/**
+	 * Format date to MySQL datetime format (YYYY-MM-DD HH:MM:SS)
+	 * Returns null for null/undefined dates so MySQL driver treats it as SQL NULL
+	 */
+	private formatDateForMySQL(date: Date | null | undefined): string | null {
+		if (!date) return null;
+		
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, "0");
+		const day = String(date.getDate()).padStart(2, "0");
+		const hours = String(date.getHours()).padStart(2, "0");
+		const minutes = String(date.getMinutes()).padStart(2, "0");
+		const seconds = String(date.getSeconds()).padStart(2, "0");
+
+		return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+	}
+
+	private async syncChatToLocal(chat: WppChat) {
+		try {
+			const startedAt = this.formatDateForMySQL(chat.startedAt);
+			const finishedAt = this.formatDateForMySQL(chat.finishedAt);
+
+			const query = `
+				INSERT INTO wpp_chats (
+					id, original_id, instance, type, avatar_url, user_id, contact_id, 
+					sector_id, started_at, finished_at, finished_by, 
+					result_id, is_finished, is_schedule
+				)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				ON DUPLICATE KEY UPDATE
+					type = VALUES(type),
+					avatar_url = VALUES(avatar_url),
+					user_id = VALUES(user_id),
+					contact_id = VALUES(contact_id),
+					sector_id = VALUES(sector_id),
+					started_at = VALUES(started_at),
+					finished_at = VALUES(finished_at),
+					finished_by = VALUES(finished_by),
+					result_id = VALUES(result_id),
+					is_finished = VALUES(is_finished),
+					is_schedule = VALUES(is_schedule)
+			`;
+
+			await instancesService.executeQuery(chat.instance, query, [
+				chat.id,
+				chat.id,
+				chat.instance,
+				chat.type,
+				chat.avatarUrl,
+				chat.userId,
+				chat.contactId,
+				chat.sectorId,
+				startedAt,
+				finishedAt,
+				chat.finishedBy,
+				chat.resultId,
+				chat.isFinished,
+				chat.isSchedule
+			]);
+			
+			console.log(`[syncChatToLocal] Chat ${chat.id} sincronizado com sucesso na instância ${chat.instance}`);
+		} catch (error) {
+			console.error("[syncChatToLocal] Erro ao sincronizar chat:", error);
+			throw error;
 		}
 	}
 }
