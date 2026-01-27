@@ -50,7 +50,7 @@ class LocalSyncService {
 				type VARCHAR(50) NOT NULL,
 				avatar_url TEXT NULL,
 				user_id INT NULL,
-				contact_id INT NOT NULL,
+				contact_id INT NULL,
 				sector_id INT NULL,
 				started_at DATETIME NOT NULL,
 				finished_at DATETIME NULL,
@@ -249,7 +249,7 @@ class LocalSyncService {
 					const finishedAt = this.formatDateForMySQL(chat.finishedAt);
 					const avatarUrl = chat.avatarUrl ? this.escapeSQL(chat.avatarUrl) : "NULL";
 
-					return `(${chat.id}, ${chat.id}, ${this.escapeSQL(chat.instance)}, ${this.escapeSQL(chat.type)}, ${avatarUrl}, ${chat.userId || "NULL"}, ${chat.contactId}, ${chat.sectorId || "NULL"}, ${startedAt}, ${finishedAt}, ${chat.finishedBy || "NULL"}, ${chat.resultId || "NULL"}, ${chat.isFinished ? 1 : 0}, ${chat.isSchedule ? 1 : 0})`;
+					return `(${chat.id}, ${chat.id}, ${this.escapeSQL(chat.instance)}, ${this.escapeSQL(chat.type)}, ${avatarUrl}, ${chat.userId || "NULL"}, ${chat.contactId || "NULL"}, ${chat.sectorId || "NULL"}, ${startedAt}, ${finishedAt}, ${chat.finishedBy || "NULL"}, ${chat.resultId || "NULL"}, ${chat.isFinished ? 1 : 0}, ${chat.isSchedule ? 1 : 0})`;
 				})
 				.join(", ");
 
