@@ -40,13 +40,17 @@ class ContactsService {
 			return contact;
 		}
 
-		return await prismaService.wppContact.create({
+		const newContact = await prismaService.wppContact.create({
 			data: {
 				instance,
 				name,
 				phone
 			}
 		});
+
+		await this.syncContactToLocal(newContact);
+
+		return newContact;
 	}
 
 	public async getContactsWithCustomer(instance: string, token: string, filters: ContactsFilters) {
@@ -232,6 +236,192 @@ class ContactsService {
 		};
 	}
 
+	public async getContactsWithCustomerLocally(instance: string, filters: ContactsFilters) {
+		const page = Math.max(1, filters.page);
+		const perPage = Math.max(1, Math.min(100, filters.perPage));
+
+		const queryParams: any[] = [];
+		const whereConditions: string[] = ["ctt.is_deleted = false"];
+
+		// Filtros de contato
+		if (filters.name) {
+			whereConditions.push("ctt.name LIKE ?");
+			queryParams.push(`%${filters.name}%`);
+		}
+
+		if (filters.phone) {
+			const phoneDigits = filters.phone.replace(/\D/g, "");
+			if (phoneDigits) {
+				whereConditions.push("ctt.phone LIKE ?");
+				queryParams.push(`%${phoneDigits}%`);
+			}
+		}
+
+		if (typeof filters.customerId === "number" && Number.isFinite(filters.customerId)) {
+			whereConditions.push("ctt.customer_id = ?");
+			queryParams.push(filters.customerId);
+		}
+
+		if (filters.hasCustomer === true) {
+			whereConditions.push("ctt.customer_id IS NOT NULL");
+		} else if (filters.hasCustomer === false) {
+			whereConditions.push("ctt.customer_id IS NULL");
+		}
+
+		// Filtros de cliente
+		if (filters.customerErp) {
+			whereConditions.push("cli.COD_ERP LIKE ?");
+			queryParams.push(`%${filters.customerErp}%`);
+		}
+
+		if (filters.customerCnpj) {
+			whereConditions.push("cli.CPF_CNPJ LIKE ?");
+			queryParams.push(`%${filters.customerCnpj}%`);
+		}
+
+		if (filters.customerName) {
+			whereConditions.push("(cli.RAZAO LIKE ? OR cli.FANTASIA LIKE ?)");
+			queryParams.push(`%${filters.customerName}%`, `%${filters.customerName}%`);
+		}
+
+		// Filtros de setor
+		if (filters.sectorIds && filters.sectorIds.length > 0) {
+			const placeholders = filters.sectorIds.map(() => "?").join(",");
+			whereConditions.push(`EXISTS (
+				SELECT 1 FROM wpp_contact_sectors wcs 
+				WHERE wcs.contact_id = ctt.id 
+				AND wcs.sector_id IN (${placeholders})
+			)`);
+			queryParams.push(...filters.sectorIds);
+		}
+
+		const whereClause = whereConditions.join(" AND ");
+
+		// Query de contagem
+		const countQuery = `
+			SELECT COUNT(*) as total
+			FROM wpp_contacts ctt
+			LEFT JOIN clientes cli ON ctt.customer_id = cli.CODIGO
+			WHERE ${whereClause}
+		`;
+
+		const countResult = await instancesService.executeQuery<Array<{ total: number }>>(
+			instance,
+			countQuery,
+			queryParams
+		);
+		const total = countResult[0]?.total || 0;
+
+		if (total === 0) {
+			return {
+				data: [],
+				pagination: {
+					page,
+					perPage,
+					total: 0,
+					totalPages: 0,
+					hasNext: false,
+					hasPrev: false
+				}
+			};
+		}
+
+		// Query de dados com paginação
+		const offset = (page - 1) * perPage;
+		const dataQuery = `
+			SELECT 
+				ctt.*,
+				cli.CODIGO as customer_CODIGO,
+				cli.RAZAO as customer_RAZAO,
+				cli.FANTASIA as customer_FANTASIA,
+				cli.CPF_CNPJ as customer_CPF_CNPJ,
+				cli.COD_ERP as customer_COD_ERP,
+				cli.FONE1 as customer_TELEFONE,
+				cli.FONE2 as customer_CELULAR,
+				cli.EMAIL as customer_EMAIL,
+				op.NOME as operator_NOME,
+				GROUP_CONCAT(wcs.sector_id) as sector_ids
+			FROM wpp_contacts ctt
+			LEFT JOIN clientes cli ON ctt.customer_id = cli.CODIGO
+			LEFT JOIN wpp_chats chat ON ctt.id = chat.contact_id AND chat.is_finished = false
+			LEFT JOIN operadores op ON chat.user_id = op.CODIGO
+			LEFT JOIN wpp_contact_sectors wcs ON ctt.id = wcs.contact_id
+			WHERE ${whereClause}
+			GROUP BY ctt.id, op.NOME
+			ORDER BY ctt.id DESC
+			LIMIT ? OFFSET ?
+		`;
+
+		// Create a new array with pagination params
+		const dataQueryParams = [...queryParams, perPage, offset];
+
+		const contacts = await instancesService.executeQuery<any[]>(instance, dataQuery, dataQueryParams);
+
+		if (contacts.length === 0) {
+			return {
+				data: [],
+				pagination: {
+					page,
+					perPage,
+					total: 0,
+					totalPages: 0,
+					hasNext: false,
+					hasPrev: false
+				}
+			};
+		}
+
+		// Mapear contatos com dados enriquecidos
+		const mappedContacts = contacts.map((row) => {
+			const customer =
+				row.customer_CODIGO !== null
+					? {
+						CODIGO: row.customer_CODIGO,
+						RAZAO: row.customer_RAZAO,
+						FANTASIA: row.customer_FANTASIA,
+						NOME: row.customer_NOME,
+						CPF_CNPJ: row.customer_CPF_CNPJ,
+						COD_ERP: row.customer_COD_ERP,
+						TELEFONE: row.customer_TELEFONE,
+						CELULAR: row.customer_CELULAR,
+						EMAIL: row.customer_EMAIL
+					}
+					: null;
+
+			// Parsear sector_ids do GROUP_CONCAT
+			const sectorIds = row.sector_ids
+				? row.sector_ids.split(',').map((id: string) => parseInt(id, 10))
+				: [];
+
+			const chatingWith = row.operator_NOME || null;
+
+			return {
+				id: row.id,
+				instance: row.instance,
+				name: row.name,
+				phone: row.phone,
+				customerId: row.customer_id,
+				isDeleted: row.is_deleted,
+				sectors: sectorIds.map((sectorId: number) => ({ sectorId })),
+				customer,
+				chatingWith
+			};
+		});
+
+		const totalPages = Math.ceil(total / perPage);
+
+		return {
+			data: mappedContacts,
+			pagination: {
+				page,
+				perPage,
+				total,
+				totalPages,
+				hasNext: page < totalPages,
+				hasPrev: page > 1
+			}
+		};
+	}
 
 	private mapCustomerFilters(instance: string, filters: ContactsFilters, page = 1): Record<string, string> {
 		const params: Record<string, string> = {
@@ -364,69 +554,6 @@ class ContactsService {
 		return result;
 	}
 
-	/**
-	 * Busca usuários por IDs, com cache Redis por instance e chamada à API escopada por instance.
-	 */
-	/* 	private async getUsersByIds(instance: string, userIds: number[]): Promise<Map<number, User>> {
-		const result = new Map<number, User>();
-
-		if (userIds.length === 0) {
-			return result;
-		}
-
-		const cacheKeys = userIds.map((id) => `user:${instance}:${id}`);
-		const cachedUsers = await redisService.mget<User>(cacheKeys);
-
-		const idsToFetch: number[] = [];
-
-		cachedUsers.forEach((user, index) => {
-			if (user) {
-				result.set(userIds[index]!, user);
-			} else {
-				idsToFetch.push(userIds[index]!);
-			}
-		});
-
-		if (idsToFetch.length === 0) {
-			return result;
-		}
-
-		try {
-			const batchSize = 100;
-			for (let i = 0; i < idsToFetch.length; i += batchSize) {
-				const batch = idsToFetch.slice(i, i + batchSize);
-
-				// Ideal: endpoint byIds (se houver), passando instance.
-				// const { data: users } = await usersService.getUsers({ ids: batch.join(","), perPage: batch.length.toString(), instance });
-
-				// Fallback universal (escopado por instance):
-				const { data: users } = await usersService.getUsers({
-					perPage: batch.length.toString()
-				});
-
-				const requestedUsers = (users || []).filter((u: any) => batch.includes(u.CODIGO));
-
-				const cacheItems = requestedUsers.map((user: any) => ({
-					key: `user:${instance}:${user.CODIGO}`,
-					value: user,
-					ttl: this.USER_CACHE_TTL
-				}));
-
-				if (cacheItems.length) {
-					await redisService.mset(cacheItems);
-				}
-
-				requestedUsers.forEach((user: any) => {
-					result.set(user.CODIGO, user);
-				});
-			}
-		} catch (error) {
-			console.error("Erro ao buscar usuários:", error);
-		}
-
-		return result;
-	} */
-
 	public async getCustomerContacts(instance: string, customerId: number) {
 		const contacts = await prismaService.wppContact.findMany({
 			where: {
@@ -512,6 +639,7 @@ class ContactsService {
 					where: { id: existingContact.id },
 					data: { name, customerId: customerId || null }
 				});
+				await this.syncContactToLocal(updated);
 				return updated;
 			}
 
@@ -534,6 +662,8 @@ class ContactsService {
 				where: { id: existingContact.id },
 				data: { name, customerId: customerId || null }
 			});
+
+			await this.syncContactToLocal(updated);
 
 			return updated;
 		}
@@ -559,6 +689,11 @@ class ContactsService {
 			include: { sectors: true } as any
 		});
 
+		await this.syncContactToLocal(createdContact);
+		if (sectorIds && sectorIds.length > 0) {
+			await this.syncContactSectorsToLocal(createdContact.id, instance, sectorIds);
+		}
+
 		return createdContact;
 	}
 
@@ -573,6 +708,8 @@ class ContactsService {
 				where: { id: contactId },
 				data
 			});
+
+			await this.syncContactToLocal(contact);
 
 			return contact;
 		}
@@ -595,6 +732,9 @@ class ContactsService {
 			// include sectors for convenience (cast to any until prisma client is regenerated)
 			include: { sectors: true } as any
 		});
+
+		await this.syncContactToLocal(contact);
+		await this.syncContactSectorsToLocal(contactId, contact.instance, cleanedSectorIds);
 
 		return contact;
 	}
@@ -676,15 +816,19 @@ class ContactsService {
 		}
 
 		// Add new sector association
-		await prismaService.wppContact.update({
+		const updated = await prismaService.wppContact.update({
 			where: { id: contactId },
-			data: { sectors: { create: { sectorId } } } as any
-		});
-
-		const updated = await prismaService.wppContact.findUnique({
-			where: { id: contactId },
+			data: { sectors: { create: { sectorId } } } as any,
 			include: { sectors: true } as any
 		});
+
+		if (updated) {
+			// Sync the contact itself
+			await this.syncContactToLocal(updated);
+			// Sync the sector associations
+			const allSectorIds = ((updated as any).sectors || []).map((s: any) => s.sectorId);
+			await this.syncContactSectorsToLocal(contactId, contact.instance, allSectorIds);
+		}
 
 		return updated;
 	}
@@ -700,7 +844,54 @@ class ContactsService {
 			}
 		});
 
+		await this.syncContactToLocal(contact);
+
 		return contact;
+	}
+
+	/**
+	 * Sync contact to local database
+	 */
+	private async syncContactToLocal(contact: WppContact) {
+		try {
+			const query = `
+				INSERT INTO wpp_contacts (id, instance, name, phone, customer_id, is_deleted)
+				VALUES (?, ?, ?, ?, ?, ?)
+				ON DUPLICATE KEY UPDATE
+					name = VALUES(name),
+					phone = VALUES(phone),
+					customer_id = VALUES(customer_id),
+					is_deleted = VALUES(is_deleted)
+			`;
+
+			await instancesService.executeQuery(
+				contact.instance,
+				query,
+				[contact.id, contact.instance, contact.name, contact.phone, contact.customerId, contact.isDeleted]
+			);
+		} catch (error) {
+			console.error("[syncContactToLocal] Erro ao sincronizar contato:", error);
+		}
+	}
+
+	/**
+	 * Sync contact sectors to local database
+	 */
+	private async syncContactSectorsToLocal(contactId: number, instance: string, sectorIds: number[]) {
+		try {
+			// Delete existing sectors
+			const deleteQuery = "DELETE FROM wpp_contact_sectors WHERE contact_id = ?";
+			await instancesService.executeQuery(instance, deleteQuery, [contactId]);
+
+			// Insert new sectors
+			if (sectorIds.length > 0) {
+				const values = sectorIds.map((sectorId) => `(${contactId}, ${sectorId})`).join(", ");
+				const insertQuery = `INSERT INTO wpp_contact_sectors (contact_id, sector_id) VALUES ${values}`;
+				await instancesService.executeQuery(instance, insertQuery, []);
+			}
+		} catch (error) {
+			console.error("[syncContactSectorsToLocal] Erro ao sincronizar setores:", error);
+		}
 	}
 }
 

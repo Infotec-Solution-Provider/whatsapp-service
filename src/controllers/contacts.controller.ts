@@ -2,6 +2,7 @@ import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import contactsService from "../services/contacts.service";
 import contactSearchService from "../services/contact-search.service";
+import parametersService from "../services/parameters.service";
 
 class ContactsController {
 	constructor(public readonly router: Router) {
@@ -82,13 +83,26 @@ class ContactsController {
 			perPage: req.query["perPage"] ? Number(req.query["perPage"]) : 50
 		};
 
-		// Configura autenticação e executa busca
-		contactSearchService.setAuth(req.headers["authorization"] || "");
-		const result = await contactSearchService.search(
-			req.session.instance,
-			filters,
-			pagination
-		);
+		// Check if local sync is enabled via parameter
+		const parameters = await parametersService.getSessionParams(req.session);
+		const useLocalSync = parameters["use_local_contacts_sync"] === "true";
+
+		let result;
+		if (useLocalSync) {
+			// Use local sync method
+			result = await contactsService.getContactsWithCustomerLocally(
+				req.session.instance,
+				filters
+			);
+		} else {
+			// Use contact search service (default)
+			contactSearchService.setAuth(req.headers["authorization"] || "");
+			result = await contactSearchService.search(
+				req.session.instance,
+				filters,
+				pagination
+			);
+		}
 
 		const resBody = {
 			message: "Contacts retrieved successfully!",
