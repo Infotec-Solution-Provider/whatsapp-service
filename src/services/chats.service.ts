@@ -698,6 +698,11 @@ class ChatsService {
 				[lastIS.CAMPANHA]
 			);
 
+			if (!campanha || !campanha[0]) {
+				logger.log(`Aviso: Campanha não encontrada para código ${lastIS.CAMPANHA}. Pulando criação de histórico.`);
+				return null;
+			}
+
 			const ATIVO_RECEP = chat.type === "ACTIVE" ? "ATIVO" : "RECEP";
 			const data = formatDateForMySQL(chat.finishedAt || new Date());
 			const dto = {
