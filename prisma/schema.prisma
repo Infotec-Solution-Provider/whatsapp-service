@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "mysql"
-  url      = env("WHATSAPP_DATABASE_URL")
+    url      = env("WHATSAPP_DATABASE_URL")
 }
 
 model WppClient {
@@ -588,4 +588,38 @@ enum GupshupWebhookQueueStatus {
   FAILED
 
   @@map("gupshup_webhook_queue_status")
+}
+
+model WppMessageProcessingQueue {
+  id                  String                           @id @default(uuid())
+  instance            String                           @map("instance")
+  clientId            Int                              @map("client_id")
+  messageId           Int                              @map("message_id")
+  contactPhone        String                           @map("contact_phone")
+  contactName         String?                          @map("contact_name")
+  status              WppMessageProcessingQueueStatus  @default(PENDING)
+  retryCount          Int                              @default(0) @map("retry_count")
+  maxRetries          Int                              @default(3) @map("max_retries")
+  error               String?                          @map("error") @db.Text
+  createdAt           DateTime                         @default(now()) @map("created_at")
+  updatedAt           DateTime                         @updatedAt @map("updated_at")
+  processingStartedAt DateTime?                        @map("processing_started_at")
+  processedAt         DateTime?                        @map("processed_at")
+  lockedUntil         DateTime?                        @map("locked_until")
+  lockedBy            String?                          @map("locked_by")
+
+  @@index([instance, status, contactPhone])
+  @@index([status, createdAt])
+  @@index([contactPhone, status])
+  @@index([lockedUntil])
+  @@map("wpp_message_processing_queue")
+}
+
+enum WppMessageProcessingQueueStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+
+  @@map("wpp_message_processing_queue_status")
 }

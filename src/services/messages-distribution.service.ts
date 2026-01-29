@@ -31,6 +31,7 @@ import chooseSectorBot from "../bots/choose-sector.bot";
 import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
 import customerLinkingBot from "../bots/customer-linking.bot";
 import { InternalServerError } from "@rgranatodutra/http-errors";
+import messageQueueService from "./message-queue.service";
 
 // Interface para bots que processam mensagens
 interface BotProcessor {
@@ -300,6 +301,29 @@ class MessagesDistributionService {
 			logger.failed(err);
 			throw new InternalServerError("Não foi possível processar a mensagem.");
 		}
+	}
+
+	/**
+	 * Método chamado pela fila de processamento para processar uma mensagem
+	 * Este método é injetado no messageQueueService através do setProcessHandler
+	 */
+	public async processMessageFromQueue(
+		instance: string,
+		clientId: number,
+		messageId: number,
+		contactName?: string | null
+	): Promise<void> {
+		// Busca a mensagem completa
+		const message = await prismaService.wppMessage.findUnique({
+			where: { id: messageId }
+		});
+
+		if (!message) {
+			throw new Error(`Mensagem ${messageId} não encontrada no banco de dados`);
+		}
+
+		// Processa a mensagem normalmente
+		await this.processMessage(instance, clientId, message, contactName);
 	}
 
 	public async transferChatSector(sector: WppSector, contact: WppContact, chat: WppChat) {
@@ -870,4 +894,11 @@ class MessagesDistributionService {
 	}
 }
 
-export default new MessagesDistributionService();
+const messagesDistributionServiceInstance = new MessagesDistributionService();
+
+// Configura o handler de processamento da fila após a instância ser criada
+messageQueueService.setProcessHandler({
+	processMessage: messagesDistributionServiceInstance.processMessageFromQueue.bind(messagesDistributionServiceInstance)
+});
+
+export default messagesDistributionServiceInstance;

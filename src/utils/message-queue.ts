@@ -33,9 +33,6 @@ export class MessageQueue {
 	 */
 	public async initialize(instance: string, clientId: number): Promise<void> {
 		if (this.initialized) return;
-
-		Logger.info(`[MessageQueue] Inicializando fila para instância ${instance}, client ${clientId}`);
-
 		try {
 			// Recupera mensagens que estavam sendo processadas (possível queda)
 			await prismaService.messageQueueItem.updateMany({
@@ -60,23 +57,15 @@ export class MessageQueue {
 				orderBy: [{ priority: "desc" }, { createdAt: "asc" }]
 			});
 
-			Logger.info(
-				`[MessageQueue] Recuperadas ${pendingMessages.length} mensagens pendentes da instância ${instance}`
-			);
-
 			// TODO: Reprocessar mensagens pendentes
 			// Por enquanto, apenas logamos. A reprocessamento precisa ser implementado
 			// com acesso ao client WhatsApp apropriado
 			if (pendingMessages.length > 0) {
-				Logger.info(
-					`[MessageQueue] Existem ${pendingMessages.length} mensagens pendentes que precisam ser reprocessadas manualmente`
-				);
-
 				// FIXME: Limpa mensagens muito antigas (> 24h) para evitar acúmulo
 				const oneDayAgo = new Date();
 				oneDayAgo.setHours(oneDayAgo.getHours() - 24);
 
-				const oldPending = await prismaService.messageQueueItem.updateMany({
+				await prismaService.messageQueueItem.updateMany({
 					where: {
 						instance,
 						clientId,
@@ -91,12 +80,6 @@ export class MessageQueue {
 						processedAt: new Date()
 					}
 				});
-
-				if (oldPending.count > 0) {
-					Logger.info(
-						`[MessageQueue] ${oldPending.count} mensagens pendentes antigas foram marcadas como falhas`
-					);
-				}
 			}
 
 			this.initialized = true;
@@ -154,8 +137,6 @@ export class MessageQueue {
 			}
 		});
 
-		Logger.debug(`[MessageQueue] Mensagem ${messageId} persistida no banco (chat: ${chatId})`);
-
 		return new Promise((resolve, reject) => {
 			const queuedMessage: QueuedMessage = {
 				id: messageId,
@@ -179,8 +160,6 @@ export class MessageQueue {
 			} else {
 				queue.push(queuedMessage);
 			}
-
-			Logger.debug(`[MessageQueue] Mensagem ${messageId} adicionada à fila do chat ${chatId}`);
 
 			// Inicia processamento se não estiver em andamento
 			if (!this.processing.has(chatId)) {
@@ -213,7 +192,6 @@ export class MessageQueue {
 				}
 
 				const message = queue.shift()!;
-				Logger.debug(`[MessageQueue] Processando mensagem ${message.id} do chat ${chatId}`);
 
 				try {
 					// Atualiza status no banco

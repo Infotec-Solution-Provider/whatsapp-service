@@ -25,15 +25,12 @@ class GupshupController {
 		);
 
 		try {
-			processingLogger.debug("Gupshup Webhook Entry Received", { body: req.body });
-			Logger.debug("Gupshup Webhook Entry Received", { body: req.body, instance });
+			processingLogger.log("Gupshup Webhook Entry Received", { body: req.body });
 
 			// Enqueue webhook for processing instead of processing immediately
 			const queueId = await gupshupWebhookQueueService.enqueue(instance, req.body);
-			
-			processingLogger.debug("Webhook enqueued for processing", { queueId, instance });
-			Logger.debug("Webhook enqueued for processing", { queueId, instance });
-			
+
+			processingLogger.log("Webhook enqueued for processing", { queueId, instance });
 			processingLogger.success({ status: "enqueued", queueId, instance });
 			res.status(200).send();
 		} catch (err: any) {

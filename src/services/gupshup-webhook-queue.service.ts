@@ -24,8 +24,6 @@ class GupshupWebhookQueueService {
         maxRetries: 3
       }
     });
-
-    Logger.debug("Gupshup webhook enqueued", { id: item.id, instance });
     return item.id;
   }
 
@@ -34,7 +32,6 @@ class GupshupWebhookQueueService {
    */
   startProcessor(): void {
     if (this.isProcessing) {
-      Logger.debug("Gupshup webhook queue processor is already running");
       return;
     }
 
@@ -91,8 +88,6 @@ class GupshupWebhookQueueService {
       }
     });
 
-    Logger.debug("Processing Gupshup webhook from queue", { id: item.id, instance: item.instance });
-
     try {
       // Handle redirect for exatron instance
       const redirectExatron = process.env["REDIRECT_EXATRON_GUPSHUP_WEBHOOK"] === "true";
@@ -102,7 +97,6 @@ class GupshupWebhookQueueService {
           where: { id },
           data: { redirected: true }
         });
-        Logger.debug("Exatron webhook redirect completed", { id: item.id });
       }
 
       // Process the webhook
@@ -116,8 +110,6 @@ class GupshupWebhookQueueService {
           processedAt: new Date()
         }
       });
-
-      Logger.debug("Gupshup webhook processed successfully", { id: item.id, instance: item.instance });
     } catch (err: any) {
       const newRetryCount = item.retryCount + 1;
       const shouldRetry = newRetryCount < item.maxRetries;
@@ -131,18 +123,6 @@ class GupshupWebhookQueueService {
           processedAt: shouldRetry ? null : new Date()
         }
       });
-
-      if (shouldRetry) {
-        Logger.debug("Gupshup webhook processing failed, will retry", {
-          id: item.id,
-          instance: item.instance,
-          retryCount: newRetryCount,
-          maxRetries: item.maxRetries,
-          error: err?.message
-        });
-      } else {
-        Logger.error("Gupshup webhook processing failed permanently: " + item.id, err);
-      }
     }
   }
 
@@ -188,8 +168,6 @@ class GupshupWebhookQueueService {
         error: null
       }
     });
-
-    Logger.debug("Reset failed webhooks for retry", { count: result.count });
     return result.count;
   }
 }

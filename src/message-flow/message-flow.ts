@@ -48,11 +48,11 @@ export default class MessageFlow {
 
 			while (true) {
 				iterationCount++;
-				
+
 				if (iterationCount > maxIterations) {
 					throw new Error(`Fluxo excedeu máximo de ${maxIterations} iterações. Possível loop infinito.`);
 				}
-				
+
 				const step = this.getStep(currentStepNumber, logger);
 				const result = await this.executeStep(step, context);
 
@@ -62,7 +62,7 @@ export default class MessageFlow {
 					logger.log("╚═══════════════════════════════════════════════════════════");
 					return this.validateChat(result.chatData || null, logger);
 				}
-				
+
 				context = { ...context, ...result.context };
 				currentStepNumber = this.getNextStepNumber(result, currentStepNumber);
 			}
@@ -77,17 +77,17 @@ export default class MessageFlow {
 	}
 
 	private getStep(stepNumber: number, logger: ProcessingLogger): BaseStep {
-		logger.debug(`[MessageFlow] Buscando etapa #${stepNumber} no mapa de etapas`);
+		logger.log(`[MessageFlow] Buscando etapa #${stepNumber} no mapa de etapas`);
 		const step = this.steps.get(stepNumber);
 		if (!step) {
 			const availableSteps = Array.from(this.steps.keys()).join(', ');
-			logger.debug(`[MessageFlow] Etapas disponíveis: [${availableSteps}]`);
+			logger.log(`[MessageFlow] Etapas disponíveis: [${availableSteps}]`);
 			const err = new Error(`Etapa #${stepNumber} não encontrada no fluxo.`);
 			logger.log(`Erro: ${err.message}`);
 			logger.failed(err);
 			throw err;
 		}
-		logger.debug(`[MessageFlow] Etapa #${stepNumber} encontrada: ${step.constructor.name}`);
+		logger.log(`[MessageFlow] Etapa #${stepNumber} encontrada: ${step.constructor.name}`);
 		return step;
 	}
 

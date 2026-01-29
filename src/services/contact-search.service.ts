@@ -377,10 +377,6 @@ class ContactSearchService {
 		filters: ContactSearchFilters,
 		pagination: PaginationParams
 	): Promise<PaginatedResult<EnrichedContact>> {
-		const startTime = Date.now();
-		Logger.debug(`[ContactSearchService] START - instance: ${instance}`);
-		Logger.debug(`[ContactSearchService] filters: ${JSON.stringify(filters)}`);
-
 		const page = Math.max(1, pagination.page);
 		const perPage = Math.max(1, Math.min(100, pagination.perPage));
 
@@ -390,7 +386,6 @@ class ContactSearchService {
 
 		// Se buscou por filtros de cliente mas não encontrou nenhum, retorna vazio
 		if (matchedCustomerIds !== null && matchedCustomerIds.length === 0) {
-			Logger.debug("[ContactSearchService] Nenhum cliente encontrado para os filtros");
 			return this.emptyResult(page, perPage);
 		}
 
@@ -413,8 +408,6 @@ class ContactSearchService {
 		}
 
 		const whereConditions = queryBuilder.build();
-		Logger.debug(`[ContactSearchService] Query: ${JSON.stringify(whereConditions)}`);
-
 		// 3. Executa busca no banco
 		const [contacts, total] = await Promise.all([
 			prismaService.wppContact.findMany({
@@ -427,8 +420,6 @@ class ContactSearchService {
 			prismaService.wppContact.count({ where: whereConditions })
 		]);
 
-		Logger.debug(`[ContactSearchService] Encontrados: ${contacts.length}, Total: ${total}`);
-
 		if (contacts.length === 0) {
 			return this.emptyResult(page, perPage);
 		}
@@ -436,9 +427,8 @@ class ContactSearchService {
 		// 4. Enriquece contatos com dados de cliente e chat
 		const enricher = new ContactEnricher(instance);
 		const enrichedContacts = await enricher.enrich(contacts);
-
 		const totalPages = Math.ceil(total / perPage);
-		Logger.debug(`[ContactSearchService] END - ${Date.now() - startTime}ms`);
+
 
 		return {
 			data: enrichedContacts,

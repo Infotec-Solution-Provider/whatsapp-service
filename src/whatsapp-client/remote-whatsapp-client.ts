@@ -2,7 +2,7 @@ import { SocketEventType, SocketServerAdminRoom, SocketServerChatRoom } from "@i
 import { TemplateMessage } from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
 import internalChatsService from "../services/internal-chats.service";
-import messagesDistributionService from "../services/messages-distribution.service";
+import messageQueueService from "../services/message-queue.service";
 import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
 import MessageDto from "../types/remote-client.types";
@@ -103,8 +103,17 @@ class RemoteWhatsappClient implements WhatsappClient {
 				process.success(savedMsg);
 			} else {
 				const savedMsg = await messagesService.insertMessage(message);
-				await messagesDistributionService.processMessage(this.instance, this.id, savedMsg, message.contactName);
-				process.log("Message received handled successfully");
+				
+				// Enfileira a mensagem para processamento
+				await messageQueueService.enqueue({
+					instance: this.instance,
+					clientId: this.id,
+					messageId: savedMsg.id,
+					contactPhone: savedMsg.from,
+					contactName: message.contactName
+				});
+				
+				process.log("Message enqueued successfully");
 				process.success(savedMsg);
 			}
 		} catch (err: any) {

@@ -193,7 +193,6 @@ export abstract class BaseStep {
 	 * @returns String interpolada
 	 */
 	protected interpolateString(context: StepContext, template: string): string {
-		Logger.debug(`[BaseStep] Interpolating string: ${template}`, context);
 		return template.replace(/\$\{([^}]+)\}/g, (match, fieldPath) => {
 			const value = this.resolveField(context, fieldPath.trim());
 			return value !== undefined && value !== null ? String(value) : match;

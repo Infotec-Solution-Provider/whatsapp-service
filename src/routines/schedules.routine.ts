@@ -1,4 +1,3 @@
-import { Logger } from "@in.pulse-crm/utils";
 import prismaService from "../services/prisma.service";
 import ProcessingLogger from "../utils/processing-logger";
 import chatsService from "../services/chats.service";
@@ -7,7 +6,6 @@ import { WppContact, WppSchedule } from "@prisma/client";
 export default async function runSchedulesJob() {
 	const process = new ProcessingLogger("system", "schedules-job", Date.now().toString(), null);
 	try {
-		Logger.info("(SCHEDULES-JOB) Iniciando rotina de agendamentos...");
 		const schedules = await getPendingSchedules(process);
 
 		for (const schedule of schedules) {
@@ -16,12 +14,10 @@ export default async function runSchedulesJob() {
 				console.log(schedule.id);
 				await updateScheduleWithChatId(process, schedule.id, chat.id);
 			} catch (err: any) {
-				Logger.error(`(SCHEDULES-JOB) Erro ao processar agendamento id: ${schedule.id}: ` + err.message);
 				process.log(`Erro ao processar agendamento id: ${schedule.id}: ` + err.message);
 			}
 		}
 	} catch (err: any) {
-		Logger.error("(SCHEDULES-JOB) Erro ao executar rotina de agendamentos: " + err.message);
 		process.log("Erro ao executar rotina de agendamentos: " + err.message);
 		process.failed(err);
 	}

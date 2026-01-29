@@ -1,12 +1,12 @@
-import { Request, Response, Router } from "express";
+import { Formatter } from "@in.pulse-crm/utils";
 import { BadRequestError } from "@rgranatodutra/http-errors";
+import { Request, Response, Router } from "express";
 import CreateMessageDto from "../dtos/create-message.dto";
-import messagesService from "../services/messages.service";
-import messagesDistributionService from "../services/messages-distribution.service";
-import prismaService from "../services/prisma.service";
 import contactsService from "../services/contacts.service";
+import messageQueueService from "../services/message-queue.service";
+import messagesService from "../services/messages.service";
+import prismaService from "../services/prisma.service";
 import ProcessingLogger from "../utils/processing-logger";
-import { Logger, Formatter } from "@in.pulse-crm/utils";
 
 const ENDPOINT = "/api/whatsapp/parsed-messages";
 
@@ -20,8 +20,9 @@ interface ProcessMessageResponse {
 	message: string;
 	data?: {
 		messageId: number;
-		chatId: number;
-		contactId: number;
+		chatId: number | null;
+		contactId: number | null;
+		queueId?: string;
 	};
 	error?: string;
 }
@@ -143,31 +144,31 @@ class ParsedMessagesController {
 			const inserted = await messagesService.insertMessage(messageDto);
 			logger.log("Mensagem inserida", { messageId: inserted.id });
 
-			// Processa a mensagem (cria chat, distribui, etc)
-			logger.log("Processando distribuição da mensagem");
-			const processed = await messagesDistributionService.processMessage(
-				messageDto.instance,
-				messageDto.clientId!,
-				inserted,
-				contactName
-			);
-
-			logger.success("Mensagem processada com sucesso");
+			// Enfileira a mensagem para processamento pela fila
+			logger.log("Enfileirando mensagem para processamento");
+			const queueId = await messageQueueService.enqueue({
+				instance: messageDto.instance,
+				clientId: messageDto.clientId!,
+				messageId: inserted.id,
+				contactPhone: inserted.from,
+				contactName: contactName
+			});
+			logger.log("Mensagem enfileirada", { queueId });
+			logger.success("Mensagem enfileirada com sucesso");
 
 			const response: ProcessMessageResponse = {
 				success: true,
-				message: "Message processed successfully",
+				message: "Message queued for processing",
 				data: {
-					messageId: processed.id,
-					chatId: processed.chatId!,
-					contactId: processed.contactId!
+					messageId: inserted.id,
+					chatId: null,
+					contactId: null
 				}
 			};
 
 			res.status(201).send(response);
 		} catch (err: any) {
 			logger.failed(err);
-			Logger.error(`Erro ao processar mensagem parseada: ${err?.message}`);
 
 			const response: ProcessMessageResponse = {
 				success: false,
@@ -251,12 +252,14 @@ class ParsedMessagesController {
 
 					const inserted = await messagesService.insertMessage(messageDto);
 
-					await messagesDistributionService.processMessage(
-						messageDto.instance,
-						messageDto.clientId!,
-						inserted,
-						contactName
-					);
+					// Enfileira a mensagem para processamento
+					await messageQueueService.enqueue({
+						instance: messageDto.instance,
+						clientId: messageDto.clientId!,
+						messageId: inserted.id,
+						contactPhone: inserted.from,
+						contactName: contactName
+					});
 
 					results.push({
 						index: i,
@@ -285,7 +288,6 @@ class ParsedMessagesController {
 			});
 		} catch (err: any) {
 			logger.failed(err);
-			Logger.error(`Erro ao processar batch de mensagens: ${err?.message}`);
 
 			res.status(err?.statusCode || 500).send({
 				success: false,
