@@ -280,11 +280,12 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 	}
 
 	private async handleMessage(msg: WAWebJS.Message) {
-		this.log("info", "Message received: " + msg.id._serialized);
+		this.log("info", "Message received: " + msg.id.id + " | " + msg.body);
 		const process = new ProcessingLogger(this.instance, "wwebjs-message-receive", msg.id._serialized, msg);
 
 		try {
 			const chat = await msg.getChat();
+			this.log("info", `Chat info: id=${chat.id._serialized} | isGroup=${chat.isGroup} | name=${chat.name}`);
 
 			if (msg.fromMe) {
 				return process.log("Message ignored: it is from me.");

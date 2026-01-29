@@ -1,6 +1,7 @@
 import { Logger } from "@in.pulse-crm/utils";
 import prismaService from "../services/prisma.service";
 import { MessageQueueStatus } from "@prisma/client";
+import ProcessingLogger from "../utils/processing-logger";
 
 /**
  * Rotina de limpeza automática da fila de mensagens
@@ -8,7 +9,8 @@ import { MessageQueueStatus } from "@prisma/client";
  * LIMPEZA AGRESSIVA: remove mensagens processadas após apenas 1 hora
  */
 export async function cleanMessageQueueRoutine(instance: string, hoursOld: number = 1): Promise<void> {
-	Logger.info(`[CleanMessageQueue] Iniciando limpeza de mensagens antigas (>${hoursOld}h)...`);
+	const logger = new ProcessingLogger("system", "clean-message-queue", String(Date.now()), {});
+	logger.log(`[CleanMessageQueue] Iniciando limpeza de mensagens antigas (>${hoursOld}h)...`);
 
 	try {
 		const cutoffDate = new Date();
@@ -28,7 +30,7 @@ export async function cleanMessageQueueRoutine(instance: string, hoursOld: numbe
 		});
 
 		if (result.count > 0) {
-			Logger.info(`[CleanMessageQueue] Removidas ${result.count} mensagens processadas há mais de ${hoursOld}h`);
+			logger.log(`[CleanMessageQueue] Removidas ${result.count} mensagens processadas há mais de ${hoursOld}h`);
 		}
 
 		// Verifica mensagens travadas em PROCESSING há muito tempo (possível queda não detectada)
@@ -63,7 +65,7 @@ export async function cleanMessageQueueRoutine(instance: string, hoursOld: numbe
 				}
 			});
 
-			Logger.info(`[CleanMessageQueue] ${stuckMessages.length} mensagens resetadas para PENDING`);
+			logger.log(`[CleanMessageQueue] ${stuckMessages.length} mensagens resetadas para PENDING`);
 		}
 
 		// Estatísticas
@@ -75,9 +77,9 @@ export async function cleanMessageQueueRoutine(instance: string, hoursOld: numbe
 			_count: true
 		});
 
-		Logger.info(`[CleanMessageQueue] Estatísticas atuais da fila:`);
+		logger.log(`[CleanMessageQueue] Estatísticas atuais da fila:`);
 		stats.forEach((stat) => {
-			Logger.info(`  - ${stat.status}: ${stat._count}`);
+			logger.log(`  - ${stat.status}: ${stat._count}`);
 		});
 	} catch (err) {
 		Logger.error(`[CleanMessageQueue] Erro durante limpeza: ${err}`);
@@ -95,10 +97,6 @@ export function scheduleMessageQueueCleanup(
 	intervalMinutes: number = 30,
 	hoursOld: number = 1
 ): NodeJS.Timeout {
-	Logger.info(
-		`[CleanMessageQueue] Agendando limpeza automática a cada ${intervalMinutes}min (remove mensagens >${hoursOld}h)`
-	);
-
 	// Executa imediatamente
 	cleanMessageQueueRoutine(instance, hoursOld);
 

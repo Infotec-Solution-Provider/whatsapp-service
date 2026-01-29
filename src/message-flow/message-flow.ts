@@ -117,15 +117,5 @@ export default class MessageFlow {
 			throw new Error(`Etapa #${step.stepNumber} já está registrada no fluxo de mensagens.`);
 		}
 		this.steps.set(step.stepNumber, step);
-		console.log(`[MessageFlow] Etapa #${step.stepNumber} (${step.constructor.name}) registrada com sucesso`);
-	}
-
-	public debugStepsMap(): void {
-		console.log('[MessageFlow] === Mapa de Etapas Registradas ===');
-		console.log(`[MessageFlow] Total de etapas: ${this.steps.size}`);
-		this.steps.forEach((step, stepNumber) => {
-			console.log(`[MessageFlow] Etapa #${stepNumber} -> ${step.constructor.name}`);
-		});
-		console.log('[MessageFlow] ===============================');
 	}
 }

@@ -58,8 +58,11 @@ class MessageQueueService {
    */
   public startWorker() {
     if (this.processingInterval) {
+      Logger.info(`[MessageQueueService] Worker já está rodando`);
       return;
     }
+
+    Logger.info(`[MessageQueueService] 🚀 Iniciando worker de processamento da fila (intervalo: ${this.PROCESSING_INTERVAL_MS}ms)`);
 
     this.processingInterval = setInterval(() => {
       this.processQueue().catch((err) => {

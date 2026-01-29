@@ -28,6 +28,7 @@ import { registerAllSteps } from "./message-flow/register-steps";
 import remoteClientController from "./controllers/remote-client.controller";
 import parsedMessagesController from "./controllers/parsed-messages.controller";
 import messageQueueController from "./controllers/message-queue.controller";
+import messageQueueService from "./services/message-queue.service";
 
 whatsappService.buildClients();
 const app = express();
@@ -88,5 +89,6 @@ const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;
 app.listen(serverPort, () => {
 	registerAllSteps();
 	gupshupWebhookQueueService.startProcessor();
+	messageQueueService.startWorker();
 	Logger.info("Server listening on port " + serverPort);
 });

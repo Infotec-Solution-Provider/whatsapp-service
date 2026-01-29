@@ -60,7 +60,6 @@ export default class MessageFlowFactory {
 			);
 			messageFlow.addStep(step);
 		}
-		messageFlow.debugStepsMap();
 		return messageFlow;
 	}
 
@@ -119,7 +118,6 @@ export default class MessageFlowFactory {
 
 				messageFlow.addStep(stepInstance);
 			}
-			messageFlow.debugStepsMap();
 			return messageFlow;
 		} catch (error: any) {
 			throw error;
