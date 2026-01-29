@@ -499,9 +499,13 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 		try {
 			// Obtém o chat e define estado de digitação
-			const chat = await this.wwebjs.getChatById(to);
+			process.log("Obtendo chat:", to);
+			const chat = await this.wwebjs.getChatById(to).catch((err) => {
+				process.log("Erro ao obter chat, tentando enviar direto sem estado de digitação:", err);
+				return null;
+			});
 
-			if (config?.enabled && config.sendTypingState) {
+			if (chat && config?.enabled && config.sendTypingState) {
 				process.log("Enviando estado de digitação...");
 				await chat.sendStateTyping();
 
@@ -515,7 +519,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			process.log("Enviando mensagem...");
 			const sentMsg = await this.wwebjs.sendMessage(to, content, { sendSeen: false, ...params });
 
-			if (config?.enabled && config.sendTypingState) {
+			if (chat && config?.enabled && config.sendTypingState) {
 				// Limpa estado de digitação
 				await chat.clearState();
 			}
