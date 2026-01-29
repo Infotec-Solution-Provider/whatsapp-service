@@ -94,11 +94,8 @@ class MessageQueueService {
    */
   private async processQueue() {
     if (this.isProcessing) {
-      Logger.debug("[MessageQueueService] Queue processing already in progress, skipping this cycle");
       return;
     }
-    Logger.debug("[MessageQueueService] Starting queue processing cycle");
-    
     this.isProcessing = true;
 
     try {
