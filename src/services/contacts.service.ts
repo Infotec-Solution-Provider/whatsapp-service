@@ -9,7 +9,7 @@ import parametersService from "./parameters.service";
 import prismaService from "./prisma.service";
 import usersService from "./users.service";
 import whatsappService from "./whatsapp.service";
-import { Logger } from "@in.pulse-crm/utils";
+
 
 export interface ContactsFilters {
 	id?: number | null;
@@ -54,7 +54,7 @@ class ContactsService {
 	}
 
 	public async getContactsWithCustomer(instance: string, token: string, filters: ContactsFilters) {
-		const startTime = Date.now();
+
 		const normalizedToken = (token || "").replace(/^Bearer\s+/i, "");
 		if (normalizedToken) {
 			customersService.setAuth(normalizedToken);
@@ -121,7 +121,7 @@ class ContactsService {
 				}
 			};
 		}
-		const dbQueryStart = Date.now();
+
 		const [contacts, total] = await Promise.all([
 			prismaService.wppContact.findMany({
 				where: whereConditions,
@@ -160,7 +160,6 @@ class ContactsService {
 			(Array.isArray(chats) ? chats : []).map((chat: any) => [chat.contactId, chat])
 		);
 
-		const mappingStart = Date.now();
 		const mappedContacts = await Promise.all(
 			contacts.map(async (contact) => {
 				const customer = contact.customerId ? customersMap.get(contact.customerId) : null;

@@ -1,4 +1,3 @@
-import { Logger } from "@in.pulse-crm/utils";
 import prismaService from "../services/prisma.service";
 import { BaseStep } from "./base/base.step";
 import MessageFlow from "./message-flow";
