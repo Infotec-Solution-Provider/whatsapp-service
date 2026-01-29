@@ -8,7 +8,7 @@ const router = Router();
  * GET /message-queue/stats
  * Retorna estatísticas da fila de processamento
  */
-router.get("/message-queue/stats", isAuthenticated, async (_req, res) => {
+router.get("/api/whatsapp/message-queue/stats", isAuthenticated, async (_req, res) => {
 	const stats = await messageQueueService.getQueueStats();
 	res.json(stats);
 });
@@ -17,7 +17,7 @@ router.get("/message-queue/stats", isAuthenticated, async (_req, res) => {
  * POST /message-queue/clean
  * Remove itens concluídos antigos da fila
  */
-router.post("/message-queue/clean", isAuthenticated, async (_req, res) => {
+router.post("/api/whatsapp/message-queue/clean", isAuthenticated, async (_req, res) => {
 	const count = await messageQueueService.cleanOldCompletedItems();
 	res.json({ message: `${count} itens removidos da fila`, count });
 });
