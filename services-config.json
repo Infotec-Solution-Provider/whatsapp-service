@@ -1,0 +1,34 @@
+{
+  "services": [
+    {
+      "name": "instances-service",
+      "path": "C:\\Workspace\\Infotec\\new-inpulse\\instances-service",
+      "command": "npm run dev"
+    },
+    {
+      "name": "users-service",
+      "path": "C:\\Workspace\\Infotec\\new-inpulse\\users-service",
+      "command": "npm run dev"
+    },
+    {
+      "name": "customers-service",
+      "path": "C:\\Workspace\\Infotec\\new-inpulse\\customers-service",
+      "command": "npm run dev"
+    },
+    {
+      "name": "files-service",
+      "path": "C:\\Workspace\\Infotec\\new-inpulse\\files-service",
+      "command": "npm run dev"
+    },
+    {
+      "name": "socket-service",
+      "path": "C:\\Workspace\\Infotec\\new-inpulse\\socket-service",
+      "command": "npm run dev"
+    },
+    {
+      "name": "inpulse-frontend",
+      "path": "C:\\Workspace\\Infotec\\new-inpulse\\inpulse-frontend",
+      "command": "npm run dev"
+    }
+  ]
+}
