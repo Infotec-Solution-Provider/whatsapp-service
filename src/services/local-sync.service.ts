@@ -89,7 +89,7 @@ class LocalSyncService {
 				sent_at DATETIME NOT NULL,
 				status VARCHAR(50) NOT NULL,
 				file_id INT NULL,
-				file_name TEXT NULL,
+				file_name LONGTEXT NULL,
 				file_type VARCHAR(255) NULL,
 				file_size VARCHAR(255) NULL,
 				user_id INT NULL,
@@ -181,6 +181,16 @@ class LocalSyncService {
 			} catch (err: any) {
 				if (!err.message.includes("already exists")) {
 					console.log(`[LocalSync] wpp_messages charset já é utf8 ou erro ao alterar`);
+				}
+			}
+
+			try {
+				const alterFileNameQuery = `ALTER TABLE wpp_messages MODIFY COLUMN file_name LONGTEXT NULL`;
+				await instancesService.executeQuery(instance, alterFileNameQuery, []);
+				console.log(`[LocalSync] Coluna file_name de wpp_messages alterada para LONGTEXT`);
+			} catch (err: any) {
+				if (!err.message.includes("already exists")) {
+					console.log(`[LocalSync] file_name já é LONGTEXT ou erro ao alterar`);
 				}
 			}
 
