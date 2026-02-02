@@ -117,7 +117,7 @@ class LocalSyncService {
 				sent_at DATETIME NOT NULL,
 				status VARCHAR(50) NOT NULL,
 				file_id INT NULL,
-				file_name VARCHAR(255) NULL,
+				file_name TEXT NULL,
 				file_type VARCHAR(255) NULL,
 				file_size VARCHAR(255) NULL,
 				user_id INT NULL,
@@ -449,7 +449,7 @@ class LocalSyncService {
 			return 0;
 		}
 
-		const batchSize = 500;
+		const batchSize = 50; // Batch menor para evitar queries SQL muito grandes
 		let syncedCount = 0;
 
 		for (let i = 0; i < messages.length; i += batchSize) {
@@ -531,7 +531,7 @@ class LocalSyncService {
 			return 0;
 		}
 
-		const batchSize = 200;
+		const batchSize = 50; // Batch menor para evitar queries SQL muito grandes
 		let syncedCount = 0;
 
 		for (let i = 0; i < schedules.length; i += batchSize) {
