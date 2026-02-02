@@ -3,34 +3,42 @@ import prismaService from "./prisma.service";
 
 class LocalSyncService {
 	/**
-	 * Remove emojis and special characters that MySQL utf8 can't handle
-	 * Keep ASCII (0-127) and Latin-1 (128-255) which includes accents and ç
+	 * Safely encode string for storage in database
 	 */
-	private removeEmojis(str: string): string {
-		if (!str) return str;
-
-		// Use Array.from to properly handle surrogate pairs
-		return Array.from(str)
-			.filter(char => {
-				const code = char.codePointAt(0) || 0;
-				// Keep ASCII (0-127) and Latin-1 Supplement (128-255)
-				// This includes acentos, ç, é, í, ó, ú, à, etc.
-				return code < 256;
-			})
-			.join('')
-			.trim();
+	private safeEncodeURIComponent(str: string): string {
+		if (!str) return "";
+		try {
+			return encodeURIComponent(str);
+		} catch (err) {
+			console.error("[LocalSync] Erro ao encodar string:", err);
+			return "";
+		}
 	}
 
 	/**
-	 * Escape string for SQL queries
+	 * Safely decode string from database
 	 */
-	private escapeSQL(value: string): string {
+	public safeDecodeURIComponent(str: string): string {
+		if (!str) return "";
+		try {
+			return decodeURIComponent(str);
+		} catch (err) {
+			console.error("[LocalSync] Erro ao decodar string:", err);
+			return str; // Return original if decode fails
+		}
+	}
+
+	/**
+	 * Format string for SQL insert (with encoding)
+	 */
+	private formatSQLString(value: string | null | undefined): string {
 		if (value === null || value === undefined) {
 			return "NULL";
 		}
-		// Remove emojis first
-		const cleaned = this.removeEmojis(value.toString());
-		return "'" + cleaned.replace(/'/g, "''").replace(/\\/g, "\\\\") + "'";
+		const encoded = this.safeEncodeURIComponent(value.toString());
+		// Escape single quotes for SQL
+		const escaped = encoded.replace(/'/g, "''");
+		return "'" + escaped + "'";
 	}
 
 	/**
@@ -104,7 +112,7 @@ class LocalSyncService {
 				contact_id INT NULL,
 				is_forwarded TINYINT(1) NOT NULL DEFAULT 0,
 				is_edited TINYINT(1) NOT NULL DEFAULT 0,
-				body TEXT NOT NULL,
+				body LONGTEXT NOT NULL,
 				timestamp VARCHAR(64) NOT NULL,
 				sent_at DATETIME NOT NULL,
 				status VARCHAR(50) NOT NULL,
@@ -282,7 +290,7 @@ class LocalSyncService {
 			const values = batch
 				.map(
 					(c) =>
-						`(${c.id}, ${this.escapeSQL(c.instance)}, ${this.escapeSQL(c.name)}, ${this.escapeSQL(c.phone)}, ${c.customerId || "NULL"}, ${c.isDeleted ? 1 : 0})`
+						`(${c.id}, ${this.formatSQLString(c.instance)}, ${this.formatSQLString(c.name)}, ${this.formatSQLString(c.phone)}, ${c.customerId || "NULL"}, ${c.isDeleted ? 1 : 0})`
 				)
 				.join(", ");
 
@@ -385,9 +393,9 @@ class LocalSyncService {
 				.map((chat) => {
 					const startedAt = this.formatDateForMySQL(chat.startedAt);
 					const finishedAt = this.formatDateForMySQL(chat.finishedAt);
-					const avatarUrl = chat.avatarUrl ? this.escapeSQL(chat.avatarUrl) : "NULL";
+			const avatarUrl = chat.avatarUrl ? this.formatSQLString(chat.avatarUrl) : "NULL";
 
-					return `(${chat.id}, ${chat.id}, ${this.escapeSQL(chat.instance)}, ${this.escapeSQL(chat.type)}, ${avatarUrl}, ${chat.userId || "NULL"}, ${chat.contactId || "NULL"}, ${chat.sectorId || "NULL"}, ${startedAt}, ${finishedAt}, ${chat.finishedBy || "NULL"}, ${chat.resultId || "NULL"}, ${chat.isFinished ? 1 : 0}, ${chat.isSchedule ? 1 : 0})`;
+				return `(${chat.id}, ${chat.id}, ${this.formatSQLString(chat.instance)}, ${this.formatSQLString(chat.type)}, ${avatarUrl}, ${chat.userId || "NULL"}, ${chat.contactId || "NULL"}, ${chat.sectorId || "NULL"}, ${startedAt}, ${finishedAt}, ${chat.finishedBy || "NULL"}, ${chat.resultId || "NULL"}, ${chat.isFinished ? 1 : 0}, ${chat.isSchedule ? 1 : 0})`;
 				})
 				.join(", ");
 
@@ -448,9 +456,14 @@ class LocalSyncService {
 			const batch = messages.slice(i, i + batchSize);
 
 			const values = batch
-				.map((msg) => {
-					const sentAt = this.formatDateForMySQL(msg.sentAt);
-					return `(${msg.id}, ${this.escapeSQL(msg.instance)}, ${msg.wwebjsId ? this.escapeSQL(msg.wwebjsId) : "NULL"}, ${msg.wwebjsIdStanza ? this.escapeSQL(msg.wwebjsIdStanza) : "NULL"}, ${msg.wabaId ? this.escapeSQL(msg.wabaId) : "NULL"}, ${msg.gupshupId ? this.escapeSQL(msg.gupshupId) : "NULL"}, ${msg.gupshupRequestId ? this.escapeSQL(msg.gupshupRequestId) : "NULL"}, ${this.escapeSQL(msg.from)}, ${this.escapeSQL(msg.to)}, ${this.escapeSQL(msg.type)}, ${msg.quotedId || "NULL"}, ${msg.chatId || "NULL"}, ${msg.contactId || "NULL"}, ${msg.isForwarded ? 1 : 0}, ${msg.isEdited ? 1 : 0}, ${this.escapeSQL(msg.body)}, ${this.escapeSQL(msg.timestamp)}, ${sentAt}, ${this.escapeSQL(msg.status)}, ${msg.fileId || "NULL"}, ${msg.fileName ? this.escapeSQL(msg.fileName) : "NULL"}, ${msg.fileType ? this.escapeSQL(msg.fileType) : "NULL"}, ${msg.fileSize ? this.escapeSQL(msg.fileSize) : "NULL"}, ${msg.userId || "NULL"}, ${msg.billingCategory ? this.escapeSQL(msg.billingCategory) : "NULL"}, ${msg.clientId || "NULL"})`;
+				.map((msg, idx) => {
+					try {
+						const sentAt = this.formatDateForMySQL(msg.sentAt);
+						return `(${msg.id}, ${this.formatSQLString(msg.instance)}, ${msg.wwebjsId ? this.formatSQLString(msg.wwebjsId) : "NULL"}, ${msg.wwebjsIdStanza ? this.formatSQLString(msg.wwebjsIdStanza) : "NULL"}, ${msg.wabaId ? this.formatSQLString(msg.wabaId) : "NULL"}, ${msg.gupshupId ? this.formatSQLString(msg.gupshupId) : "NULL"}, ${msg.gupshupRequestId ? this.formatSQLString(msg.gupshupRequestId) : "NULL"}, ${this.formatSQLString(msg.from)}, ${this.formatSQLString(msg.to)}, ${this.formatSQLString(msg.type)}, ${msg.quotedId || "NULL"}, ${msg.chatId || "NULL"}, ${msg.contactId || "NULL"}, ${msg.isForwarded ? 1 : 0}, ${msg.isEdited ? 1 : 0}, ${this.formatSQLString(msg.body)}, ${this.formatSQLString(msg.timestamp)}, ${sentAt}, ${this.formatSQLString(msg.status)}, ${msg.fileId || "NULL"}, ${msg.fileName ? this.formatSQLString(msg.fileName) : "NULL"}, ${msg.fileType ? this.formatSQLString(msg.fileType) : "NULL"}, ${msg.fileSize ? this.formatSQLString(msg.fileSize) : "NULL"}, ${msg.userId || "NULL"}, ${msg.billingCategory ? this.formatSQLString(msg.billingCategory) : "NULL"}, ${msg.clientId || "NULL"})`;
+					} catch (err) {
+						console.error(`[LocalSync] Erro ao processar mensagem ${msg.id} no índice ${idx}:`, err);
+						throw err;
+					}
 				})
 				.join(", ");
 
@@ -493,8 +506,8 @@ class LocalSyncService {
 				await instancesService.executeQuery(instance, query, []);
 				syncedCount += batch.length;
 			} catch (err) {
-				console.error(`[LocalSync] Erro ao sincronizar batch de mensagens:`, err);
-				console.error(`[LocalSync] Query: ${query.substring(0, 500)}...`);
+				console.error(`[LocalSync] Erro ao sincronizar batch de mensagens (linhas ${i + 1}-${i + batch.length}):`, err);
+				console.error(`[LocalSync] Query preview: ${query.substring(0, 800)}...`);
 				throw err;
 			}
 		}
@@ -528,7 +541,7 @@ class LocalSyncService {
 				.map((schedule) => {
 					const scheduledAt = this.formatDateForMySQL(schedule.scheduledAt);
 					const scheduleDate = this.formatDateForMySQL(schedule.scheduleDate);
-					return `(${schedule.id}, ${this.escapeSQL(schedule.instance)}, ${schedule.description ? this.escapeSQL(schedule.description) : "NULL"}, ${schedule.contactId}, ${schedule.chatId || "NULL"}, ${scheduledAt}, ${scheduleDate}, ${schedule.scheduledBy}, ${schedule.scheduledFor}, ${schedule.sectorId || "NULL"})`;
+					return `(${schedule.id}, ${this.formatSQLString(schedule.instance)}, ${schedule.description ? this.formatSQLString(schedule.description) : "NULL"}, ${schedule.contactId}, ${schedule.chatId || "NULL"}, ${scheduledAt}, ${scheduleDate}, ${schedule.scheduledBy}, ${schedule.scheduledFor}, ${schedule.sectorId || "NULL"})`;
 				})
 				.join(", ");
 

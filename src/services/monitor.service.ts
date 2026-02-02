@@ -486,49 +486,39 @@ class MonitorService {
 				return {
 					id: Number(row.id),
 					instance: row.instance,
-					wwebjsId: row.wwebjs_id || null,
-					wwebjsIdStanza: row.wwebjs_id_stanza || null,
-					wabaId: row.waba_id || null,
-					gupshupId: row.gupshup_id || null,
-					gupshupRequestId: row.gupshup_request_id || null,
-					from: row.from,
-					to: row.to,
-					type: row.type,
+					wwebjsId: row.wwebjs_id ? decodeURIComponent(row.wwebjs_id) : null,
+					wwebjsIdStanza: row.wwebjs_id_stanza ? decodeURIComponent(row.wwebjs_id_stanza) : null,
+					wabaId: row.waba_id ? decodeURIComponent(row.waba_id) : null,
+					gupshupId: row.gupshup_id ? decodeURIComponent(row.gupshup_id) : null,
+					gupshupRequestId: row.gupshup_request_id ? decodeURIComponent(row.gupshup_request_id) : null,
+					from: decodeURIComponent(row.from),
+					to: decodeURIComponent(row.to),
+					type: decodeURIComponent(row.type),
 					quotedId: row.quoted_id ? Number(row.quoted_id) : null,
 					chatId: row.chat_id ? Number(row.chat_id) : null,
 					contactId: row.contact_id ? Number(row.contact_id) : null,
 					isForwarded: Number(row.is_forwarded) === 1,
 					isEdited: Number(row.is_edited) === 1,
-					body: row.body,
-					timestamp: row.timestamp,
+					body: decodeURIComponent(row.body),
+					timestamp: decodeURIComponent(row.timestamp),
 					sentAt,
-					status: row.status,
+					status: decodeURIComponent(row.status),
 					fileId: row.file_id ? Number(row.file_id) : null,
-					fileName: row.file_name || null,
-					fileType: row.file_type || null,
-					fileSize: row.file_size || null,
+					fileName: row.file_name ? decodeURIComponent(row.file_name) : null,
+					fileType: row.file_type ? decodeURIComponent(row.file_type) : null,
+					fileSize: row.file_size ? decodeURIComponent(row.file_size) : null,
 					userId: row.user_id ? Number(row.user_id) : null,
-					billingCategory: row.billing_category || null,
+					billingCategory: row.billing_category ? decodeURIComponent(row.billing_category) : null,
 					clientId: row.client_id ? Number(row.client_id) : null
 				} as WppMessage;
 			});
 
 			const messagesByContact = new Map<number, WppMessage[]>();
 			messages.forEach((msg) => {
-				const decoded =
-					session.instance === "vollo" && typeof msg.body === "string"
-						? (() => {
-							try {
-								return { ...msg, body: decodeURIComponent(msg.body) };
-							} catch (e) {
-								return msg;
-							}
-						})()
-						: msg;
-				const list = messagesByContact.get(decoded.contactId || 0) || [];
-				list.push(decoded);
-				if (decoded.contactId) {
-					messagesByContact.set(decoded.contactId, list);
+				const list = messagesByContact.get(msg.contactId || 0) || [];
+				list.push(msg);
+				if (msg.contactId) {
+					messagesByContact.set(msg.contactId, list);
 				}
 			});
 
@@ -633,8 +623,8 @@ class MonitorService {
 
 			return {
 				id: Number(row.id),
-				instance: row.instance,
-				description: row.description || null,
+				instance: decodeURIComponent(row.instance),
+				description: row.description ? decodeURIComponent(row.description) : null,
 				contactId: Number(row.contact_id),
 				chatId: row.chat_id ? Number(row.chat_id) : null,
 				scheduledAt: row.scheduled_at ? new Date(row.scheduled_at) : new Date(),
