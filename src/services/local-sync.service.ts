@@ -11,6 +11,19 @@ interface SyncOptions {
 
 class LocalSyncService {
 	/**
+	 * Safely encode string for storage (handles emojis and special chars)
+	 */
+	private safeEncode(value: string | null | undefined): string | null {
+		if (!value) return null;
+		try {
+			return encodeURIComponent(value);
+		} catch (err) {
+			console.error(`[LocalSync] Erro ao fazer encode:`, err);
+			return value;
+		}
+	}
+
+	/**
 	 * Ensure all required local tables exist in the tenant database
 	 */
 	private async ensureTablesExist(instance: string): Promise<void> {
@@ -28,7 +41,7 @@ class LocalSyncService {
 				UNIQUE KEY unique_instance_phone (instance, phone),
 				INDEX idx_customer_id (customer_id),
 				INDEX idx_phone (phone)
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 		`;
 
 		const createContactSectorsTableQuery = `
@@ -37,7 +50,7 @@ class LocalSyncService {
 				sector_id INT NOT NULL,
 				PRIMARY KEY (contact_id, sector_id),
 				INDEX idx_sector_id (sector_id)
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 		`;
 
 		const createChatsTableQuery = `
@@ -61,7 +74,7 @@ class LocalSyncService {
 				INDEX idx_user_id (user_id),
 				INDEX idx_is_finished (is_finished),
 				INDEX idx_sector_id (sector_id)
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 		`;
 
 		const createMessagesTableQuery = `
@@ -101,7 +114,7 @@ class LocalSyncService {
 				INDEX idx_chat_id (chat_id),
 				INDEX idx_sent_at (sent_at),
 				INDEX idx_status (status)
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 		`;
 
 		const createSchedulesTableQuery = `
@@ -121,7 +134,7 @@ class LocalSyncService {
 				INDEX idx_chat_id (chat_id),
 				INDEX idx_scheduled_at (scheduled_at),
 				INDEX idx_schedule_date (schedule_date)
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 		`;
 
 		try {
@@ -386,7 +399,7 @@ class LocalSyncService {
 					chat.id, // original_id
 					chat.instance,
 					chat.type,
-					chat.avatarUrl,
+					this.safeEncode(chat.avatarUrl),
 					chat.userId,
 					chat.contactId,
 					chat.sectorId,
@@ -476,12 +489,12 @@ class LocalSyncService {
 					msg.contactId,
 					msg.isForwarded ? 1 : 0,
 					msg.isEdited ? 1 : 0,
-					msg.body,
+					this.safeEncode(msg.body),
 					msg.timestamp,
 					this.formatDateForMySQL(msg.sentAt),
 					msg.status,
 					msg.fileId,
-					msg.fileName,
+					this.safeEncode(msg.fileName),
 					msg.fileType,
 					msg.fileSize,
 					msg.userId,
@@ -568,7 +581,7 @@ class LocalSyncService {
 				values.push(
 					schedule.id,
 					schedule.instance,
-					schedule.description,
+				this.safeEncode(schedule.description),
 					schedule.contactId,
 					schedule.chatId,
 					this.formatDateForMySQL(schedule.scheduledAt),
