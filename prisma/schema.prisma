@@ -623,3 +623,26 @@ enum WppMessageProcessingQueueStatus {
 
   @@map("wpp_message_processing_queue_status")
 }
+
+model ProcessLog {
+  id               Int       @id @default(autoincrement())
+  instance         String    @map("instance")
+  processName      String    @map("process_name")
+  processId        String    @map("process_id")
+  status           String    @map("status") // SUCCESS or FAILED
+  startTime        DateTime  @map("start_time")
+  endTime          DateTime  @map("end_time")
+  duration         Int       @map("duration") // em ms
+  input            String?   @map("input") @db.LongText
+  output           String?   @map("output") @db.LongText
+  error            String?   @map("error") @db.LongText
+  errorMessage     String?   @map("error_message") @db.Text
+  logEntries       String?   @map("log_entries") @db.LongText
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  @@index([instance, processName])
+  @@index([status, createdAt])
+  @@index([instance, status])
+  @@map("process_logs")
+}
+

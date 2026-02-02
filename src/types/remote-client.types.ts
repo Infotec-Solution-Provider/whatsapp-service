@@ -22,9 +22,10 @@ export default interface MessageDto {
 	fileType?: null | string;
 	fileSize?: null | string;
 	isForwarded?: boolean;
-	groupId: string | null;
 	clientId: number | null;
 	contactName: string;
+	isGroup: boolean;
+	groupId?: string | null;
 }
 
 export interface QRReceivedEvent {

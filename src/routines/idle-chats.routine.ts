@@ -4,6 +4,7 @@ import chooseSectorBot from "../bots/choose-sector.bot";
 import { Logger } from "@in.pulse-crm/utils";
 import chatsService from "../services/chats.service";
 import whatsappService from "../services/whatsapp.service";
+import ProcessingLogger from "../utils/processing-logger";
 
 interface MessageLike {
 	sentAt: Date;
@@ -18,69 +19,99 @@ const ROUTINE_PARAMETERS = [
 const DEFAULT_CHAT_IDLE_TIME = 30 * 60 * 1000; // minutos
 
 export default async function runIdleChatsJob() {
-	const parameters = await getRoutineParameters();
-	const enabledInstances = await getRoutineEnabledInstances(parameters);
-	const ongoingChats = await getOngoingChats(enabledInstances);
+	const process = new ProcessingLogger("SYSTEM", "idle-chats-routine", "idle-chats", {});
+	
+	try {
+		process.log("Iniciando rotina de chats inativos");
+		
+		const parameters = await getRoutineParameters();
+		process.log("Parâmetros da rotina carregados", { total: parameters.length });
+		
+		const enabledInstances = await getRoutineEnabledInstances(parameters);
+		process.log("Instâncias habilitadas carregadas", { instances: enabledInstances });
+		
+		const ongoingChats = await getOngoingChats(enabledInstances);
+		process.log("Chats em andamento carregados", { total: ongoingChats.length });
 
-	for (const chat of ongoingChats) {
-		const chatParameters = await getRoutineParametersForChat(parameters, chat);
+		let processedChats = 0;
+		let finishedChats = 0;
 
-		if (chatParameters["chat_auto_finish_enabled"] !== "true") continue;
+		for (const chat of ongoingChats) {
+			const chatParameters = await getRoutineParametersForChat(parameters, chat);
 
-		const idleTime = Number(chatParameters["chat_auto_finish_idle_time"] || DEFAULT_CHAT_IDLE_TIME);
-		Logger.debug(`Usando tempo de inatividade de ${idleTime / 60000} minutos para o chat ${chat.id}`);
-
-		if (!chat.startedAt) {
-			Logger.warning(`Chat ${chat.id} não possui data de início. Pulando...`);
-			continue;
-		}
-
-		const isIdle = checkIsIdle(chat.startedAt, chat.messages, idleTime);
-		if (!isIdle) {
-			Logger.debug(`Chat ${chat.id} não está ocioso. Ultima mensagem em ${chat.messages[0]?.sentAt}`);
-			continue;
-		}
-
-		Logger.info(`Chat ${chat.id} está ocioso há mais de ${idleTime / 60000} minutos.`);
-
-		const hasUserMsg = await checkHasUserMessage(chat.messages);
-
-		if (!chat.contact) {
-			Logger.info(`Chat ${chat.id} está ocioso, mas o contato foi excluído. Finalizando chat.`);
-			await finishChatAndNotify(chat, "contato excluído.");
-			return;
-		}
-
-		if (!hasUserMsg) {
-			Logger.info(`Chat ${chat.id} está ocioso e sem mensagens do usuário. Finalizando chat.`);
-			await finishChatAndNotify(chat, "inatividade do usuário.", chat.contact?.name);
-			return;
-		}
-
-		const alreadySentQuestion = chooseSectorBot.checkIfAlreadyAskedToBackToMenu(chat);
-
-		if (!alreadySentQuestion) {
-			const sector = await prismaService.wppSector.findUnique({ where: { id: chat.sectorId! } });
-
-			if (!sector || !sector.defaultClientId) {
+			if (chatParameters["chat_auto_finish_enabled"] !== "true") {
+				process.log(`Chat ${chat.id} - Auto-finish desabilitado`);
 				continue;
 			}
-			const client = await whatsappService.getClient(sector.defaultClientId);
 
-			if (!client) {
+			const idleTime = Number(chatParameters["chat_auto_finish_idle_time"] || DEFAULT_CHAT_IDLE_TIME);
+
+			if (!chat.startedAt) {
+				process.log(`Chat ${chat.id} - Sem data de início`);
 				continue;
 			}
-			Logger.info(`Chat ${chat.id} está ocioso. Enviando mensagem para o contato.`);
-			await chooseSectorBot.askIfWantsToBackToMenu(client.id, chat, chat.contact);
-			return;
+
+			const isIdle = checkIsIdle(chat.startedAt, chat.messages, idleTime);
+			if (!isIdle) {
+				process.log(`Chat ${chat.id} - Não inativo (idleTime: ${idleTime}ms)`);
+				continue;
+			}
+
+			processedChats++;
+			process.log(`Chat ${chat.id} - Detectado como inativo`);
+
+			const hasUserMsg = await checkHasUserMessage(chat.messages);
+
+			if (!chat.contact) {
+				await finishChatAndNotify(chat, "contato excluído.");
+				finishedChats++;
+				process.log(`Chat ${chat.id} - Finalizado: contato excluído`);
+				return;
+			}
+
+			if (!hasUserMsg) {
+				await finishChatAndNotify(chat, "inatividade do usuário.", chat.contact?.name);
+				finishedChats++;
+				process.log(`Chat ${chat.id} - Finalizado: inatividade do usuário`);
+				return;
+			}
+
+			const alreadySentQuestion = chooseSectorBot.checkIfAlreadyAskedToBackToMenu(chat);
+
+			if (!alreadySentQuestion) {
+				const sector = await prismaService.wppSector.findUnique({ where: { id: chat.sectorId! } });
+
+				if (!sector || !sector.defaultClientId) {
+					process.log(`Chat ${chat.id} - Setor não encontrado ou sem client padrão`);
+					continue;
+				}
+				const client = await whatsappService.getClient(sector.defaultClientId);
+
+				if (!client) {
+					process.log(`Chat ${chat.id} - Client não encontrado`);
+					continue;
+				}
+				
+				process.log(`Chat ${chat.id} - Pergunta de volta ao menu enviada`);
+				await chooseSectorBot.askIfWantsToBackToMenu(client.id, chat, chat.contact);
+				return;
+			}
+
+			const timeSinceQuestion = Date.now() - (chat.messages[0]?.sentAt.getTime() || 0);
+			if (timeSinceQuestion > 15 * 60 * 1000) {
+				await finishChatAndNotify(chat, "Inatividade após a pergunta do bot.", chat.contact?.name);
+				finishedChats++;
+				process.log(`Chat ${chat.id} - Finalizado: inatividade após pergunta`);
+				return;
+			}
 		}
 
-		const timeSinceQuestion = Date.now() - (chat.messages[0]?.sentAt.getTime() || 0);
-		if (timeSinceQuestion > 15 * 60 * 1000) {
-			Logger.info(`Chat ${chat.id} está ocioso e já enviou a pergunta. Finalizando chat.`);
-			await finishChatAndNotify(chat, "Inatividade após a pergunta do bot.", chat.contact?.name);
-			return;
-		}
+		process.log("Rotina concluída", { processedChats, finishedChats });
+		process.success({ processedChats, finishedChats });
+	} catch (error) {
+		process.log(`Erro na rotina: ${error}`);
+		process.failed(error);
+		throw error;
 	}
 }
 

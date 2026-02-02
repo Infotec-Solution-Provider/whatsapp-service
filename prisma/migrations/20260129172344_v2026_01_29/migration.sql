@@ -4,7 +4,7 @@ CREATE TABLE `clients` (
     `name` VARCHAR(191) NOT NULL,
     `phone` VARCHAR(191) NULL,
     `instance` VARCHAR(191) NOT NULL,
-    `type` ENUM('WABA', 'WWEBJS', 'GUPSHUP') NOT NULL,
+    `type` ENUM('WABA', 'WWEBJS', 'GUPSHUP', 'REMOTE') NOT NULL,
     `is_active` BOOLEAN NOT NULL,
     `waba_phone_id` VARCHAR(191) NULL,
     `waba_account_id` VARCHAR(191) NULL,
@@ -12,8 +12,8 @@ CREATE TABLE `clients` (
     `gupshup_token` VARCHAR(191) NULL,
     `gupshup_app_name` VARCHAR(191) NULL,
     `gupshup_app_id` VARCHAR(191) NULL,
+    `remote_client_url` VARCHAR(191) NULL,
 
-    UNIQUE INDEX `clients_instance_key`(`instance`),
     INDEX `clients_is_active_idx`(`is_active`),
     UNIQUE INDEX `clients_name_key`(`name`),
     PRIMARY KEY (`id`)
@@ -75,7 +75,6 @@ CREATE TABLE `messages` (
     UNIQUE INDEX `messages_gupshup_id_key`(`gupshup_id`),
     INDEX `messages_from_to_chat_id_idx`(`from`, `to`, `chat_id`),
     INDEX `messages_chat_id_user_id_idx`(`chat_id`, `user_id`),
-    INDEX `messages_contact_id_fkey`(`contact_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -123,6 +122,7 @@ CREATE TABLE `internalmessages` (
     `file_name` VARCHAR(191) NULL,
     `file_type` VARCHAR(191) NULL,
     `file_size` VARCHAR(191) NULL,
+    `client_id` INTEGER NULL,
 
     UNIQUE INDEX `internalmessages_wwebjs_id_key`(`wwebjs_id`),
     UNIQUE INDEX `internalmessages_wwebjs_id_stanza_key`(`wwebjs_id_stanza`),
@@ -188,9 +188,9 @@ CREATE TABLE `sectors` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
     `name` VARCHAR(191) NOT NULL,
     `instance` VARCHAR(191) NOT NULL,
-    `wpp_instance_id` INTEGER NULL,
     `start_chats` BOOLEAN NOT NULL,
     `receive_chats` BOOLEAN NOT NULL,
+    `default_client_id` INTEGER NULL,
 
     UNIQUE INDEX `sectors_name_key`(`name`),
     PRIMARY KEY (`id`)
@@ -286,14 +286,6 @@ CREATE TABLE `wallets` (
     `name` VARCHAR(191) NOT NULL,
 
     PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
--- CreateTable
-CREATE TABLE `sectors_clients` (
-    `sectorId` INTEGER NOT NULL,
-    `clientId` INTEGER NOT NULL,
-
-    PRIMARY KEY (`sectorId`, `clientId`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
@@ -398,6 +390,108 @@ CREATE TABLE `ready_messages` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
+CREATE TABLE `message_queue_items` (
+    `id` VARCHAR(191) NOT NULL,
+    `instance` VARCHAR(191) NOT NULL,
+    `chat_id` VARCHAR(191) NOT NULL,
+    `client_id` INTEGER NOT NULL,
+    `status` ENUM('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELLED') NOT NULL DEFAULT 'PENDING',
+    `priority` INTEGER NOT NULL DEFAULT 0,
+    `payload` JSON NOT NULL,
+    `is_group` BOOLEAN NOT NULL DEFAULT false,
+    `retry_count` INTEGER NOT NULL DEFAULT 0,
+    `max_retries` INTEGER NOT NULL DEFAULT 3,
+    `error` TEXT NULL,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updated_at` DATETIME(3) NOT NULL,
+    `processing_started_at` DATETIME(3) NULL,
+    `processed_at` DATETIME(3) NULL,
+
+    INDEX `message_queue_items_instance_chat_id_status_idx`(`instance`, `chat_id`, `status`),
+    INDEX `message_queue_items_status_created_at_idx`(`status`, `created_at`),
+    INDEX `message_queue_items_client_id_status_idx`(`client_id`, `status`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `gupshup_webhook_queue` (
+    `id` VARCHAR(191) NOT NULL,
+    `instance` VARCHAR(191) NOT NULL,
+    `payload` JSON NOT NULL,
+    `status` ENUM('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED') NOT NULL DEFAULT 'PENDING',
+    `retry_count` INTEGER NOT NULL DEFAULT 0,
+    `max_retries` INTEGER NOT NULL DEFAULT 3,
+    `error` TEXT NULL,
+    `redirected` BOOLEAN NOT NULL DEFAULT false,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updated_at` DATETIME(3) NOT NULL,
+    `processing_started_at` DATETIME(3) NULL,
+    `processed_at` DATETIME(3) NULL,
+
+    INDEX `gupshup_webhook_queue_instance_status_idx`(`instance`, `status`),
+    INDEX `gupshup_webhook_queue_status_created_at_idx`(`status`, `created_at`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `wpp_message_processing_queue` (
+    `id` VARCHAR(191) NOT NULL,
+    `instance` VARCHAR(191) NOT NULL,
+    `client_id` INTEGER NOT NULL,
+    `message_id` INTEGER NOT NULL,
+    `contact_phone` VARCHAR(191) NOT NULL,
+    `contact_name` VARCHAR(191) NULL,
+    `status` ENUM('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED') NOT NULL DEFAULT 'PENDING',
+    `retry_count` INTEGER NOT NULL DEFAULT 0,
+    `max_retries` INTEGER NOT NULL DEFAULT 3,
+    `error` TEXT NULL,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updated_at` DATETIME(3) NOT NULL,
+    `processing_started_at` DATETIME(3) NULL,
+    `processed_at` DATETIME(3) NULL,
+    `locked_until` DATETIME(3) NULL,
+    `locked_by` VARCHAR(191) NULL,
+
+    INDEX `wpp_message_processing_queue_instance_status_contact_phone_idx`(`instance`, `status`, `contact_phone`),
+    INDEX `wpp_message_processing_queue_status_created_at_idx`(`status`, `created_at`),
+    INDEX `wpp_message_processing_queue_contact_phone_status_idx`(`contact_phone`, `status`),
+    INDEX `wpp_message_processing_queue_locked_until_idx`(`locked_until`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `process_logs` (
+    `id` INTEGER NOT NULL AUTO_INCREMENT,
+    `instance` VARCHAR(191) NOT NULL,
+    `process_name` VARCHAR(191) NOT NULL,
+    `process_id` VARCHAR(191) NOT NULL,
+    `status` VARCHAR(191) NOT NULL,
+    `start_time` DATETIME(3) NOT NULL,
+    `end_time` DATETIME(3) NOT NULL,
+    `duration` INTEGER NOT NULL,
+    `input` LONGTEXT NULL,
+    `output` LONGTEXT NULL,
+    `error` LONGTEXT NULL,
+    `error_message` TEXT NULL,
+    `log_entries` LONGTEXT NULL,
+    `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `process_logs_instance_process_name_idx`(`instance`, `process_name`),
+    INDEX `process_logs_status_created_at_idx`(`status`, `created_at`),
+    INDEX `process_logs_instance_status_idx`(`instance`, `status`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
+CREATE TABLE `_sector_clients` (
+    `A` INTEGER NOT NULL,
+    `B` INTEGER NOT NULL,
+
+    UNIQUE INDEX `_sector_clients_AB_unique`(`A`, `B`),
+    INDEX `_sector_clients_B_index`(`B`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- CreateTable
 CREATE TABLE `_WppChatToWppTag` (
     `A` INTEGER NOT NULL,
     `B` INTEGER NOT NULL,
@@ -428,6 +522,9 @@ ALTER TABLE `chats` ADD CONSTRAINT `chats_sector_id_fkey` FOREIGN KEY (`sector_i
 ALTER TABLE `internalmessages` ADD CONSTRAINT `internalmessages_internalchat_id_fkey` FOREIGN KEY (`internalchat_id`) REFERENCES `internalchats`(`id`) ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE `internalmessages` ADD CONSTRAINT `internalmessages_client_id_fkey` FOREIGN KEY (`client_id`) REFERENCES `clients`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE `internalchats` ADD CONSTRAINT `internalchats_sector_id_fkey` FOREIGN KEY (`sector_id`) REFERENCES `sectors`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -435,6 +532,9 @@ ALTER TABLE `internal_chat_members` ADD CONSTRAINT `internal_chat_members_intern
 
 -- AddForeignKey
 ALTER TABLE `internal_mentions` ADD CONSTRAINT `internal_mentions_internalmessage_id_fkey` FOREIGN KEY (`internalmessage_id`) REFERENCES `internalmessages`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `sectors` ADD CONSTRAINT `sectors_default_client_id_fkey` FOREIGN KEY (`default_client_id`) REFERENCES `clients`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `contacts_sectors` ADD CONSTRAINT `contacts_sectors_contactId_fkey` FOREIGN KEY (`contactId`) REFERENCES `contacts`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
@@ -452,12 +552,6 @@ ALTER TABLE `automatic_response_rule_users` ADD CONSTRAINT `automatic_response_r
 ALTER TABLE `automatic_response_schedules` ADD CONSTRAINT `automatic_response_schedules_ruleId_fkey` FOREIGN KEY (`ruleId`) REFERENCES `automatic_response_rules`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE `sectors_clients` ADD CONSTRAINT `sectors_clients_sectorId_fkey` FOREIGN KEY (`sectorId`) REFERENCES `sectors`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE `sectors_clients` ADD CONSTRAINT `sectors_clients_clientId_fkey` FOREIGN KEY (`clientId`) REFERENCES `clients`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE `schedules` ADD CONSTRAINT `schedules_chat_id_fkey` FOREIGN KEY (`chat_id`) REFERENCES `chats`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -471,6 +565,12 @@ ALTER TABLE `wallets_users` ADD CONSTRAINT `wallets_users_wallet_id_fkey` FOREIG
 
 -- AddForeignKey
 ALTER TABLE `notifications` ADD CONSTRAINT `notifications_chat_id_fkey` FOREIGN KEY (`chat_id`) REFERENCES `chats`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `_sector_clients` ADD CONSTRAINT `_sector_clients_A_fkey` FOREIGN KEY (`A`) REFERENCES `clients`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE `_sector_clients` ADD CONSTRAINT `_sector_clients_B_fkey` FOREIGN KEY (`B`) REFERENCES `sectors`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE `_WppChatToWppTag` ADD CONSTRAINT `_WppChatToWppTag_A_fkey` FOREIGN KEY (`A`) REFERENCES `chats`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;

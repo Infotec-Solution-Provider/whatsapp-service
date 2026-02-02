@@ -90,12 +90,11 @@ class RemoteWhatsappClient implements WhatsappClient {
 
 		try {
 			process.log("Handling message received");
-			const isGroup = Boolean(message.groupId);
 
-			if (isGroup) {
+			if (message.isGroup && message.groupId) {
 				process.log("Message is from a group, processing in internalChatsService");
 				const savedMsg = await internalChatsService.receiveMessage(
-					message.groupId!,
+					message.groupId,
 					message,
 					message.contactName
 				);
@@ -103,7 +102,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 				process.success(savedMsg);
 			} else {
 				const savedMsg = await messagesService.insertMessage(message);
-				
+
 				// Enfileira a mensagem para processamento
 				await messageQueueService.enqueue({
 					instance: this.instance,
@@ -112,7 +111,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 					contactPhone: savedMsg.from,
 					contactName: message.contactName
 				});
-				
+
 				process.log("Message enqueued successfully");
 				process.success(savedMsg);
 			}

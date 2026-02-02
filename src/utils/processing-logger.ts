@@ -1,9 +1,6 @@
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import "dotenv/config";
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
-
-const LOGS_PATH = process.env["LOGS_PATH"] || "./logs";
+import prismaService from "../services/prisma.service";
 
 export default class ProcessingLogger {
 	constructor(
@@ -56,31 +53,25 @@ export default class ProcessingLogger {
 	private async save(): Promise<void> {
 		try {
 			const logData = {
-				startTime: this.startTime.toISOString(),
-				endTime: this.endTime!.toISOString(),
+				instance: this.instance,
+				processName: this.processName,
+				processId: this.processId,
+				status: this.error ? "FAILED" : "SUCCESS",
+				startTime: this.startTime,
+				endTime: this.endTime!,
 				duration: this.endTime!.getTime() - this.startTime.getTime(),
-				logEntries: this.logEntries,
-				input: this.input,
-				output: this.output,
-				error: this.error,
-				errorMessage: sanitizeErrorMessage(this.error)
+				input: JSON.stringify(this.input),
+				output: JSON.stringify(this.output),
+				error: JSON.stringify(this.error),
+				errorMessage: sanitizeErrorMessage(this.error),
+				logEntries: JSON.stringify(this.logEntries)
 			};
 
-			const logDir = this.error
-				? path.join(LOGS_PATH, this.instance, this.processName, "errors")
-				: path.join(LOGS_PATH, this.instance, this.processName);
-
-		// Sanitize processId to remove invalid filename characters (especially colons on Windows)
-		const sanitizedProcessId = this.processId.replace(/[<>:"/\\|?*]/g, '_');
-		const logFileName = `${sanitizedProcessId}.json`;
-			const logFilePath = path.join(logDir, logFileName);
-
-			await mkdir(logDir, { recursive: true });
-			await writeFile(logFilePath, JSON.stringify(logData, null, 2), {
-				encoding: "utf-8"
+			await prismaService.processLog.create({
+				data: logData
 			});
 		} catch (err) {
-			Logger.error("Failed to save log file", err as Error);
+			Logger.error("Failed to save process log to database", err as Error);
 		}
 	}
 }

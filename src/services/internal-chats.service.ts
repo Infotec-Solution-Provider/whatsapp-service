@@ -12,7 +12,7 @@ import {
 import socketService from "./socket.service";
 import ProcessingLogger from "../utils/processing-logger";
 import filesService from "./files.service";
-import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import prismaService from "./prisma.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
@@ -563,6 +563,7 @@ class InternalChatsService {
 	}
 
 	public async receiveMessage(groupId: string, msg: CreateMessageDto, authorName: string | null = null) {
+		Logger.debug(`Recebendo mensagem de grupo WhatsApp. Grupo ID: ${groupId}, Autor: ${authorName || msg.from}`, msg);
 		const cleanGroupId = groupId.replace(/[/:]/g, "-");
 		const process = new ProcessingLogger(
 			msg.instance,
