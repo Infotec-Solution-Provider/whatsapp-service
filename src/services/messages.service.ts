@@ -8,6 +8,7 @@ import { Mentions } from "../types/whatsapp-instance.types";
 import whatsappService from "./whatsapp.service";
 import ProcessingLogger from "../utils/processing-logger";
 import instancesService from "./instances.service";
+import localSyncService from "./local-sync.service";
 
 interface FetchMessagesFilter {
 	minDate: string;
@@ -67,7 +68,23 @@ class MessagesService {
 				`UPDATE wpp_messages SET status = 'READ' WHERE contact_id = ? AND (\`to\` LIKE 'me:%' OR \`to\` = 'system')`,
 				[contactId]
 			);
-		} catch (err) {
+		} catch (err: any) {
+			const errMsg = String(err?.message || "");
+			if (errMsg.includes("wpp_messages") && errMsg.includes("doesn't exist")) {
+				try {
+					await localSyncService.ensureLocalTables(instance);
+					await instancesService.executeQuery(
+						instance,
+						`UPDATE wpp_messages SET status = 'READ' WHERE contact_id = ? AND (\`to\` LIKE 'me:%' OR \`to\` = 'system')`,
+						[contactId]
+					);
+					return;
+				} catch (retryErr) {
+					console.error("[markContactMessagesAsRead] Erro ao sincronizar mensagens locais após criar tabelas:", retryErr);
+					return;
+				}
+			}
+
 			console.error("[markContactMessagesAsRead] Erro ao sincronizar mensagens locais:", err);
 		}
 
@@ -247,7 +264,47 @@ class MessagesService {
 				message.billingCategory,
 				message.clientId
 			]);
-		} catch (error) {
+		} catch (error: any) {
+			const errMsg = String(error?.message || "");
+			if (errMsg.includes("wpp_messages") && errMsg.includes("doesn't exist")) {
+				try {
+					await localSyncService.ensureLocalTables(message.instance);
+					const sentAt = this.formatDateForMySQL(message.sentAt);
+					await instancesService.executeQuery(message.instance, query, [
+						message.id,
+						message.instance,
+						message.wwebjsId,
+						message.wwebjsIdStanza,
+						message.wabaId,
+						message.gupshupId,
+						message.gupshupRequestId,
+						message.from,
+						message.to,
+						message.type,
+						message.quotedId,
+						message.chatId,
+						message.contactId,
+						message.isForwarded ? 1 : 0,
+						message.isEdited ? 1 : 0,
+						message.body,
+						message.timestamp,
+						sentAt,
+						message.status,
+						message.fileId,
+						message.fileName,
+						message.fileType,
+						message.fileSize,
+						message.userId,
+						message.billingCategory,
+						message.clientId
+					]);
+					return;
+				} catch (retryError) {
+					console.error("[syncMessageToLocal] Erro ao sincronizar mensagem após criar tabelas:", retryError);
+					return;
+				}
+			}
+
 			console.error("[syncMessageToLocal] Erro ao sincronizar mensagem:", error);
 		}
 	}

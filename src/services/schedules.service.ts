@@ -6,6 +6,7 @@ import cron from "node-cron";
 import instancesService from "./instances.service";
 import runIdleChatsJob from "../routines/idle-chats.routine";
 import runSchedulesJob from "../routines/schedules.routine";
+import localSyncService from "./local-sync.service";
 
 interface ChatsFilters {
 	userId?: string;
@@ -196,7 +197,48 @@ class SchedulesService {
 				schedule.scheduledFor,
 				schedule.sectorId
 			]);
-		} catch (error) {
+		} catch (error: any) {
+			const errMsg = String(error?.message || "");
+			if (errMsg.includes("wpp_schedules") && errMsg.includes("doesn't exist")) {
+				try {
+					await localSyncService.ensureLocalTables(schedule.instance);
+					const scheduledAt = this.formatDateForMySQL(schedule.scheduledAt);
+					const scheduleDate = this.formatDateForMySQL(schedule.scheduleDate);
+					const query = `
+						INSERT INTO wpp_schedules (
+							id, instance, description, contact_id, chat_id, scheduled_at, schedule_date,
+							scheduled_by, scheduled_for, sector_id
+						)
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+						ON DUPLICATE KEY UPDATE
+							description = VALUES(description),
+							contact_id = VALUES(contact_id),
+							chat_id = VALUES(chat_id),
+							scheduled_at = VALUES(scheduled_at),
+							schedule_date = VALUES(schedule_date),
+							scheduled_by = VALUES(scheduled_by),
+							scheduled_for = VALUES(scheduled_for),
+							sector_id = VALUES(sector_id)
+					`;
+					await instancesService.executeQuery(schedule.instance, query, [
+						schedule.id,
+						schedule.instance,
+						schedule.description,
+						schedule.contactId,
+						schedule.chatId,
+						scheduledAt,
+						scheduleDate,
+						schedule.scheduledBy,
+						schedule.scheduledFor,
+						schedule.sectorId
+					]);
+					return;
+				} catch (retryError) {
+					console.error("[syncScheduleToLocal] Erro ao sincronizar agendamento após criar tabelas:", retryError);
+					return;
+				}
+			}
+
 			console.error("[syncScheduleToLocal] Erro ao sincronizar agendamento:", error);
 		}
 	}
@@ -208,7 +250,23 @@ class SchedulesService {
 				"DELETE FROM wpp_schedules WHERE id = ?",
 				[schedule.id]
 			);
-		} catch (error) {
+		} catch (error: any) {
+			const errMsg = String(error?.message || "");
+			if (errMsg.includes("wpp_schedules") && errMsg.includes("doesn't exist")) {
+				try {
+					await localSyncService.ensureLocalTables(schedule.instance);
+					await instancesService.executeQuery(
+						schedule.instance,
+						"DELETE FROM wpp_schedules WHERE id = ?",
+						[schedule.id]
+					);
+					return;
+				} catch (retryError) {
+					console.error("[deleteScheduleFromLocal] Erro ao remover agendamento local após criar tabelas:", retryError);
+					return;
+				}
+			}
+
 			console.error("[deleteScheduleFromLocal] Erro ao remover agendamento local:", error);
 		}
 	}

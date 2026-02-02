@@ -642,6 +642,10 @@ class LocalSyncService {
 			throw error;
 		}
 	}
+
+	public async ensureLocalTables(instance: string): Promise<void> {
+		await this.ensureTablesExist(instance);
+	}
 }
 
 export default new LocalSyncService();
