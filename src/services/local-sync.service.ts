@@ -461,47 +461,13 @@ class LocalSyncService {
 			return 0;
 		}
 
-		const batchSize = 50;
 		let syncedCount = 0;
+		let errorCount = 0;
 
-		for (let i = 0; i < messages.length; i += batchSize) {
-			const batch = messages.slice(i, i + batchSize);
-
-			// Create placeholders for 26 fields per message
-			const placeholders = batch.map(() => "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").join(", ");
-			
-			// Flatten all values
-			const values: any[] = [];
-			batch.forEach((msg) => {
-				values.push(
-					msg.id,
-					msg.instance,
-					msg.wwebjsId,
-					msg.wwebjsIdStanza,
-					msg.wabaId,
-					msg.gupshupId,
-					msg.gupshupRequestId,
-					msg.from,
-					msg.to,
-					msg.type,
-					msg.quotedId,
-					msg.chatId,
-					msg.contactId,
-					msg.isForwarded ? 1 : 0,
-					msg.isEdited ? 1 : 0,
-					this.safeEncode(msg.body),
-					msg.timestamp,
-					this.formatDateForMySQL(msg.sentAt),
-					msg.status,
-					msg.fileId,
-					this.safeEncode(msg.fileName),
-					msg.fileType,
-					msg.fileSize,
-					msg.userId,
-					msg.billingCategory,
-					msg.clientId
-				);
-			});
+		// Inserir um por um para identificar mensagens problemáticas
+		for (let i = 0; i < messages.length; i++) {
+			const msg = messages[i];
+			if (!msg) continue;
 
 			const query = `
 				INSERT INTO wpp_messages (
@@ -510,7 +476,7 @@ class LocalSyncService {
 					body, timestamp, sent_at, status, file_id, file_name, file_type, file_size,
 					user_id, billing_category, client_id
 				)
-				VALUES ${placeholders}
+				VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 				ON DUPLICATE KEY UPDATE
 					wwebjs_id = VALUES(wwebjs_id),
 					wwebjs_id_stanza = VALUES(wwebjs_id_stanza),
@@ -538,16 +504,65 @@ class LocalSyncService {
 					client_id = VALUES(client_id)
 			`;
 
+			const values = [
+				msg.id,
+				msg.instance,
+				msg.wwebjsId,
+				msg.wwebjsIdStanza,
+				msg.wabaId,
+				msg.gupshupId,
+				msg.gupshupRequestId,
+				msg.from,
+				msg.to,
+				msg.type,
+				msg.quotedId,
+				msg.chatId,
+				msg.contactId,
+				msg.isForwarded ? 1 : 0,
+				msg.isEdited ? 1 : 0,
+				this.safeEncode(msg.body),
+				msg.timestamp,
+				this.formatDateForMySQL(msg.sentAt),
+				msg.status,
+				msg.fileId,
+				this.safeEncode(msg.fileName),
+				msg.fileType,
+				msg.fileSize,
+				msg.userId,
+				msg.billingCategory,
+				msg.clientId
+			];
+
 			try {
 				await instancesService.executeQuery(instance, query, values);
-				syncedCount += batch.length;
-			} catch (err) {
-				console.error(`[LocalSync] Erro ao sincronizar batch de mensagens (linhas ${i + 1}-${i + batch.length}):`, err);
-				throw err;
+				syncedCount++;
+				
+				// Log progresso a cada 50 mensagens
+				if ((i + 1) % 50 === 0) {
+					console.log(`[LocalSync] Progresso: ${i + 1}/${messages.length} mensagens sincronizadas`);
+				}
+			} catch (err: any) {
+				errorCount++;
+				console.error(`\n[LocalSync] ========== ERRO NA MENSAGEM ${i + 1}/${messages.length} ==========`);
+				console.error(`[LocalSync] ID: ${msg.id}`);
+				console.error(`[LocalSync] From: ${msg.from}`);
+				console.error(`[LocalSync] To: ${msg.to}`);
+				console.error(`[LocalSync] Type: ${msg.type}`);
+				console.error(`[LocalSync] Body (primeiros 200 chars): ${msg.body?.substring(0, 200)}`);
+				console.error(`[LocalSync] FileName: ${msg.fileName}`);
+				console.error(`[LocalSync] SentAt: ${msg.sentAt}`);
+				console.error(`[LocalSync] Erro SQL: ${err.message}`);
+				console.error(`[LocalSync] ============================================\n`);
+				
+				// Abortar após 10 erros para não poluir muito o log
+				if (errorCount >= 10) {
+					console.error(`[LocalSync] ABORTANDO: Muitos erros consecutivos (${errorCount})`);
+					throw err;
+				}
 			}
 		}
 
-		console.log(`[LocalSync] ${syncedCount} mensagens sincronizadas`);
+		console.log(`[LocalSync] ${syncedCount} mensagens sincronizadas (${errorCount} erros)`);
 		return syncedCount;
 	}
 
