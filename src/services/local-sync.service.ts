@@ -606,8 +606,8 @@ class LocalSyncService {
 	 * Format date to MySQL datetime format (YYYY-MM-DD HH:MM:SS)
 	 * Returns NULL literal (without quotes) for use in raw SQL strings
 	 */
-	private formatDateForMySQL(date: Date | null | undefined): string {
-		if (!date) return "NULL";
+	private formatDateForMySQL(date: Date | null | undefined): string | null {
+		if (!date) return null;
 
 		const year = date.getFullYear();
 		const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -616,7 +616,7 @@ class LocalSyncService {
 		const minutes = String(date.getMinutes()).padStart(2, "0");
 		const seconds = String(date.getSeconds()).padStart(2, "0");
 
-		return `'${year}-${month}-${day} ${hours}:${minutes}:${seconds}'`;
+		return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 	}
 
 	/**
