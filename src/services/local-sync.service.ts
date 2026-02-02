@@ -107,6 +107,32 @@ class LocalSyncService {
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 		`;
 
+		const createLastMessagesTableQuery = `
+			CREATE TABLE IF NOT EXISTS wpp_last_messages (
+				instance VARCHAR(255) NOT NULL,
+				contact_id INT NOT NULL,
+				chat_id INT NULL,
+				message_id INT NOT NULL,
+				\`from\` VARCHAR(255) NOT NULL,
+				\`to\` VARCHAR(255) NOT NULL,
+				type VARCHAR(50) NOT NULL,
+				body LONGTEXT NOT NULL,
+				timestamp VARCHAR(64) NOT NULL,
+				sent_at DATETIME NOT NULL,
+				status VARCHAR(50) NOT NULL,
+				file_id INT NULL,
+				file_name LONGTEXT NULL,
+				file_type VARCHAR(255) NULL,
+				file_size VARCHAR(255) NULL,
+				user_id INT NULL,
+				billing_category VARCHAR(255) NULL,
+				client_id INT NULL,
+				PRIMARY KEY (instance, contact_id),
+				INDEX idx_chat_id (chat_id),
+				INDEX idx_sent_at (sent_at)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+		`;
+
 		const createSchedulesTableQuery = `
 			CREATE TABLE IF NOT EXISTS wpp_schedules (
 				id INT NOT NULL,
@@ -139,6 +165,9 @@ class LocalSyncService {
 
 			await instancesService.executeQuery(instance, createMessagesTableQuery, []);
 			console.log(`[LocalSync] Tabela wpp_messages verificada/criada`);
+
+			await instancesService.executeQuery(instance, createLastMessagesTableQuery, []);
+			console.log(`[LocalSync] Tabela wpp_last_messages verificada/criada`);
 
 			await instancesService.executeQuery(instance, createSchedulesTableQuery, []);
 			console.log(`[LocalSync] Tabela wpp_schedules verificada/criada`);
@@ -182,6 +211,74 @@ class LocalSyncService {
 				if (!err.message.includes("already exists")) {
 					console.log(`[LocalSync] wpp_messages charset já é utf8 ou erro ao alterar`);
 				}
+			}
+
+			try {
+				const alterLastMessagesQuery = `ALTER TABLE wpp_last_messages CONVERT TO CHARACTER SET utf8`;
+				await instancesService.executeQuery(instance, alterLastMessagesQuery, []);
+				console.log(`[LocalSync] Charset de wpp_last_messages alterado para utf8`);
+			} catch (err: any) {
+				if (!err.message.includes("already exists")) {
+					console.log(`[LocalSync] wpp_last_messages charset já é utf8 ou erro ao alterar`);
+				}
+			}
+
+			try {
+				const backfillLastMessagesQuery = `
+					INSERT INTO wpp_last_messages (
+						instance, contact_id, chat_id, message_id, \`from\`, \`to\`, type, body,
+						timestamp, sent_at, status, file_id, file_name, file_type, file_size,
+						user_id, billing_category, client_id
+					)
+					SELECT
+						m.instance,
+						m.contact_id,
+						m.chat_id,
+						m.id,
+						m.\`from\`,
+						m.\`to\`,
+						m.type,
+						m.body,
+						m.timestamp,
+						m.sent_at,
+						m.status,
+						m.file_id,
+						m.file_name,
+						m.file_type,
+						m.file_size,
+						m.user_id,
+						m.billing_category,
+						m.client_id
+					FROM wpp_messages m
+					INNER JOIN (
+						SELECT contact_id, MAX(sent_at) AS max_sent_at
+						FROM wpp_messages
+						WHERE instance = ? AND contact_id IS NOT NULL
+						GROUP BY contact_id
+					) lm ON lm.contact_id = m.contact_id AND lm.max_sent_at = m.sent_at
+					WHERE m.instance = ? AND m.contact_id IS NOT NULL
+					ON DUPLICATE KEY UPDATE
+						message_id = IF(VALUES(sent_at) >= sent_at, VALUES(message_id), message_id),
+						chat_id = IF(VALUES(sent_at) >= sent_at, VALUES(chat_id), chat_id),
+						\`from\` = IF(VALUES(sent_at) >= sent_at, VALUES(\`from\`), \`from\`),
+						\`to\` = IF(VALUES(sent_at) >= sent_at, VALUES(\`to\`), \`to\`),
+						type = IF(VALUES(sent_at) >= sent_at, VALUES(type), type),
+						body = IF(VALUES(sent_at) >= sent_at, VALUES(body), body),
+						timestamp = IF(VALUES(sent_at) >= sent_at, VALUES(timestamp), timestamp),
+						sent_at = IF(VALUES(sent_at) >= sent_at, VALUES(sent_at), sent_at),
+						status = IF(VALUES(sent_at) >= sent_at, VALUES(status), status),
+						file_id = IF(VALUES(sent_at) >= sent_at, VALUES(file_id), file_id),
+						file_name = IF(VALUES(sent_at) >= sent_at, VALUES(file_name), file_name),
+						file_type = IF(VALUES(sent_at) >= sent_at, VALUES(file_type), file_type),
+						file_size = IF(VALUES(sent_at) >= sent_at, VALUES(file_size), file_size),
+						user_id = IF(VALUES(sent_at) >= sent_at, VALUES(user_id), user_id),
+						billing_category = IF(VALUES(sent_at) >= sent_at, VALUES(billing_category), billing_category),
+						client_id = IF(VALUES(sent_at) >= sent_at, VALUES(client_id), client_id)
+				`;
+				await instancesService.executeQuery(instance, backfillLastMessagesQuery, [instance, instance]);
+				console.log(`[LocalSync] Backfill de wpp_last_messages concluído`);
+			} catch (err: any) {
+				console.log(`[LocalSync] Erro ao fazer backfill de wpp_last_messages: ${err.message}`);
 			}
 
 			try {
@@ -550,6 +647,67 @@ class LocalSyncService {
 
 			try {
 				await instancesService.executeQuery(instance, query, values);
+
+				const lastMessagesBatch = batch.filter((msg) => typeof msg.contactId === "number");
+				if (lastMessagesBatch.length) {
+					const lastPlaceholders = lastMessagesBatch
+						.map(() => "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+						.join(", ");
+					const lastValues: any[] = [];
+					lastMessagesBatch.forEach((msg) => {
+						const sentAtValue =
+							this.formatDateForMySQL(msg.sentAt) || this.formatDateForMySQL(new Date(0));
+						lastValues.push(
+							msg.instance,
+							msg.contactId,
+							msg.chatId,
+							msg.id,
+							msg.from,
+							msg.to,
+							msg.type,
+							safeEncode(msg.body) || "",
+							msg.timestamp,
+							sentAtValue,
+							msg.status,
+							msg.fileId,
+							safeEncode(msg.fileName),
+							msg.fileType,
+							msg.fileSize,
+							msg.userId,
+							msg.billingCategory,
+							msg.clientId
+						);
+					});
+
+					const lastQuery = `
+						INSERT INTO wpp_last_messages (
+							instance, contact_id, chat_id, message_id, \`from\`, \`to\`, type, body,
+							timestamp, sent_at, status, file_id, file_name, file_type, file_size,
+							user_id, billing_category, client_id
+						)
+						VALUES ${lastPlaceholders}
+						ON DUPLICATE KEY UPDATE
+							message_id = IF(VALUES(sent_at) >= sent_at, VALUES(message_id), message_id),
+							chat_id = IF(VALUES(sent_at) >= sent_at, VALUES(chat_id), chat_id),
+							\`from\` = IF(VALUES(sent_at) >= sent_at, VALUES(\`from\`), \`from\`),
+							\`to\` = IF(VALUES(sent_at) >= sent_at, VALUES(\`to\`), \`to\`),
+							type = IF(VALUES(sent_at) >= sent_at, VALUES(type), type),
+							body = IF(VALUES(sent_at) >= sent_at, VALUES(body), body),
+							timestamp = IF(VALUES(sent_at) >= sent_at, VALUES(timestamp), timestamp),
+							sent_at = IF(VALUES(sent_at) >= sent_at, VALUES(sent_at), sent_at),
+							status = IF(VALUES(sent_at) >= sent_at, VALUES(status), status),
+							file_id = IF(VALUES(sent_at) >= sent_at, VALUES(file_id), file_id),
+							file_name = IF(VALUES(sent_at) >= sent_at, VALUES(file_name), file_name),
+							file_type = IF(VALUES(sent_at) >= sent_at, VALUES(file_type), file_type),
+							file_size = IF(VALUES(sent_at) >= sent_at, VALUES(file_size), file_size),
+							user_id = IF(VALUES(sent_at) >= sent_at, VALUES(user_id), user_id),
+							billing_category = IF(VALUES(sent_at) >= sent_at, VALUES(billing_category), billing_category),
+							client_id = IF(VALUES(sent_at) >= sent_at, VALUES(client_id), client_id)
+					`;
+
+					await instancesService.executeQuery(instance, lastQuery, lastValues);
+				}
+
 				syncedCount += batch.length;
 				if (syncedCount % 500 === 0 || syncedCount === validMessages.length) {
 					console.log(`[LocalSync] Progresso: ${syncedCount}/${validMessages.length} mensagens sincronizadas`);

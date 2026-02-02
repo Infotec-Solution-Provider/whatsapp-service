@@ -266,6 +266,56 @@ class MessagesService {
 				message.billingCategory,
 				message.clientId
 			]);
+
+			// Atualizar wpp_last_messages se a mensagem tiver contactId
+			if (message.contactId) {
+				const lastMessageQuery = `
+					INSERT INTO wpp_last_messages (
+						instance, contact_id, chat_id, message_id, \`from\`, \`to\`, type, body,
+						timestamp, sent_at, status, file_id, file_name, file_type, file_size,
+						user_id, billing_category, client_id
+					)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					ON DUPLICATE KEY UPDATE
+						message_id = IF(VALUES(sent_at) >= sent_at, VALUES(message_id), message_id),
+						chat_id = IF(VALUES(sent_at) >= sent_at, VALUES(chat_id), chat_id),
+						\`from\` = IF(VALUES(sent_at) >= sent_at, VALUES(\`from\`), \`from\`),
+						\`to\` = IF(VALUES(sent_at) >= sent_at, VALUES(\`to\`), \`to\`),
+						type = IF(VALUES(sent_at) >= sent_at, VALUES(type), type),
+						body = IF(VALUES(sent_at) >= sent_at, VALUES(body), body),
+						timestamp = IF(VALUES(sent_at) >= sent_at, VALUES(timestamp), timestamp),
+						sent_at = IF(VALUES(sent_at) >= sent_at, VALUES(sent_at), sent_at),
+						status = IF(VALUES(sent_at) >= sent_at, VALUES(status), status),
+						file_id = IF(VALUES(sent_at) >= sent_at, VALUES(file_id), file_id),
+						file_name = IF(VALUES(sent_at) >= sent_at, VALUES(file_name), file_name),
+						file_type = IF(VALUES(sent_at) >= sent_at, VALUES(file_type), file_type),
+						file_size = IF(VALUES(sent_at) >= sent_at, VALUES(file_size), file_size),
+						user_id = IF(VALUES(sent_at) >= sent_at, VALUES(user_id), user_id),
+						billing_category = IF(VALUES(sent_at) >= sent_at, VALUES(billing_category), billing_category),
+						client_id = IF(VALUES(sent_at) >= sent_at, VALUES(client_id), client_id)
+				`;
+
+				await instancesService.executeQuery(message.instance, lastMessageQuery, [
+					message.instance,
+					message.contactId,
+					message.chatId,
+					message.id,
+					message.from,
+					message.to,
+					message.type,
+					safeEncode(message.body) || "",
+					message.timestamp,
+					sentAt || this.formatDateForMySQL(new Date(0)),
+					message.status,
+					message.fileId,
+					message.fileName,
+					message.fileType,
+					message.fileSize,
+					message.userId,
+					message.billingCategory,
+					message.clientId
+				]);
+			}
 		} catch (error: any) {
 			const errMsg = String(error?.message || "");
 			if (errMsg.includes("wpp_messages") && errMsg.includes("doesn't exist")) {
@@ -300,6 +350,57 @@ class MessagesService {
 						message.billingCategory,
 						message.clientId
 					]);
+
+					// Atualizar wpp_last_messages após retry se tiver contactId
+					if (message.contactId) {
+						const lastMessageQuery = `
+							INSERT INTO wpp_last_messages (
+								instance, contact_id, chat_id, message_id, \`from\`, \`to\`, type, body,
+								timestamp, sent_at, status, file_id, file_name, file_type, file_size,
+								user_id, billing_category, client_id
+							)
+							VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+							ON DUPLICATE KEY UPDATE
+								message_id = IF(VALUES(sent_at) >= sent_at, VALUES(message_id), message_id),
+								chat_id = IF(VALUES(sent_at) >= sent_at, VALUES(chat_id), chat_id),
+								\`from\` = IF(VALUES(sent_at) >= sent_at, VALUES(\`from\`), \`from\`),
+								\`to\` = IF(VALUES(sent_at) >= sent_at, VALUES(\`to\`), \`to\`),
+								type = IF(VALUES(sent_at) >= sent_at, VALUES(type), type),
+								body = IF(VALUES(sent_at) >= sent_at, VALUES(body), body),
+								timestamp = IF(VALUES(sent_at) >= sent_at, VALUES(timestamp), timestamp),
+								sent_at = IF(VALUES(sent_at) >= sent_at, VALUES(sent_at), sent_at),
+								status = IF(VALUES(sent_at) >= sent_at, VALUES(status), status),
+								file_id = IF(VALUES(sent_at) >= sent_at, VALUES(file_id), file_id),
+								file_name = IF(VALUES(sent_at) >= sent_at, VALUES(file_name), file_name),
+								file_type = IF(VALUES(sent_at) >= sent_at, VALUES(file_type), file_type),
+								file_size = IF(VALUES(sent_at) >= sent_at, VALUES(file_size), file_size),
+								user_id = IF(VALUES(sent_at) >= sent_at, VALUES(user_id), user_id),
+								billing_category = IF(VALUES(sent_at) >= sent_at, VALUES(billing_category), billing_category),
+								client_id = IF(VALUES(sent_at) >= sent_at, VALUES(client_id), client_id)
+						`;
+
+						await instancesService.executeQuery(message.instance, lastMessageQuery, [
+							message.instance,
+							message.contactId,
+							message.chatId,
+							message.id,
+							message.from,
+							message.to,
+							message.type,
+							safeEncode(message.body) || "",
+							message.timestamp,
+							sentAt || this.formatDateForMySQL(new Date(0)),
+							message.status,
+							message.fileId,
+							message.fileName,
+							message.fileType,
+							message.fileSize,
+							message.userId,
+							message.billingCategory,
+							message.clientId
+						]);
+					}
+
 					return;
 				} catch (retryError) {
 					console.error("[syncMessageToLocal] Erro ao sincronizar mensagem após criar tabelas:", retryError);

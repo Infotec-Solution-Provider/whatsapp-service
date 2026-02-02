@@ -4,6 +4,7 @@ import chatsService from "./chats.service";
 import internalChatsService from "./internal-chats.service";
 import schedulesService from "./schedules.service";
 import instancesService from "./instances.service";
+import prismaService from "./prisma.service";
 import { safeDecode } from "../utils/safe-encode";
 
 interface MonitorSearchInput {
@@ -27,47 +28,144 @@ class MonitorService {
 	}
 
 	public async searchMonitorData(session: SessionData, input: MonitorSearchInput) {
-		return this.searchMonitorDataInternal(session, input, false);
+		return this.searchMonitorDataInternalStandard(session, input);
 	}
 
 	public async searchMonitorDataLocal(session: SessionData, input: MonitorSearchInput) {
-		return this.searchMonitorDataInternal(session, input, true);
+		return this.searchMonitorDataInternalLocal(session, input);
 	}
 
-	private async searchMonitorDataInternal(
-		session: SessionData,
-		input: MonitorSearchInput,
-		useLocal: boolean
-	) {
+	private async searchMonitorDataInternalStandard(session: SessionData, input: MonitorSearchInput) {
 		const page = Number(input.page) || 1;
 		const pageSize = Number(input.pageSize) || 20;
 		const filters = (input.filters as Record<string, any>) || {};
 
-		const schedules = useLocal
-			? await this.getLocalSchedules(session)
-			: await schedulesService.getSchedulesBySession(session, {});
-		const whatsappChatsRaw = useLocal
-			? await this.getLocalWhatsappChats(session)
-			: (await chatsService.getChatsMonitor(session, true, true)).chats;
+		const schedules = await schedulesService.getSchedulesBySession(session, {});
+		const whatsappChatsRaw = (await chatsService.getChatsMonitor(session, false, true)).chats;
 		const { chats: internalChatsRaw } = await internalChatsService.getInternalChatsMonitor(session);
 
-		const whatsappChats = whatsappChatsRaw.map((chat: any) => {
-			const messages = chat?.contact?.WppMessage || chat?.messages || [];
-			const lastMessage = messages.reduce((prev: any, curr: any) => {
-				if (!prev) return curr;
-				return (curr?.timestamp || 0) > (prev?.timestamp || 0) ? curr : prev;
-			}, null);
+		const contactIds = whatsappChatsRaw
+			.map((chat: any) => chat?.contactId)
+			.filter((id: any): id is number => typeof id === "number");
 
-			const isUnread = messages.some((m: any) => {
-				const from = String(m.from || "");
-				const isFromUs =
-					from.startsWith("me:") ||
-					from.startsWith("system:") ||
-					from.startsWith("bot") ||
-					from.startsWith("thirdparty") ||
-					from.startsWith("user:");
-				return m.status !== "READ" && !isFromUs;
+		if (contactIds.length) {
+			const lastMessages = await prismaService.wppMessage.findMany({
+				where: {
+					instance: session.instance,
+					contactId: { in: contactIds }
+				},
+				orderBy: { sentAt: "desc" },
+				distinct: ["contactId"]
 			});
+
+			const unreadCounts = await prismaService.wppMessage.groupBy({
+				by: ["contactId"],
+				where: {
+					instance: session.instance,
+					contactId: { in: contactIds },
+					status: { not: "READ" },
+					NOT: [
+						{ from: { startsWith: "me:" } },
+						{ from: { startsWith: "system:" } },
+						{ from: { startsWith: "bot" } },
+						{ from: { startsWith: "thirdparty" } },
+						{ from: { startsWith: "user:" } }
+					]
+				},
+				_count: { _all: true }
+			});
+
+			const lastMessageByContact = new Map<number, WppMessage>();
+			lastMessages.forEach((msg) => {
+				if (typeof msg.contactId === "number") {
+					lastMessageByContact.set(msg.contactId, msg);
+				}
+			});
+
+			const unreadByContact = new Map<number, number>();
+			unreadCounts.forEach((row) => {
+				if (typeof row.contactId === "number") {
+					unreadByContact.set(row.contactId, row._count._all || 0);
+				}
+			});
+
+			whatsappChatsRaw.forEach((chat: any) => {
+				const contactId = chat?.contactId;
+				if (typeof contactId !== "number") return;
+				chat.lastMessage = lastMessageByContact.get(contactId) || null;
+				chat.isUnread = (unreadByContact.get(contactId) || 0) > 0;
+			});
+		}
+
+		return this.applyMonitorFiltersAndPagination(
+			{ page, pageSize, filters },
+			whatsappChatsRaw,
+			internalChatsRaw,
+			schedules,
+			false
+		);
+	}
+
+	private async searchMonitorDataInternalLocal(session: SessionData, input: MonitorSearchInput) {
+		const page = Number(input.page) || 1;
+		const pageSize = Number(input.pageSize) || 20;
+		const filters = (input.filters as Record<string, any>) || {};
+		const searchText = String(filters["searchText"] || "").trim();
+		const searchColumn = String(filters["searchColumn"] || "all");
+
+		const needsLastMessage =
+			!!searchText && (searchColumn === "message" || searchColumn === "all")
+				? true
+				: filters["showPendingResponseOnly"] || filters["sortBy"] === "lastMessage";
+		const needsUnread = !!filters["showUnreadOnly"];
+
+		const schedules = await this.getLocalSchedules(session);
+		const whatsappChatsRaw = await this.getLocalWhatsappChats(session, {
+			includeLastMessage: needsLastMessage,
+			includeUnread: needsUnread
+		});
+		const { chats: internalChatsRaw } = await internalChatsService.getInternalChatsMonitor(session);
+
+		return this.applyMonitorFiltersAndPagination(
+			{ page, pageSize, filters },
+			whatsappChatsRaw,
+			internalChatsRaw,
+			schedules,
+			true
+		);
+	}
+
+	private applyMonitorFiltersAndPagination(
+		input: { page: number; pageSize: number; filters: Record<string, any> },
+		whatsappChatsRaw: any[],
+		internalChatsRaw: any[],
+		schedules: any[],
+		isLocal: boolean
+	) {
+		const { page, pageSize, filters } = input;
+
+		const whatsappChats = whatsappChatsRaw.map((chat: any) => {
+			const messages = chat?.messages || chat?.contact?.WppMessage || [];
+			const lastMessage =
+				chat?.lastMessage ||
+				messages.reduce((prev: any, curr: any) => {
+					if (!prev) return curr;
+					return (curr?.timestamp || 0) > (prev?.timestamp || 0) ? curr : prev;
+				}, null);
+
+			const isUnread =
+				typeof chat?.isUnread === "boolean"
+					? chat.isUnread
+					: messages.some((m: any) => {
+						const from = String(m.from || "");
+						const isFromUs =
+							from.startsWith("me:") ||
+							from.startsWith("system:") ||
+							from.startsWith("bot") ||
+							from.startsWith("thirdparty") ||
+							from.startsWith("user:");
+						return m.status !== "READ" && !isFromUs;
+					});
 
 			return {
 				...chat,
@@ -129,6 +227,7 @@ class MonitorService {
 		const onlyDigits = (s?: string | null) => (s ?? "").toString().replace(/\D/g, "");
 
 		const search = normalize(normalizedFilters.searchText);
+		const searchColumn = isLocal ? String(filters["searchColumn"] || "all") : "all";
 
 		const matchesSearch = (values: Array<string | null | undefined>) => {
 			if (!search) return true;
@@ -142,6 +241,31 @@ class MonitorService {
 			}
 
 			return false;
+		};
+
+		const pickCandidates = (groups: {
+			name?: Array<string | null | undefined>;
+			phone?: Array<string | null | undefined>;
+			customer?: Array<string | null | undefined>;
+			message?: Array<string | null | undefined>;
+		}) => {
+			const name = groups.name || [];
+			const phone = groups.phone || [];
+			const customer = groups.customer || [];
+			const message = groups.message || [];
+
+			switch (searchColumn) {
+				case "name":
+					return name;
+				case "phone":
+					return phone;
+				case "customer":
+					return customer;
+				case "message":
+					return message;
+				default:
+					return [...name, ...phone, ...customer, ...message];
+			}
 		};
 
 		const filteredInternal = internalChats.filter((chat: any) => {
@@ -193,7 +317,12 @@ class MonitorService {
 				anyChat?.messages?.[0]?.body
 			];
 
-			return matchesSearch([...nameCandidates, ...lastMessageCandidates]);
+			return matchesSearch(
+				pickCandidates({
+					name: nameCandidates,
+					message: lastMessageCandidates
+				})
+			);
 		});
 
 		const filteredWpp = whatsappChats.filter((chat: any) => {
@@ -255,16 +384,19 @@ class MonitorService {
 			}
 
 			const nameCandidates: Array<string | null | undefined> = [
-				chat?.contact?.name,
-				chat?.customer?.RAZAO,
+				chat?.contact?.name
+			];
+			const phoneCandidates: Array<string | null | undefined> = [
 				chat?.contact?.phone,
 				chat?.contact?.phoneNumber,
 				chat?.contact?.phone_number,
 				chat?.contact?.formattedPhone,
 				chat?.contact?.formattedPhoneNumber,
 				chat?.contact?.phoneFormatted,
-				chat?.contact?.shortName,
 				chat?.contact?.shortPhone
+			];
+			const customerCandidates: Array<string | null | undefined> = [
+				chat?.customer?.RAZAO
 			];
 			const lastMessageCandidates: Array<string | null | undefined> = [
 				chat?.lastMessageBody,
@@ -275,7 +407,14 @@ class MonitorService {
 				chat?.messages?.[0]?.body
 			];
 
-			return matchesSearch([...nameCandidates, ...lastMessageCandidates]);
+			return matchesSearch(
+				pickCandidates({
+					name: nameCandidates,
+					phone: phoneCandidates,
+					customer: customerCandidates,
+					message: lastMessageCandidates
+				})
+			);
 		});
 
 		const filteredSchedules = schedules.filter((schedule: any) => {
@@ -304,7 +443,7 @@ class MonitorService {
 				scheduledAt > new Date(normalizedFilters.scheduledAt.to)
 			)
 				return false;
-
+			
 			const scheduledTo = schedule.scheduleDate ? new Date(schedule.scheduleDate) : null;
 			if (
 				normalizedFilters.scheduledTo?.from &&
@@ -319,17 +458,20 @@ class MonitorService {
 			)
 				return false;
 
-			return matchesSearch([
-				schedule?.contact?.name,
-				schedule?.contact?.phone,
-				schedule?.contact?.phoneNumber,
-				schedule?.contact?.phone_number,
-				schedule?.contact?.formattedPhone,
-				schedule?.contact?.formattedPhoneNumber,
-				schedule?.contact?.phoneFormatted,
-				schedule?.customer?.RAZAO,
-				schedule?.customer?.CPF_CNPJ
-			]);
+			return matchesSearch(
+				pickCandidates({
+					name: [schedule?.contact?.name],
+					phone: [
+						schedule?.contact?.phone,
+						schedule?.contact?.phoneNumber,
+						schedule?.contact?.phone_number,
+						schedule?.contact?.formattedPhone,
+						schedule?.contact?.formattedPhoneNumber,
+						schedule?.contact?.phoneFormatted
+					],
+					customer: [schedule?.customer?.RAZAO, schedule?.customer?.CPF_CNPJ]
+				})
+			);
 		});
 
 		const allItems = [...filteredInternal, ...filteredWpp, ...filteredSchedules];
@@ -377,7 +519,10 @@ class MonitorService {
 		};
 	}
 
-	private async getLocalWhatsappChats(session: SessionData) {
+	private async getLocalWhatsappChats(
+		session: SessionData,
+		options: { includeLastMessage?: boolean; includeUnread?: boolean } = {}
+	) {
 		const isTI = session.sectorId === 3 || session.instance !== "nunes";
 		const params: any[] = [session.instance];
 		let whereClause = "chat.instance = ?";
@@ -471,63 +616,100 @@ class MonitorService {
 			.map((chat) => chat.contactId)
 			.filter((id): id is number => typeof id === "number");
 
-		if (contactIds.length) {
-			const placeholders = contactIds.map(() => "?").join(",");
-			const messagesQuery = `
-				SELECT * FROM wpp_messages
-				WHERE instance = ? AND contact_id IN (${placeholders})
-				ORDER BY sent_at ASC
-			`;
-			const messagesRows = await instancesService.executeQuery<any[]>(
-				session.instance,
-				messagesQuery,
-				[session.instance, ...contactIds]
-			);
-			const messages = messagesRows.map((row) => {
-				const sentAt = row.sent_at ? new Date(row.sent_at) : new Date();
-				return {
-					id: Number(row.id),
-					instance: row.instance,
-					wwebjsId: row.wwebjs_id || null,
-					wwebjsIdStanza: row.wwebjs_id_stanza || null,
-					wabaId: row.waba_id || null,
-					gupshupId: row.gupshup_id || null,
-					gupshupRequestId: row.gupshup_request_id || null,
-					from: row.from,
-					to: row.to,
-					type: row.type,
-					quotedId: row.quoted_id ? Number(row.quoted_id) : null,
-					chatId: row.chat_id ? Number(row.chat_id) : null,
-					contactId: row.contact_id ? Number(row.contact_id) : null,
-					isForwarded: Number(row.is_forwarded) === 1,
-					isEdited: Number(row.is_edited) === 1,
-					body: safeDecode(row.body),
-					timestamp: row.timestamp,
-					sentAt,
-					status: row.status,
-					fileId: row.file_id ? Number(row.file_id) : null,
-					fileName: safeDecode(row.file_name),
-					fileType: row.file_type || null,
-					fileSize: row.file_size || null,
-					userId: row.user_id ? Number(row.user_id) : null,
-					billingCategory: row.billing_category || null,
-					clientId: row.client_id ? Number(row.client_id) : null
-				} as WppMessage;
-			});
+		const includeLastMessage = options.includeLastMessage !== false;
+		const includeUnread = options.includeUnread !== false;
 
-			const messagesByContact = new Map<number, WppMessage[]>();
-			messages.forEach((msg) => {
-				const list = messagesByContact.get(msg.contactId || 0) || [];
-				list.push(msg);
-				if (msg.contactId) {
-					messagesByContact.set(msg.contactId, list);
-				}
-			});
+		if (contactIds.length && (includeLastMessage || includeUnread)) {
+			const placeholders = contactIds.map(() => "?").join(",");
+			const lastMessageByContact = new Map<number, WppMessage>();
+			if (includeLastMessage) {
+				const lastMessagesQuery = `
+					SELECT * FROM wpp_last_messages
+					WHERE instance = ? AND contact_id IN (${placeholders})
+				`;
+				const lastMessagesRows = await instancesService.executeQuery<any[]>(
+					session.instance,
+					lastMessagesQuery,
+					[session.instance, ...contactIds]
+				);
+				lastMessagesRows.forEach((row) => {
+					const sentAt = row.sent_at ? new Date(row.sent_at) : new Date();
+					const message = {
+						id: Number(row.message_id),
+						instance: row.instance,
+						wwebjsId: null,
+						wwebjsIdStanza: null,
+						wabaId: null,
+						gupshupId: null,
+						gupshupRequestId: null,
+						from: row.from,
+						to: row.to,
+						type: row.type,
+						quotedId: null,
+						chatId: row.chat_id ? Number(row.chat_id) : null,
+						contactId: row.contact_id ? Number(row.contact_id) : null,
+						isForwarded: false,
+						isEdited: false,
+						body: safeDecode(row.body),
+						timestamp: row.timestamp,
+						sentAt,
+						status: row.status,
+						fileId: row.file_id ? Number(row.file_id) : null,
+						fileName: safeDecode(row.file_name),
+						fileType: row.file_type || null,
+						fileSize: row.file_size || null,
+						userId: row.user_id ? Number(row.user_id) : null,
+						billingCategory: row.billing_category || null,
+						clientId: row.client_id ? Number(row.client_id) : null
+					} as WppMessage;
+					if (message.contactId) {
+						lastMessageByContact.set(message.contactId, message);
+					}
+				});
+			}
+
+			const unreadByContact = new Map<number, number>();
+			if (includeUnread) {
+				const unreadQuery = `
+					SELECT contact_id,
+						SUM(
+							CASE
+								WHEN status <> 'READ'
+								AND \`from\` NOT LIKE 'me:%'
+								AND \`from\` NOT LIKE 'system:%'
+								AND \`from\` NOT LIKE 'bot%'
+								AND \`from\` NOT LIKE 'thirdparty%'
+								AND \`from\` NOT LIKE 'user:%'
+								THEN 1 ELSE 0
+							END
+						) AS unread_count
+					FROM wpp_messages
+					WHERE instance = ? AND contact_id IN (${placeholders})
+					GROUP BY contact_id
+				`;
+				const unreadRows = await instancesService.executeQuery<any[]>(
+					session.instance,
+					unreadQuery,
+					[session.instance, ...contactIds]
+				);
+				unreadRows.forEach((row) => {
+					const contactId = row.contact_id ? Number(row.contact_id) : null;
+					if (!contactId) return;
+					unreadByContact.set(contactId, Number(row.unread_count) || 0);
+				});
+			}
 
 			chats.forEach((chat) => {
-				if (!chat.contact || chat.isFinished) return;
-				const contactMessages = messagesByContact.get(chat.contactId || 0) || [];
-				chat.contact.WppMessage = contactMessages;
+				if (!chat.contact) return;
+				const contactId = chat.contactId || 0;
+				const lastMessage = lastMessageByContact.get(contactId) || null;
+				const unreadCount = unreadByContact.get(contactId) || 0;
+				const anyChat = chat as any;
+				anyChat.lastMessage = lastMessage;
+				anyChat.isUnread = includeUnread ? unreadCount > 0 : false;
+				if (!chat.isFinished) {
+					chat.contact.WppMessage = lastMessage ? [lastMessage] : [];
+				}
 			});
 		}
 
