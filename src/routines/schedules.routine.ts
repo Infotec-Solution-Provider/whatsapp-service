@@ -1,6 +1,7 @@
 import prismaService from "../services/prisma.service";
 import ProcessingLogger from "../utils/processing-logger";
 import chatsService from "../services/chats.service";
+import schedulesService from "../services/schedules.service";
 import { WppContact, WppSchedule } from "@prisma/client";
 
 export default async function runSchedulesJob() {
@@ -12,7 +13,8 @@ export default async function runSchedulesJob() {
 			try {
 				const chat = await getChatForSchedule(process, schedule, schedule.contact as WppContact);
 				console.log(schedule.id);
-				await updateScheduleWithChatId(process, schedule.id, chat.id);
+				const updatedSchedule = await updateScheduleWithChatId(process, schedule.id, chat.id);
+				await schedulesService.syncScheduleToLocal(updatedSchedule);
 			} catch (err: any) {
 				process.log(`Erro ao processar agendamento id: ${schedule.id}: ` + err.message);
 			}
@@ -81,11 +83,12 @@ async function getChatForSchedule(process: ProcessingLogger, schedule: WppSchedu
 async function updateScheduleWithChatId(process: ProcessingLogger, scheduleId: number, chatId: number) {
 	try {
 		process.log(`Updating schedule id: ${scheduleId} with chatId: ${chatId}`);
-		await prismaService.wppSchedule.update({
+		const schedule = await prismaService.wppSchedule.update({
 			where: { id: scheduleId },
 			data: { chatId }
 		});
 		process.log(`Schedule id: ${scheduleId} updated successfully.`);
+		return schedule;
 	} catch (err: any) {
 		throw new Error("Erro ao atualizar agendamento com chatId: " + err.message, { cause: err });
 	}

@@ -114,6 +114,8 @@ class SchedulesService {
 			}
 		});
 
+		await this.syncScheduleToLocal(schedules);
+
 		if (chat) {
 			const systemMsg = `Esse atendimento foi agendado para retorno em ${date.toLocaleString('pt-BR')}.\nAgendado por ${session.name}.`;
 			await chatsService.systemFinishChatById(chat.id, systemMsg);
@@ -146,6 +148,8 @@ class SchedulesService {
 			data: scheduleData
 		});
 
+		await this.syncScheduleToLocal(schedules);
+
 		return schedules;
 	}
 
@@ -154,7 +158,70 @@ class SchedulesService {
 			where: { id: scheduleId }
 		});
 
+		await this.deleteScheduleFromLocal(schedules);
+
 		return schedules;
+	}
+
+	public async syncScheduleToLocal(schedule: WppSchedule) {
+		try {
+			const scheduledAt = this.formatDateForMySQL(schedule.scheduledAt);
+			const scheduleDate = this.formatDateForMySQL(schedule.scheduleDate);
+			const query = `
+				INSERT INTO wpp_schedules (
+					id, instance, description, contact_id, chat_id, scheduled_at, schedule_date,
+					scheduled_by, scheduled_for, sector_id
+				)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				ON DUPLICATE KEY UPDATE
+					description = VALUES(description),
+					contact_id = VALUES(contact_id),
+					chat_id = VALUES(chat_id),
+					scheduled_at = VALUES(scheduled_at),
+					schedule_date = VALUES(schedule_date),
+					scheduled_by = VALUES(scheduled_by),
+					scheduled_for = VALUES(scheduled_for),
+					sector_id = VALUES(sector_id)
+			`;
+
+			await instancesService.executeQuery(schedule.instance, query, [
+				schedule.id,
+				schedule.instance,
+				schedule.description,
+				schedule.contactId,
+				schedule.chatId,
+				scheduledAt,
+				scheduleDate,
+				schedule.scheduledBy,
+				schedule.scheduledFor,
+				schedule.sectorId
+			]);
+		} catch (error) {
+			console.error("[syncScheduleToLocal] Erro ao sincronizar agendamento:", error);
+		}
+	}
+
+	private async deleteScheduleFromLocal(schedule: WppSchedule) {
+		try {
+			await instancesService.executeQuery(
+				schedule.instance,
+				"DELETE FROM wpp_schedules WHERE id = ?",
+				[schedule.id]
+			);
+		} catch (error) {
+			console.error("[deleteScheduleFromLocal] Erro ao remover agendamento local:", error);
+		}
+	}
+
+	private formatDateForMySQL(date: Date | null | undefined): string | null {
+		if (!date) return null;
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, "0");
+		const day = String(date.getDate()).padStart(2, "0");
+		const hours = String(date.getHours()).padStart(2, "0");
+		const minutes = String(date.getMinutes()).padStart(2, "0");
+		const seconds = String(date.getSeconds()).padStart(2, "0");
+		return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 	}
 }
 

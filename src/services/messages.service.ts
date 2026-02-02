@@ -7,6 +7,7 @@ import socketService from "./socket.service";
 import { Mentions } from "../types/whatsapp-instance.types";
 import whatsappService from "./whatsapp.service";
 import ProcessingLogger from "../utils/processing-logger";
+import instancesService from "./instances.service";
 
 interface FetchMessagesFilter {
 	minDate: string;
@@ -22,17 +23,22 @@ interface EditMessageOptions {
 
 class MessagesService {
 	public async insertMessage(data: CreateMessageDto) {
-		return await prismaService.wppMessage.create({ data });
+		const message = await prismaService.wppMessage.create({ data });
+		await this.syncMessageToLocal(message);
+		return message;
 	}
 
 	public async updateMessage(id: number, data: Partial<WppMessage>) {
-		return await prismaService.wppMessage.update({
+		const message = await prismaService.wppMessage.update({
 			where: { id },
 			data,
 			include: {
 				WppChat: true
 			}
 		});
+
+		await this.syncMessageToLocal(message);
+		return message;
 	}
 
 	public async markContactMessagesAsRead(instance: string, contactId: number) {
@@ -54,6 +60,16 @@ class MessagesService {
 				status: "READ"
 			}
 		});
+
+		try {
+			await instancesService.executeQuery(
+				instance,
+				`UPDATE wpp_messages SET status = 'READ' WHERE contact_id = ? AND (\`to\` LIKE 'me:%' OR \`to\` = 'system')`,
+				[contactId]
+			);
+		} catch (err) {
+			console.error("[markContactMessagesAsRead] Erro ao sincronizar mensagens locais:", err);
+		}
 
 		const chat = await prismaService.wppChat.findFirst({
 			where: {
@@ -163,6 +179,88 @@ class MessagesService {
 			process.log("Erro ao editar a mensagem.", (err as Error).message);
 			throw new Error("Failed to edit message: " + (err as Error).message);
 		}
+	}
+
+	private async syncMessageToLocal(message: WppMessage) {
+		try {
+			const sentAt = this.formatDateForMySQL(message.sentAt);
+			const query = `
+				INSERT INTO wpp_messages (
+					id, instance, wwebjs_id, wwebjs_id_stanza, waba_id, gupshup_id, gupshup_request_id,
+					\`from\`, \`to\`, type, quoted_id, chat_id, contact_id, is_forwarded, is_edited,
+					body, timestamp, sent_at, status, file_id, file_name, file_type, file_size,
+					user_id, billing_category, client_id
+				)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				ON DUPLICATE KEY UPDATE
+					wwebjs_id = VALUES(wwebjs_id),
+					wwebjs_id_stanza = VALUES(wwebjs_id_stanza),
+					waba_id = VALUES(waba_id),
+					gupshup_id = VALUES(gupshup_id),
+					gupshup_request_id = VALUES(gupshup_request_id),
+					\`from\` = VALUES(\`from\`),
+					\`to\` = VALUES(\`to\`),
+					type = VALUES(type),
+					quoted_id = VALUES(quoted_id),
+					chat_id = VALUES(chat_id),
+					contact_id = VALUES(contact_id),
+					is_forwarded = VALUES(is_forwarded),
+					is_edited = VALUES(is_edited),
+					body = VALUES(body),
+					timestamp = VALUES(timestamp),
+					sent_at = VALUES(sent_at),
+					status = VALUES(status),
+					file_id = VALUES(file_id),
+					file_name = VALUES(file_name),
+					file_type = VALUES(file_type),
+					file_size = VALUES(file_size),
+					user_id = VALUES(user_id),
+					billing_category = VALUES(billing_category),
+					client_id = VALUES(client_id)
+			`;
+
+			await instancesService.executeQuery(message.instance, query, [
+				message.id,
+				message.instance,
+				message.wwebjsId,
+				message.wwebjsIdStanza,
+				message.wabaId,
+				message.gupshupId,
+				message.gupshupRequestId,
+				message.from,
+				message.to,
+				message.type,
+				message.quotedId,
+				message.chatId,
+				message.contactId,
+				message.isForwarded ? 1 : 0,
+				message.isEdited ? 1 : 0,
+				message.body,
+				message.timestamp,
+				sentAt,
+				message.status,
+				message.fileId,
+				message.fileName,
+				message.fileType,
+				message.fileSize,
+				message.userId,
+				message.billingCategory,
+				message.clientId
+			]);
+		} catch (error) {
+			console.error("[syncMessageToLocal] Erro ao sincronizar mensagem:", error);
+		}
+	}
+
+	private formatDateForMySQL(date: Date | null | undefined): string | null {
+		if (!date) return null;
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, "0");
+		const day = String(date.getDate()).padStart(2, "0");
+		const hours = String(date.getHours()).padStart(2, "0");
+		const minutes = String(date.getMinutes()).padStart(2, "0");
+		const seconds = String(date.getSeconds()).padStart(2, "0");
+		return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 	}
 }
 

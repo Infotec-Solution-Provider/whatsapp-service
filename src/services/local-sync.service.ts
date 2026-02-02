@@ -8,7 +8,7 @@ class LocalSyncService {
 	 */
 	private removeEmojis(str: string): string {
 		if (!str) return str;
-		
+
 		// Use Array.from to properly handle surrogate pairs
 		return Array.from(str)
 			.filter(char => {
@@ -87,6 +87,66 @@ class LocalSyncService {
 			) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 		`;
 
+		const createMessagesTableQuery = `
+			CREATE TABLE IF NOT EXISTS wpp_messages (
+				id INT NOT NULL,
+				instance VARCHAR(255) NOT NULL,
+				wwebjs_id VARCHAR(255) NULL,
+				wwebjs_id_stanza VARCHAR(255) NULL,
+				waba_id VARCHAR(255) NULL,
+				gupshup_id VARCHAR(255) NULL,
+				gupshup_request_id VARCHAR(255) NULL,
+				\`from\` VARCHAR(255) NOT NULL,
+				\`to\` VARCHAR(255) NOT NULL,
+				type VARCHAR(50) NOT NULL,
+				quoted_id INT NULL,
+				chat_id INT NULL,
+				contact_id INT NULL,
+				is_forwarded TINYINT(1) NOT NULL DEFAULT 0,
+				is_edited TINYINT(1) NOT NULL DEFAULT 0,
+				body TEXT NOT NULL,
+				timestamp VARCHAR(64) NOT NULL,
+				sent_at DATETIME NOT NULL,
+				status VARCHAR(50) NOT NULL,
+				file_id INT NULL,
+				file_name VARCHAR(255) NULL,
+				file_type VARCHAR(255) NULL,
+				file_size VARCHAR(255) NULL,
+				user_id INT NULL,
+				billing_category VARCHAR(255) NULL,
+				client_id INT NULL,
+				PRIMARY KEY (id),
+				UNIQUE KEY unique_wwebjs_id (wwebjs_id),
+				UNIQUE KEY unique_wwebjs_id_stanza (wwebjs_id_stanza),
+				UNIQUE KEY unique_waba_id (waba_id),
+				UNIQUE KEY unique_gupshup_id (gupshup_id),
+				INDEX idx_contact_id (contact_id),
+				INDEX idx_chat_id (chat_id),
+				INDEX idx_sent_at (sent_at),
+				INDEX idx_status (status)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+		`;
+
+		const createSchedulesTableQuery = `
+			CREATE TABLE IF NOT EXISTS wpp_schedules (
+				id INT NOT NULL,
+				instance VARCHAR(255) NOT NULL,
+				description TEXT NULL,
+				contact_id INT NOT NULL,
+				chat_id INT NULL,
+				scheduled_at DATETIME NOT NULL,
+				schedule_date DATETIME NOT NULL,
+				scheduled_by INT NOT NULL,
+				scheduled_for INT NOT NULL,
+				sector_id INT NULL,
+				PRIMARY KEY (id),
+				INDEX idx_contact_id (contact_id),
+				INDEX idx_chat_id (chat_id),
+				INDEX idx_scheduled_at (scheduled_at),
+				INDEX idx_schedule_date (schedule_date)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+		`;
+
 		try {
 			await instancesService.executeQuery(instance, createContactsTableQuery, []);
 			console.log(`[LocalSync] Tabela wpp_contacts verificada/criada`);
@@ -96,6 +156,12 @@ class LocalSyncService {
 
 			await instancesService.executeQuery(instance, createChatsTableQuery, []);
 			console.log(`[LocalSync] Tabela wpp_chats verificada/criada`);
+
+			await instancesService.executeQuery(instance, createMessagesTableQuery, []);
+			console.log(`[LocalSync] Tabela wpp_messages verificada/criada`);
+
+			await instancesService.executeQuery(instance, createSchedulesTableQuery, []);
+			console.log(`[LocalSync] Tabela wpp_schedules verificada/criada`);
 
 			// Alter table charset to utf8 if needed
 			try {
@@ -128,6 +194,26 @@ class LocalSyncService {
 				}
 			}
 
+			try {
+				const alterMessagesQuery = `ALTER TABLE wpp_messages CONVERT TO CHARACTER SET utf8`;
+				await instancesService.executeQuery(instance, alterMessagesQuery, []);
+				console.log(`[LocalSync] Charset de wpp_messages alterado para utf8`);
+			} catch (err: any) {
+				if (!err.message.includes("already exists")) {
+					console.log(`[LocalSync] wpp_messages charset já é utf8 ou erro ao alterar`);
+				}
+			}
+
+			try {
+				const alterSchedulesQuery = `ALTER TABLE wpp_schedules CONVERT TO CHARACTER SET utf8`;
+				await instancesService.executeQuery(instance, alterSchedulesQuery, []);
+				console.log(`[LocalSync] Charset de wpp_schedules alterado para utf8`);
+			} catch (err: any) {
+				if (!err.message.includes("already exists")) {
+					console.log(`[LocalSync] wpp_schedules charset já é utf8 ou erro ao alterar`);
+				}
+			}
+
 			// Ensure original_id column exists - with proper migration
 			try {
 				const checkColumnQuery = `
@@ -136,25 +222,25 @@ class LocalSyncService {
 				`;
 
 				const columnExists = await instancesService.executeQuery<any[]>(instance, checkColumnQuery, []);
-				
+
 				if (!columnExists || columnExists.length === 0) {
 					console.log(`[LocalSync] Coluna original_id não encontrada, adicionando...`);
-					
+
 					// Add column as nullable first
 					const addColumnQuery = `ALTER TABLE wpp_chats ADD COLUMN original_id INT NULL AFTER id`;
 					await instancesService.executeQuery(instance, addColumnQuery, []);
 					console.log(`[LocalSync] Coluna original_id adicionada como NULL`);
-					
+
 					// Fill with the id value from existing rows
 					const fillColumnQuery = `UPDATE wpp_chats SET original_id = id WHERE original_id IS NULL`;
 					await instancesService.executeQuery(instance, fillColumnQuery, []);
 					console.log(`[LocalSync] Coluna original_id preenchida com valores de id`);
-					
+
 					// Modify column to NOT NULL and add UNIQUE constraint
 					const modifyColumnQuery = `ALTER TABLE wpp_chats MODIFY COLUMN original_id INT NOT NULL UNIQUE`;
 					await instancesService.executeQuery(instance, modifyColumnQuery, []);
 					console.log(`[LocalSync] Coluna original_id modificada para NOT NULL UNIQUE`);
-					
+
 					// Add index if not exists
 					const addIndexQuery = `ALTER TABLE wpp_chats ADD INDEX idx_original_id (original_id)`;
 					await instancesService.executeQuery(instance, addIndexQuery, []);
@@ -341,12 +427,149 @@ class LocalSyncService {
 	}
 
 	/**
+	 * Sync all messages from Prisma to local database
+	 */
+	private async syncMessages(instance: string): Promise<number> {
+		console.log(`[LocalSync] Sincronizando mensagens para: ${instance}`);
+
+		const messages = await prismaService.wppMessage.findMany({
+			where: { instance }
+		});
+
+		if (messages.length === 0) {
+			console.log(`[LocalSync] Nenhuma mensagem encontrada para sincronizar`);
+			return 0;
+		}
+
+		const batchSize = 500;
+		let syncedCount = 0;
+
+		for (let i = 0; i < messages.length; i += batchSize) {
+			const batch = messages.slice(i, i + batchSize);
+
+			const values = batch
+				.map((msg) => {
+					const sentAt = this.formatDateForMySQL(msg.sentAt);
+					return `(${msg.id}, ${this.escapeSQL(msg.instance)}, ${msg.wwebjsId ? this.escapeSQL(msg.wwebjsId) : "NULL"}, ${msg.wwebjsIdStanza ? this.escapeSQL(msg.wwebjsIdStanza) : "NULL"}, ${msg.wabaId ? this.escapeSQL(msg.wabaId) : "NULL"}, ${msg.gupshupId ? this.escapeSQL(msg.gupshupId) : "NULL"}, ${msg.gupshupRequestId ? this.escapeSQL(msg.gupshupRequestId) : "NULL"}, ${this.escapeSQL(msg.from)}, ${this.escapeSQL(msg.to)}, ${this.escapeSQL(msg.type)}, ${msg.quotedId || "NULL"}, ${msg.chatId || "NULL"}, ${msg.contactId || "NULL"}, ${msg.isForwarded ? 1 : 0}, ${msg.isEdited ? 1 : 0}, ${this.escapeSQL(msg.body)}, ${this.escapeSQL(msg.timestamp)}, ${sentAt}, ${this.escapeSQL(msg.status)}, ${msg.fileId || "NULL"}, ${msg.fileName ? this.escapeSQL(msg.fileName) : "NULL"}, ${msg.fileType ? this.escapeSQL(msg.fileType) : "NULL"}, ${msg.fileSize ? this.escapeSQL(msg.fileSize) : "NULL"}, ${msg.userId || "NULL"}, ${msg.billingCategory ? this.escapeSQL(msg.billingCategory) : "NULL"}, ${msg.clientId || "NULL"})`;
+				})
+				.join(", ");
+
+			const query = `
+				INSERT INTO wpp_messages (
+					id, instance, wwebjs_id, wwebjs_id_stanza, waba_id, gupshup_id, gupshup_request_id,
+					\`from\`, \`to\`, type, quoted_id, chat_id, contact_id, is_forwarded, is_edited,
+					body, timestamp, sent_at, status, file_id, file_name, file_type, file_size,
+					user_id, billing_category, client_id
+				)
+				VALUES ${values}
+				ON DUPLICATE KEY UPDATE
+					wwebjs_id = VALUES(wwebjs_id),
+					wwebjs_id_stanza = VALUES(wwebjs_id_stanza),
+					waba_id = VALUES(waba_id),
+					gupshup_id = VALUES(gupshup_id),
+					gupshup_request_id = VALUES(gupshup_request_id),
+					\`from\` = VALUES(\`from\`),
+					\`to\` = VALUES(\`to\`),
+					type = VALUES(type),
+					quoted_id = VALUES(quoted_id),
+					chat_id = VALUES(chat_id),
+					contact_id = VALUES(contact_id),
+					is_forwarded = VALUES(is_forwarded),
+					is_edited = VALUES(is_edited),
+					body = VALUES(body),
+					timestamp = VALUES(timestamp),
+					sent_at = VALUES(sent_at),
+					status = VALUES(status),
+					file_id = VALUES(file_id),
+					file_name = VALUES(file_name),
+					file_type = VALUES(file_type),
+					file_size = VALUES(file_size),
+					user_id = VALUES(user_id),
+					billing_category = VALUES(billing_category),
+					client_id = VALUES(client_id)
+			`;
+
+			try {
+				await instancesService.executeQuery(instance, query, []);
+				syncedCount += batch.length;
+			} catch (err) {
+				console.error(`[LocalSync] Erro ao sincronizar batch de mensagens:`, err);
+				console.error(`[LocalSync] Query: ${query.substring(0, 500)}...`);
+				throw err;
+			}
+		}
+
+		console.log(`[LocalSync] ${syncedCount} mensagens sincronizadas`);
+		return syncedCount;
+	}
+
+	/**
+	 * Sync all schedules from Prisma to local database
+	 */
+	private async syncSchedules(instance: string): Promise<number> {
+		console.log(`[LocalSync] Sincronizando agendamentos para: ${instance}`);
+
+		const schedules = await prismaService.wppSchedule.findMany({
+			where: { instance }
+		});
+
+		if (schedules.length === 0) {
+			console.log(`[LocalSync] Nenhum agendamento encontrado para sincronizar`);
+			return 0;
+		}
+
+		const batchSize = 200;
+		let syncedCount = 0;
+
+		for (let i = 0; i < schedules.length; i += batchSize) {
+			const batch = schedules.slice(i, i + batchSize);
+
+			const values = batch
+				.map((schedule) => {
+					const scheduledAt = this.formatDateForMySQL(schedule.scheduledAt);
+					const scheduleDate = this.formatDateForMySQL(schedule.scheduleDate);
+					return `(${schedule.id}, ${this.escapeSQL(schedule.instance)}, ${schedule.description ? this.escapeSQL(schedule.description) : "NULL"}, ${schedule.contactId}, ${schedule.chatId || "NULL"}, ${scheduledAt}, ${scheduleDate}, ${schedule.scheduledBy}, ${schedule.scheduledFor}, ${schedule.sectorId || "NULL"})`;
+				})
+				.join(", ");
+
+			const query = `
+				INSERT INTO wpp_schedules (
+					id, instance, description, contact_id, chat_id, scheduled_at, schedule_date,
+					scheduled_by, scheduled_for, sector_id
+				)
+				VALUES ${values}
+				ON DUPLICATE KEY UPDATE
+					description = VALUES(description),
+					contact_id = VALUES(contact_id),
+					chat_id = VALUES(chat_id),
+					scheduled_at = VALUES(scheduled_at),
+					schedule_date = VALUES(schedule_date),
+					scheduled_by = VALUES(scheduled_by),
+					scheduled_for = VALUES(scheduled_for),
+					sector_id = VALUES(sector_id)
+			`;
+
+			try {
+				await instancesService.executeQuery(instance, query, []);
+				syncedCount += batch.length;
+			} catch (err) {
+				console.error(`[LocalSync] Erro ao sincronizar batch de agendamentos:`, err);
+				console.error(`[LocalSync] Query: ${query.substring(0, 500)}...`);
+				throw err;
+			}
+		}
+
+		console.log(`[LocalSync] ${syncedCount} agendamentos sincronizados`);
+		return syncedCount;
+	}
+
+	/**
 	 * Format date to MySQL datetime format (YYYY-MM-DD HH:MM:SS)
 	 * Returns NULL literal (without quotes) for use in raw SQL strings
 	 */
 	private formatDateForMySQL(date: Date | null | undefined): string {
 		if (!date) return "NULL";
-		
+
 		const year = date.getFullYear();
 		const month = String(date.getMonth() + 1).padStart(2, "0");
 		const day = String(date.getDate()).padStart(2, "0");
@@ -376,8 +599,16 @@ class LocalSyncService {
 			// 4. Sync chats
 			const chatsCount = await this.syncChats(instance);
 
+			// 5. Sync messages
+			const messagesCount = await this.syncMessages(instance);
+
+			// 6. Sync schedules
+			const schedulesCount = await this.syncSchedules(instance);
+
 			console.log(`[LocalSync] ====== Sincronizacao concluida para: ${instance} ======`);
-			console.log(`[LocalSync] Resumo: ${contactsCount} contatos, ${sectorsCount} setores, ${chatsCount} chats`);
+			console.log(
+				`[LocalSync] Resumo: ${contactsCount} contatos, ${sectorsCount} setores, ${chatsCount} chats, ${messagesCount} mensagens, ${schedulesCount} agendamentos`
+			);
 		} catch (error) {
 			console.error(`[LocalSync] Erro ao sincronizar instancia ${instance}:`, error);
 			throw error;

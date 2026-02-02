@@ -1,16 +1,13 @@
-import { Customer, SessionData } from "@in.pulse-crm/sdk";
+import { SessionData } from "@in.pulse-crm/sdk";
 import { Prisma, WppContact } from "@prisma/client";
 import { BadRequestError, ConflictError } from "@rgranatodutra/http-errors";
-import { CustomerSchedule } from "../message-flow/base/base.step";
 import { ContactMapper } from "../mappers/contact.mapper";
+import { CustomerSchedule } from "../message-flow/base/base.step";
 import { ContactQueryBuilder } from "../utils/contact-query-builder";
 import { PaginationHelper } from "../utils/pagination-helper";
-import chatsService from "./chats.service";
-import customersService from "./customers.service";
 import instancesService from "./instances.service";
 import parametersService from "./parameters.service";
 import prismaService from "./prisma.service";
-import usersService from "./users.service";
 import whatsappService from "./whatsapp.service";
 
 
