@@ -119,10 +119,11 @@ class MonitorService {
 				: filters["showPendingResponseOnly"] || filters["sortBy"] === "lastMessage";
 		const needsUnread = !!filters["showUnreadOnly"];
 
-		const schedules = await this.getLocalSchedules(session);
+		const schedules = await this.getLocalSchedules(session, filters);
 		const whatsappChatsRaw = await this.getLocalWhatsappChats(session, {
 			includeLastMessage: needsLastMessage,
-			includeUnread: needsUnread
+			includeUnread: needsUnread,
+			filters
 		});
 		const { chats: internalChatsRaw } = await internalChatsService.getInternalChatsMonitor(session);
 
@@ -521,7 +522,7 @@ class MonitorService {
 
 	private async getLocalWhatsappChats(
 		session: SessionData,
-		options: { includeLastMessage?: boolean; includeUnread?: boolean } = {}
+		options: { includeLastMessage?: boolean; includeUnread?: boolean; filters?: Record<string, any> } = {}
 	) {
 		const isTI = session.sectorId === 3 || session.instance !== "nunes";
 		const params: any[] = [session.instance];
@@ -530,6 +531,186 @@ class MonitorService {
 		if (!isTI) {
 			whereClause += " AND chat.sector_id = ?";
 			params.push(session.sectorId);
+		}
+
+		const filters = options.filters || {};
+
+		// Filtros de estado do chat
+		const showOngoing = filters["showOngoing"] ?? true;
+		const showFinished = filters["showFinished"] ?? true;
+		if (!showOngoing && showFinished) {
+			whereClause += " AND chat.is_finished = 1";
+		} else if (showOngoing && !showFinished) {
+			whereClause += " AND chat.is_finished = 0";
+		}
+
+		// Filtro de usuário
+		if (filters["user"] && filters["user"] !== "all") {
+			whereClause += " AND chat.user_id = ?";
+			params.push(filters["user"]);
+		}
+
+		// Filtro de bots
+		if (!filters["showBots"]) {
+			whereClause += " AND (chat.bot_id IS NULL OR chat.bot_id = 0)";
+		}
+
+		// Filtro de agendados
+		if (filters["showOnlyScheduled"]) {
+			whereClause += " AND chat.is_schedule = 1";
+		}
+
+		// Filtro de data de início
+		if (filters["startedAt"]?.from) {
+			whereClause += " AND chat.started_at >= ?";
+			params.push(new Date(filters["startedAt"].from));
+		}
+		if (filters["startedAt"]?.to) {
+			whereClause += " AND chat.started_at <= ?";
+			params.push(new Date(filters["startedAt"].to));
+		}
+
+		// Filtro de data de finalização
+		if (filters["finishedAt"]?.from) {
+			whereClause += " AND chat.finished_at >= ?";
+			params.push(new Date(filters["finishedAt"].from));
+		}
+		if (filters["finishedAt"]?.to) {
+			whereClause += " AND chat.finished_at <= ?";
+			params.push(new Date(filters["finishedAt"].to));
+		}
+
+		// Filtro de scheduledFor (requer JOIN com schedules)
+		if (filters["scheduledFor"] && filters["scheduledFor"] !== "all") {
+			whereClause += " AND sch.scheduled_for = ?";
+			params.push(filters["scheduledFor"]);
+		}
+
+		const includeLastMessage = options.includeLastMessage !== false;
+		const includeUnread = options.includeUnread !== false;
+
+		// Filtro de texto (busca)
+		const searchText = String(filters["searchText"] || "").trim();
+		const searchColumn = String(filters["searchColumn"] || "all");
+		if (searchText) {
+			const searchPattern = `%${searchText}%`;
+			const conditions: string[] = [];
+
+			if (searchColumn === "name" || searchColumn === "all") {
+				conditions.push("ctt.name LIKE ?");
+				params.push(searchPattern);
+			}
+			if (searchColumn === "phone" || searchColumn === "all") {
+				conditions.push("ctt.phone LIKE ?");
+				params.push(searchPattern);
+			}
+			if (searchColumn === "customer" || searchColumn === "all") {
+				conditions.push("cli.RAZAO LIKE ?");
+				params.push(searchPattern);
+			}
+			if (searchColumn === "message" || searchColumn === "all") {
+				if (includeLastMessage) {
+					conditions.push("lm.body LIKE ?");
+					params.push(searchPattern);
+				}
+			}
+
+			if (conditions.length > 0) {
+				whereClause += " AND (" + conditions.join(" OR ") + ")";
+			}
+		}
+
+		// Filtro de showUnreadOnly
+		if (filters["showUnreadOnly"] && includeUnread) {
+			whereClause += " AND unread.unread_count > 0";
+		}
+
+		// Filtro de showPendingResponseOnly
+		if (filters["showPendingResponseOnly"] && includeLastMessage) {
+			whereClause += " AND lm.`from` NOT LIKE 'me:%' AND lm.`from` NOT LIKE 'user:%'";
+		}
+
+		// Construir SELECT com campos condicionais
+		const lastMessageFields = includeLastMessage
+			? `,
+				lm.message_id as lm_message_id,
+				lm.chat_id as lm_chat_id,
+				lm.from as lm_from,
+				lm.to as lm_to,
+				lm.type as lm_type,
+				lm.body as lm_body,
+				lm.timestamp as lm_timestamp,
+				lm.sent_at as lm_sent_at,
+				lm.status as lm_status,
+				lm.file_id as lm_file_id,
+				lm.file_name as lm_file_name,
+				lm.file_type as lm_file_type,
+				lm.file_size as lm_file_size,
+				lm.user_id as lm_user_id,
+				lm.billing_category as lm_billing_category,
+				lm.client_id as lm_client_id`
+			: "";
+
+		const unreadField = includeUnread
+			? `,
+				COALESCE(unread.unread_count, 0) as unread_count`
+			: "";
+
+		// JOIN com schedules para filtro scheduledFor
+		const schedulesJoin = filters["scheduledFor"] && filters["scheduledFor"] !== "all"
+			? `LEFT JOIN wpp_schedules sch ON sch.instance = chat.instance AND sch.chat_id = chat.original_id`
+			: "";
+
+		// Construir JOINs condicionais
+		const lastMessageJoin = includeLastMessage
+			? `LEFT JOIN wpp_last_messages lm ON lm.instance = chat.instance AND lm.contact_id = chat.contact_id`
+			: "";
+
+		const unreadJoin = includeUnread
+			? `LEFT JOIN (
+					SELECT contact_id,
+						SUM(
+							CASE
+								WHEN status <> 'READ'
+								AND \`from\` NOT LIKE 'me:%'
+								AND \`from\` NOT LIKE 'system:%'
+								AND \`from\` NOT LIKE 'bot%'
+								AND \`from\` NOT LIKE 'thirdparty%'
+								AND \`from\` NOT LIKE 'user:%'
+								THEN 1 ELSE 0
+							END
+						) AS unread_count
+					FROM wpp_messages
+					WHERE instance = ?
+					GROUP BY contact_id
+				) unread ON unread.contact_id = chat.contact_id`
+			: "";
+
+		// Adicionar parâmetro extra para unread subquery se necessário
+		if (includeUnread) {
+			params.push(session.instance);
+		}
+
+		// Ordenação
+		const sortBy = filters["sortBy"] || "startedAt";
+		const sortOrder = (filters["sortOrder"] || "desc").toUpperCase();
+		let orderClause = "";
+		switch (sortBy) {
+			case "finishedAt":
+				orderClause = `ORDER BY chat.finished_at ${sortOrder}`;
+				break;
+			case "lastMessage":
+				if (includeLastMessage) {
+					orderClause = `ORDER BY lm.timestamp ${sortOrder}`;
+				} else {
+					orderClause = `ORDER BY chat.started_at ${sortOrder}`;
+				}
+				break;
+			case "name":
+				orderClause = `ORDER BY ctt.name ${sortOrder}`;
+				break;
+			default:
+				orderClause = `ORDER BY chat.started_at ${sortOrder}`;
 		}
 
 		const query = `
@@ -556,10 +737,16 @@ class MonitorService {
 				cli.FANTASIA as customer_FANTASIA,
 				cli.CPF_CNPJ as customer_CPF_CNPJ,
 				cli.COD_ERP as customer_COD_ERP
+				${lastMessageFields}
+				${unreadField}
 			FROM wpp_chats chat
 			LEFT JOIN wpp_contacts ctt ON ctt.id = chat.contact_id
 			LEFT JOIN clientes cli ON cli.CODIGO = ctt.customer_id
+			${schedulesJoin}
+			${lastMessageJoin}
+			${unreadJoin}
 			WHERE ${whereClause}
+			${orderClause}
 		`;
 
 		const rows = await instancesService.executeQuery<any[]>(session.instance, query, params);
@@ -590,7 +777,47 @@ class MonitorService {
 				}
 				: null;
 
-			return {
+			// Montar lastMessage do JOIN se disponível
+			let lastMessage: WppMessage | null = null;
+			if (includeLastMessage && row.lm_message_id) {
+				const sentAt = row.lm_sent_at ? new Date(row.lm_sent_at) : new Date();
+				lastMessage = {
+					id: Number(row.lm_message_id),
+					instance: row.instance,
+					wwebjsId: null,
+					wwebjsIdStanza: null,
+					wabaId: null,
+					gupshupId: null,
+					gupshupRequestId: null,
+					from: row.lm_from,
+					to: row.lm_to,
+					type: row.lm_type,
+					quotedId: null,
+					chatId: row.lm_chat_id ? Number(row.lm_chat_id) : null,
+					contactId: contactId,
+					isForwarded: false,
+					isEdited: false,
+					body: safeDecode(row.lm_body),
+					timestamp: row.lm_timestamp,
+					sentAt,
+					status: row.lm_status,
+					fileId: row.lm_file_id ? Number(row.lm_file_id) : null,
+					fileName: safeDecode(row.lm_file_name),
+					fileType: row.lm_file_type || null,
+					fileSize: row.lm_file_size || null,
+					userId: row.lm_user_id ? Number(row.lm_user_id) : null,
+					billingCategory: row.lm_billing_category || null,
+					clientId: row.lm_client_id ? Number(row.lm_client_id) : null
+				} as WppMessage;
+
+				if (contact && !Number(row.is_finished)) {
+					contact.WppMessage = [lastMessage];
+				}
+			}
+
+			const isUnread = includeUnread ? (Number(row.unread_count) || 0) > 0 : false;
+
+			const chat: any = {
 				id: Number(row.id),
 				instance: row.instance,
 				type: row.type,
@@ -607,111 +834,15 @@ class MonitorService {
 				isSchedule: Number(row.is_schedule) === 1,
 				contact,
 				customer,
-				schedule: null
+				schedule: null,
+				lastMessage,
+				isUnread
 			};
+
+			return chat;
 		});
 
 		const chatIds = chats.map((chat) => chat.id).filter((id) => Number.isFinite(id));
-		const contactIds = chats
-			.map((chat) => chat.contactId)
-			.filter((id): id is number => typeof id === "number");
-
-		const includeLastMessage = options.includeLastMessage !== false;
-		const includeUnread = options.includeUnread !== false;
-
-		if (contactIds.length && (includeLastMessage || includeUnread)) {
-			const placeholders = contactIds.map(() => "?").join(",");
-			const lastMessageByContact = new Map<number, WppMessage>();
-			if (includeLastMessage) {
-				const lastMessagesQuery = `
-					SELECT * FROM wpp_last_messages
-					WHERE instance = ? AND contact_id IN (${placeholders})
-				`;
-				const lastMessagesRows = await instancesService.executeQuery<any[]>(
-					session.instance,
-					lastMessagesQuery,
-					[session.instance, ...contactIds]
-				);
-				lastMessagesRows.forEach((row) => {
-					const sentAt = row.sent_at ? new Date(row.sent_at) : new Date();
-					const message = {
-						id: Number(row.message_id),
-						instance: row.instance,
-						wwebjsId: null,
-						wwebjsIdStanza: null,
-						wabaId: null,
-						gupshupId: null,
-						gupshupRequestId: null,
-						from: row.from,
-						to: row.to,
-						type: row.type,
-						quotedId: null,
-						chatId: row.chat_id ? Number(row.chat_id) : null,
-						contactId: row.contact_id ? Number(row.contact_id) : null,
-						isForwarded: false,
-						isEdited: false,
-						body: safeDecode(row.body),
-						timestamp: row.timestamp,
-						sentAt,
-						status: row.status,
-						fileId: row.file_id ? Number(row.file_id) : null,
-						fileName: safeDecode(row.file_name),
-						fileType: row.file_type || null,
-						fileSize: row.file_size || null,
-						userId: row.user_id ? Number(row.user_id) : null,
-						billingCategory: row.billing_category || null,
-						clientId: row.client_id ? Number(row.client_id) : null
-					} as WppMessage;
-					if (message.contactId) {
-						lastMessageByContact.set(message.contactId, message);
-					}
-				});
-			}
-
-			const unreadByContact = new Map<number, number>();
-			if (includeUnread) {
-				const unreadQuery = `
-					SELECT contact_id,
-						SUM(
-							CASE
-								WHEN status <> 'READ'
-								AND \`from\` NOT LIKE 'me:%'
-								AND \`from\` NOT LIKE 'system:%'
-								AND \`from\` NOT LIKE 'bot%'
-								AND \`from\` NOT LIKE 'thirdparty%'
-								AND \`from\` NOT LIKE 'user:%'
-								THEN 1 ELSE 0
-							END
-						) AS unread_count
-					FROM wpp_messages
-					WHERE instance = ? AND contact_id IN (${placeholders})
-					GROUP BY contact_id
-				`;
-				const unreadRows = await instancesService.executeQuery<any[]>(
-					session.instance,
-					unreadQuery,
-					[session.instance, ...contactIds]
-				);
-				unreadRows.forEach((row) => {
-					const contactId = row.contact_id ? Number(row.contact_id) : null;
-					if (!contactId) return;
-					unreadByContact.set(contactId, Number(row.unread_count) || 0);
-				});
-			}
-
-			chats.forEach((chat) => {
-				if (!chat.contact) return;
-				const contactId = chat.contactId || 0;
-				const lastMessage = lastMessageByContact.get(contactId) || null;
-				const unreadCount = unreadByContact.get(contactId) || 0;
-				const anyChat = chat as any;
-				anyChat.lastMessage = lastMessage;
-				anyChat.isUnread = includeUnread ? unreadCount > 0 : false;
-				if (!chat.isFinished) {
-					chat.contact.WppMessage = lastMessage ? [lastMessage] : [];
-				}
-			});
-		}
 
 		if (chatIds.length) {
 			const placeholders = chatIds.map(() => "?").join(",");
@@ -751,7 +882,67 @@ class MonitorService {
 		return chats;
 	}
 
-	private async getLocalSchedules(session: SessionData) {
+	private async getLocalSchedules(session: SessionData, filters: Record<string, any> = {}) {
+		const params: any[] = [session.instance];
+		let whereClause = "sch.instance = ? AND sch.chat_id IS NULL";
+
+		// Filtro scheduledFor
+		if (filters["scheduledFor"] && filters["scheduledFor"] !== "all") {
+			whereClause += " AND sch.scheduled_for = ?";
+			params.push(filters["scheduledFor"]);
+		}
+
+		// Filtro scheduledBy
+		if (filters["scheduledBy"] && filters["scheduledBy"] !== "all") {
+			whereClause += " AND sch.scheduled_by = ?";
+			params.push(filters["scheduledBy"]);
+		}
+
+		// Filtro scheduledAt (data de agendamento)
+		if (filters["scheduledAt"]?.from) {
+			whereClause += " AND sch.scheduled_at >= ?";
+			params.push(new Date(filters["scheduledAt"].from));
+		}
+		if (filters["scheduledAt"]?.to) {
+			whereClause += " AND sch.scheduled_at <= ?";
+			params.push(new Date(filters["scheduledAt"].to));
+		}
+
+		// Filtro scheduledTo (data para executar o agendamento)
+		if (filters["scheduledTo"]?.from) {
+			whereClause += " AND sch.schedule_date >= ?";
+			params.push(new Date(filters["scheduledTo"].from));
+		}
+		if (filters["scheduledTo"]?.to) {
+			whereClause += " AND sch.schedule_date <= ?";
+			params.push(new Date(filters["scheduledTo"].to));
+		}
+
+		// Filtro de texto (busca)
+		const searchText = String(filters["searchText"] || "").trim();
+		const searchColumn = String(filters["searchColumn"] || "all");
+		if (searchText) {
+			const searchPattern = `%${searchText}%`;
+			const conditions: string[] = [];
+
+			if (searchColumn === "name" || searchColumn === "all") {
+				conditions.push("ctt.name LIKE ?");
+				params.push(searchPattern);
+			}
+			if (searchColumn === "phone" || searchColumn === "all") {
+				conditions.push("ctt.phone LIKE ?");
+				params.push(searchPattern);
+			}
+			if (searchColumn === "customer" || searchColumn === "all") {
+				conditions.push("(cli.RAZAO LIKE ? OR cli.CPF_CNPJ LIKE ?)");
+				params.push(searchPattern, searchPattern);
+			}
+
+			if (conditions.length > 0) {
+				whereClause += " AND (" + conditions.join(" OR ") + ")";
+			}
+		}
+
 		const query = `
 			SELECT
 				sch.id,
@@ -776,10 +967,10 @@ class MonitorService {
 			FROM wpp_schedules sch
 			LEFT JOIN wpp_contacts ctt ON ctt.id = sch.contact_id
 			LEFT JOIN clientes cli ON cli.CODIGO = ctt.customer_id
-			WHERE sch.instance = ? AND sch.chat_id IS NULL
+			WHERE ${whereClause}
 		`;
 
-		const rows = await instancesService.executeQuery<any[]>(session.instance, query, [session.instance]);
+		const rows = await instancesService.executeQuery<any[]>(session.instance, query, params);
 
 		return rows.map((row) => {
 			const contactId = row.contact_id_ref ? Number(row.contact_id_ref) : null;
