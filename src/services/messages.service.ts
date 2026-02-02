@@ -199,9 +199,7 @@ class MessagesService {
 	}
 
 	private async syncMessageToLocal(message: WppMessage) {
-		try {
-			const sentAt = this.formatDateForMySQL(message.sentAt);
-			const query = `
+		const query = `
 				INSERT INTO wpp_messages (
 					id, instance, wwebjs_id, wwebjs_id_stanza, waba_id, gupshup_id, gupshup_request_id,
 					\`from\`, \`to\`, type, quoted_id, chat_id, contact_id, is_forwarded, is_edited,
@@ -235,6 +233,9 @@ class MessagesService {
 					billing_category = VALUES(billing_category),
 					client_id = VALUES(client_id)
 			`;
+
+		try {
+			const sentAt = this.formatDateForMySQL(message.sentAt);
 
 			await instancesService.executeQuery(message.instance, query, [
 				message.id,
