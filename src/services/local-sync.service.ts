@@ -3,45 +3,6 @@ import prismaService from "./prisma.service";
 
 class LocalSyncService {
 	/**
-	 * Safely encode string for storage in database
-	 */
-	private safeEncodeURIComponent(str: string): string {
-		if (!str) return "";
-		try {
-			return encodeURIComponent(str);
-		} catch (err) {
-			console.error("[LocalSync] Erro ao encodar string:", err);
-			return "";
-		}
-	}
-
-	/**
-	 * Safely decode string from database
-	 */
-	public safeDecodeURIComponent(str: string): string {
-		if (!str) return "";
-		try {
-			return decodeURIComponent(str);
-		} catch (err) {
-			console.error("[LocalSync] Erro ao decodar string:", err);
-			return str; // Return original if decode fails
-		}
-	}
-
-	/**
-	 * Format string for SQL insert (with encoding)
-	 */
-	private formatSQLString(value: string | null | undefined): string {
-		if (value === null || value === undefined) {
-			return "NULL";
-		}
-		const encoded = this.safeEncodeURIComponent(value.toString());
-		// Escape single quotes for SQL
-		const escaped = encoded.replace(/'/g, "''");
-		return "'" + escaped + "'";
-	}
-
-	/**
 	 * Ensure all required local tables exist in the tenant database
 	 */
 	private async ensureTablesExist(instance: string): Promise<void> {
@@ -287,16 +248,25 @@ class LocalSyncService {
 		for (let i = 0; i < contacts.length; i += batchSize) {
 			const batch = contacts.slice(i, i + batchSize);
 
-			const values = batch
-				.map(
-					(c) =>
-						`(${c.id}, ${this.formatSQLString(c.instance)}, ${this.formatSQLString(c.name)}, ${this.formatSQLString(c.phone)}, ${c.customerId || "NULL"}, ${c.isDeleted ? 1 : 0})`
-				)
-				.join(", ");
+			// Create placeholders (?,?,?,?,?,?) for each contact
+			const placeholders = batch.map(() => "(?,?,?,?,?,?)").join(", ");
+			
+			// Flatten all values into a single array
+			const values: any[] = [];
+			batch.forEach((c) => {
+				values.push(
+					c.id,
+					c.instance,
+					c.name,
+					c.phone,
+					c.customerId,
+					c.isDeleted ? 1 : 0
+				);
+			});
 
 			const query = `
 				INSERT INTO wpp_contacts (id, instance, name, phone, customer_id, is_deleted)
-				VALUES ${values}
+				VALUES ${placeholders}
 				ON DUPLICATE KEY UPDATE
 					name = VALUES(name),
 					phone = VALUES(phone),
@@ -304,7 +274,7 @@ class LocalSyncService {
 					is_deleted = VALUES(is_deleted)
 			`;
 
-			await instancesService.executeQuery(instance, query, []);
+			await instancesService.executeQuery(instance, query, values);
 			syncedCount += batch.length;
 		}
 
@@ -353,14 +323,22 @@ class LocalSyncService {
 		const batchSize = 500;
 		for (let i = 0; i < allSectorRelations.length; i += batchSize) {
 			const batch = allSectorRelations.slice(i, i + batchSize);
-			const values = batch.map((rel) => `(${rel.contactId}, ${rel.sectorId})`).join(", ");
+			
+			// Create placeholders for 2 fields per relation
+			const placeholders = batch.map(() => "(?,?)").join(", ");
+			
+			// Flatten all values
+			const values: any[] = [];
+			batch.forEach((rel) => {
+				values.push(rel.contactId, rel.sectorId);
+			});
 
 			const query = `
 				INSERT INTO wpp_contact_sectors (contact_id, sector_id)
-				VALUES ${values}
+				VALUES ${placeholders}
 			`;
 
-			await instancesService.executeQuery(instance, query, []);
+			await instancesService.executeQuery(instance, query, values);
 			syncedCount += batch.length;
 		}
 
@@ -389,15 +367,29 @@ class LocalSyncService {
 		for (let i = 0; i < chats.length; i += batchSize) {
 			const batch = chats.slice(i, i + batchSize);
 
-			const values = batch
-				.map((chat) => {
-					const startedAt = this.formatDateForMySQL(chat.startedAt);
-					const finishedAt = this.formatDateForMySQL(chat.finishedAt);
-			const avatarUrl = chat.avatarUrl ? this.formatSQLString(chat.avatarUrl) : "NULL";
-
-				return `(${chat.id}, ${chat.id}, ${this.formatSQLString(chat.instance)}, ${this.formatSQLString(chat.type)}, ${avatarUrl}, ${chat.userId || "NULL"}, ${chat.contactId || "NULL"}, ${chat.sectorId || "NULL"}, ${startedAt}, ${finishedAt}, ${chat.finishedBy || "NULL"}, ${chat.resultId || "NULL"}, ${chat.isFinished ? 1 : 0}, ${chat.isSchedule ? 1 : 0})`;
-				})
-				.join(", ");
+			// Create placeholders for 14 fields per chat
+			const placeholders = batch.map(() => "(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").join(", ");
+			
+			// Flatten all values
+			const values: any[] = [];
+			batch.forEach((chat) => {
+				values.push(
+					chat.id,
+					chat.id, // original_id
+					chat.instance,
+					chat.type,
+					chat.avatarUrl,
+					chat.userId,
+					chat.contactId,
+					chat.sectorId,
+					this.formatDateForMySQL(chat.startedAt),
+					this.formatDateForMySQL(chat.finishedAt),
+					chat.finishedBy,
+					chat.resultId,
+					chat.isFinished ? 1 : 0,
+					chat.isSchedule ? 1 : 0
+				);
+			});
 
 			const query = `
 				INSERT INTO wpp_chats (
@@ -405,7 +397,7 @@ class LocalSyncService {
 					sector_id, started_at, finished_at, finished_by,
 					result_id, is_finished, is_schedule
 				)
-				VALUES ${values}
+				VALUES ${placeholders}
 				ON DUPLICATE KEY UPDATE
 					type = VALUES(type),
 					avatar_url = VALUES(avatar_url),
@@ -421,11 +413,10 @@ class LocalSyncService {
 			`;
 
 			try {
-				await instancesService.executeQuery(instance, query, []);
+				await instancesService.executeQuery(instance, query, values);
 				syncedCount += batch.length;
 			} catch (err) {
 				console.error(`[LocalSync] Erro ao sincronizar batch de chats:`, err);
-				console.error(`[LocalSync] Query: ${query.substring(0, 500)}...`);
 				throw err;
 			}
 		}
@@ -449,23 +440,47 @@ class LocalSyncService {
 			return 0;
 		}
 
-		const batchSize = 50; // Batch menor para evitar queries SQL muito grandes
+		const batchSize = 50;
 		let syncedCount = 0;
 
 		for (let i = 0; i < messages.length; i += batchSize) {
 			const batch = messages.slice(i, i + batchSize);
 
-			const values = batch
-				.map((msg, idx) => {
-					try {
-						const sentAt = this.formatDateForMySQL(msg.sentAt);
-						return `(${msg.id}, ${this.formatSQLString(msg.instance)}, ${msg.wwebjsId ? this.formatSQLString(msg.wwebjsId) : "NULL"}, ${msg.wwebjsIdStanza ? this.formatSQLString(msg.wwebjsIdStanza) : "NULL"}, ${msg.wabaId ? this.formatSQLString(msg.wabaId) : "NULL"}, ${msg.gupshupId ? this.formatSQLString(msg.gupshupId) : "NULL"}, ${msg.gupshupRequestId ? this.formatSQLString(msg.gupshupRequestId) : "NULL"}, ${this.formatSQLString(msg.from)}, ${this.formatSQLString(msg.to)}, ${this.formatSQLString(msg.type)}, ${msg.quotedId || "NULL"}, ${msg.chatId || "NULL"}, ${msg.contactId || "NULL"}, ${msg.isForwarded ? 1 : 0}, ${msg.isEdited ? 1 : 0}, ${this.formatSQLString(msg.body)}, ${this.formatSQLString(msg.timestamp)}, ${sentAt}, ${this.formatSQLString(msg.status)}, ${msg.fileId || "NULL"}, ${msg.fileName ? this.formatSQLString(msg.fileName) : "NULL"}, ${msg.fileType ? this.formatSQLString(msg.fileType) : "NULL"}, ${msg.fileSize ? this.formatSQLString(msg.fileSize) : "NULL"}, ${msg.userId || "NULL"}, ${msg.billingCategory ? this.formatSQLString(msg.billingCategory) : "NULL"}, ${msg.clientId || "NULL"})`;
-					} catch (err) {
-						console.error(`[LocalSync] Erro ao processar mensagem ${msg.id} no índice ${idx}:`, err);
-						throw err;
-					}
-				})
-				.join(", ");
+			// Create placeholders for 26 fields per message
+			const placeholders = batch.map(() => "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").join(", ");
+			
+			// Flatten all values
+			const values: any[] = [];
+			batch.forEach((msg) => {
+				values.push(
+					msg.id,
+					msg.instance,
+					msg.wwebjsId,
+					msg.wwebjsIdStanza,
+					msg.wabaId,
+					msg.gupshupId,
+					msg.gupshupRequestId,
+					msg.from,
+					msg.to,
+					msg.type,
+					msg.quotedId,
+					msg.chatId,
+					msg.contactId,
+					msg.isForwarded ? 1 : 0,
+					msg.isEdited ? 1 : 0,
+					msg.body,
+					msg.timestamp,
+					this.formatDateForMySQL(msg.sentAt),
+					msg.status,
+					msg.fileId,
+					msg.fileName,
+					msg.fileType,
+					msg.fileSize,
+					msg.userId,
+					msg.billingCategory,
+					msg.clientId
+				);
+			});
 
 			const query = `
 				INSERT INTO wpp_messages (
@@ -474,7 +489,7 @@ class LocalSyncService {
 					body, timestamp, sent_at, status, file_id, file_name, file_type, file_size,
 					user_id, billing_category, client_id
 				)
-				VALUES ${values}
+				VALUES ${placeholders}
 				ON DUPLICATE KEY UPDATE
 					wwebjs_id = VALUES(wwebjs_id),
 					wwebjs_id_stanza = VALUES(wwebjs_id_stanza),
@@ -503,11 +518,10 @@ class LocalSyncService {
 			`;
 
 			try {
-				await instancesService.executeQuery(instance, query, []);
+				await instancesService.executeQuery(instance, query, values);
 				syncedCount += batch.length;
 			} catch (err) {
 				console.error(`[LocalSync] Erro ao sincronizar batch de mensagens (linhas ${i + 1}-${i + batch.length}):`, err);
-				console.error(`[LocalSync] Query preview: ${query.substring(0, 800)}...`);
 				throw err;
 			}
 		}
@@ -531,26 +545,38 @@ class LocalSyncService {
 			return 0;
 		}
 
-		const batchSize = 50; // Batch menor para evitar queries SQL muito grandes
+		const batchSize = 50;
 		let syncedCount = 0;
 
 		for (let i = 0; i < schedules.length; i += batchSize) {
 			const batch = schedules.slice(i, i + batchSize);
 
-			const values = batch
-				.map((schedule) => {
-					const scheduledAt = this.formatDateForMySQL(schedule.scheduledAt);
-					const scheduleDate = this.formatDateForMySQL(schedule.scheduleDate);
-					return `(${schedule.id}, ${this.formatSQLString(schedule.instance)}, ${schedule.description ? this.formatSQLString(schedule.description) : "NULL"}, ${schedule.contactId}, ${schedule.chatId || "NULL"}, ${scheduledAt}, ${scheduleDate}, ${schedule.scheduledBy}, ${schedule.scheduledFor}, ${schedule.sectorId || "NULL"})`;
-				})
-				.join(", ");
+			// Create placeholders for 10 fields per schedule
+			const placeholders = batch.map(() => "(?,?,?,?,?,?,?,?,?,?)").join(", ");
+			
+			// Flatten all values
+			const values: any[] = [];
+			batch.forEach((schedule) => {
+				values.push(
+					schedule.id,
+					schedule.instance,
+					schedule.description,
+					schedule.contactId,
+					schedule.chatId,
+					this.formatDateForMySQL(schedule.scheduledAt),
+					this.formatDateForMySQL(schedule.scheduleDate),
+					schedule.scheduledBy,
+					schedule.scheduledFor,
+					schedule.sectorId
+				);
+			});
 
 			const query = `
 				INSERT INTO wpp_schedules (
 					id, instance, description, contact_id, chat_id, scheduled_at, schedule_date,
 					scheduled_by, scheduled_for, sector_id
 				)
-				VALUES ${values}
+				VALUES ${placeholders}
 				ON DUPLICATE KEY UPDATE
 					description = VALUES(description),
 					contact_id = VALUES(contact_id),
@@ -563,7 +589,7 @@ class LocalSyncService {
 			`;
 
 			try {
-				await instancesService.executeQuery(instance, query, []);
+				await instancesService.executeQuery(instance, query, values);
 				syncedCount += batch.length;
 			} catch (err) {
 				console.error(`[LocalSync] Erro ao sincronizar batch de agendamentos:`, err);
