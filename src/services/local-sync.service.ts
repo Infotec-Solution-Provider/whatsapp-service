@@ -1,3 +1,4 @@
+import { safeEncode } from "../utils/safe-encode";
 import instancesService from "./instances.service";
 import prismaService from "./prisma.service";
 
@@ -10,18 +11,7 @@ interface SyncOptions {
 }
 
 class LocalSyncService {
-	/**
-	 * Safely encode string for storage (handles emojis and special chars)
-	 */
-	private safeEncode(value: string | null | undefined): string | null {
-		if (!value) return null;
-		try {
-			return encodeURIComponent(value);
-		} catch (err) {
-			console.error(`[LocalSync] Erro ao fazer encode:`, err);
-			return value;
-		}
-	}
+
 
 	/**
 	 * Ensure all required local tables exist in the tenant database
@@ -271,7 +261,7 @@ class LocalSyncService {
 
 			// Create placeholders (?,?,?,?,?,?) for each contact
 			const placeholders = batch.map(() => "(?,?,?,?,?,?)").join(", ");
-			
+
 			// Flatten all values into a single array
 			const values: any[] = [];
 			batch.forEach((c) => {
@@ -344,10 +334,10 @@ class LocalSyncService {
 		const batchSize = 500;
 		for (let i = 0; i < allSectorRelations.length; i += batchSize) {
 			const batch = allSectorRelations.slice(i, i + batchSize);
-			
+
 			// Create placeholders for 2 fields per relation
 			const placeholders = batch.map(() => "(?,?)").join(", ");
-			
+
 			// Flatten all values
 			const values: any[] = [];
 			batch.forEach((rel) => {
@@ -390,7 +380,7 @@ class LocalSyncService {
 
 			// Create placeholders for 14 fields per chat
 			const placeholders = batch.map(() => "(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").join(", ");
-			
+
 			// Flatten all values
 			const values: any[] = [];
 			batch.forEach((chat) => {
@@ -399,7 +389,7 @@ class LocalSyncService {
 					chat.id, // original_id
 					chat.instance,
 					chat.type,
-					this.safeEncode(chat.avatarUrl),
+					safeEncode(chat.avatarUrl),
 					chat.userId,
 					chat.contactId,
 					chat.sectorId,
@@ -520,12 +510,12 @@ class LocalSyncService {
 				msg.contactId,
 				msg.isForwarded ? 1 : 0,
 				msg.isEdited ? 1 : 0,
-				this.safeEncode(msg.body),
+				safeEncode(msg.body) || "",
 				msg.timestamp,
 				this.formatDateForMySQL(msg.sentAt),
 				msg.status,
 				msg.fileId,
-				this.safeEncode(msg.fileName),
+				safeEncode(msg.fileName),
 				msg.fileType,
 				msg.fileSize,
 				msg.userId,
@@ -536,7 +526,7 @@ class LocalSyncService {
 			try {
 				await instancesService.executeQuery(instance, query, values);
 				syncedCount++;
-				
+
 				// Log progresso a cada 50 mensagens
 				if ((i + 1) % 50 === 0) {
 					console.log(`[LocalSync] Progresso: ${i + 1}/${messages.length} mensagens sincronizadas`);
@@ -553,7 +543,7 @@ class LocalSyncService {
 				console.error(`[LocalSync] SentAt: ${msg.sentAt}`);
 				console.error(`[LocalSync] Erro SQL: ${err.message}`);
 				console.error(`[LocalSync] ============================================\n`);
-				
+
 				// Abortar após 10 erros para não poluir muito o log
 				if (errorCount >= 10) {
 					console.error(`[LocalSync] ABORTANDO: Muitos erros consecutivos (${errorCount})`);
@@ -589,14 +579,14 @@ class LocalSyncService {
 
 			// Create placeholders for 10 fields per schedule
 			const placeholders = batch.map(() => "(?,?,?,?,?,?,?,?,?,?)").join(", ");
-			
+
 			// Flatten all values
 			const values: any[] = [];
 			batch.forEach((schedule) => {
 				values.push(
 					schedule.id,
 					schedule.instance,
-				this.safeEncode(schedule.description),
+					safeEncode(schedule.description),
 					schedule.contactId,
 					schedule.chatId,
 					this.formatDateForMySQL(schedule.scheduledAt),
@@ -660,7 +650,7 @@ class LocalSyncService {
 	 */
 	public async syncInstance(instance: string, options: SyncOptions = {}): Promise<void> {
 		console.log(`[LocalSync] ====== Iniciando sincronizacao para: ${instance} ======`);
-		
+
 		if (options.skipContacts) console.log(`[LocalSync] Pulando sincronizacao de contatos`);
 		if (options.skipSectors) console.log(`[LocalSync] Pulando sincronizacao de setores`);
 		if (options.skipChats) console.log(`[LocalSync] Pulando sincronizacao de chats`);

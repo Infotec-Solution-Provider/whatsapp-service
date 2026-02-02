@@ -9,6 +9,7 @@ import whatsappService from "./whatsapp.service";
 import ProcessingLogger from "../utils/processing-logger";
 import instancesService from "./instances.service";
 import localSyncService from "./local-sync.service";
+import { safeEncode } from "../utils/safe-encode";
 
 interface FetchMessagesFilter {
 	minDate: string;
@@ -253,7 +254,7 @@ class MessagesService {
 				message.contactId,
 				message.isForwarded ? 1 : 0,
 				message.isEdited ? 1 : 0,
-				message.body,
+				message.body || "",
 				message.timestamp,
 				sentAt,
 				message.status,
@@ -287,7 +288,7 @@ class MessagesService {
 						message.contactId,
 						message.isForwarded ? 1 : 0,
 						message.isEdited ? 1 : 0,
-						message.body,
+						safeEncode(message.body) || "",
 						message.timestamp,
 						sentAt,
 						message.status,

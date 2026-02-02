@@ -4,6 +4,7 @@ import chatsService from "./chats.service";
 import internalChatsService from "./internal-chats.service";
 import schedulesService from "./schedules.service";
 import instancesService from "./instances.service";
+import { safeDecode } from "../utils/safe-encode";
 
 interface MonitorSearchInput {
 	page?: number;
@@ -12,18 +13,6 @@ interface MonitorSearchInput {
 }
 
 class MonitorService {
-	/**
-	 * Safely decode string from storage
-	 */
-	private safeDecode(value: string | null | undefined): string | null {
-		if (!value) return null;
-		try {
-			return decodeURIComponent(value);
-		} catch (err) {
-			console.error(`[MonitorService] Erro ao fazer decode:`, err);
-			return value;
-		}
-	}
 
 	public async getMonitorData(session: SessionData) {
 		const schedules = await schedulesService.getSchedulesBySession(session, {});
@@ -437,7 +426,7 @@ class MonitorService {
 			const contact = contactId
 				? {
 					id: contactId,
-				name: this.safeDecode(row.contact_name),
+					name: safeDecode(row.contact_name),
 					phone: row.contact_phone,
 					phoneNumber: row.contact_phone,
 					phone_number: row.contact_phone,
@@ -460,7 +449,7 @@ class MonitorService {
 				id: Number(row.id),
 				instance: row.instance,
 				type: row.type,
-				avatarUrl: this.safeDecode(row.avatar_url),
+				avatarUrl: safeDecode(row.avatar_url),
 				userId: row.user_id ? Number(row.user_id) : null,
 				botId: null,
 				contactId: contactId,
@@ -512,12 +501,12 @@ class MonitorService {
 					contactId: row.contact_id ? Number(row.contact_id) : null,
 					isForwarded: Number(row.is_forwarded) === 1,
 					isEdited: Number(row.is_edited) === 1,
-				body: this.safeDecode(row.body),
-				timestamp: row.timestamp,
-				sentAt,
-				status: row.status,
-				fileId: row.file_id ? Number(row.file_id) : null,
-				fileName: this.safeDecode(row.file_name),
+					body: safeDecode(row.body),
+					timestamp: row.timestamp,
+					sentAt,
+					status: row.status,
+					fileId: row.file_id ? Number(row.file_id) : null,
+					fileName: safeDecode(row.file_name),
 					fileType: row.file_type || null,
 					fileSize: row.file_size || null,
 					userId: row.user_id ? Number(row.user_id) : null,
@@ -561,7 +550,7 @@ class MonitorService {
 				scheduleMap.set(chatId, {
 					id: Number(schedule.id),
 					instance: schedule.instance,
-				description: this.safeDecode(schedule.description),
+					description: safeDecode(schedule.description),
 					contactId: Number(schedule.contact_id),
 					chatId,
 					scheduledAt: schedule.scheduled_at ? new Date(schedule.scheduled_at) : new Date(),
@@ -637,7 +626,7 @@ class MonitorService {
 			return {
 				id: Number(row.id),
 				instance: row.instance,
-				description: this.safeDecode(row.description),
+				description: safeDecode(row.description),
 				contactId: Number(row.contact_id),
 				chatId: row.chat_id ? Number(row.chat_id) : null,
 				scheduledAt: row.scheduled_at ? new Date(row.scheduled_at) : new Date(),
