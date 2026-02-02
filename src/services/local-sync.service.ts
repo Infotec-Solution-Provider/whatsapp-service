@@ -1,6 +1,14 @@
 import instancesService from "./instances.service";
 import prismaService from "./prisma.service";
 
+interface SyncOptions {
+	skipContacts?: boolean;
+	skipSectors?: boolean;
+	skipChats?: boolean;
+	skipMessages?: boolean;
+	skipSchedules?: boolean;
+}
+
 class LocalSyncService {
 	/**
 	 * Ensure all required local tables exist in the tenant database
@@ -622,27 +630,33 @@ class LocalSyncService {
 	/**
 	 * Run full synchronization for a specific instance
 	 */
-	public async syncInstance(instance: string): Promise<void> {
+	public async syncInstance(instance: string, options: SyncOptions = {}): Promise<void> {
 		console.log(`[LocalSync] ====== Iniciando sincronizacao para: ${instance} ======`);
+		
+		if (options.skipContacts) console.log(`[LocalSync] Pulando sincronizacao de contatos`);
+		if (options.skipSectors) console.log(`[LocalSync] Pulando sincronizacao de setores`);
+		if (options.skipChats) console.log(`[LocalSync] Pulando sincronizacao de chats`);
+		if (options.skipMessages) console.log(`[LocalSync] Pulando sincronizacao de mensagens`);
+		if (options.skipSchedules) console.log(`[LocalSync] Pulando sincronizacao de agendamentos`);
 
 		try {
 			// 1. Ensure tables exist
 			await this.ensureTablesExist(instance);
 
 			// 2. Sync contacts
-			const contactsCount = await this.syncContacts(instance);
+			const contactsCount = options.skipContacts ? 0 : await this.syncContacts(instance);
 
 			// 3. Sync contact sectors
-			const sectorsCount = await this.syncContactSectors(instance);
+			const sectorsCount = options.skipSectors ? 0 : await this.syncContactSectors(instance);
 
 			// 4. Sync chats
-			const chatsCount = await this.syncChats(instance);
+			const chatsCount = options.skipChats ? 0 : await this.syncChats(instance);
 
 			// 5. Sync messages
-			const messagesCount = await this.syncMessages(instance);
+			const messagesCount = options.skipMessages ? 0 : await this.syncMessages(instance);
 
 			// 6. Sync schedules
-			const schedulesCount = await this.syncSchedules(instance);
+			const schedulesCount = options.skipSchedules ? 0 : await this.syncSchedules(instance);
 
 			console.log(`[LocalSync] ====== Sincronizacao concluida para: ${instance} ======`);
 			console.log(
@@ -657,7 +671,7 @@ class LocalSyncService {
 	/**
 	 * Run full synchronization for all instances
 	 */
-	public async syncAllInstances(): Promise<void> {
+	public async syncAllInstances(options: SyncOptions = {}): Promise<void> {
 		console.log(`[LocalSync] Iniciando sincronizacao de todas as instancias`);
 
 		try {
@@ -672,7 +686,7 @@ class LocalSyncService {
 			console.log(`[LocalSync] Encontradas ${uniqueInstances.length} instancias para sincronizar`);
 
 			for (const instance of uniqueInstances) {
-				await this.syncInstance(instance);
+				await this.syncInstance(instance, options);
 			}
 
 			console.log(`[LocalSync] Sincronizacao de todas as instancias concluida`);
