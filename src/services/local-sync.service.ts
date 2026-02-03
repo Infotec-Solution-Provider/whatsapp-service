@@ -671,7 +671,7 @@ class LocalSyncService {
 		}
 		// Update sync state with the highest ID processed
 		if (chats.length > 0) {
-			const maxId = Math.max(...chats.map(c => c.id));
+			const maxId = chats.reduce((max, chat) => Math.max(max, chat.id), 0);
 			await this.updateSyncState(instance, 'chats', maxId);
 			console.log(`[LocalSync] Sync state atualizado para chats: ${maxId}`);
 		}
@@ -870,7 +870,7 @@ class LocalSyncService {
 
 		// Update sync state with the highest ID processed
 		if (validMessages.length > 0) {
-			const maxId = Math.max(...validMessages.map(m => m.id));
+			const maxId = validMessages.reduce((max, msg) => Math.max(max, msg.id), 0);
 			await this.updateSyncState(instance, 'messages', maxId);
 			console.log(`[LocalSync] Sync state atualizado para messages: ${maxId}`);
 		}
