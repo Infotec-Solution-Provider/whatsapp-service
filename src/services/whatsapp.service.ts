@@ -324,8 +324,9 @@ class WhatsappService {
 				}
 				if (data.sendAsAudio) {
 					fileType = "audio";
-					sendAsAudio = true;
-					sendAsDocument = false; // Áudio não deve ser enviado como documento
+
+					sendAsAudio = true; 
+					sendAsDocument = false;
 				}
 
 				options = {
