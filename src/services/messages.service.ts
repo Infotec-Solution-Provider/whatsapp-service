@@ -25,7 +25,19 @@ interface EditMessageOptions {
 
 class MessagesService {
 	public async insertMessage(data: CreateMessageDto) {
-		const message = await prismaService.wppMessage.create({ data });
+		const { clientId, contactId, chatId, ...rest } = data;
+		const createData: any = { ...rest };
+		
+		if (typeof contactId === "number" && contactId > 0) {
+			createData.WppContact = { connect: { id: contactId } };
+		}
+		if (typeof chatId === "number" && chatId > 0) {
+			createData.WppChat = { connect: { id: chatId } };
+		}
+		if (typeof clientId === "number" && clientId > 0) {
+			createData.client = { connect: { id: clientId } };
+		}
+		const message = await prismaService.wppMessage.create({ data: createData });
 		await this.syncMessageToLocal(message);
 		return message;
 	}
