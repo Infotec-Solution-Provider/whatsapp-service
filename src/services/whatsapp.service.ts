@@ -219,7 +219,8 @@ class WhatsappService {
 				to: `${to}`,
 				type: "chat",
 				body: data.text || "",
-				userId: session.userId
+				userId: session.userId,
+				clientId: client.id,
 			} as CreateMessageDto;
 
 			let options = { to, text: text } as SendMessageOptions;
@@ -294,7 +295,7 @@ class WhatsappService {
 						"." + convertedAudio.extension
 					);
 					data.file.size = convertedAudio.size;
-					
+
 					process.log("Mensagem convertida com sucesso.");
 				}
 
@@ -400,7 +401,8 @@ class WhatsappService {
 				from: `bot:${client._phone}`,
 				to: `${to}`,
 				type: "chat",
-				body: data.text || ""
+				body: data.text || "",
+				clientId: client.id
 			} as CreateMessageDto;
 
 			let options = { to, text: data.text } as SendMessageOptions;
@@ -646,11 +648,11 @@ class WhatsappService {
 						});
 						const chat = contact
 							? await prismaService.wppChat.findFirst({
-									where: {
-										instance: session.instance,
-										contactId: contact.id
-									}
-								})
+								where: {
+									instance: session.instance,
+									contactId: contact.id
+								}
+							})
 							: null;
 
 						for (const originalMsg of originalMessages) {
@@ -754,8 +756,8 @@ class WhatsappService {
 			});
 			const chat = contact
 				? await prismaService.wppChat.findFirst({
-						where: { contactId: contact.id, isFinished: false }
-					})
+					where: { contactId: contact.id, isFinished: false }
+				})
 				: null;
 
 			// Prepara as opções de envio (texto ou arquivo)
