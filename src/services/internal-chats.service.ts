@@ -21,6 +21,7 @@ import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 import { Mention, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
 import WhatsappAudioConverter from "../utils/whatsapp-audio-converter";
 import instancesService from "./instances.service";
+import CreateInternalMessageDto from "../dtos/create-internal-message.dto";
 
 interface ChatsFilters {
 	userId?: string;
@@ -587,8 +588,16 @@ class InternalChatsService {
 			}
 			process.log(`Chat interno encontrado. Chat ID: ${chat.id}`);
 
-			const { to, sentAt, ...rest } = msg;
-			process.log(`Salvando mensagem no banco de dados. Tipo: ${msg.type}, De: ${msg.from}`);
+			const { to, ...rest } = msg;
+			process.log(`Salvando mensagem no banco de dados. Tipo: ${msg.type}, De: ${msg.from}`, {
+				...rest,
+				from: `external:${msg.from}` + (authorName ? `:${authorName}` : ""),
+				internalChatId: chat.id,
+				isForwarded: !!msg.isForwarded,
+				isEdited: false
+			});
+
+
 			const savedMsg = await prismaService.internalMessage.create({
 				data: {
 					...rest,
