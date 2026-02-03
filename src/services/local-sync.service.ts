@@ -386,8 +386,15 @@ class LocalSyncService {
 				id: '2026-02-03-001-add-bot-id-column',
 				description: 'Add bot_id column to wpp_chats table',
 				up: async () => {
-					const addBotIdQuery = `ALTER TABLE wpp_chats ADD COLUMN bot_id INT NULL AFTER sector_id`;
-					await instancesService.executeQuery(instance, addBotIdQuery, []);
+					const checkBotIdQuery = `
+						SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+						WHERE TABLE_NAME = 'wpp_chats' AND COLUMN_NAME = 'bot_id'
+					`;
+					const columnExists = await instancesService.executeQuery<any[]>(instance, checkBotIdQuery, []);
+					if (!columnExists || columnExists.length === 0) {
+						const addBotIdQuery = `ALTER TABLE wpp_chats ADD COLUMN bot_id INT NULL AFTER sector_id`;
+						await instancesService.executeQuery(instance, addBotIdQuery, []);
+					}
 				}
 			}
 		];
