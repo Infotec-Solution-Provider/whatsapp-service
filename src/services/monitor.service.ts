@@ -6,6 +6,7 @@ import schedulesService from "./schedules.service";
 import instancesService from "./instances.service";
 import prismaService from "./prisma.service";
 import { safeDecode } from "../utils/safe-encode";
+import parametersService from "./parameters.service";
 
 interface MonitorSearchInput {
 	page?: number;
@@ -28,11 +29,21 @@ class MonitorService {
 	}
 
 	public async searchMonitorData(session: SessionData, input: MonitorSearchInput) {
-		return this.searchMonitorDataInternalStandard(session, input);
-	}
+		// Buscar parâmetros da sessão
+		const params = await parametersService.getSessionParams({
+			instance: session.instance,
+			sectorId: session.sectorId,
+			userId: session.userId
+		});
 
-	public async searchMonitorDataLocal(session: SessionData, input: MonitorSearchInput) {
-		return this.searchMonitorDataInternalLocal(session, input);
+		// Verificar se a busca local está ativa
+		const useLocalSearch = params["monitor:use_local_search"] === "true";
+
+		if (useLocalSearch) {
+			return this.searchMonitorDataInternalLocal(session, input);
+		}
+
+		return this.searchMonitorDataInternalStandard(session, input);
 	}
 
 	private async searchMonitorDataInternalStandard(session: SessionData, input: MonitorSearchInput) {
@@ -444,7 +455,7 @@ class MonitorService {
 				scheduledAt > new Date(normalizedFilters.scheduledAt.to)
 			)
 				return false;
-			
+
 			const scheduledTo = schedule.scheduleDate ? new Date(schedule.scheduleDate) : null;
 			if (
 				normalizedFilters.scheduledTo?.from &&

@@ -15,12 +15,6 @@ class MonitorController {
 			isAuthenticated,
 			this.searchMonitorData
 		);
-
-		this.router.post(
-			"/api/whatsapp/monitor/search/local",
-			isAuthenticated,
-			this.searchMonitorDataLocal
-		);
 	}
 
 	private async getMonitorData(req: Request, res: Response) {
@@ -34,19 +28,6 @@ class MonitorController {
 
 	private async searchMonitorData(req: Request, res: Response) {
 		const result = await monitorService.searchMonitorData(req.session, {
-			page: req.body.page,
-			pageSize: req.body.pageSize,
-			filters: req.body.filters
-		});
-
-		res.status(200).send({
-			message: "Monitor data retrieved successfully!",
-			data: result
-		});
-	}
-
-	private async searchMonitorDataLocal(req: Request, res: Response) {
-		const result = await monitorService.searchMonitorDataLocal(req.session, {
 			page: req.body.page,
 			pageSize: req.body.pageSize,
 			filters: req.body.filters
