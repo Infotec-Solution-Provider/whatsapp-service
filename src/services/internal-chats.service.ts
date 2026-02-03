@@ -1,4 +1,3 @@
-import { InternalChat, Prisma } from "@prisma/client";
 import {
 	FileDirType,
 	InternalChatMember,
@@ -9,19 +8,19 @@ import {
 	SocketServerUserRoom,
 	User
 } from "@in.pulse-crm/sdk";
-import socketService from "./socket.service";
-import ProcessingLogger from "../utils/processing-logger";
-import filesService from "./files.service";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { InternalChat, Prisma } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
-import prismaService from "./prisma.service";
-import whatsappService, { getMessageType } from "./whatsapp.service";
 import CreateMessageDto from "../dtos/create-message.dto";
-import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 import { Mention, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
+import ProcessingLogger from "../utils/processing-logger";
 import WhatsappAudioConverter from "../utils/whatsapp-audio-converter";
+import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
+import filesService from "./files.service";
 import instancesService from "./instances.service";
-import CreateInternalMessageDto from "../dtos/create-internal-message.dto";
+import prismaService from "./prisma.service";
+import socketService from "./socket.service";
+import whatsappService, { getMessageType } from "./whatsapp.service";
 
 interface ChatsFilters {
 	userId?: string;
@@ -581,7 +580,7 @@ class InternalChatsService {
 					wppGroupId: groupId
 				}
 			});
-
+/*  */
 			if (!chat) {
 				process.log(`Chat interno não encontrado para grupo ${groupId}. Ignorando mensagem.`);
 				return;
