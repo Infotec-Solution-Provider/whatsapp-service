@@ -311,26 +311,29 @@ class WhatsappService {
 
 				const fileUrl = filesService.getFileDownloadUrl(savedFile.id);
 				let fileType = "document";
+				let sendAsAudio = false;
+				let sendAsDocument = !!data.sendAsDocument;
 
 				if (data.file.mimetype.startsWith("image/")) {
 					fileType = "image";
+					sendAsDocument = false; // Imagens não devem ser enviadas como documento
 				}
 				if (data.file.mimetype.startsWith("video/")) {
 					fileType = "video";
+					sendAsDocument = false; // Vídeos não devem ser enviados como documento
 				}
 				if (data.sendAsAudio) {
 					fileType = "audio";
-
-					(options as SendFileOptions).sendAsAudio = false;
-					(options as SendFileOptions).sendAsDocument = true;
+					sendAsAudio = true;
+					sendAsDocument = false; // Áudio não deve ser enviado como documento
 				}
 
 				options = {
 					...options,
 					fileUrl,
 					fileType,
-					sendAsAudio: false,
-					sendAsDocument: data.sendAsDocument,
+					sendAsAudio,
+					sendAsDocument,
 					file: savedFile
 				} as SendFileOptions;
 
