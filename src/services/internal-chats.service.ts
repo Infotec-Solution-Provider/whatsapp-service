@@ -587,7 +587,7 @@ class InternalChatsService {
 			}
 			process.log(`Chat interno encontrado. Chat ID: ${chat.id}`);
 
-			const { to, clientId, ...rest } = msg;
+			const { to, clientId, sentAt, ...rest } = msg;
 			process.log(`Salvando mensagem no banco de dados. Tipo: ${msg.type}, De: ${msg.from}`, {
 				...rest,
 				from: `external:${msg.from}` + (authorName ? `:${authorName}` : ""),
