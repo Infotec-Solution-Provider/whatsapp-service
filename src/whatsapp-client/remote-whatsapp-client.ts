@@ -93,11 +93,11 @@ class RemoteWhatsappClient implements WhatsappClient {
 
 			if (message.isGroup && message.groupId) {
 				process.log("Message is from a group, processing in internalChatsService");
-				
+
 				// Converter para CreateMessageDto removendo campos extras
 				const { isGroup, groupId, authorName, contactName, ...cleanMessage } = message;
 				const createMessageDto: CreateMessageDto = cleanMessage;
-				
+
 				const savedMsg = await internalChatsService.receiveMessage(
 					groupId,
 					createMessageDto,
@@ -162,7 +162,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 		return false;
 	}
 
-	public async sendMessage(props: SendMessageOptions): Promise<CreateMessageDto> {
+	public async sendMessage(props: SendMessageOptions, isGroup: boolean): Promise<CreateMessageDto> {
 		const id = `send-msg-${Date.now()}`;
 		const process = new ProcessingLogger(this.instance, "rc-send-message", id, props);
 
@@ -173,13 +173,13 @@ class RemoteWhatsappClient implements WhatsappClient {
 				props.fileUrl = props.fileUrl.replace("http://localhost:8003", "https://inpulse.infotecrs.inf.br")
 			}
 
-			const response = await axios.post<MessageDto>(`${this.clientUrl}/api/send-message`, props);
+			const response = await axios.post<MessageDto>(`${this.clientUrl}/api/send-message`, { ...props, isGroup: isGroup });
 
 			if (!response.data) {
 				throw new Error("No response from send-message endpoint");
 			}
 
-			const { isGroup, groupId, authorName, ...messageData } = response.data;
+			const { isGroup: _ignore, groupId, authorName, ...messageData } = response.data;
 
 			process.log("Message sent successfully from wwebjs-api");
 
