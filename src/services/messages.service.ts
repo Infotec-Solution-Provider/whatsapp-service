@@ -25,9 +25,13 @@ interface EditMessageOptions {
 
 class MessagesService {
 	public async insertMessage(data: CreateMessageDto) {
+		delete (data as any)["isGroup"];
+		delete (data as any)["authorName"];
+		delete (data as any)["groupId"];
+
 		const { clientId, contactId, chatId, ...rest } = data;
 		const createData: any = { ...rest };
-		
+
 		if (typeof contactId === "number" && contactId > 0) {
 			createData.WppContact = { connect: { id: contactId } };
 		}
