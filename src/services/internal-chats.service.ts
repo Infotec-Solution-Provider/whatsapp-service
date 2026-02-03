@@ -580,14 +580,14 @@ class InternalChatsService {
 					wppGroupId: groupId
 				}
 			});
-/*  */
+			/*  */
 			if (!chat) {
 				process.log(`Chat interno não encontrado para grupo ${groupId}. Ignorando mensagem.`);
 				return;
 			}
 			process.log(`Chat interno encontrado. Chat ID: ${chat.id}`);
 
-			const { to, ...rest } = msg;
+			const { to, clientId, ...rest } = msg;
 			process.log(`Salvando mensagem no banco de dados. Tipo: ${msg.type}, De: ${msg.from}`, {
 				...rest,
 				from: `external:${msg.from}` + (authorName ? `:${authorName}` : ""),
@@ -601,10 +601,16 @@ class InternalChatsService {
 				data: {
 					...rest,
 					from: `external:${msg.from}` + (authorName ? `:${authorName}` : ""),
-					internalChatId: chat.id,
 					isForwarded: !!msg.isForwarded,
-					isEdited: false
-				}
+					isEdited: false,
+					chat: {
+						connect: {
+							id: chat.id
+						}
+					},
+					...(clientId ? { client: { connect: { id: clientId } } } : {})
+				},
+
 			});
 
 			process.log(`Mensagem salva com sucesso. Mensagem ID: ${savedMsg.id}`);
