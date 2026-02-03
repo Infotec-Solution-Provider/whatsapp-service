@@ -14,6 +14,34 @@ import { WppMessageStatus } from "@prisma/client";
 import { Logger } from "@in.pulse-crm/utils";
 import axios from "axios";
 
+interface RemoteMessageDto {
+	instance: string;
+	from: string;
+	to: string;
+	body: string;
+	type: string;
+	timestamp: string;
+	sentAt: Date;
+	status: WppMessageStatus;
+	quotedId?: null | number;
+	chatId?: null | number;
+	contactId?: null | number;
+	userId?: number;
+	wwebjsId?: null | string;
+	wwebjsIdStanza?: null | string;
+	gupshupId?: null | string;
+	wabaId?: null | string;
+	fileId?: null | number;
+	fileName?: null | string;
+	fileType?: null | string;
+	fileSize?: null | string;
+	isForwarded?: false | boolean;
+	isGroup: boolean;
+	authorName?: null | string;
+	groupId?: null | string;
+	clientId: number | null;
+}
+
 class RemoteWhatsappClient implements WhatsappClient {
 	constructor(
 		public readonly id: number,
@@ -168,16 +196,20 @@ class RemoteWhatsappClient implements WhatsappClient {
 				props.fileUrl = props.fileUrl.replace("http://localhost:8003", "https://inpulse.infotecrs.inf.br")
 			}
 
-			const response = await axios.post<CreateMessageDto>(`${this.clientUrl}/api/send-message`, props);
+			const response = await axios.post<RemoteMessageDto>(`${this.clientUrl}/api/send-message`, props);
 
 			if (!response.data) {
 				throw new Error("No response from send-message endpoint");
 			}
 
+			const { isGroup, groupId, authorName, ...messageData } = response.data;
+
 			process.log("Message sent successfully from wwebjs-api");
 
 			process.success(response.data);
-			return response.data;
+
+
+			return messageData;
 		} catch (err: any) {
 			process.log(`Failed to send message: ${err?.message}`);
 			process.failed(err);
@@ -227,7 +259,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 		Logger.debug("RemoteWhatsappClient.sendTemplate not implemented", { props, chatId, contactId });
 		throw new Error("Method not implemented.");
 	}
-	
+
 	public forwardMessage(to: string, messageId: string, isGroup: boolean): Promise<void> {
 		Logger.debug("RemoteWhatsappClient.forwardMessage not implemented", { to, messageId, isGroup });
 		throw new Error("Method not implemented.");
