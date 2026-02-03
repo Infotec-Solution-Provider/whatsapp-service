@@ -533,20 +533,25 @@ class InternalChatsService {
 				);
 				const sentMsg = await this.sendMessageToWppGroup(session, chat.wppGroupId, data, savedMsg);
 
-				if (sentMsg?.wwebjsId) {
+				process.log(
+					`Resultado do envio - wwebjsId: ${sentMsg?.wwebjsId || "null"}, wwebjsIdStanza: ${sentMsg?.wwebjsIdStanza || "null"}, sentMsg completo:`,
+					sentMsg
+				);
+
+				if (sentMsg?.wwebjsId || sentMsg?.wwebjsIdStanza) {
 					process.log(
-						`Mensagem enviada para WhatsApp com sucesso. wwebjsId: ${sentMsg.wwebjsId}, wwebjsIdStanza: ${sentMsg.wwebjsIdStanza || "N/A"}`
+						`Mensagem enviada para WhatsApp com sucesso. wwebjsId: ${sentMsg.wwebjsId || "N/A"}, wwebjsIdStanza: ${sentMsg.wwebjsIdStanza || "N/A"}`
 					);
 					await prismaService.internalMessage.update({
 						where: { id: savedMsg.id },
 						data: {
 							wwebjsIdStanza: sentMsg.wwebjsIdStanza ?? null,
-							wwebjsId: sentMsg.wwebjsId!
+							wwebjsId: sentMsg.wwebjsId ?? null
 						}
 					});
 					process.log(`Mensagem interna atualizada com IDs do WhatsApp`);
 				} else {
-					process.log(`Aviso: Mensagem não foi enviada para o WhatsApp ou não retornou wwebjsId`);
+					process.log(`Aviso: Mensagem não foi enviada para o WhatsApp ou não retornou nenhum ID`);
 				}
 			} else {
 				process.log(`Chat é apenas interno, não há grupo WhatsApp associado`);
@@ -795,7 +800,11 @@ class InternalChatsService {
 					true
 				);
 				process.log(
-					`Mensagem com arquivo enviada com sucesso. wwebjsId: ${result?.wwebjsId || "N/A"}, wwebjsIdStanza: ${result?.wwebjsIdStanza || "N/A"}`
+					`Mensagem com arquivo enviada. Resultado completo:`,
+					result
+				);
+				process.log(
+					`wwebjsId: ${result?.wwebjsId || "N/A"}, wwebjsIdStanza: ${result?.wwebjsIdStanza || "N/A"}`
 				);
 				process.success(`Mensagem com arquivo enviada para grupo ${groupId}`);
 				return result;
@@ -811,7 +820,11 @@ class InternalChatsService {
 					true
 				);
 				process.log(
-					`Mensagem de texto enviada com sucesso. wwebjsId: ${result?.wwebjsId || "N/A"}, wwebjsIdStanza: ${result?.wwebjsIdStanza || "N/A"}`
+					`Mensagem de texto enviada. Resultado completo:`,
+					result
+				);
+				process.log(
+					`wwebjsId: ${result?.wwebjsId || "N/A"}, wwebjsIdStanza: ${result?.wwebjsIdStanza || "N/A"}`
 				);
 				process.success(`Mensagem de texto enviada para grupo ${groupId}`);
 				return result;
