@@ -31,9 +31,11 @@ class MessagesService {
 	}
 
 	public async updateMessage(id: number, data: Partial<WppMessage>) {
+		delete data.id;
+
 		const message = await prismaService.wppMessage.update({
 			where: { id },
-			data,
+			data: { ...data },
 			include: {
 				WppChat: true
 			}
