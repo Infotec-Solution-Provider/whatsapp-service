@@ -14,34 +14,6 @@ import { WppMessageStatus } from "@prisma/client";
 import { Logger } from "@in.pulse-crm/utils";
 import axios from "axios";
 
-interface RemoteMessageDto {
-	instance: string;
-	from: string;
-	to: string;
-	body: string;
-	type: string;
-	timestamp: string;
-	sentAt: Date;
-	status: WppMessageStatus;
-	quotedId?: null | number;
-	chatId?: null | number;
-	contactId?: null | number;
-	userId?: number;
-	wwebjsId?: null | string;
-	wwebjsIdStanza?: null | string;
-	gupshupId?: null | string;
-	wabaId?: null | string;
-	fileId?: null | number;
-	fileName?: null | string;
-	fileType?: null | string;
-	fileSize?: null | string;
-	isForwarded?: false | boolean;
-	isGroup: boolean;
-	authorName?: null | string;
-	groupId?: null | string;
-	clientId: number | null;
-}
-
 class RemoteWhatsappClient implements WhatsappClient {
 	constructor(
 		public readonly id: number,
@@ -121,10 +93,15 @@ class RemoteWhatsappClient implements WhatsappClient {
 
 			if (message.isGroup && message.groupId) {
 				process.log("Message is from a group, processing in internalChatsService");
+				
+				// Converter para CreateMessageDto removendo campos extras
+				const { isGroup, groupId, authorName, contactName, ...cleanMessage } = message;
+				const createMessageDto: CreateMessageDto = cleanMessage;
+				
 				const savedMsg = await internalChatsService.receiveMessage(
-					message.groupId,
-					message,
-					message.contactName
+					groupId,
+					createMessageDto,
+					contactName || authorName
 				);
 				process.log("Message received handled successfully");
 				process.success(savedMsg);
@@ -196,7 +173,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 				props.fileUrl = props.fileUrl.replace("http://localhost:8003", "https://inpulse.infotecrs.inf.br")
 			}
 
-			const response = await axios.post<RemoteMessageDto>(`${this.clientUrl}/api/send-message`, props);
+			const response = await axios.post<MessageDto>(`${this.clientUrl}/api/send-message`, props);
 
 			if (!response.data) {
 				throw new Error("No response from send-message endpoint");
