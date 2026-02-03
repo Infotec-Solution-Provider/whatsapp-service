@@ -275,6 +275,7 @@ class WhatsappService {
 				message.type = getMessageType(fileData.mime_type, !!data.sendAsAudio, !!data.sendAsDocument);
 				process.log("Arquivo processado com sucesso.", message);
 			}
+
 			if ("file" in data && !!data.file) {
 				process.log(`Processando arquivo enviado diretamente: ${data.file.originalname}`);
 
@@ -283,8 +284,6 @@ class WhatsappService {
 						data.file.buffer,
 						data.file.mimetype
 					);
-
-					data;
 
 					process.log("Mensagem de audio, convertendo arquivo para " + convertedAudio.extension);
 
@@ -295,6 +294,7 @@ class WhatsappService {
 						"." + convertedAudio.extension
 					);
 					data.file.size = convertedAudio.size;
+					
 					process.log("Mensagem convertida com sucesso.");
 				}
 

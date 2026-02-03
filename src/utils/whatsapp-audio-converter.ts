@@ -17,7 +17,7 @@ const TARGET_FORMAT = "mp3";
 const TARGET_MIMETYPE = "audio/mpeg";
 const TARGET_AUDIOBITRATE = "64k"; // 32k–64k é bom para voz
 const TARGET_AUDIOFREQUENCY = 44100; // padrão universal (compatível com Android/iOS)
-const TARGET_CHANNELS = 1; // mono é suficiente para voz
+const TARGET_CHANNELS = 2; // mono é suficiente para voz
 const TARGET_CODEC = "libmp3lame";
 
 class WhatsappAudioConverter {

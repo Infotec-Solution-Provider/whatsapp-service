@@ -184,6 +184,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 			throw err;
 		}
 	}
+
 	public async editMessage(props: EditMessageOptions): Promise<void> {
 		const id = `edit-msg-${Date.now()}`;
 		const process = new ProcessingLogger(this.instance, "rc-edit-message", id, props);
@@ -217,13 +218,16 @@ class RemoteWhatsappClient implements WhatsappClient {
 			throw err;
 		}
 	}
+
 	public getTemplates(): Promise<TemplateMessage[]> {
 		throw new Error("Method not implemented.");
 	}
+
 	public sendTemplate(props: SendTemplateOptions, chatId: number, contactId: number): Promise<CreateMessageDto> {
 		Logger.debug("RemoteWhatsappClient.sendTemplate not implemented", { props, chatId, contactId });
 		throw new Error("Method not implemented.");
 	}
+	
 	public forwardMessage(to: string, messageId: string, isGroup: boolean): Promise<void> {
 		Logger.debug("RemoteWhatsappClient.forwardMessage not implemented", { to, messageId, isGroup });
 		throw new Error("Method not implemented.");
