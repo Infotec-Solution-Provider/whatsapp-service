@@ -19,6 +19,26 @@ class LocalSyncService {
 	private async ensureTablesExist(instance: string): Promise<void> {
 		console.log(`[LocalSync] Verificando tabelas no banco do tenant: ${instance}`);
 
+		// Create migrations table first
+		const createMigrationsTableQuery = `
+			CREATE TABLE IF NOT EXISTS wpp_sync_migrations (
+				id VARCHAR(255) PRIMARY KEY,
+				description TEXT NOT NULL,
+				executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				INDEX idx_executed_at (executed_at)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+		`;
+
+		// Create sync state table to track last synced IDs
+		const createSyncStateTableQuery = `
+			CREATE TABLE IF NOT EXISTS wpp_sync_state (
+				entity VARCHAR(50) PRIMARY KEY,
+				last_synced_id INT NOT NULL DEFAULT 0,
+				last_synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+				INDEX idx_last_synced_at (last_synced_at)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+		`;
+
 		const createContactsTableQuery = `
 			CREATE TABLE IF NOT EXISTS wpp_contacts (
 				id INT NOT NULL,
@@ -53,6 +73,7 @@ class LocalSyncService {
 				user_id INT NULL,
 				contact_id INT NULL,
 				sector_id INT NULL,
+				bot_id INT NULL,
 				started_at DATETIME NULL,
 				finished_at DATETIME NULL,
 				finished_by INT NULL,
@@ -154,6 +175,12 @@ class LocalSyncService {
 		`;
 
 		try {
+			await instancesService.executeQuery(instance, createMigrationsTableQuery, []);
+			console.log(`[LocalSync] Tabela wpp_sync_migrations verificada/criada`);
+
+			await instancesService.executeQuery(instance, createSyncStateTableQuery, []);
+			console.log(`[LocalSync] Tabela wpp_sync_state verificada/criada`);
+
 			await instancesService.executeQuery(instance, createContactsTableQuery, []);
 			console.log(`[LocalSync] Tabela wpp_contacts verificada/criada`);
 
@@ -212,6 +239,9 @@ class LocalSyncService {
 					console.log(`[LocalSync] wpp_messages charset já é utf8 ou erro ao alterar`);
 				}
 			}
+
+			// Run migrations
+			await this.runMigrations(instance);
 
 			try {
 				const alterLastMessagesQuery = `ALTER TABLE wpp_last_messages CONVERT TO CHARACTER SET utf8`;
@@ -346,6 +376,97 @@ class LocalSyncService {
 	}
 
 	/**
+	 * Run database migrations
+	 */
+	private async runMigrations(instance: string): Promise<void> {
+		console.log(`[LocalSync] Executando migrations para: ${instance}`);
+
+		const migrations = [
+			{
+				id: '2026-02-03-001-add-bot-id-column',
+				description: 'Add bot_id column to wpp_chats table',
+				up: async () => {
+					const addBotIdQuery = `ALTER TABLE wpp_chats ADD COLUMN bot_id INT NULL AFTER sector_id`;
+					await instancesService.executeQuery(instance, addBotIdQuery, []);
+				}
+			}
+		];
+
+		for (const migration of migrations) {
+			try {
+				// Check if migration already ran
+				const checkQuery = `SELECT id FROM wpp_sync_migrations WHERE id = ?`;
+				const existing = await instancesService.executeQuery<any[]>(instance, checkQuery, [migration.id]);
+
+				if (existing && existing.length > 0) {
+					console.log(`[LocalSync] Migration ${migration.id} já executada, pulando...`);
+					continue;
+				}
+
+				console.log(`[LocalSync] Executando migration: ${migration.id}`);
+				await migration.up();
+
+				// Record migration as executed
+				const insertQuery = `INSERT INTO wpp_sync_migrations (id, description) VALUES (?, ?)`;
+				await instancesService.executeQuery(instance, insertQuery, [migration.id, migration.description]);
+				console.log(`[LocalSync] Migration ${migration.id} executada com sucesso`);
+			} catch (err: any) {
+				if (err.message.includes("Duplicate column name") || err.message.includes("Duplicate entry")) {
+					console.log(`[LocalSync] Migration ${migration.id} já aplicada (coluna/entrada duplicada)`);
+					// Record as executed even if column already exists
+					try {
+						const insertQuery = `INSERT INTO wpp_sync_migrations (id, description) VALUES (?, ?)`;
+						await instancesService.executeQuery(instance, insertQuery, [migration.id, migration.description]);
+					} catch (insertErr) {
+						// Ignore duplicate entry error for migration record
+					}
+				} else {
+					console.error(`[LocalSync] Erro ao executar migration ${migration.id}:`, err.message);
+					throw err;
+				}
+			}
+		}
+	}
+
+	/**
+	 * Get or initialize sync state for an entity
+	 */
+	private async getSyncState(instance: string, entity: string): Promise<number> {
+		try {
+			const query = `SELECT last_synced_id FROM wpp_sync_state WHERE entity = ?`;
+			const result = await instancesService.executeQuery<any[]>(instance, query, [entity]);
+			
+			if (result && result.length > 0) {
+				return result[0].last_synced_id || 0;
+			}
+			
+			// Initialize if doesn't exist
+			const insertQuery = `INSERT INTO wpp_sync_state (entity, last_synced_id) VALUES (?, 0)`;
+			await instancesService.executeQuery(instance, insertQuery, [entity]);
+			return 0;
+		} catch (err) {
+			console.error(`[LocalSync] Erro ao obter sync state para ${entity}:`, err);
+			return 0;
+		}
+	}
+
+	/**
+	 * Update sync state for an entity
+	 */
+	private async updateSyncState(instance: string, entity: string, lastSyncedId: number): Promise<void> {
+		try {
+			const query = `
+				INSERT INTO wpp_sync_state (entity, last_synced_id) 
+				VALUES (?, ?)
+				ON DUPLICATE KEY UPDATE last_synced_id = VALUES(last_synced_id)
+			`;
+			await instancesService.executeQuery(instance, query, [entity, lastSyncedId]);
+		} catch (err) {
+			console.error(`[LocalSync] Erro ao atualizar sync state para ${entity}:`, err);
+		}
+	}
+
+	/**
 	 * Sync all contacts from Prisma to local database
 	 */
 	private async syncContacts(instance: string): Promise<number> {
@@ -465,13 +586,21 @@ class LocalSyncService {
 	}
 
 	/**
-	 * Sync all chats from Prisma to local database
+	 * Sync chats from Prisma to local database (incremental)
 	 */
 	private async syncChats(instance: string): Promise<number> {
 		console.log(`[LocalSync] Sincronizando chats para: ${instance}`);
 
+		// Get last synced chat ID
+		const lastSyncedId = await this.getSyncState(instance, 'chats');
+		console.log(`[LocalSync] Último ID de chat sincronizado: ${lastSyncedId}`);
+
 		const chats = await prismaService.wppChat.findMany({
-			where: { instance }
+			where: { 
+				instance,
+				id: { gt: lastSyncedId }
+			},
+			orderBy: { id: 'asc' }
 		});
 
 		if (chats.length === 0) {
@@ -485,8 +614,8 @@ class LocalSyncService {
 		for (let i = 0; i < chats.length; i += batchSize) {
 			const batch = chats.slice(i, i + batchSize);
 
-			// Create placeholders for 14 fields per chat
-			const placeholders = batch.map(() => "(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").join(", ");
+			// Create placeholders for 15 fields per chat
+			const placeholders = batch.map(() => "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").join(", ");
 
 			// Flatten all values
 			const values: any[] = [];
@@ -500,6 +629,7 @@ class LocalSyncService {
 					chat.userId,
 					chat.contactId,
 					chat.sectorId,
+					chat.botId,
 					this.formatDateForMySQL(chat.startedAt),
 					this.formatDateForMySQL(chat.finishedAt),
 					chat.finishedBy,
@@ -512,7 +642,7 @@ class LocalSyncService {
 			const query = `
 				INSERT INTO wpp_chats (
 					id, original_id, instance, type, avatar_url, user_id, contact_id,
-					sector_id, started_at, finished_at, finished_by,
+					sector_id, bot_id, started_at, finished_at, finished_by,
 					result_id, is_finished, is_schedule
 				)
 				VALUES ${placeholders}
@@ -522,6 +652,7 @@ class LocalSyncService {
 					user_id = VALUES(user_id),
 					contact_id = VALUES(contact_id),
 					sector_id = VALUES(sector_id),
+					bot_id = VALUES(bot_id),
 					started_at = VALUES(started_at),
 					finished_at = VALUES(finished_at),
 					finished_by = VALUES(finished_by),
@@ -538,19 +669,32 @@ class LocalSyncService {
 				throw err;
 			}
 		}
-
+		// Update sync state with the highest ID processed
+		if (chats.length > 0) {
+			const maxId = Math.max(...chats.map(c => c.id));
+			await this.updateSyncState(instance, 'chats', maxId);
+			console.log(`[LocalSync] Sync state atualizado para chats: ${maxId}`);
+		}
 		console.log(`[LocalSync] ${syncedCount} chats sincronizados`);
 		return syncedCount;
 	}
 
 	/**
-	 * Sync all messages from Prisma to local database
+	 * Sync messages from Prisma to local database (incremental)
 	 */
 	private async syncMessages(instance: string): Promise<number> {
 		console.log(`[LocalSync] Sincronizando mensagens para: ${instance}`);
 
+		// Get last synced message ID
+		const lastSyncedId = await this.getSyncState(instance, 'messages');
+		console.log(`[LocalSync] Último ID de mensagem sincronizado: ${lastSyncedId}`);
+
 		const messages = await prismaService.wppMessage.findMany({
-			where: { instance }
+			where: { 
+				instance,
+				id: { gt: lastSyncedId }
+			},
+			orderBy: { id: 'asc' }
 		});
 
 		if (messages.length === 0) {
@@ -724,6 +868,13 @@ class LocalSyncService {
 			}
 		}
 
+		// Update sync state with the highest ID processed
+		if (validMessages.length > 0) {
+			const maxId = Math.max(...validMessages.map(m => m.id));
+			await this.updateSyncState(instance, 'messages', maxId);
+			console.log(`[LocalSync] Sync state atualizado para messages: ${maxId}`);
+		}
+
 		console.log(
 			`[LocalSync] ${syncedCount} mensagens sincronizadas (${errorCount} erros, ${skippedCount} ignoradas)`
 		);
@@ -890,6 +1041,75 @@ class LocalSyncService {
 
 	public async ensureLocalTables(instance: string): Promise<void> {
 		await this.ensureTablesExist(instance);
+	}
+
+	/**
+	 * Reset sync state for an entity (forces full resync on next run)
+	 */
+	public async resetSyncState(instance: string, entity: 'messages' | 'chats' | 'all'): Promise<void> {
+		try {
+			if (entity === 'all') {
+				const query = `DELETE FROM wpp_sync_state`;
+				await instancesService.executeQuery(instance, query, []);
+				console.log(`[LocalSync] Sync state resetado para todas as entidades`);
+			} else {
+				const query = `DELETE FROM wpp_sync_state WHERE entity = ?`;
+				await instancesService.executeQuery(instance, query, [entity]);
+				console.log(`[LocalSync] Sync state resetado para ${entity}`);
+			}
+		} catch (err) {
+			console.error(`[LocalSync] Erro ao resetar sync state:`, err);
+			throw err;
+		}
+	}
+
+	/**
+	 * Get sync status for an instance
+	 */
+	public async getSyncStatus(instance: string): Promise<{
+		migrations: Array<{ id: string; description: string; executed_at: Date }>;
+		syncState: Array<{ entity: string; last_synced_id: number; last_synced_at: Date }>;
+	}> {
+		try {
+			const migrationsQuery = `SELECT id, description, executed_at FROM wpp_sync_migrations ORDER BY executed_at DESC`;
+			const migrations = await instancesService.executeQuery<any[]>(instance, migrationsQuery, []);
+
+			const syncStateQuery = `SELECT entity, last_synced_id, last_synced_at FROM wpp_sync_state ORDER BY entity`;
+			const syncState = await instancesService.executeQuery<any[]>(instance, syncStateQuery, []);
+
+			return {
+				migrations: migrations || [],
+				syncState: syncState || []
+			};
+		} catch (err) {
+			console.error(`[LocalSync] Erro ao obter sync status:`, err);
+			return { migrations: [], syncState: [] };
+		}
+	}
+
+	/**
+	 * Force full resync by clearing data and state
+	 */
+	public async forceFullResync(instance: string): Promise<void> {
+		console.log(`[LocalSync] Iniciando full resync para ${instance}...`);
+		
+		try {
+			// Clear sync state
+			await this.resetSyncState(instance, 'all');
+
+			// Optionally clear existing data (commented out for safety)
+			// await instancesService.executeQuery(instance, 'TRUNCATE TABLE wpp_contacts', []);
+			// await instancesService.executeQuery(instance, 'TRUNCATE TABLE wpp_contact_sectors', []);
+			// await instancesService.executeQuery(instance, 'TRUNCATE TABLE wpp_chats', []);
+			// await instancesService.executeQuery(instance, 'TRUNCATE TABLE wpp_messages', []);
+			// await instancesService.executeQuery(instance, 'TRUNCATE TABLE wpp_last_messages', []);
+			// await instancesService.executeQuery(instance, 'TRUNCATE TABLE wpp_schedules', []);
+
+			console.log(`[LocalSync] Sync state limpo. Execute syncInstance() para resincronizar tudo.`);
+		} catch (err) {
+			console.error(`[LocalSync] Erro ao forçar full resync:`, err);
+			throw err;
+		}
 	}
 }
 
