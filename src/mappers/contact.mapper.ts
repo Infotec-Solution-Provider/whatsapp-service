@@ -1,3 +1,5 @@
+import { safeDecode } from '../utils/safe-encode';
+
 interface DatabaseContactRow {
 	id: number;
 	instance: string;
@@ -57,7 +59,7 @@ export class ContactMapper {
 		return {
 			id: row.id,
 			instance: row.instance,
-			name: row.name,
+			name: safeDecode(row.name) || row.name,
 			phone: row.phone,
 			customerId: row.customer_id,
 			isDeleted: row.is_deleted,

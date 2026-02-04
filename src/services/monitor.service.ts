@@ -989,7 +989,7 @@ class MonitorService {
 			const contact = contactId
 				? {
 					id: contactId,
-					name: row.contact_name,
+					name: safeDecode(row.contact_name),
 					phone: row.contact_phone,
 					phoneNumber: row.contact_phone,
 					phone_number: row.contact_phone,

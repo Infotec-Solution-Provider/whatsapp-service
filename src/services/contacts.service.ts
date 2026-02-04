@@ -5,6 +5,7 @@ import { ContactMapper } from "../mappers/contact.mapper";
 import { CustomerSchedule } from "../message-flow/base/base.step";
 import { ContactQueryBuilder } from "../utils/contact-query-builder";
 import { PaginationHelper } from "../utils/pagination-helper";
+import { safeEncode } from "../utils/safe-encode";
 import instancesService from "./instances.service";
 import parametersService from "./parameters.service";
 import prismaService from "./prisma.service";
@@ -392,7 +393,7 @@ class ContactsService {
 			await instancesService.executeQuery(
 				contact.instance,
 				query,
-				[contact.id, contact.instance, contact.name, contact.phone, contact.customerId, contact.isDeleted]
+				[contact.id, contact.instance, safeEncode(contact.name), contact.phone, contact.customerId, contact.isDeleted]
 			);
 		} catch (error) {
 			console.error("[syncContactToLocal] Erro ao sincronizar contato:", error);

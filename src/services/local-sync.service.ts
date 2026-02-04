@@ -442,11 +442,11 @@ class LocalSyncService {
 		try {
 			const query = `SELECT last_synced_id FROM wpp_sync_state WHERE entity = ?`;
 			const result = await instancesService.executeQuery<any[]>(instance, query, [entity]);
-			
+
 			if (result && result.length > 0) {
 				return result[0].last_synced_id || 0;
 			}
-			
+
 			// Initialize if doesn't exist
 			const insertQuery = `INSERT INTO wpp_sync_state (entity, last_synced_id) VALUES (?, 0)`;
 			await instancesService.executeQuery(instance, insertQuery, [entity]);
@@ -503,7 +503,7 @@ class LocalSyncService {
 				values.push(
 					c.id,
 					c.instance,
-					c.name,
+					safeEncode(c.name),
 					c.phone,
 					c.customerId,
 					c.isDeleted ? 1 : 0
@@ -603,7 +603,7 @@ class LocalSyncService {
 		console.log(`[LocalSync] Último ID de chat sincronizado: ${lastSyncedId}`);
 
 		const chats = await prismaService.wppChat.findMany({
-			where: { 
+			where: {
 				instance,
 				id: { gt: lastSyncedId }
 			},
@@ -697,7 +697,7 @@ class LocalSyncService {
 		console.log(`[LocalSync] Último ID de mensagem sincronizado: ${lastSyncedId}`);
 
 		const messages = await prismaService.wppMessage.findMany({
-			where: { 
+			where: {
 				instance,
 				id: { gt: lastSyncedId }
 			},
@@ -1099,7 +1099,7 @@ class LocalSyncService {
 	 */
 	public async forceFullResync(instance: string): Promise<void> {
 		console.log(`[LocalSync] Iniciando full resync para ${instance}...`);
-		
+
 		try {
 			// Clear sync state
 			await this.resetSyncState(instance, 'all');
