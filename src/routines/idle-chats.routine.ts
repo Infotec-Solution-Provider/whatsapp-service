@@ -129,8 +129,6 @@ async function getRoutineEnabledInstances(parameters: Parameter[]) {
 		}
 	});
 
-	Logger.debug(`[ROUTINE] Instâncias com a rotina habilitada: `, enabledInstances);
-
 	return enabledInstances;
 }
 
@@ -183,8 +181,6 @@ async function getRoutineParametersForChat(parameters: Parameter[], chat: WppCha
 	userParams.forEach((param) => {
 		chatParameters[param.key] = param.value;
 	});
-
-	Logger.debug(`[ROUTINE] Parâmetros para o chat ${chat.id}: `, chatParameters);
 
 	return chatParameters;
 }

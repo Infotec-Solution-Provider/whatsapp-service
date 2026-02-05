@@ -323,7 +323,7 @@ class WhatsappService {
 				if (data.sendAsAudio) {
 					fileType = "audio";
 
-					sendAsAudio = true; 
+					sendAsAudio = true;
 					sendAsDocument = false;
 				}
 
@@ -531,8 +531,12 @@ class WhatsappService {
 
 	public async getGroups(clientId: number) {
 		const client = this.getClient(clientId);
-		if (!(client instanceof WWEBJSWhatsappClient)) {
-			throw new BadRequestError("Client is not WWEBJS client");
+
+		const isWwebjs = client instanceof WWEBJSWhatsappClient;
+		const isRemote = client instanceof RemoteWhatsappClient;
+
+		if (!isWwebjs && !isRemote) {
+			throw new BadRequestError("Client is not WWEBJS client or Remote client");
 		}
 
 		const groups = await client.getGroups();

@@ -6,7 +6,7 @@ import messageQueueService from "../services/message-queue.service";
 import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
 import MessageDto from "../types/remote-client.types";
-import { EditMessageOptions, SendMessageOptions, SendTemplateOptions } from "../types/whatsapp-instance.types";
+import { EditMessageOptions, SendMessageOptions, SendTemplateOptions, WhatsappGroup } from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
 import socketService from "../services/socket.service";
@@ -226,6 +226,10 @@ class RemoteWhatsappClient implements WhatsappClient {
 			process.failed(err);
 			throw err;
 		}
+	}
+
+	public getGroups(): Promise<WhatsappGroup[]> {
+		throw new Error("Method not implemented.");
 	}
 
 	public getTemplates(): Promise<TemplateMessage[]> {

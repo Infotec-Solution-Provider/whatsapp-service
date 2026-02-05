@@ -53,3 +53,9 @@ export type Mentions = Mention[];
 export type WhatsAppMention = { id: string; tag?: string };
 
 export interface WhatsappTemplate {}
+
+
+export interface WhatsappGroup {
+	id: string;
+	name: string;
+}

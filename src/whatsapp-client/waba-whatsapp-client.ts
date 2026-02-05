@@ -10,7 +10,8 @@ import {
 	EditMessageOptions,
 	SendFileOptions,
 	SendMessageOptions,
-	SendTemplateOptions
+	SendTemplateOptions,
+	WhatsappGroup
 } from "../types/whatsapp-instance.types";
 import generateUID from "../utils/generate-uid";
 import ProcessingLogger from "../utils/processing-logger";
@@ -406,6 +407,10 @@ class WABAWhatsappClient implements WhatsappClient {
 		const templates = response.data.data;
 
 		return templates.map((t: WABAMessageTemplate) => TemplateAdapter.fromWABATemplate(t));
+	}
+
+	public getGroups(): Promise<WhatsappGroup[]> {
+		throw new Error("Method not implemented.");
 	}
 }
 

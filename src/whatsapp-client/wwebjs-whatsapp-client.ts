@@ -605,7 +605,10 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 	public async getGroups() {
 		const chats = await this.wwebjs.getChats();
 
-		return chats.filter((c) => c.isGroup);
+		return chats.filter((c) => c.isGroup).map(c => ({
+			id: c.id.user,
+			name: c.name || c.id.user
+		}))
 	}
 
 	public async forwardMessage(to: string, messageId: string, isGroup: boolean = false) {

@@ -1,6 +1,6 @@
 import { TemplateMessage } from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
-import { EditMessageOptions, SendMessageOptions, SendTemplateOptions } from "../types/whatsapp-instance.types";
+import { EditMessageOptions, SendMessageOptions, SendTemplateOptions, WhatsappGroup } from "../types/whatsapp-instance.types";
 
 /**
  * Abstract class representing a WhatsApp instance.
@@ -78,6 +78,8 @@ abstract class WhatsappClient {
 	): Promise<CreateMessageDto>;
 
 	public abstract forwardMessage(to: string, messageId: string, isGroup: boolean): Promise<void>;
+
+	public abstract getGroups(): Promise<WhatsappGroup[]>;
 }
 
 export default WhatsappClient;

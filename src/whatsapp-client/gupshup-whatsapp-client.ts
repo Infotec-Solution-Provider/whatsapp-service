@@ -1,6 +1,6 @@
 import axios from "axios";
 import CreateMessageDto from "../dtos/create-message.dto";
-import { EditMessageOptions, SendMessageOptions, SendTemplateOptions } from "../types/whatsapp-instance.types";
+import { EditMessageOptions, SendMessageOptions, SendTemplateOptions, WhatsappGroup } from "../types/whatsapp-instance.types";
 import WhatsappClient from "./whatsapp-client";
 import { GSRecoverTemplatesResponse } from "../types/gupshup-api.types";
 import ProcessingLogger from "../utils/processing-logger";
@@ -197,7 +197,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 		return mapped;
 	}
 
-	public async editMessage({}: EditMessageOptions): Promise<void> {
+	public async editMessage({ }: EditMessageOptions): Promise<void> {
 		throw new Error("Method not implemented.");
 	}
 
@@ -277,6 +277,10 @@ class GupshupWhatsappClient implements WhatsappClient {
 			default:
 				return "document";
 		}
+	}
+
+	public getGroups(): Promise<WhatsappGroup[]> {
+		throw new Error("Method not implemented.");
 	}
 }
 
