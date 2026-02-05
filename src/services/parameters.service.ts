@@ -26,7 +26,7 @@ class ParametersService {
 
 	public async getInstanceParams(instance: string) {
 		const instanceParams = await prismaService.parameter.findMany({
-			where: { instance }
+			where: { instance, scope: "INSTANCE" }
 		});
 
 		return instanceParams;
