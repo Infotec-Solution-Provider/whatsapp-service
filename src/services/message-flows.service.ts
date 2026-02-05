@@ -1,4 +1,3 @@
-import { Logger } from "@in.pulse-crm/utils";
 import { WppMessageFlowStepType } from "@prisma/client";
 import prismaService from "./prisma.service";
 

@@ -1,4 +1,3 @@
-import { Logger } from "@in.pulse-crm/utils";
 import { WppClient } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import GUPSHUPMessageParser from "../parsers/gupshup-message.parser";

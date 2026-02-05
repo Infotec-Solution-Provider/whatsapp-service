@@ -1,5 +1,3 @@
-import { Logger } from "@in.pulse-crm/utils";
-
 export interface HumanBehaviorConfig {
 	enabled: boolean; // Ativa/desativa simulação de comportamento humano
 	readingSpeed: { min: number; max: number }; // Palavras por minuto
