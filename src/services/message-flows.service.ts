@@ -112,8 +112,6 @@ class MessageFlowsService {
 	 * Cria um novo fluxo
 	 */
 	async createFlow(data: CreateFlowDto) {
-		Logger.info(`[MessageFlowsService] Creating flow for ${data.instance}/${data.sectorId}`);
-
 		// Verifica se já existe
 		const existing = await this.getFlowByInstanceAndSector(data.instance, data.sectorId);
 		if (existing) {
@@ -131,7 +129,6 @@ class MessageFlowsService {
 			}
 		});
 
-		Logger.info(`[MessageFlowsService] Flow created with ID ${flow.id}`);
 		return flow;
 	}
 
@@ -139,8 +136,6 @@ class MessageFlowsService {
 	 * Atualiza um fluxo
 	 */
 	async updateFlow(flowId: number, data: UpdateFlowDto) {
-		Logger.info(`[MessageFlowsService] Updating flow ${flowId}`);
-
 		const updateData: any = {};
 		if (data.description !== undefined) {
 			updateData.description = data.description || null;
@@ -158,7 +153,6 @@ class MessageFlowsService {
 			}
 		});
 
-		Logger.info(`[MessageFlowsService] Flow ${flowId} updated`);
 		return flow;
 	}
 
@@ -166,21 +160,15 @@ class MessageFlowsService {
 	 * Deleta um fluxo (e todos os steps)
 	 */
 	async deleteFlow(flowId: number) {
-		Logger.info(`[MessageFlowsService] Deleting flow ${flowId}`);
-
 		await prismaService.wppMessageFlow.delete({
 			where: { id: flowId }
 		});
-
-		Logger.info(`[MessageFlowsService] Flow ${flowId} deleted`);
 	}
 
 	/**
 	 * Adiciona um step ao fluxo
 	 */
 	async createStep(flowId: number, data: CreateStepDto) {
-		Logger.info(`[MessageFlowsService] Creating step #${data.stepNumber} for flow ${flowId}`);
-
 		// Verifica se o fluxo existe
 		await this.getFlow(flowId);
 
@@ -209,7 +197,6 @@ class MessageFlowsService {
 			}
 		});
 
-		Logger.info(`[MessageFlowsService] Step ${step.id} created`);
 		return step;
 	}
 
@@ -217,9 +204,6 @@ class MessageFlowsService {
 	 * Atualiza um step
 	 */
 	async updateStep(stepId: number, data: UpdateStepDto) {
-		Logger.info(`[MessageFlowsService] Updating step ${stepId}`);
-		Logger.info(`[MessageFlowsService] data recebido: type='${data.type}', stepNumber=${data.stepNumber}`);
-
 		const updateData: any = {};
 		if (data.type !== undefined) updateData.type = data.type;
 		if (data.stepNumber !== undefined) updateData.stepNumber = data.stepNumber;
@@ -230,15 +214,11 @@ class MessageFlowsService {
 		if (data.description !== undefined) updateData.description = data.description;
 		if (data.connections !== undefined) updateData.connections = data.connections as any;
 
-		Logger.debug(`[MessageFlowsService] updateData para Prisma:`, updateData);
-
 		const step = await prismaService.wppMessageFlowStep.update({
 			where: { id: stepId },
 			data: updateData
 		});
 
-		Logger.info(`[MessageFlowsService] Step ${stepId} updated`);
-		Logger.info(`[MessageFlowsService] Passo retornado do Prisma: id=${step.id}, type='${step.type}', stepNumber=${step.stepNumber}`);
 		return step;
 	}
 
@@ -246,21 +226,15 @@ class MessageFlowsService {
 	 * Deleta um step
 	 */
 	async deleteStep(stepId: number) {
-		Logger.info(`[MessageFlowsService] Deleting step ${stepId}`);
-
 		await prismaService.wppMessageFlowStep.delete({
 			where: { id: stepId }
 		});
-
-		Logger.info(`[MessageFlowsService] Step ${stepId} deleted`);
 	}
 
 	/**
 	 * Reordena steps de um fluxo
 	 */
-	async reorderSteps(flowId: number, stepOrders: Array<{ stepId: number; stepNumber: number }>) {
-		Logger.info(`[MessageFlowsService] Reordering steps for flow ${flowId}`);
-
+	async reorderSteps(_flowId: number, stepOrders: Array<{ stepId: number; stepNumber: number }>) {
 		// Atualiza cada step em uma transação
 		await prismaService.$transaction(
 			stepOrders.map(({ stepId, stepNumber }) =>
@@ -270,8 +244,6 @@ class MessageFlowsService {
 				})
 			)
 		);
-
-		Logger.info(`[MessageFlowsService] Steps reordered`);
 	}
 
 	/**
@@ -339,8 +311,6 @@ class MessageFlowsService {
 	 * Duplica um fluxo para outra instância/setor
 	 */
 	async duplicateFlow(flowId: number, targetInstance: string, targetSectorId: number) {
-		Logger.info(`[MessageFlowsService] Duplicating flow ${flowId} to ${targetInstance}/${targetSectorId}`);
-
 		const sourceFlow = await this.getFlow(flowId);
 
 		// Cria o novo fluxo
@@ -362,8 +332,6 @@ class MessageFlowsService {
 				description: step.description || ""
 			});
 		}
-
-		Logger.info(`[MessageFlowsService] Flow duplicated to ID ${newFlow.id}`);
 		return newFlow.id;
 	}
 }

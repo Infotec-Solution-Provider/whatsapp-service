@@ -188,9 +188,7 @@ class GupshupService {
 			throw err;
 		} finally {
 			const durationMs = Date.now() - startedAt;
-			Logger.debug(
-				`[GupshupService] Processamento do webhook levou ${durationMs}ms para a instância ${instance}`
-			);
+
 			logger.log("Tempo total de processamento do webhook", { durationMs });
 		}
 	}

@@ -173,7 +173,6 @@ class RemoteWhatsappClient implements WhatsappClient {
 				props.fileUrl = props.fileUrl.replace("http://localhost:8003", "https://inpulse.infotecrs.inf.br")
 			}
 
-			Logger.debug("RemoteWhatsappClient.sendMessage", { props, isGroup });
 			const response = await axios.post<MessageDto>(`${this.clientUrl}/api/send-message`, { ...props, isGroup: isGroup });
 
 			if (!response.data) {

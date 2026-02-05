@@ -115,29 +115,25 @@ export class HumanBehaviorSimulator {
 	public static async simulateHumanDelay(
 		receivedMessageLength: number | null,
 		messageToSend: string,
-		instance: string,
+		_instance: string,
 		config: HumanBehaviorConfig = DEFAULT_HUMAN_BEHAVIOR_CONFIG
 	): Promise<void> {
 		if (!config.enabled) {
-			Logger.debug(`[${instance}] Comportamento humano desabilitado`);
 			return;
 		}
 
 		// 1. Se recebeu uma mensagem, simula leitura
 		if (receivedMessageLength !== null && receivedMessageLength > 0) {
 			const readingTime = this.calculateReadingTime(receivedMessageLength, config);
-			Logger.debug(`[${instance}] Simulando leitura: ${Math.round(readingTime / 1000)}s`);
 			await this.sleep(readingTime);
 		}
 
 		// 2. Simula tempo de pensamento
 		const thinkingTime = this.calculateThinkingTime(config);
-		Logger.debug(`[${instance}] Simulando pensamento: ${Math.round(thinkingTime / 1000)}s`);
 		await this.sleep(thinkingTime);
 
 		// 3. Simula tempo de digitação
 		const typingTime = this.calculateTypingTime(messageToSend.length, config);
-		Logger.debug(`[${instance}] Simulando digitação: ${Math.round(typingTime / 1000)}s`);
 		await this.sleep(typingTime);
 	}
 

@@ -55,18 +55,7 @@ class WABAWhatsappClient implements WhatsappClient {
 		const process = new ProcessingLogger(this.instance, "waba-send-message", generateUID(), options);
 
 		try {
-			Logger.debug("WABA Send Message Options:", options);
 			process.log("Iniciando envio de mensagem...", options);
-
-			/* 			const isConversationWindowOpen = await whatsappService.isConversationWindowOpen(this.instance, options.to);
-						Logger.debug("isConversationWindowOpen:", isConversationWindowOpen); */
-
-			/* 			if (!isConversationWindowOpen ) {
-							process.log("Janela de conversa não está aberta. ");
-							throw new Error(
-								"A janela de conversa com o contato não está aberta. Não é possível enviar a mensagem."
-							);
-						} */
 
 			const reqUrl = `${GRAPH_API_URL}/${this.wabaPhoneId}/messages`;
 			const reqBody: any = {
@@ -76,20 +65,16 @@ class WABAWhatsappClient implements WhatsappClient {
 			};
 
 			const msgType = this.getSendMessageType(options);
-			Logger.debug("Determined message type:", msgType);
 			process.log("Tipo de mensagem determinado: " + msgType);
 
 			if (msgType !== "text" && "file" in options) {
-				Logger.debug("Uploading media for message...");
 				process.log("Iniciando upload de mídia...", options.file);
 				const uploadedFile = await this.uploadMediaFromFileId(options);
-				Logger.debug("Media uploaded successfully:", uploadedFile);
 				process.log("Upload de mídia concluído.", uploadedFile);
 				process.log("Montando corpo da mensagem de mídia...");
 				reqBody["type"] = msgType;
 
 				if (msgType === "audio") {
-					Logger.debug("Audio message detected, removing text caption if any.");
 					options.text = null;
 				}
 
@@ -98,7 +83,6 @@ class WABAWhatsappClient implements WhatsappClient {
 					...(options.text ? { caption: options.text } : {}),
 					...(msgType === "document" ? { filename: options.file.name } : {})
 				};
-				Logger.debug("Message body constructed for media message:", reqBody);
 			} else {
 				process.log("Montando corpo da mensagem de texto...");
 				reqBody["type"] = "text";
@@ -109,7 +93,6 @@ class WABAWhatsappClient implements WhatsappClient {
 			const response = await axios.post(reqUrl, reqBody, this.reqOptions);
 			process.log("Mensagem enviada com sucesso.", response.data);
 
-			Logger.debug("Message sent successfully, response:", response.data);
 			const now = new Date();
 			const dto: CreateMessageDto = {
 				clientId: this.id,
