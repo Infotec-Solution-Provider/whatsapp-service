@@ -139,8 +139,6 @@ class GupshupWhatsappClient implements WhatsappClient {
 	public async sendTemplate(options: SendTemplateOptions, chatId: number, contactId: number) {
 		const data = new URLSearchParams();
 
-		console.log("[Gupshup] Enviando template com opções:", options);
-
 		data.append("channel", "whatsapp");
 		data.append("src.name", this.appName);
 		data.append("source", this._phone);

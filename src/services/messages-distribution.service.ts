@@ -551,7 +551,6 @@ class MessagesDistributionService {
 			logger.success("Atualização de status concluída com sucesso");
 		} catch (err) {
 			logger.log("Falha ao atualizar status da mensagem", { error: (err as any)?.message });
-			console.log("Não foi possível atualizar a mensagem de id: " + id);
 			logger.failed(err);
 		}
 	}
@@ -807,7 +806,6 @@ class MessagesDistributionService {
 		const applicable: Applicable[] = [];
 
 		for (const r of rules) {
-			console.log(r);
 			const activeSched = r.schedules.find((s) => scheduleMatchesNow(s, now));
 			if (!activeSched) continue;
 

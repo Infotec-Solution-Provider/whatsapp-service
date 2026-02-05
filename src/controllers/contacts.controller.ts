@@ -36,8 +36,6 @@ class ContactsController {
 	private async getCustomerContacts(req: Request, res: Response) {
 		const data = await contactsService.getCustomerContacts(req.session.instance, Number(req.params["id"]));
 
-		console.log(data);
-
 		res.status(200).send({
 			message: "Chats retrieved successfully!",
 			data
@@ -46,8 +44,6 @@ class ContactsController {
 
 	private async getContacts(req: Request, res: Response) {
 		const data = await contactsService.getContacts(req.session.instance);
-
-		console.log(data[0]);
 
 		res.status(200).send({
 			message: "Chats retrieved successfully!",

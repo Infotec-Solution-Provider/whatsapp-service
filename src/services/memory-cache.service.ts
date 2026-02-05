@@ -29,10 +29,6 @@ class MemoryCacheService {
 					cleanedCount++;
 				}
 			}
-
-			if (cleanedCount > 0) {
-				console.log(`♻️ Memory cache cleanup: removed ${cleanedCount} expired keys`);
-			}
 		}, 60000);
 	}
 

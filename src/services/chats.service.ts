@@ -847,8 +847,6 @@ class ChatsService {
 		);
 
 		try {
-			console.log(`[startChatByContactId] Iniciando chat. Instance: ${session.instance}, ContactId: ${contactId}`);
-
 			const contact = await prismaService.wppContact.findUnique({
 				where: { id: contactId }
 			});
@@ -879,12 +877,8 @@ class ChatsService {
 					}
 				}
 			});
-
-			console.log(`[startChatByContactId] Chat criado no Prisma: ${newChat.id}. Iniciando sincronização...`);
-
+;
 			await this.syncChatToLocal(newChat);
-
-			console.log(`[startChatByContactId] Sincronização concluída para chat ${newChat.id}`);
 
 			const usersService = getUsersClient();
 			usersService.setAuth(token);
@@ -1139,8 +1133,6 @@ class ChatsService {
 				chat.isFinished,
 				chat.isSchedule
 			]);
-
-			console.log(`[syncChatToLocal] Chat ${chat.id} sincronizado com sucesso na instância ${chat.instance}`);
 		} catch (error) {
 			console.error("[syncChatToLocal] Erro ao sincronizar chat:", error);
 			throw error;

@@ -14,7 +14,6 @@ class RedisService {
 		this.useMemoryCache = this.provider === "memory";
 		
 		if (this.useMemoryCache) {
-			console.log("📦 Using in-memory cache");
 			this.isConnected = true;
 		} else {
 			this.connect();
