@@ -8,7 +8,7 @@ import whatsappService from "../services/whatsapp.service";
 
 class MessagesController {
 	constructor(public readonly router: Router) {
-		this.router.get("/api/whatsapp/messages/:id", isAuthenticated, this.getMessageById);
+		this.router.get("/api/whatsapp/messages/:id", this.getMessageById);
 		this.router.patch("/api/whatsapp/messages/mark-as-read", isAuthenticated, this.readContactMessages);
 		this.router.post("/api/whatsapp/:clientId/messages", upload.single("file"), isAuthenticated, this.sendMessage);
 		this.router.post("/api/whatsapp/:clientId/messages/forward", isAuthenticated, this.forwardMessages.bind(this));
