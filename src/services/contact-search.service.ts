@@ -1,10 +1,10 @@
-import { Customer } from "@in.pulse-crm/sdk";
-import { Prisma } from "@prisma/client";
+import { Customer, CustomersClient, UsersClient } from "@in.pulse-crm/sdk";
 import { Logger } from "@in.pulse-crm/utils";
+import { Prisma } from "@prisma/client";
 import chatsService from "./chats.service";
-import customersService from "./customers.service";
+import getCustomersClient from "./customers.service";
 import prismaService from "./prisma.service";
-import usersService from "./users.service";
+import getUsersClient from "./users.service";
 
 // ============================================================================
 // Types
@@ -133,7 +133,7 @@ class ContactQueryBuilder {
 class CustomerSearcher {
 	private instance: string;
 
-	constructor(instance: string) {
+	constructor(instance: string, private customersService: CustomersClient) {
 		this.instance = instance;
 	}
 
@@ -165,7 +165,7 @@ class CustomerSearcher {
 
 		try {
 			// Busca por COD_ERP exato
-			const { data } = await customersService.getCustomers({
+			const { data } = await this.customersService.getCustomers({
 				instance: this.instance,
 				COD_ERP: erpRaw,
 				perPage: "10"
@@ -176,7 +176,7 @@ class CustomerSearcher {
 			// Se for numérico, também tenta por CODIGO
 			const erpDigits = erpRaw.replace(/\D/g, "");
 			if (erpDigits) {
-				const { data: dataById } = await customersService.getCustomers({
+				const { data: dataById } = await this.customersService.getCustomers({
 					instance: this.instance,
 					CODIGO: erpDigits,
 					perPage: "1"
@@ -193,7 +193,7 @@ class CustomerSearcher {
 		if (!digits) return;
 
 		try {
-			const { data } = await customersService.getCustomers({
+			const { data } = await this.customersService.getCustomers({
 				instance: this.instance,
 				CPF_CNPJ: digits,
 				perPage: "10"
@@ -213,7 +213,7 @@ class CustomerSearcher {
 
 		for (let page = 1; page <= maxPages; page++) {
 			try {
-				const { data } = await customersService.getCustomers({
+				const { data } = await this.customersService.getCustomers({
 					instance: this.instance,
 					RAZAO: trimmed,
 					page: page.toString(),
@@ -247,7 +247,7 @@ class CustomerSearcher {
 class ContactEnricher {
 	private instance: string;
 
-	constructor(instance: string) {
+	constructor(instance: string, private readonly customersService: CustomersClient, private readonly usersService: UsersClient) {
 		this.instance = instance;
 	}
 
@@ -301,7 +301,7 @@ class ContactEnricher {
 			await Promise.all(
 				batch.map(async (id) => {
 					try {
-						const resp = await customersService.getCustomers({
+						const resp = await this.customersService.getCustomers({
 							instance: this.instance,
 							CODIGO: id.toString(),
 							perPage: "1"
@@ -345,7 +345,7 @@ class ContactEnricher {
 		if (!chat?.userId) return null;
 
 		try {
-			const user = await usersService.getUserById(chat.userId);
+			const user = await this.usersService.getUserById(chat.userId);
 			return user?.NOME || "Supervisão";
 		} catch {
 			return "Supervisão";
@@ -358,20 +358,18 @@ class ContactEnricher {
 // ============================================================================
 
 class ContactSearchService {
-	/**
-	 * Configura autenticação para os serviços externos
-	 */
-	setAuth(token: string): void {
+	private customersService: CustomersClient;
+	private usersService: UsersClient;
+
+
+	constructor(token: string) {
 		const normalized = token.replace(/^Bearer\s+/i, "");
-		if (normalized) {
-			customersService.setAuth(normalized);
-			usersService.setAuth(normalized);
-		}
+		this.customersService = getCustomersClient();
+		this.usersService = getUsersClient();
+		this.customersService.setAuth(normalized);
+		this.usersService.setAuth(normalized);
 	}
 
-	/**
-	 * Busca contatos com filtros e enriquecimento de dados
-	 */
 	async search(
 		instance: string,
 		filters: ContactSearchFilters,
@@ -381,7 +379,7 @@ class ContactSearchService {
 		const perPage = Math.max(1, Math.min(100, pagination.perPage));
 
 		// 1. Busca IDs de clientes se houver filtros de cliente
-		const customerSearcher = new CustomerSearcher(instance);
+		const customerSearcher = new CustomerSearcher(instance, this.customersService);
 		const matchedCustomerIds = await customerSearcher.searchByFilters(filters);
 
 		// Se buscou por filtros de cliente mas não encontrou nenhum, retorna vazio
@@ -425,7 +423,7 @@ class ContactSearchService {
 		}
 
 		// 4. Enriquece contatos com dados de cliente e chat
-		const enricher = new ContactEnricher(instance);
+		const enricher = new ContactEnricher(instance, this.customersService, this.usersService);
 		const enrichedContacts = await enricher.enrich(contacts);
 		const totalPages = Math.ceil(total / perPage);
 
@@ -458,4 +456,4 @@ class ContactSearchService {
 	}
 }
 
-export default new ContactSearchService();
+export default ContactSearchService;

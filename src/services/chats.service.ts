@@ -15,7 +15,7 @@ import instancesService from "./instances.service";
 import messagesDistributionService from "./messages-distribution.service";
 import prismaService from "./prisma.service";
 import socketService from "./socket.service";
-import usersService from "./users.service";
+import getUsersClient from "./users.service";
 import whatsappService, { SendTemplateData } from "./whatsapp.service";
 
 interface InpulseResult {
@@ -349,6 +349,8 @@ class ChatsService {
 
 	public async transferAttendance(token: string, session: SessionData, id: number, userId: number) {
 		const { instance } = session;
+
+		const usersService = getUsersClient();
 		usersService.setAuth(token);
 
 		const chats = await prismaService.wppChat.findUnique({
@@ -424,6 +426,7 @@ class ChatsService {
 			}
 
 			const { instance, userId } = session;
+			const usersService = getUsersClient();
 			usersService.setAuth(token || "");
 
 			logger.log(`Buscando usuário que finalizou o atendimento. UserId: ${userId}`);
@@ -845,7 +848,7 @@ class ChatsService {
 
 		try {
 			console.log(`[startChatByContactId] Iniciando chat. Instance: ${session.instance}, ContactId: ${contactId}`);
-			
+
 			const contact = await prismaService.wppContact.findUnique({
 				where: { id: contactId }
 			});
@@ -878,11 +881,12 @@ class ChatsService {
 			});
 
 			console.log(`[startChatByContactId] Chat criado no Prisma: ${newChat.id}. Iniciando sincronização...`);
-			
+
 			await this.syncChatToLocal(newChat);
 
 			console.log(`[startChatByContactId] Sincronização concluída para chat ${newChat.id}`);
 
+			const usersService = getUsersClient();
 			usersService.setAuth(token);
 			const user = await usersService.getUserById(session.userId);
 
@@ -913,7 +917,7 @@ class ChatsService {
 			await messagesDistributionService.notifyChatStarted(process, newChat as WppChat);
 
 			console.log(`[startChatByContactId] Chat ${newChat.id} finalizado com sucesso`);
-			
+
 			return newChat;
 		} catch (err) {
 			process.log("Erro ao iniciar o atendimento ");
@@ -1082,7 +1086,7 @@ class ChatsService {
 	 */
 	private formatDateForMySQL(date: Date | null | undefined): string | null {
 		if (!date) return null;
-		
+
 		const year = date.getFullYear();
 		const month = String(date.getMonth() + 1).padStart(2, "0");
 		const day = String(date.getDate()).padStart(2, "0");
@@ -1135,7 +1139,7 @@ class ChatsService {
 				chat.isFinished,
 				chat.isSchedule
 			]);
-			
+
 			console.log(`[syncChatToLocal] Chat ${chat.id} sincronizado com sucesso na instância ${chat.instance}`);
 		} catch (error) {
 			console.error("[syncChatToLocal] Erro ao sincronizar chat:", error);

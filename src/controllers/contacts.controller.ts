@@ -1,7 +1,7 @@
 import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import contactsService from "../services/contacts.service";
-import contactSearchService from "../services/contact-search.service";
+import ContactSearchService from "../services/contact-search.service";
 import parametersService from "../services/parameters.service";
 
 class ContactsController {
@@ -95,8 +95,9 @@ class ContactsController {
 				filters
 			);
 		} else {
-			// Use contact search service (default)
-			contactSearchService.setAuth(req.headers["authorization"] || "");
+			const token = req.headers["authorization"] || "";
+			const contactSearchService = new ContactSearchService(token);
+
 			result = await contactSearchService.search(
 				req.session.instance,
 				filters,

@@ -3,4 +3,8 @@ import { UsersClient } from "@in.pulse-crm/sdk";
 
 const USERS_API_RL = process.env["USERS_API_RL"] || "http://localhost:8001";
 
-export default new UsersClient(USERS_API_RL);
+function getUsersClient() {
+  return new UsersClient(USERS_API_RL);
+}
+
+export default getUsersClient;
