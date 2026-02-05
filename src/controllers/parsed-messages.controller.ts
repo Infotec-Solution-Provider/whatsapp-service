@@ -121,6 +121,7 @@ class ParsedMessagesController {
 			if (messageDto.isGroup && messageDto.groupId) {
 				logger.log("Mensagem de grupo detectada, processando em internalChatsService");
 				const savedMsg = await internalChatsService.receiveMessage(
+					client.instance,
 					messageDto.groupId,
 					messageDto,
 					contactName
@@ -265,7 +266,7 @@ class ParsedMessagesController {
 
 					// Mensagens de grupo devem ir para o handler interno
 					if (messageDto.isGroup && messageDto.groupId) {
-						await internalChatsService.receiveMessage(messageDto.groupId, messageDto, contactName);
+						await internalChatsService.receiveMessage(client.instance, messageDto.groupId, messageDto, contactName);
 						results.push({
 							index: i,
 							success: true

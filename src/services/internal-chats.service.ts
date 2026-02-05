@@ -21,6 +21,7 @@ import instancesService from "./instances.service";
 import prismaService from "./prisma.service";
 import socketService from "./socket.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
+import internalMessageQueueService from "./internal-message-queue.service";
 
 interface ChatsFilters {
 	userId?: string;
@@ -420,7 +421,7 @@ class InternalChatsService {
 
 			let message = {
 				instance: session.instance,
-				status: "RECEIVED",
+				status: "PENDING",
 				timestamp: Date.now().toString(),
 				from: `user:${session.userId}`,
 				type: "chat",
@@ -531,29 +532,50 @@ class InternalChatsService {
 				process.log(
 					`Chat está associado a um grupo WhatsApp. Tentando enviar para grupo ID: ${chat.wppGroupId}`
 				);
-				const sentMsg = await this.sendMessageToWppGroup(session, chat.wppGroupId, data, savedMsg);
 
-				process.log(
-					`Resultado do envio - wwebjsId: ${sentMsg?.wwebjsId || "null"}, wwebjsIdStanza: ${sentMsg?.wwebjsIdStanza || "null"}, sentMsg completo:`,
-					sentMsg
-				);
 
-				if (sentMsg?.wwebjsId || sentMsg?.wwebjsIdStanza) {
+				try {
+					const sentMsg = await this.sendMessageToWppGroup(session, chat.wppGroupId, data, savedMsg);
+
 					process.log(
-						`Mensagem enviada para WhatsApp com sucesso. wwebjsId: ${sentMsg.wwebjsId || "N/A"}, wwebjsIdStanza: ${sentMsg.wwebjsIdStanza || "N/A"}`
+						`Resultado do envio - wwebjsId: ${sentMsg?.wwebjsId || "null"}, wwebjsIdStanza: ${sentMsg?.wwebjsIdStanza || "null"}, sentMsg completo:`,
+						sentMsg
 					);
+
+					if (sentMsg?.wwebjsId || sentMsg?.wwebjsIdStanza) {
+						process.log(
+							`Mensagem enviada para WhatsApp com sucesso. wwebjsId: ${sentMsg.wwebjsId || "N/A"}, wwebjsIdStanza: ${sentMsg.wwebjsIdStanza || "N/A"}`
+						);
+						await prismaService.internalMessage.update({
+							where: { id: savedMsg.id },
+							data: {
+								wwebjsIdStanza: sentMsg.wwebjsIdStanza ?? null,
+								wwebjsId: sentMsg.wwebjsId ?? null,
+								status: "RECEIVED"
+							}
+						});
+						process.log(`Mensagem interna atualizada com IDs do WhatsApp`);
+					} else {
+						process.log(`Aviso: Mensagem não foi enviada para o WhatsApp ou não retornou nenhum ID`);
+						await prismaService.internalMessage.update({
+							where: { id: savedMsg.id },
+							data: { status: "ERROR" }
+						});
+					}
+				} catch (err) {
+					const errorMsg = sanitizeErrorMessage(err) || "Erro desconhecido";
+					process.log(`Falha ao enviar mensagem ao WhatsApp. Marcando como ERROR. Erro: ${errorMsg}`);
 					await prismaService.internalMessage.update({
 						where: { id: savedMsg.id },
-						data: {
-							wwebjsIdStanza: sentMsg.wwebjsIdStanza ?? null,
-							wwebjsId: sentMsg.wwebjsId ?? null
-						}
+						data: { status: "ERROR" }
 					});
-					process.log(`Mensagem interna atualizada com IDs do WhatsApp`);
-				} else {
-					process.log(`Aviso: Mensagem não foi enviada para o WhatsApp ou não retornou nenhum ID`);
+					throw err;
 				}
 			} else {
+				await prismaService.internalMessage.update({
+					where: { id: savedMsg.id },
+					data: { status: "RECEIVED" }
+				});
 				process.log(`Chat é apenas interno, não há grupo WhatsApp associado`);
 			}
 
@@ -567,7 +589,7 @@ class InternalChatsService {
 		}
 	}
 
-	public async receiveMessage(groupId: string, msg: CreateMessageDto, authorName: string | null = null) {
+	public async receiveMessage(instance: string, groupId: string, msg: CreateMessageDto, authorName: string | null = null) {
 		Logger.debug(`Recebendo mensagem de grupo WhatsApp. Grupo ID: ${groupId}, Autor: ${authorName || msg.from}`, msg);
 		const cleanGroupId = groupId.replace(/[/:]/g, "-");
 		const process = new ProcessingLogger(
@@ -582,6 +604,7 @@ class InternalChatsService {
 
 			const chat = await prismaService.internalChat.findUnique({
 				where: {
+					instance: instance,
 					wppGroupId: groupId
 				}
 			});
@@ -634,6 +657,22 @@ class InternalChatsService {
 			process.failed(err);
 			throw err;
 		}
+	}
+
+	/**
+	 * Método chamado pela fila de processamento para processar uma mensagem interna
+	 * Este método é injetado no internalMessageQueueService através do setProcessHandler
+	 */
+	public async processInternalMessageFromQueue(
+		instance: string,
+		_internalChatId: number,
+		_queueId: string,
+		groupId: string,
+		messageData: CreateMessageDto,
+		authorName?: string | null
+	): Promise<void> {
+		// Processa a mensagem normalmente usando o método receiveMessage
+		await this.receiveMessage(instance, groupId, messageData, authorName);
 	}
 
 	public async receiveMessageEdit(groupId: string, msgId: string, newText: string) {
@@ -1150,4 +1189,11 @@ class InternalChatsService {
 	}
 }
 
-export default new InternalChatsService();
+const internalChatsServiceInstance = new InternalChatsService();
+
+// Configura o handler de processamento da fila após a instância ser criada
+internalMessageQueueService.setProcessHandler({
+	processInternalMessage: internalChatsServiceInstance.processInternalMessageFromQueue.bind(internalChatsServiceInstance)
+});
+
+export default internalChatsServiceInstance;

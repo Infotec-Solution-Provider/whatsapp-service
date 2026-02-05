@@ -123,7 +123,7 @@ async function processLogFile(
 
 		if (isGroup) {
 			const groupId = logData.input.from.replace("@g.us", "");
-			await internalChatsService.receiveMessage(groupId, parsedMsg, contactName);
+			await internalChatsService.receiveMessage(instance, groupId, parsedMsg, contactName);
 			Logger.info(`✓ Mensagem de grupo recuperada: ${logData.input.id._serialized}`);
 		} else {
 			const savedMsg = await messagesService.insertMessage(parsedMsg);

@@ -328,7 +328,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				process.success(savedMsg);
 			}
 			if (chat.isGroup) {
-				await internalChatsService.receiveMessage(chat.id.user, parsedMsg, contactName);
+				await internalChatsService.receiveMessage(this.instance, chat.id.user, parsedMsg, contactName);
 			}
 		} catch (err) {
 			process.log(`Error while processing message: ${sanitizeErrorMessage(err)}`);

@@ -1,7 +1,7 @@
 import { SocketEventType, SocketServerAdminRoom, SocketServerChatRoom } from "@in.pulse-crm/sdk";
 import { TemplateMessage } from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
-import internalChatsService from "../services/internal-chats.service";
+import internalMessageQueueService from "../services/internal-message-queue.service";
 import messageQueueService from "../services/message-queue.service";
 import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
@@ -92,19 +92,31 @@ class RemoteWhatsappClient implements WhatsappClient {
 			process.log("Handling message received");
 
 			if (message.isGroup && message.groupId) {
-				process.log("Message is from a group, processing in internalChatsService");
+				process.log("Message is from a group, enqueuing for internal chat processing");
 
 				// Converter para CreateMessageDto removendo campos extras
 				const { isGroup, groupId, authorName, contactName, ...cleanMessage } = message;
 				const createMessageDto: CreateMessageDto = cleanMessage;
 
-				const savedMsg = await internalChatsService.receiveMessage(
-					groupId,
-					createMessageDto,
-					contactName || authorName
-				);
-				process.log("Message received handled successfully");
-				process.success(savedMsg);
+				// Enfileira a mensagem interna para processamento
+				const internalChat = await prismaService.internalChat.findUnique({
+					where: { wppGroupId: groupId }
+				});
+
+				if (internalChat) {
+					await internalMessageQueueService.enqueue({
+						instance: this.instance,
+						internalChatId: internalChat.id,
+						groupId: groupId,
+						messageData: createMessageDto,
+						authorName: contactName || authorName
+					});
+					process.log("Internal message enqueued successfully");
+					process.success({ queueId: `enqueued-${internalChat.id}` });
+				} else {
+					process.log("Internal chat not found for group ID, ignoring message");
+					process.success({ ignored: true });
+				}
 			} else {
 				const savedMsg = await messagesService.insertMessage(message);
 

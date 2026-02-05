@@ -624,6 +624,41 @@ enum WppMessageProcessingQueueStatus {
   @@map("wpp_message_processing_queue_status")
 }
 
+model InternalMessageProcessingQueue {
+  id                  String                              @id @default(uuid())
+  instance            String                              @map("instance")
+  internalChatId      Int                                 @map("internal_chat_id")
+  internalMessageId   Int?                                @map("internal_message_id")
+  groupId             String                              @map("group_id")
+  messageData         String                              @map("message_data") @db.LongText  // JSON serializado da mensagem
+  authorName          String?                             @map("author_name")
+  status              InternalMessageProcessingQueueStatus @default(PENDING)
+  retryCount          Int                                 @default(0) @map("retry_count")
+  maxRetries          Int                                 @default(3) @map("max_retries")
+  error               String?                             @map("error") @db.Text
+  createdAt           DateTime                            @default(now()) @map("created_at")
+  updatedAt           DateTime                            @updatedAt @map("updated_at")
+  processingStartedAt DateTime?                           @map("processing_started_at")
+  processedAt         DateTime?                           @map("processed_at")
+  lockedUntil         DateTime?                           @map("locked_until")
+  lockedBy            String?                             @map("locked_by")
+
+  @@index([instance, status, groupId])
+  @@index([status, createdAt])
+  @@index([groupId, status])
+  @@index([lockedUntil])
+  @@map("internal_message_processing_queue")
+}
+
+enum InternalMessageProcessingQueueStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+
+  @@map("internal_message_processing_queue_status")
+}
+
 model ProcessLog {
   id               Int       @id @default(autoincrement())
   instance         String    @map("instance")
