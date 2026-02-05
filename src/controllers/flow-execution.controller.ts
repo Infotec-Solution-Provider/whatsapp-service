@@ -27,7 +27,7 @@ class FlowExecutionController {
 
   private setupRoutes() {
     // Executar flow para um contato
-    this.router.post("/api/flow-execution/execute", this.executeFlow.bind(this));
+    this.router.post("/api/whatsapp/flow-execution/execute", this.executeFlow.bind(this));
   }
 
   private async executeFlow(req: Request, res: Response): Promise<Response> {
