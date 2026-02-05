@@ -7,6 +7,7 @@ import instancesService from "./instances.service";
 import prismaService from "./prisma.service";
 import { safeDecode } from "../utils/safe-encode";
 import parametersService from "./parameters.service";
+import { Logger } from "@in.pulse-crm/utils";
 
 interface MonitorSearchInput {
 	page?: number;
@@ -38,6 +39,7 @@ class MonitorService {
 
 		// Verificar se a busca local está ativa
 		const useLocalSearch = params["monitor:use_local_search"] === "true";
+		Logger.debug(`Buscando dados da monitoria usando método ${useLocalSearch ? "local" : "padrão"}`, { params, useLocalSearch });
 
 		if (useLocalSearch) {
 			return this.searchMonitorDataInternalLocal(session, input);
