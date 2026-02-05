@@ -1,11 +1,9 @@
-import { Request, Response, Router } from "express";
 import { BadRequestError } from "@rgranatodutra/http-errors";
+import { Request, Response, Router } from "express";
+import { ChatPayload } from "../message-flow/base/base.step";
 import messagesDistributionService from "../services/messages-distribution.service";
 import prismaService from "../services/prisma.service";
-import contactsService from "../services/contacts.service";
 import ProcessingLogger from "../utils/processing-logger";
-import { Formatter } from "@in.pulse-crm/utils";
-import { ChatPayload } from "../message-flow/base/base.step";
 
 interface FlowExecutionRequest {
   instance: string;
