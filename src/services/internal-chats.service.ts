@@ -528,6 +528,17 @@ class InternalChatsService {
 				where: { id: +data.chatId }
 			});
 
+			// Emitir status inicial baseado no tipo de chat
+			const initialStatus = chat?.wppGroupId ? "PENDING" : "SENT";
+			process.log(
+				`Emitindo evento de status inicial: ${initialStatus} para chat ${chat?.wppGroupId ? 'com' : 'sem'} vínculo WhatsApp`
+			);
+			await socketService.emit(SocketEventType.InternalMessageStatus, room, {
+				chatId: +data.chatId,
+				internalMessageId: savedMsg.id,
+				status: initialStatus
+			});
+
 			if (chat?.wppGroupId) {
 				process.log(
 					`Chat está associado a um grupo WhatsApp. Tentando enviar para grupo ID: ${chat.wppGroupId}`
@@ -555,6 +566,14 @@ class InternalChatsService {
 							}
 						});
 						process.log(`Mensagem interna atualizada com IDs do WhatsApp`);
+
+						// Emitir status SENT após envio bem-sucedido ao WhatsApp
+						process.log(`Emitindo evento de status SENT após envio ao WhatsApp`);
+						await socketService.emit(SocketEventType.InternalMessageStatus, room, {
+							chatId: +data.chatId,
+							internalMessageId: savedMsg.id,
+							status: "SENT"
+						});
 					} else {
 						process.log(`Aviso: Mensagem não foi enviada para o WhatsApp ou não retornou nenhum ID`);
 						await prismaService.internalMessage.update({
