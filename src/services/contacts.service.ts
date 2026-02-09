@@ -9,8 +9,6 @@ import { safeEncode } from "../utils/safe-encode";
 import instancesService from "./instances.service";
 import parametersService from "./parameters.service";
 import prismaService from "./prisma.service";
-import whatsappService from "./whatsapp.service";
-
 
 export interface ContactsFilters {
 	id?: number | null;
