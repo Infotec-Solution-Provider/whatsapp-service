@@ -28,12 +28,19 @@ export interface ContactsFilters {
 
 class ContactsService {
 	public async getOrCreateContact(instance: string, name: string, phone: string) {
-		const contact = await prismaService.wppContact.findUnique({
+		const hasDDI = phone.startsWith("55");
+		if (!hasDDI) phone = "55" + phone;
+
+		const hasExtraDigit = phone.length === 13;
+		const phoneAlt = hasExtraDigit ? phone.slice(0, 4) + phone.slice(5) : phone.slice(0, 4) + "9" + phone.slice(4);
+
+		const contact = await prismaService.wppContact.findFirst({
 			where: {
-				instance_phone: {
-					instance,
-					phone
-				}
+				instance,
+				OR: [
+					{ phone },
+					{ phone: phoneAlt }
+				]
 			}
 		});
 
@@ -140,17 +147,18 @@ class ContactsService {
 		customerId?: number,
 		sectorIds?: number[]
 	) {
-		const validPhone = await whatsappService.getValidWhatsappPhone(instance, phone);
-		if (!validPhone) {
-			throw new BadRequestError("Esse número não é um WhatsApp válido!");
-		}
+		const hasDDI = phone.startsWith("55");
+		const validPhone = hasDDI ? phone : "55" + phone;
+		const hasExtraDigit = validPhone.length === 13;
+		const validPhoneAlt = hasExtraDigit ? validPhone.slice(0, 4) + validPhone.slice(5) : validPhone.slice(0, 4) + "9" + validPhone.slice(4);
 
-		const existingContact = await prismaService.wppContact.findUnique({
+		const existingContact = await prismaService.wppContact.findFirst({
 			where: {
-				instance_phone: {
-					instance,
-					phone: validPhone
-				}
+				instance,
+				OR: [
+					{ phone: validPhone },
+					{ phone: validPhoneAlt }
+				]
 			},
 			// include sectors - cast to any because Prisma client types must be regenerated after schema change
 			include: { sectors: true } as any
