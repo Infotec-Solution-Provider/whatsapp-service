@@ -1091,7 +1091,7 @@ class ChatsService {
 		return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 	}
 
-	private async syncChatToLocal(chat: WppChat) {
+	public async syncChatToLocal(chat: WppChat) {
 		try {
 			const startedAt = this.formatDateForMySQL(chat.startedAt);
 			const finishedAt = this.formatDateForMySQL(chat.finishedAt);

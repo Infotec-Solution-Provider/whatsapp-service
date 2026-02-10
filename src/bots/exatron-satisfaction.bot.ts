@@ -6,6 +6,7 @@ import messagesDistributionService from "../services/messages-distribution.servi
 import prismaService from "../services/prisma.service";
 import socketService from "../services/socket.service";
 import whatsappService from "../services/whatsapp.service";
+import chatsService from "../services/chats.service";
 import JsonSessionStore from "../utils/json-session-store";
 import ProcessingLogger from "../utils/processing-logger";
 import parametersService from "../services/parameters.service";
@@ -274,6 +275,7 @@ class ExatronSatisfactionBot {
 				finishedBy: null
 			}
 		});
+		await chatsService.syncChatToLocal(updated);
 
 		// Usa mensagem de sistema para registrar no histórico do chat atual
 		logger?.log("Adicionando mensagem de sistema de finalização");
@@ -331,10 +333,11 @@ class ExatronSatisfactionBot {
 		try {
 			await messagesDistributionService.addSystemMessage(chat, "Iniciando pesquisa de satisfação.", false);
 
-			await prismaService.wppChat.update({
+			const updated = await prismaService.wppChat.update({
 				where: { id: chat.id },
 				data: { isFinished: false, botId: 2 }
 			});
+			await chatsService.syncChatToLocal(updated);
 
 			session.step = 1;
 			session.questionIndex = 0;

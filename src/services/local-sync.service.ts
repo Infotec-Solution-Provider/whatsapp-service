@@ -457,21 +457,6 @@ class LocalSyncService {
 		}
 	}
 
-	/**
-	 * Update sync state for an entity
-	 */
-	private async updateSyncState(instance: string, entity: string, lastSyncedId: number): Promise<void> {
-		try {
-			const query = `
-				INSERT INTO wpp_sync_state (entity, last_synced_id) 
-				VALUES (?, ?)
-				ON DUPLICATE KEY UPDATE last_synced_id = VALUES(last_synced_id)
-			`;
-			await instancesService.executeQuery(instance, query, [entity, lastSyncedId]);
-		} catch (err) {
-			console.error(`[LocalSync] Erro ao atualizar sync state para ${entity}:`, err);
-		}
-	}
 
 	/**
 	 * Sync all contacts from Prisma to local database
@@ -597,16 +582,8 @@ class LocalSyncService {
 	 */
 	private async syncChats(instance: string): Promise<number> {
 		console.log(`[LocalSync] Sincronizando chats para: ${instance}`);
-
-		// Get last synced chat ID
-		const lastSyncedId = await this.getSyncState(instance, 'chats');
-		console.log(`[LocalSync] Último ID de chat sincronizado: ${lastSyncedId}`);
-
 		const chats = await prismaService.wppChat.findMany({
-			where: {
-				instance,
-				id: { gt: lastSyncedId }
-			},
+			where: { instance },
 			orderBy: { id: 'asc' }
 		});
 
@@ -679,7 +656,6 @@ class LocalSyncService {
 		// Update sync state with the highest ID processed
 		if (chats.length > 0) {
 			const maxId = chats.reduce((max, chat) => Math.max(max, chat.id), 0);
-			await this.updateSyncState(instance, 'chats', maxId);
 			console.log(`[LocalSync] Sync state atualizado para chats: ${maxId}`);
 		}
 		console.log(`[LocalSync] ${syncedCount} chats sincronizados`);
@@ -873,13 +849,6 @@ class LocalSyncService {
 					throw err;
 				}
 			}
-		}
-
-		// Update sync state with the highest ID processed
-		if (validMessages.length > 0) {
-			const maxId = validMessages.reduce((max, msg) => Math.max(max, msg.id), 0);
-			await this.updateSyncState(instance, 'messages', maxId);
-			console.log(`[LocalSync] Sync state atualizado para messages: ${maxId}`);
 		}
 
 		console.log(

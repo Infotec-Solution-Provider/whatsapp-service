@@ -262,10 +262,11 @@ class CustomerLinkingBot {
 			);
 			const avatarUrl = await whatsappService.getProfilePictureUrl(newChat.instance, contact.phone);
 			if (avatarUrl) {
-				await prismaService.wppChat.update({
+				const updatedChat = await prismaService.wppChat.update({
 					data: { avatarUrl },
 					where: { id: newChat.id }
 				});
+				await chatsService.syncChatToLocal(updatedChat);
 			}
 
 			await messagesDistributionService.notifyChatStarted(logger, newChat);

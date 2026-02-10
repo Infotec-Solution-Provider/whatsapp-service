@@ -181,6 +181,7 @@ class MessagesDistributionService {
 					botId: 1
 				}
 			});
+			await chatsService.syncChatToLocal(chat);
 			return { chat, systemMessage: null };
 		}
 
@@ -221,6 +222,7 @@ class MessagesDistributionService {
 				const chat = await prismaService.wppChat.create({
 					data: chatData
 				});
+				await chatsService.syncChatToLocal(chat);
 				return { chat, systemMessage: null };
 			}
 		}
@@ -237,6 +239,7 @@ class MessagesDistributionService {
 				startedAt: new Date()
 			}
 		});
+		await chatsService.syncChatToLocal(chat);
 
 		return { chat, systemMessage: systemMessage || null };
 	}
@@ -284,10 +287,11 @@ class MessagesDistributionService {
 
 			const avatarUrl = await whatsappService.getProfilePictureUrl(instance, msg.from);
 			if (avatarUrl) {
-				await prismaService.wppChat.update({
+				const updatedChat = await prismaService.wppChat.update({
 					data: { avatarUrl },
 					where: { id: newChat.id }
 				});
+				await chatsService.syncChatToLocal(updatedChat);
 			}
 
 			const finalSystemMessage = systemMessage || "Atendimento iniciado pelo cliente!";
@@ -341,6 +345,7 @@ class MessagesDistributionService {
 				where: { id: chat.id },
 				data: { ...data, botId: null }
 			});
+			await chatsService.syncChatToLocal(updatedChat);
 
 			await this.addSystemMessage(updatedChat, `Transferido para o setor ${sector.name}!`);
 
@@ -368,6 +373,7 @@ class MessagesDistributionService {
 				where: { id: chat.id },
 				data: { ...data, userId: operador.CODIGO, botId: null }
 			});
+			await chatsService.syncChatToLocal(updatedChat);
 
 			await this.addSystemMessage(updatedChat, `Transferido para o setor ${sector.name}!`);
 

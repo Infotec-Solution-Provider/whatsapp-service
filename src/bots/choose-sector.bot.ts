@@ -6,6 +6,7 @@ import instancesService from "../services/instances.service";
 import { SocketEventType, User } from "@in.pulse-crm/sdk";
 import socketService from "../services/socket.service";
 import prismaService from "../services/prisma.service";
+import chatsService from "../services/chats.service";
 
 class ChooseSectorBot {
 	private readonly running: { step: number; chatId: number }[] = [];
@@ -191,7 +192,7 @@ class ChooseSectorBot {
 					case 2:
 						this.removeRunningStep(chat.id);
 
-						await prismaService.wppChat.update({
+						const updatedChat = await prismaService.wppChat.update({
 							where: { id: chat.id },
 							data: {
 								isFinished: true,
@@ -199,6 +200,7 @@ class ChooseSectorBot {
 								finishedBy: null
 							}
 						});
+						await chatsService.syncChatToLocal(updatedChat);
 						const finishMsg = `Atendimento finalizado pelo cliente devido inatividade do operador.`;
 						await messagesDistributionService.addSystemMessage(chat, finishMsg);
 						await socketService.emit(SocketEventType.WppChatFinished, `${chat.instance}:chat:${chat.id}`, {
@@ -213,10 +215,11 @@ class ChooseSectorBot {
 					case 3:
 						this.removeRunningStep(chat.id);
 						const user = this.getOperadorOld(chat.id);
-						await prismaService.wppChat.update({
+						const updatedChat = await prismaService.wppChat.update({
 							where: { id: chat.id },
 							data: { userId: user, botId: null }
 						});
+						await chatsService.syncChatToLocal(updatedChat);
 
 						whatsappService.sendBotMessage(message.from, message.clientId!, {
 							chat,
@@ -252,10 +255,11 @@ class ChooseSectorBot {
 				"*Responda apenas com o número da opção desejada.*"
 			].join("\n")
 		});
-		await prismaService.wppChat.update({
+		const updatedChat = await prismaService.wppChat.update({
 			where: { id: chat.id },
 			data: { botId: 1 }
 		});
+		await chatsService.syncChatToLocal(updatedChat);
 
 		this.forceStep(chat.id, 4, chat.userId || 0);
 	}
