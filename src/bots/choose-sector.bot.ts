@@ -192,7 +192,7 @@ class ChooseSectorBot {
 					case 2:
 						this.removeRunningStep(chat.id);
 
-						const updatedChat = await prismaService.wppChat.update({
+						const finishedChat = await prismaService.wppChat.update({
 							where: { id: chat.id },
 							data: {
 								isFinished: true,
@@ -200,7 +200,7 @@ class ChooseSectorBot {
 								finishedBy: null
 							}
 						});
-						await chatsService.syncChatToLocal(updatedChat);
+						await chatsService.syncChatToLocal(finishedChat);
 						const finishMsg = `Atendimento finalizado pelo cliente devido inatividade do operador.`;
 						await messagesDistributionService.addSystemMessage(chat, finishMsg);
 						await socketService.emit(SocketEventType.WppChatFinished, `${chat.instance}:chat:${chat.id}`, {
@@ -215,11 +215,11 @@ class ChooseSectorBot {
 					case 3:
 						this.removeRunningStep(chat.id);
 						const user = this.getOperadorOld(chat.id);
-						const updatedChat = await prismaService.wppChat.update({
+						const transferedChat = await prismaService.wppChat.update({
 							where: { id: chat.id },
 							data: { userId: user, botId: null }
 						});
-						await chatsService.syncChatToLocal(updatedChat);
+						await chatsService.syncChatToLocal(transferedChat);
 
 						whatsappService.sendBotMessage(message.from, message.clientId!, {
 							chat,
