@@ -58,6 +58,12 @@ class WABAWhatsappClient implements WhatsappClient {
 		try {
 			process.log("Iniciando envio de mensagem...", options);
 
+			if ("file" in options && options.file.size > 16 * 1024 * 1024 && !options.sendAsDocument) {
+				process.log("Arquivo acima de 16MB, enviando como documento.");
+				options.sendAsDocument = true;
+				options.sendAsAudio = false;
+			}
+
 			const reqUrl = `${GRAPH_API_URL}/${this.wabaPhoneId}/messages`;
 			const reqBody: any = {
 				recipient_type: "individual",
@@ -256,10 +262,7 @@ class WABAWhatsappClient implements WhatsappClient {
 			const form = new FormData();
 
 			form.append("messaging_product", "whatsapp");
-			form.append(
-				"type",
-				this.getSendFileType(options.file.mime_type, !!options.sendAsAudio, !!options.sendAsDocument)
-			);
+			form.append("type", options.file.mime_type || "application/octet-stream");
 			form.append("file", fileBuffer, {
 				filename: options.file.name,
 				contentType: options.file.mime_type
