@@ -61,6 +61,17 @@ class MessagesController {
 				data.file = file;
 			}
 
+			// Convert string boolean values to actual booleans
+			if (typeof data.sendAsDocument === 'string') {
+				data.sendAsDocument = data.sendAsDocument === 'true';
+			}
+			if (typeof data.sendAsAudio === 'string') {
+				data.sendAsAudio = data.sendAsAudio === 'true';
+			}
+			if (typeof data.isForwarded === 'string') {
+				data.isForwarded = data.isForwarded === 'true';
+			}
+
 			const message = await whatsappService.sendMessage(req.session, clientId, to, data);
 
 			res.status(201).send({

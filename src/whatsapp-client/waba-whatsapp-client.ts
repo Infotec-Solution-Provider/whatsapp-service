@@ -22,7 +22,7 @@ interface GetTemplateVariablesProps {
 	variables: TemplateVariables;
 }
 
-const GRAPH_API_URL = "https://graph.facebook.com/v16.0/";
+const GRAPH_API_URL = "https://graph.facebook.com/v16.0";
 
 class WABAWhatsappClient implements WhatsappClient {
 	constructor(

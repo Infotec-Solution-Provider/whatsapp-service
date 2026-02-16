@@ -193,6 +193,14 @@ class WhatsappService {
 
 	public async sendMessage(session: SessionData, clientId: number, to: string, data: SendMessageData) {
 		const { file, ...logData } = data;
+
+		// Ensure boolean fields are properly typed (handle string values from form data)
+		if (typeof data.sendAsDocument === 'string') {
+			data.sendAsDocument = data.sendAsDocument === 'true';
+		}
+		if (typeof data.sendAsAudio === 'string') {
+			data.sendAsAudio = data.sendAsAudio === 'true';
+		}
 		const process = new ProcessingLogger(session.instance, "send-message", `${to}-${Date.now()}`, logData);
 
 		process.log("Iniciando o envio da mensagem.");
