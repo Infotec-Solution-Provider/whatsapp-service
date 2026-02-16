@@ -451,13 +451,18 @@ class ChatsService {
 				}
 			});
 
+			const event = SocketEventType.WppChatFinished;
+			await socketService.emit(event, `${instance}:chat:${chat.id}`, {
+				chatId: chat.id
+			});
+
 			await this.syncChatToLocal(chat);
 
 			logger.log(
 				`Chat atualizado com sucesso. Chat ID: ${chat.id}, Status: finalizado, Resultado ID: ${chat.resultId}`
 			);
 
-			const event = SocketEventType.WppChatFinished;
+
 
 			let finishMsg: string = "";
 
@@ -475,9 +480,7 @@ class ChatsService {
 			logger.log(`Mensagem de sistema adicionada com sucesso`);
 
 			logger.log(`Emitindo evento de chat finalizado via socket para a sala: ${instance}:chat:${chat.id}`);
-			await socketService.emit(event, `${instance}:chat:${chat.id}`, {
-				chatId: chat.id
-			});
+
 			logger.log(`Evento de socket emitido com sucesso`);
 
 			if (chat.contact?.customerId && result) {
@@ -877,7 +880,7 @@ class ChatsService {
 					}
 				}
 			});
-;
+			;
 			await this.syncChatToLocal(newChat);
 
 			const usersService = getUsersClient();
