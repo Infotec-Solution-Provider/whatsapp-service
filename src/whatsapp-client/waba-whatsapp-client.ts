@@ -58,10 +58,11 @@ class WABAWhatsappClient implements WhatsappClient {
 		try {
 			process.log("Iniciando envio de mensagem...", options);
 
-			if ("file" in options && options.file.size > 16 * 1024 * 1024 && !options.sendAsDocument) {
-				process.log("Arquivo acima de 16MB, enviando como documento.");
-				options.sendAsDocument = true;
-				options.sendAsAudio = false;
+			if ("file" in options && options.file.size > 16 * 1024 * 1024) {
+				process.log("Arquivo acima de 16MB. Solicite a compressao do arquivo antes do envio.");
+				throw new Error(
+					"Arquivo acima de 16MB. Por favor, compacte o arquivo e tente novamente."
+				);
 			}
 
 			const reqUrl = `${GRAPH_API_URL}/${this.wabaPhoneId}/messages`;
@@ -277,9 +278,21 @@ class WABAWhatsappClient implements WhatsappClient {
 			process.log("Upload de mídia concluído com sucesso.", output);
 			return output;
 		} catch (error) {
-			process.log("Falha ao enviar mídia a Graph API...");
+			process.log("Falha ao enviar mídia a META Api...");
 			process.failed(error);
-			throw new Error("Falha ao enviar mídia a Graph API. Processo ID: " + processId);
+			let metaErrorDetails = "";
+			if (error instanceof AxiosError) {
+				const responseData = error.response?.data;
+				const metaError = responseData?.error;
+				if (metaError) {
+					metaErrorDetails = metaError.message ? ` Detalhes: ${metaError.message}` : "";
+				} else {
+					metaErrorDetails = responseData ? ` Detalhes: ${JSON.stringify(responseData)}` : "";
+				}
+			}
+			throw new Error(
+				"Erro ao enviar mídia a META Api. ID: " + processId + metaErrorDetails
+			);
 		}
 	}
 
