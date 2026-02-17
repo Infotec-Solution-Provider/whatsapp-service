@@ -7,6 +7,7 @@ import chatsService from "./chats.service";
 import messagesDistributionService from "./messages-distribution.service";
 import messagesService from "./messages.service";
 import prismaService from "./prisma.service";
+import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 
 interface ValidateEntryResultStatus {
 	type: "status";
@@ -180,7 +181,9 @@ class WABAService {
 				message.id
 			);
 		} catch (err) {
-			logger.log("Erro ao processar status de falha WABA");
+			logger.log("Erro ao processar status de falha WABA", {
+				error: sanitizeErrorMessage(err)
+			});
 		}
 	}
 
@@ -226,7 +229,9 @@ class WABAService {
 				data: { conversationExpiration: newExpiration.toString() }
 			});
 		} catch (err) {
-			logger.log("Erro ao processar estado de conversa WABA");
+			logger.log("Erro ao processar estado de conversa WABA", {
+				error: sanitizeErrorMessage(err)
+			});
 		}
 	}
 

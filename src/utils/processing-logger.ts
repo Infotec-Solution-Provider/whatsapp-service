@@ -46,8 +46,55 @@ export default class ProcessingLogger {
 
 	public failed(err: unknown): void {
 		this.error = err;
+		if (err instanceof Error) {
+			this.log("Processo finalizado com erro", {
+				name: err.name,
+				message: err.message,
+				stack: err.stack
+			});
+		}
 		this.endTime = new Date();
 		this.save();
+	}
+
+	private safeStringify(value: unknown): string {
+		try {
+			const seen = new WeakSet<object>();
+			return JSON.stringify(value, (_key, currentValue: unknown) => {
+				if (typeof currentValue === "bigint") {
+					return currentValue.toString();
+				}
+
+				if (currentValue instanceof Error) {
+					const base: Record<string, unknown> = {
+						name: currentValue.name,
+						message: currentValue.message,
+						stack: currentValue.stack
+					};
+
+					const extra = Object.getOwnPropertyNames(currentValue).reduce<Record<string, unknown>>(
+						(acc, key) => {
+							acc[key] = (currentValue as unknown as Record<string, unknown>)[key];
+							return acc;
+						},
+						{}
+					);
+
+					return { ...base, ...extra };
+				}
+
+				if (typeof currentValue === "object" && currentValue !== null) {
+					if (seen.has(currentValue)) {
+						return "[Circular]";
+					}
+					seen.add(currentValue);
+				}
+
+				return currentValue;
+			});
+		} catch {
+			return JSON.stringify({ serializationError: true, valueAsString: String(value) });
+		}
 	}
 
 	private async save(): Promise<void> {
@@ -60,11 +107,11 @@ export default class ProcessingLogger {
 				startTime: this.startTime,
 				endTime: this.endTime!,
 				duration: this.endTime!.getTime() - this.startTime.getTime(),
-				input: JSON.stringify(this.input),
-				output: JSON.stringify(this.output),
-				error: JSON.stringify(this.error),
+				input: this.safeStringify(this.input),
+				output: this.safeStringify(this.output),
+				error: this.safeStringify(this.error),
 				errorMessage: sanitizeErrorMessage(this.error),
-				logEntries: JSON.stringify(this.logEntries)
+				logEntries: this.safeStringify(this.logEntries)
 			};
 
 			await prismaService.processLog.create({

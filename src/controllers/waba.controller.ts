@@ -16,7 +16,13 @@ class WABAController {
 			await wabaService.handleWebhookEntry(instance, req.body);
 			res.status(200).send();
 		} catch (err: any) {
-			res.status(500).send({ message: err?.message });
+			const statusCode = err?.statusCode || err?.status || 500;
+			Logger.error("Erro no webhook WABA entry", err as Error);
+			res.status(statusCode).send({
+				message: err?.message,
+				name: err?.name,
+				stack: err?.stack
+			});
 		}
 	};
 
@@ -37,7 +43,13 @@ class WABAController {
 
 			res.status(200).send();
 		} catch (err: any) {
-			res.status(500).send({ message: err?.message });
+			const statusCode = err?.statusCode || err?.status || 500;
+			Logger.error("Erro no webhook WABA challenge", err as Error);
+			res.status(statusCode).send({
+				message: err?.message,
+				name: err?.name,
+				stack: err?.stack
+			});
 		}
 	};
 }

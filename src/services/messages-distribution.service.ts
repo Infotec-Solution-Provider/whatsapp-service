@@ -301,9 +301,13 @@ class MessagesDistributionService {
 			const outputMsg = await this.insertAndNotify(logger, newChat, msg, true);
 			return outputMsg;
 		} catch (err) {
-			logger.log(`Erro ao processar mensagem!`);
+			const msg = sanitizeErrorMessage(err);
+			logger.log(`Erro ao processar mensagem: ${msg}`);
 			logger.failed(err);
-			throw new InternalServerError("Não foi possível processar a mensagem.");
+			if (err instanceof InternalServerError) {
+				throw err;
+			}
+			throw new InternalServerError(`Não foi possível processar a mensagem. Detalhes: ${msg}`, err as Error);
 		}
 	}
 
@@ -692,209 +696,272 @@ class MessagesDistributionService {
 		currChat: WppChat | null,
 		logger: ProcessingLogger
 	) {
-		type RuleWithIncludes = AutomaticResponseRule & { schedules: AutomaticResponseSchedule[] };
+		try {
+			type RuleWithIncludes = AutomaticResponseRule & { schedules: AutomaticResponseSchedule[] };
 
-		// 1) Carrega TODAS as regras potencialmente aplicáveis (globais + específicas do user do chat)
-		const rules: RuleWithIncludes[] = await prismaService.automaticResponseRule.findMany({
-			where: {
+			logger.log("[AutoResponse] Iniciando avaliação de regras", {
 				instance,
-				isEnabled: true,
-				OR: [{ isGlobal: true }, { userAssignments: { some: { userId: currChat?.userId ?? -1 } } }]
-			},
-			include: { schedules: true },
-			orderBy: [{ id: "desc" }]
-		});
-
-		if (!rules.length) return;
-
-		const toLocalInTZ = (d: Date, tz: string) => {
-			const fmt = new Intl.DateTimeFormat("en-CA", {
-				timeZone: tz,
-				year: "numeric",
-				month: "2-digit",
-				day: "2-digit",
-				hour: "2-digit",
-				minute: "2-digit",
-				hour12: false
-			});
-			const parts = fmt.formatToParts(d);
-			const get = (t: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === t)?.value ?? "";
-			const y = Number(get("year"));
-			const m = Number(get("month"));
-			const da = Number(get("day"));
-			const h = Number(get("hour"));
-			const mi = Number(get("minute"));
-			return new Date(Date.UTC(y, m - 1, da, h, mi, 0, 0));
-		};
-
-		const parseHHmm = (s: string) => {
-			const [hh = 0, mm = 0] = s.split(":").map(Number);
-
-			return hh * 60 + mm;
-		};
-
-		const minutesOfDay = (d: Date) => d.getUTCHours() * 60 + d.getUTCMinutes();
-
-		const lastDayOfMonth = (y: number, m1_12: number) => {
-			return new Date(Date.UTC(y, m1_12, 0)).getUTCDate();
-		};
-
-		const inDateWindow = (nowLocal: Date, startDate?: Date | null, endDate?: Date | null) => {
-			if (startDate && nowLocal < startDate) return false;
-			if (endDate && nowLocal > endDate) return false;
-			return true;
-		};
-
-		const inTimeWindow = (nowLocal: Date, startTime: string, endTime: string) => {
-			const nowMin = minutesOfDay(nowLocal);
-			const s = parseHHmm(startTime);
-			const e = parseHHmm(endTime);
-			if (s <= e) return nowMin >= s && nowMin <= e;
-			return nowMin >= s || nowMin <= e;
-		};
-
-		const scheduleMatchesNow = (sched: AutomaticResponseSchedule, now: Date) => {
-			const tz = sched.timezone || "America/Fortaleza";
-			const nowLocal = toLocalInTZ(now, tz);
-
-			if (!sched.startTime || !sched.endTime) return false;
-
-			const sDate = sched.startDate ? toLocalInTZ(sched.startDate, tz) : null;
-			const eDate = sched.endDate ? toLocalInTZ(sched.endDate, tz) : null;
-			if (!inDateWindow(nowLocal, sDate, eDate)) return false;
-
-			if (!inTimeWindow(nowLocal, sched.startTime, sched.endTime)) return false;
-
-			const y = nowLocal.getUTCFullYear();
-			const m = nowLocal.getUTCMonth() + 1;
-			const d = nowLocal.getUTCDate();
-			const wd = nowLocal.getUTCDay();
-			const freq = (sched.frequency as any) || "WEEKLY";
-
-			if (freq === "DAILY") return true;
-
-			if (freq === "WEEKLY") {
-				const jsonDays = sched.daysOfWeek as unknown as number[] | null | undefined;
-				if (jsonDays && jsonDays.length) return jsonDays.includes(wd);
-				if (sched.dayOfWeek !== null && sched.dayOfWeek !== undefined) return wd === sched.dayOfWeek;
-				return false;
-			}
-
-			if (freq === "MONTHLY") {
-				if (!sched.dayOfMonth) return false;
-				const lastDM = lastDayOfMonth(y, m);
-				const eff = Math.min(sched.dayOfMonth, lastDM);
-				return d === eff;
-			}
-
-			if (freq === "YEARLY") {
-				if (!sched.dayOfMonth || !sched.month) return false;
-				if (m !== sched.month) return false;
-				const lastDM = lastDayOfMonth(y, m);
-				const eff = Math.min(sched.dayOfMonth, lastDM);
-				return d === eff;
-			}
-
-			if (freq === "ONCE") {
-				return !!sched.startDate;
-			}
-
-			return false;
-		};
-
-		// 2) Filtra as regras que possuem ALGUM schedule ativo agora, e escolhe o schedule que bateu
-		const now = new Date();
-		type Applicable = {
-			rule: RuleWithIncludes;
-			schedule: AutomaticResponseSchedule;
-			windowMinutes: number; // usado para decidir empates (preferimos a janela mais "estreita")
-		};
-		const applicable: Applicable[] = [];
-
-		for (const r of rules) {
-			const activeSched = r.schedules.find((s) => scheduleMatchesNow(s, now));
-			if (!activeSched) continue;
-
-			// calcula o tamanho da janela (em minutos) para critério de especificidade
-			const sMin = parseHHmm(activeSched.startTime);
-			const eMin = parseHHmm(activeSched.endTime);
-			let width = eMin - sMin;
-			if (width < 0) width += 24 * 60; // cruza meia-noite
-
-			applicable.push({ rule: r, schedule: activeSched, windowMinutes: width });
-		}
-
-		if (!applicable.length) {
-			logger.log("[AutoResponse] Nenhuma regra ativa no momento.");
-			return;
-		}
-
-		// 3) Resolução de choque:
-		//    - Se existir qualquer GLOBAL aplicável, considera APENAS as globais.
-		//    - Caso contrário, segue com as específicas do usuário.
-		const hasGlobal = applicable.some((x) => x.rule.isGlobal);
-		let chosenPool = hasGlobal
-			? applicable.filter((x) => x.rule.isGlobal)
-			: applicable.filter((x) => !x.rule.isGlobal);
-
-		// 4) Se ainda restarem múltiplas, escolhemos APENAS UMA para não spammar:
-		//    - 1º: menor janela (mais específica)
-		//    - 2º: mais recente (id DESC já veio da consulta, mas reforçamos)
-		chosenPool.sort((a, b) => {
-			if (a.windowMinutes !== b.windowMinutes) return a.windowMinutes - b.windowMinutes;
-			return b.rule.id - a.rule.id;
-		});
-
-		const chosen = chosenPool[0]!;
-		const ruleToApply = chosen.rule;
-
-		logger.log(`[AutoResponse] Regra selecionada: "${ruleToApply.name}" (global=${ruleToApply.isGlobal})`);
-
-		// 5) Flood-guard rápido global (30s): evita duplicidade acidental
-		const FLOOD_SECONDS = 30;
-		if (contact.lastOutOfHoursReplySentAt) {
-			const secs = (now.getTime() - new Date(contact.lastOutOfHoursReplySentAt).getTime()) / 1000;
-			if (secs < FLOOD_SECONDS) {
-				logger.log(`[AutoResponse] Flood-guard global ativo (${FLOOD_SECONDS}s). Pulando envio.`);
-				return;
-			}
-		}
-
-		// 6) Cooldown por-regra (via billingCategory = AUTO_REPLY_RULE:<id>)
-		const billingCategory = `AUTO_REPLY_RULE:${ruleToApply.id}`;
-		const lastByRule = await prismaService.wppMessage.findFirst({
-			where: {
 				contactId: contact.id,
-				from: "system:auto-reply",
-				billingCategory
-			},
-			orderBy: { sentAt: "desc" }
-		});
+				chatId: currChat?.id || null,
+				chatUserId: currChat?.userId || null,
+				chatSectorId: currChat?.sectorId || null
+			});
 
-		if (lastByRule) {
-			const secs = (now.getTime() - new Date(lastByRule.sentAt).getTime()) / 1000;
-			if (secs < ruleToApply.cooldownSeconds) {
-				logger.log(`[AutoResponse] Cooldown por-regra ativo (ruleId=${ruleToApply.id}). Pulando envio.`);
+			// 1) Carrega TODAS as regras potencialmente aplicáveis (globais + específicas do user do chat)
+			const rules: RuleWithIncludes[] = await prismaService.automaticResponseRule.findMany({
+				where: {
+					instance,
+					isEnabled: true,
+					OR: [{ isGlobal: true }, { userAssignments: { some: { userId: currChat?.userId ?? -1 } } }]
+				},
+				include: { schedules: true },
+				orderBy: [{ id: "desc" }]
+			});
+
+			logger.log("[AutoResponse] Regras candidatas carregadas", { totalRules: rules.length });
+
+			if (!rules.length) return;
+
+			const toLocalInTZ = (d: Date, tz: string) => {
+				const fmt = new Intl.DateTimeFormat("en-CA", {
+					timeZone: tz,
+					year: "numeric",
+					month: "2-digit",
+					day: "2-digit",
+					hour: "2-digit",
+					minute: "2-digit",
+					hour12: false
+				});
+				const parts = fmt.formatToParts(d);
+				const get = (t: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === t)?.value ?? "";
+				const y = Number(get("year"));
+				const m = Number(get("month"));
+				const da = Number(get("day"));
+				const h = Number(get("hour"));
+				const mi = Number(get("minute"));
+				return new Date(Date.UTC(y, m - 1, da, h, mi, 0, 0));
+			};
+
+			const parseHHmm = (s: string) => {
+				const [hh = 0, mm = 0] = s.split(":").map(Number);
+
+				return hh * 60 + mm;
+			};
+
+			const minutesOfDay = (d: Date) => d.getUTCHours() * 60 + d.getUTCMinutes();
+
+			const lastDayOfMonth = (y: number, m1_12: number) => {
+				return new Date(Date.UTC(y, m1_12, 0)).getUTCDate();
+			};
+
+			const inDateWindow = (nowLocal: Date, startDate?: Date | null, endDate?: Date | null) => {
+				if (startDate && nowLocal < startDate) return false;
+				if (endDate && nowLocal > endDate) return false;
+				return true;
+			};
+
+			const inTimeWindow = (nowLocal: Date, startTime: string, endTime: string) => {
+				const nowMin = minutesOfDay(nowLocal);
+				const s = parseHHmm(startTime);
+				const e = parseHHmm(endTime);
+				if (s <= e) return nowMin >= s && nowMin <= e;
+				return nowMin >= s || nowMin <= e;
+			};
+
+			const scheduleMatchesNow = (sched: AutomaticResponseSchedule, now: Date) => {
+				const tz = sched.timezone || "America/Fortaleza";
+				const nowLocal = toLocalInTZ(now, tz);
+
+				if (!sched.startTime || !sched.endTime) return false;
+
+				const sDate = sched.startDate ? toLocalInTZ(sched.startDate, tz) : null;
+				const eDate = sched.endDate ? toLocalInTZ(sched.endDate, tz) : null;
+				if (!inDateWindow(nowLocal, sDate, eDate)) return false;
+
+				if (!inTimeWindow(nowLocal, sched.startTime, sched.endTime)) return false;
+
+				const y = nowLocal.getUTCFullYear();
+				const m = nowLocal.getUTCMonth() + 1;
+				const d = nowLocal.getUTCDate();
+				const wd = nowLocal.getUTCDay();
+				const freq = (sched.frequency as any) || "WEEKLY";
+
+				if (freq === "DAILY") return true;
+
+				if (freq === "WEEKLY") {
+					const jsonDays = sched.daysOfWeek as unknown as number[] | null | undefined;
+					if (jsonDays && jsonDays.length) return jsonDays.includes(wd);
+					if (sched.dayOfWeek !== null && sched.dayOfWeek !== undefined) return wd === sched.dayOfWeek;
+					return false;
+				}
+
+				if (freq === "MONTHLY") {
+					if (!sched.dayOfMonth) return false;
+					const lastDM = lastDayOfMonth(y, m);
+					const eff = Math.min(sched.dayOfMonth, lastDM);
+					return d === eff;
+				}
+
+				if (freq === "YEARLY") {
+					if (!sched.dayOfMonth || !sched.month) return false;
+					if (m !== sched.month) return false;
+					const lastDM = lastDayOfMonth(y, m);
+					const eff = Math.min(sched.dayOfMonth, lastDM);
+					return d === eff;
+				}
+
+				if (freq === "ONCE") {
+					return !!sched.startDate;
+				}
+
+				return false;
+			};
+
+			// 2) Filtra as regras que possuem ALGUM schedule ativo agora, e escolhe o schedule que bateu
+			const now = new Date();
+			type Applicable = {
+				rule: RuleWithIncludes;
+				schedule: AutomaticResponseSchedule;
+				windowMinutes: number; // usado para decidir empates (preferimos a janela mais "estreita")
+			};
+			const applicable: Applicable[] = [];
+
+			for (const r of rules) {
+				const activeSched = r.schedules.find((s) => scheduleMatchesNow(s, now));
+				if (!activeSched) continue;
+
+				// calcula o tamanho da janela (em minutos) para critério de especificidade
+				const sMin = parseHHmm(activeSched.startTime);
+				const eMin = parseHHmm(activeSched.endTime);
+				let width = eMin - sMin;
+				if (width < 0) width += 24 * 60; // cruza meia-noite
+
+				applicable.push({ rule: r, schedule: activeSched, windowMinutes: width });
+			}
+
+			if (!applicable.length) {
+				logger.log("[AutoResponse] Nenhuma regra ativa no momento.", { contactId: contact.id });
 				return;
 			}
+
+			logger.log("[AutoResponse] Regras ativas encontradas", { totalActiveRules: applicable.length });
+
+			// 3) Resolução de choque:
+			//    - Se existir qualquer GLOBAL aplicável, considera APENAS as globais.
+			//    - Caso contrário, segue com as específicas do usuário.
+			const hasGlobal = applicable.some((x) => x.rule.isGlobal);
+			let chosenPool = hasGlobal
+				? applicable.filter((x) => x.rule.isGlobal)
+				: applicable.filter((x) => !x.rule.isGlobal);
+
+			// 4) Se ainda restarem múltiplas, escolhemos APENAS UMA para não spammar:
+			//    - 1º: menor janela (mais específica)
+			//    - 2º: mais recente (id DESC já veio da consulta, mas reforçamos)
+			chosenPool.sort((a, b) => {
+				if (a.windowMinutes !== b.windowMinutes) return a.windowMinutes - b.windowMinutes;
+				return b.rule.id - a.rule.id;
+			});
+
+			const chosen = chosenPool[0]!;
+			const ruleToApply = chosen.rule;
+
+			logger.log(`[AutoResponse] Regra selecionada: "${ruleToApply.name}" (global=${ruleToApply.isGlobal})`, {
+				ruleId: ruleToApply.id,
+				windowMinutes: chosen.windowMinutes,
+				chatId: currChat?.id || null
+			});
+
+			// 5) Flood-guard rápido global (30s): evita duplicidade acidental
+			const FLOOD_SECONDS = 30;
+			if (contact.lastOutOfHoursReplySentAt) {
+				const secs = (now.getTime() - new Date(contact.lastOutOfHoursReplySentAt).getTime()) / 1000;
+				if (secs < FLOOD_SECONDS) {
+					logger.log(`[AutoResponse] Flood-guard global ativo (${FLOOD_SECONDS}s). Pulando envio.`, {
+						secondsSinceLastReply: secs,
+						contactId: contact.id
+					});
+					return;
+				}
+			}
+
+			// 6) Cooldown por-regra (via billingCategory = AUTO_REPLY_RULE:<id>)
+			const billingCategory = `AUTO_REPLY_RULE:${ruleToApply.id}`;
+			const lastByRule = await prismaService.wppMessage.findFirst({
+				where: {
+					contactId: contact.id,
+					from: "system:auto-reply",
+					billingCategory
+				},
+				orderBy: { sentAt: "desc" }
+			});
+
+			if (lastByRule) {
+				const secs = (now.getTime() - new Date(lastByRule.sentAt).getTime()) / 1000;
+				if (secs < ruleToApply.cooldownSeconds) {
+					logger.log(`[AutoResponse] Cooldown por-regra ativo (ruleId=${ruleToApply.id}). Pulando envio.`, {
+						secondsSinceLastRuleReply: secs,
+						cooldownSeconds: ruleToApply.cooldownSeconds
+					});
+					return;
+				}
+			}
+
+			const sector = await prismaService.wppSector.findUnique({
+				where: { id: currChat?.sectorId || -1 }
+			});
+
+			if (!sector) {
+				logger.log("[AutoResponse] Setor não encontrado para envio de resposta automática. Pulando envio.", {
+					contactId: contact.id,
+					chatId: currChat?.id || null,
+					sectorId: currChat?.sectorId || null
+				});
+				return;
+			}
+
+			logger.log("[AutoResponse] Enviando resposta automática", {
+				ruleId: ruleToApply.id,
+				contactId: contact.id,
+				phone: contact.phone,
+				sectorId: sector.id,
+				hasFile: !!ruleToApply.fileId
+			});
+
+			// 7) Envia e atualiza "último envio"
+			const sentAutoReply = await whatsappService.sendAutoReplyMessage(
+				instance,
+				sector,
+				contact.phone,
+				ruleToApply.message,
+				ruleToApply.fileId
+			);
+
+			if (!sentAutoReply) {
+				logger.log("[AutoResponse] Falha no envio da resposta automática. lastOutOfHoursReplySentAt não será atualizado.", {
+					ruleId: ruleToApply.id,
+					contactId: contact.id
+				});
+				return;
+			}
+
+			await prismaService.wppContact.update({
+				where: { id: contact.id },
+				data: { lastOutOfHoursReplySentAt: new Date() }
+			});
+
+			logger.log("[AutoResponse] Resposta automática enviada e controle de envio atualizado", {
+				ruleId: ruleToApply.id,
+				contactId: contact.id,
+				autoReplyMessageId: sentAutoReply.id
+			});
+		} catch (err) {
+			logger.log("[AutoResponse] Erro ao avaliar/enviar resposta automática", {
+				instance,
+				contactId: contact.id,
+				chatId: currChat?.id || null,
+				error: sanitizeErrorMessage(err)
+			});
 		}
-
-		const sector = await prismaService.wppSector.findUnique({
-			where: { id: currChat?.sectorId || -1 }
-		});
-		// 7) Envia e atualiza "último envio"
-		await whatsappService.sendAutoReplyMessage(
-			instance,
-			sector!,
-			contact.phone,
-			ruleToApply.message,
-			ruleToApply.fileId
-		);
-
-		await prismaService.wppContact.update({
-			where: { id: contact.id },
-			data: { lastOutOfHoursReplySentAt: new Date() }
-		});
 	}
 }
 
