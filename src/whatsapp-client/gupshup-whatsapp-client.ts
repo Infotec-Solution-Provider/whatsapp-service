@@ -52,7 +52,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 			data.append("source", this._phone);
 			data.append("destination", options.to);
 
-			const msgType = (() => {
+			let msgType = (() => {
 				if (!("fileUrl" in options)) return "text";
 				if (!options.fileType || options.fileType === "document") return "file";
 				return options.fileType;
@@ -97,9 +97,45 @@ class GupshupWhatsappClient implements WhatsappClient {
 			}
 
 			logger.log("[Gupshup] Enviando requisição para Gupshup.", data.toString());
-			const response = await this.api.post("/wa/api/v1/msg", data, {
-				headers: { "Content-Type": "application/x-www-form-urlencoded" }
-			});
+			let response;
+
+			try {
+				response = await this.api.post("/wa/api/v1/msg", data, {
+					headers: { "Content-Type": "application/x-www-form-urlencoded" }
+				});
+			} catch (mediaError: any) {
+				if (!("fileUrl" in options)) {
+					throw mediaError;
+				}
+
+				const fileDownloadUrl = `https://inpulse.infotecrs.inf.br/api/files/${options.file.id}/view`;
+				const fallbackText = options.text ? `${options.text}\n\n${fileDownloadUrl}` : fileDownloadUrl;
+
+				logger.log("[Gupshup] Falha no envio de mídia. Aplicando fallback para texto com link.", {
+					fileId: options.file.id,
+					fileDownloadUrl,
+					error: mediaError?.response?.data || mediaError?.message || String(mediaError)
+				});
+
+				const fallbackData = new URLSearchParams();
+				fallbackData.append("channel", "whatsapp");
+				fallbackData.append("src.name", this.appName);
+				fallbackData.append("source", this._phone);
+				fallbackData.append("destination", options.to);
+
+				const fallbackMessage: any = { type: "text", text: fallbackText };
+				if (options.quotedId) {
+					fallbackMessage.context = { msgId: options.quotedId };
+				}
+
+				fallbackData.append("message", JSON.stringify(fallbackMessage));
+				response = await this.api.post("/wa/api/v1/msg", fallbackData, {
+					headers: { "Content-Type": "application/x-www-form-urlencoded" }
+				});
+
+				msgType = "text";
+				options.text = fallbackText;
+			}
 			logger.log("[Gupshup] Resposta recebida da Gupshup.", { status: response.status });
 
 			const now = new Date();
