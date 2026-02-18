@@ -88,8 +88,8 @@ class WABAWhatsappClient implements WhatsappClient {
 				} catch (uploadError) {
 					const fileDownloadUrl = `https://inpulse.infotecrs.inf.br/api/files/${options.file.id}/view`;
 					const fallbackText = options.text
-						? `${options.text}\n\nArquivo: ${fileDownloadUrl}`
-						: `Arquivo: ${fileDownloadUrl}`;
+						? `${options.text}\n\n${fileDownloadUrl}`
+						: `${fileDownloadUrl}`;
 
 					process.log("Falha no upload de mídia. Aplicando fallback de URL para download.", {
 						fileId: options.file.id,
