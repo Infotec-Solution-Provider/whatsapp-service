@@ -86,13 +86,14 @@ class WABAWhatsappClient implements WhatsappClient {
 						...(msgType === "document" ? { filename: options.file.name } : {})
 					};
 				} catch (uploadError) {
-					const fileDownloadUrl = `https://inpulse.infotecrs.inf.br/api/files/${options.file.id}/view`;
+					const fileMetadata = await filesService.fetchFileMetadata(options.fileId);
+					const fileDownloadUrl = `https://inpulse.infotecrs.inf.br/public/files/${fileMetadata.public_id}`;
 					const fallbackText = options.text
 						? `${options.text}\n\n${fileDownloadUrl}`
 						: `${fileDownloadUrl}`;
 
 					process.log("Falha no upload de mídia. Aplicando fallback de URL para download.", {
-						fileId: options.file.id,
+						fileId: options.fileId,
 						fileDownloadUrl,
 						error: uploadError instanceof Error ? uploadError.message : uploadError
 					});
@@ -185,6 +186,7 @@ class WABAWhatsappClient implements WhatsappClient {
 				sendOptions = {
 					to,
 					text: originalMessage.body ?? null,
+					fileId: originalMessage.fileId,
 					fileUrl: filesService.getFileDownloadUrl(originalMessage.fileId),
 					fileName: originalMessage.fileName || fileMetadata.name,
 					fileType: this.mapFileTypeForWABA(originalMessage.type),
@@ -194,6 +196,7 @@ class WABAWhatsappClient implements WhatsappClient {
 				};
 
 				process.log("Opções de envio de mídia preparadas", {
+					fileId: sendOptions.fileId,
 					fileName: sendOptions.fileName,
 					fileType: sendOptions.fileType,
 					sendAsAudio: sendOptions.sendAsAudio,

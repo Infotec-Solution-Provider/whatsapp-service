@@ -14,6 +14,7 @@ export interface SendFileOptions extends BaseSendMessageOptions {
 	text?: string | null;
 	sendAsAudio?: boolean;
 	sendAsDocument?: boolean;
+	fileId: number;
 	fileUrl: string;
 	fileName: string;
 	fileType?: SendFileType;

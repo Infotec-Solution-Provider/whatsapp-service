@@ -108,10 +108,8 @@ class GupshupWhatsappClient implements WhatsappClient {
 					throw mediaError;
 				}
 
-				const fileDownloadUrl = options.fileUrl.replace(
-					"http://localhost:8003",
-					"https://inpulse.infotecrs.inf.br"
-				);
+				const fileMetadata = await filesService.fetchFileMetadata(options.fileId);
+				const fileDownloadUrl = `https://inpulse.infotecrs.inf.br/public/files/${fileMetadata.public_id}`;
 				const fallbackText = options.text ? `${options.text}\n\n${fileDownloadUrl}` : fileDownloadUrl;
 
 				logger.log("[Gupshup] Falha no envio de mídia. Aplicando fallback para texto com link.", {
