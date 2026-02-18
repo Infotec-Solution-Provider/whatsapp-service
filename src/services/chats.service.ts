@@ -438,18 +438,36 @@ class ChatsService {
 			}
 
 			logger.log(`Atualizando chat no banco de dados. Marcando como finalizado`);
-			const chat = await prismaService.wppChat.update({
-				where: { id },
+			const finishedAt = new Date();
+			const updateResult = await prismaService.wppChat.updateMany({
+				where: {
+					id,
+					isFinished: false
+				},
 				data: {
 					isFinished: true,
-					finishedAt: new Date(),
+					finishedAt,
 					finishedBy: userId,
 					resultId
-				},
+				}
+			});
+
+			if (updateResult.count === 0) {
+				logger.log(`Chat já estava finalizado. Ignorando nova tentativa de finalização. Chat ID: ${id}`);
+				logger.success(`Finalização ignorada (idempotência). Chat ID: ${id}`);
+				return;
+			}
+
+			const chat = await prismaService.wppChat.findUnique({
+				where: { id },
 				include: {
 					contact: true
 				}
 			});
+
+			if (!chat) {
+				throw new Error(`Chat ${id} não encontrado após finalização`);
+			}
 
 			const event = SocketEventType.WppChatFinished;
 			await socketService.emit(event, `${instance}:chat:${chat.id}`, {
