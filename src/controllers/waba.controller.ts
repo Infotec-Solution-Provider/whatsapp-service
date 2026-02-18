@@ -1,6 +1,7 @@
 import { Request, Response, Router } from "express";
-import wabaService from "../services/waba.service";
 import { Logger } from "@in.pulse-crm/utils";
+import ProcessingLogger from "../utils/processing-logger";
+import wabaWebhookQueueService from "../services/waba-webhook-queue.service";
 
 const ENDPOINT = "/api/whatsapp/waba/:instance";
 
@@ -11,18 +12,25 @@ class WABAController {
 	}
 
 	private webhookEntry = async (req: Request, res: Response) => {
+		const instance = req.params["instance"] as string;
+		const processingLogger = new ProcessingLogger(
+			instance,
+			"waba-webhook-entry",
+			`${instance}-${Date.now()}`,
+			req.body
+		);
+
 		try {
-			const instance = req.params["instance"] as string;
-			await wabaService.handleWebhookEntry(instance, req.body);
+			const queueId = await wabaWebhookQueueService.enqueue(instance, req.body);
+			processingLogger.log("Webhook WABA enfileirado para processamento", { queueId, instance });
+			processingLogger.success({ status: "enqueued", queueId, instance });
 			res.status(200).send();
 		} catch (err: any) {
-			const statusCode = err?.statusCode || err?.status || 500;
-			Logger.error("Erro no webhook WABA entry", err as Error);
-			res.status(statusCode).send({
-				message: err?.message,
-				name: err?.name,
-				stack: err?.stack
-			});
+			processingLogger.failed(err);
+			Logger.error("Erro ao enfileirar webhook WABA", err as Error);
+			if (!res.headersSent) {
+				res.status(200).send();
+			}
 		}
 	};
 

@@ -590,6 +590,35 @@ enum GupshupWebhookQueueStatus {
   @@map("gupshup_webhook_queue_status")
 }
 
+model WABAWebhookQueue {
+  id                  String                 @id @default(uuid())
+  instance            String                 @map("instance")
+  payload             Json                   @map("payload")
+  status              WABAWebhookQueueStatus @default(PENDING)
+  retryCount          Int                    @default(0) @map("retry_count")
+  maxRetries          Int                    @default(3) @map("max_retries")
+  error               String?                @map("error") @db.Text
+  ignoredReason       String?                @map("ignored_reason") @db.Text
+  createdAt           DateTime               @default(now()) @map("created_at")
+  updatedAt           DateTime               @updatedAt @map("updated_at")
+  processingStartedAt DateTime?              @map("processing_started_at")
+  processedAt         DateTime?              @map("processed_at")
+
+  @@index([instance, status])
+  @@index([status, createdAt])
+  @@map("waba_webhook_queue")
+}
+
+enum WABAWebhookQueueStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  IGNORED
+
+  @@map("waba_webhook_queue_status")
+}
+
 model WppMessageProcessingQueue {
   id                  String                           @id @default(uuid())
   instance            String                           @map("instance")

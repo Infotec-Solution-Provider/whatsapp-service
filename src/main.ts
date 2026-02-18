@@ -31,6 +31,7 @@ import parsedMessagesController from "./controllers/parsed-messages.controller";
 import messageQueueController from "./controllers/message-queue.controller";
 import messageQueueService from "./services/message-queue.service";
 import internalMessageQueueService from "./services/internal-message-queue.service";
+import wabaWebhookQueueService from "./services/waba-webhook-queue.service";
 
 whatsappService.buildClients();
 const app = express();
@@ -92,6 +93,7 @@ const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;
 app.listen(serverPort, () => {
 	registerAllSteps();
 	gupshupWebhookQueueService.startProcessor();
+	wabaWebhookQueueService.startProcessor();
 	messageQueueService.startWorker();
 	internalMessageQueueService.startWorker();
 	Logger.info("Server listening on port " + serverPort);

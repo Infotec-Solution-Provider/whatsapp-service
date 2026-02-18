@@ -1,5 +1,4 @@
 import { WppClient } from "@prisma/client";
-import { BadRequestError } from "@rgranatodutra/http-errors";
 import WABAMessageParser from "../parsers/waba-message.parser";
 import { Message, ReceiveMessageBody, WABAMessageStatusData } from "../types/whatsapp-api.types";
 import ProcessingLogger from "../utils/processing-logger";
@@ -22,7 +21,17 @@ interface ValidateEntryResultMessage {
 	recipient: string;
 }
 
-type ValidateEntryResult = ValidateEntryResultStatus | ValidateEntryResultMessage;
+interface ValidateEntryResultIgnored {
+	type: "ignored";
+	reason: string;
+}
+
+type ValidateEntryResult = ValidateEntryResultStatus | ValidateEntryResultMessage | ValidateEntryResultIgnored;
+
+interface HandleWebhookEntryResult {
+	ignored: boolean;
+	reason?: string;
+}
 
 class WABAService {
 	private async validateEntry(
@@ -33,7 +42,7 @@ class WABAService {
 		logger.log("Validando webhook entry");
 
 		if (typeof input !== "object" || input === null) {
-			throw new BadRequestError("invalid webhook entry.");
+			return { type: "ignored", reason: "Webhook WABA inválido: payload não é objeto" };
 		}
 
 		const body = input as ReceiveMessageBody;
@@ -44,7 +53,7 @@ class WABAService {
 			| undefined;
 
 		if (!value) {
-			throw new BadRequestError("invalid webhook entry.");
+			return { type: "ignored", reason: "Webhook WABA ignorado: payload sem value" };
 		}
 
 		const recipient = value?.metadata?.display_phone_number;
@@ -61,16 +70,22 @@ class WABAService {
 			return { type: "message", data: message, appId: undefined, recipient };
 		}
 
-		throw new BadRequestError("Unexpected webhook entry");
+		return { type: "ignored", reason: "Webhook WABA ignorado: sem mensagem/status processável" };
 	}
 
-	public async handleWebhookEntry(instance: string, input: unknown) {
+	public async handleWebhookEntry(instance: string, input: unknown): Promise<HandleWebhookEntryResult> {
 		const logger = new ProcessingLogger(instance, "waba-webhook-entry", Date.now().toString(), input);
 
 		try {
 			logger.log("Iniciando processamento do webhook WABA");
 			const validated = await this.validateEntry(instance, logger, input);
 			logger.log("Webhook validado", validated);
+
+			if (validated.type === "ignored") {
+				logger.log("Webhook WABA ignorado", { reason: validated.reason });
+				logger.success("Webhook WABA finalizado como ignored");
+				return { ignored: true, reason: validated.reason };
+			}
 
 			// Encontrar client WABA pela instance
 			const client = await prismaService.wppClient.findFirstOrThrow({
@@ -102,7 +117,8 @@ class WABAService {
 							messageId: existingMessage.id,
 							wabaId: existingMessage.wabaId
 						});
-						return;
+						logger.success("Webhook WABA finalizado como ignored");
+						return { ignored: true, reason: "Webhook WABA ignorado: mensagem duplicada" };
 					}
 
 					const inserted = await messagesService.insertMessage(parsedMsg);
@@ -151,6 +167,7 @@ class WABAService {
 			}
 
 			logger.success("Webhook WABA processado com sucesso");
+			return { ignored: false };
 		} catch (err: any) {
 			logger.failed(err);
 			throw err;
