@@ -436,8 +436,8 @@ class WABAWhatsappClient implements WhatsappClient {
 		return templates.map((t: WABAMessageTemplate) => TemplateAdapter.fromWABATemplate(t));
 	}
 
-	public getGroups(): Promise<WhatsappGroup[]> {
-		throw new Error("Method not implemented.");
+	public async getGroups(): Promise<WhatsappGroup[]> {
+		return [];
 	}
 }
 

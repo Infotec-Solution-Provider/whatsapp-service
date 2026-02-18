@@ -108,7 +108,10 @@ class GupshupWhatsappClient implements WhatsappClient {
 					throw mediaError;
 				}
 
-				const fileDownloadUrl = `https://inpulse.infotecrs.inf.br/api/files/${options.file.id}/view`;
+				const fileDownloadUrl = options.fileUrl.replace(
+					"http://localhost:8003",
+					"https://inpulse.infotecrs.inf.br"
+				);
 				const fallbackText = options.text ? `${options.text}\n\n${fileDownloadUrl}` : fileDownloadUrl;
 
 				logger.log("[Gupshup] Falha no envio de mídia. Aplicando fallback para texto com link.", {
@@ -315,8 +318,8 @@ class GupshupWhatsappClient implements WhatsappClient {
 		}
 	}
 
-	public getGroups(): Promise<WhatsappGroup[]> {
-		throw new Error("Method not implemented.");
+	public async getGroups(): Promise<WhatsappGroup[]> {
+		return [];
 	}
 }
 

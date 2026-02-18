@@ -240,20 +240,20 @@ class RemoteWhatsappClient implements WhatsappClient {
 		}
 	}
 
-	public getGroups(): Promise<WhatsappGroup[]> {
-		throw new Error("Method not implemented.");
+	public async getGroups(): Promise<WhatsappGroup[]> {
+		return [];
 	}
 
-	public getTemplates(): Promise<TemplateMessage[]> {
-		throw new Error("Method not implemented.");
+	public async getTemplates(): Promise<TemplateMessage[]> {
+		return [];
 	}
 
-	public sendTemplate(props: SendTemplateOptions, chatId: number, contactId: number): Promise<CreateMessageDto> {
+	public async sendTemplate(props: SendTemplateOptions, chatId: number, contactId: number): Promise<CreateMessageDto> {
 		Logger.debug("RemoteWhatsappClient.sendTemplate not implemented", { props, chatId, contactId });
 		throw new Error("Method not implemented.");
 	}
 
-	public forwardMessage(to: string, messageId: string, isGroup: boolean): Promise<void> {
+	public async forwardMessage(to: string, messageId: string, isGroup: boolean): Promise<void> {
 		Logger.debug("RemoteWhatsappClient.forwardMessage not implemented", { to, messageId, isGroup });
 		throw new Error("Method not implemented.");
 	}
