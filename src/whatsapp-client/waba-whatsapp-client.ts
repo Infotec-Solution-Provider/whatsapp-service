@@ -58,13 +58,6 @@ class WABAWhatsappClient implements WhatsappClient {
 		try {
 			process.log("Iniciando envio de mensagem...", options);
 
-			if ("file" in options && options.file.size > 16 * 1024 * 1024) {
-				process.log("Arquivo acima de 16MB. Solicite a compressao do arquivo antes do envio.");
-				throw new Error(
-					"Arquivo acima de 16MB. Por favor, compacte o arquivo e tente novamente."
-				);
-			}
-
 			const reqUrl = `${GRAPH_API_URL}/${this.wabaPhoneId}/messages`;
 			const reqBody: any = {
 				recipient_type: "individual",
@@ -72,25 +65,43 @@ class WABAWhatsappClient implements WhatsappClient {
 				to: options.to
 			};
 
-			const msgType = this.getSendMessageType(options);
+			let msgType = this.getSendMessageType(options);
 			process.log("Tipo de mensagem determinado: " + msgType);
 
 			if (msgType !== "text" && "file" in options) {
 				process.log("Iniciando upload de mídia...", options.file);
-				const uploadedFile = await this.uploadMediaFromFileId(options);
-				process.log("Upload de mídia concluído.", uploadedFile);
-				process.log("Montando corpo da mensagem de mídia...");
-				reqBody["type"] = msgType;
+				try {
+					const uploadedFile = await this.uploadMediaFromFileId(options);
+					process.log("Upload de mídia concluído.", uploadedFile);
+					process.log("Montando corpo da mensagem de mídia...");
+					reqBody["type"] = msgType;
 
-				if (msgType === "audio") {
-					options.text = null;
+					if (msgType === "audio") {
+						options.text = null;
+					}
+
+					reqBody[msgType] = {
+						id: uploadedFile.id,
+						...(options.text ? { caption: options.text } : {}),
+						...(msgType === "document" ? { filename: options.file.name } : {})
+					};
+				} catch (uploadError) {
+					const fileDownloadUrl = `https://inpulse.infotecrs.inf.br/api/files/${options.file.id}/view`;
+					const fallbackText = options.text
+						? `${options.text}\n\nArquivo para download: ${fileDownloadUrl}`
+						: `Arquivo para download: ${fileDownloadUrl}`;
+
+					process.log("Falha no upload de mídia. Aplicando fallback de URL para download.", {
+						fileId: options.file.id,
+						fileDownloadUrl,
+						error: uploadError instanceof Error ? uploadError.message : uploadError
+					});
+
+					msgType = "text";
+					options.text = fallbackText;
+					reqBody["type"] = "text";
+					reqBody["text"] = { body: fallbackText };
 				}
-
-				reqBody[msgType] = {
-					id: uploadedFile.id,
-					...(options.text ? { caption: options.text } : {}),
-					...(msgType === "document" ? { filename: options.file.name } : {})
-				};
 			} else {
 				process.log("Montando corpo da mensagem de texto...");
 				reqBody["type"] = "text";
