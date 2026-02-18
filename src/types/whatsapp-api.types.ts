@@ -12,7 +12,8 @@ export type MessageType =
 	| "interactive"
 	| "sticker"
 	| "order"
-	| "system";
+	| "system"
+	| "unsupported";
 
 export type Message =
 	| WABATextMessageData
@@ -24,7 +25,9 @@ export type Message =
 	| WABALocationMessageData
 	| WABAReactionMessageData
 	| WABAInteractiveMessageData
-	| WABAStickerMessageData;
+	| WABAStickerMessageData
+	| WABASystemMessageData
+	| WABAUnsupportedMessageData;
 
 export type MessageStatus = "read" | "delivered" | "sent" | "failed" | "deleted";
 export type ConversationCategory = "authentication" | "marketing" | "utility" | "service";
@@ -88,6 +91,26 @@ export interface WABAMessageData {
 export interface WABATextMessageData extends WABAMessageData {
 	type: "text";
 	text: {
+		body: string;
+	};
+}
+
+export interface WABAUnsupportedMessageData extends WABAMessageData {
+	type: "unsupported";
+	errors: [
+		{
+			code: number;
+			title: string;
+			message: string;
+		}
+	]
+	unsupported: {
+		type: string;
+	}
+}
+export interface WABASystemMessageData extends WABAMessageData {
+	type: "system";
+	system: {
 		body: string;
 	};
 }

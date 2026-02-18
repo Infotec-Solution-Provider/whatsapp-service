@@ -48,8 +48,10 @@ export default class WABAMessageParser {
 				clientId
 			};
 
-			if (data.context?.id) {
-				const quotedMsg = await prismaService.wppMessage.findFirst({ where: { wabaId: data.context.id } });
+			const referenceMsgId = (data.type === "reaction" && data.reaction.message_id) || data.context?.id;
+		
+			if (referenceMsgId) {
+				const quotedMsg = await prismaService.wppMessage.findFirst({ where: { wabaId: referenceMsgId } });
 				if (quotedMsg) parsed.quotedId = quotedMsg.id;
 			}
 			if (data.context?.forwarded) parsed.isForwarded = true;
@@ -92,15 +94,30 @@ export default class WABAMessageParser {
 					break;
 				}
 				case "reaction": {
-					throw new Error("Mensagens do tipo 'reaction' não são suportadas.");
+					parsed.type = "reaction";
+					data.reaction.message_id;
 					break;
 				}
 				case "interactive": {
 					parsed.body = this.parseInteractiveBody(data);
 					break;
 				}
+				case "system": {
+					parsed.type = "thirdparty:meta";
+					parsed.body = data.system?.body || "";
+					break;
+				}
+				case "unsupported": {
+					parsed.type = "unsupported";
+					parsed.body = `O cliente enviou uma mensagem incompatível.` +
+						`\nTipo original: ${data.type} | Erro: (${data.errors[0].code}) ${data.errors[0].message}` +
+						"\nÉ provável que seja uma mensagem temporária que só é visível por celular."
+						+ "\nPor favor, peça para o cliente enviar novamente a mensagem, \ndesativando qualquer recurso de visualização unica ou mensagem temporária.";
+
+					break;
+				}
 				default:
-					throw new Error(`Tipo de mensagem não suportado: ${(data as any)?.type}`);
+					throw new Error(`Tipo de mensagem não tratado: ${(data as any)?.type}`);
 			}
 
 			if (mediaId) {

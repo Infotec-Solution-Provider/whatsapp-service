@@ -92,8 +92,22 @@ class WABAService {
 						validated.data,
 						logger
 					);
+
+					const existingMessage = parsedMsg.wabaId && await prismaService.wppMessage.findFirst({
+						where: { wabaId: parsedMsg.wabaId }
+					});
+
+					if (!!existingMessage) {
+						logger.log("Mensagem WABA já existe no banco de dados, ignorando processamento", {
+							messageId: existingMessage.id,
+							wabaId: existingMessage.wabaId
+						});
+						return;
+					}
+
 					const inserted = await messagesService.insertMessage(parsedMsg);
 					const processed = await messagesDistributionService.processMessage(instance, client.id, inserted);
+
 					if (processed.contactId) {
 						logger.log("Verificando necessidade de atualizar expiration da conversa");
 						const isUpdated = await this.checkAndUpdateContactConversationExpiration(
