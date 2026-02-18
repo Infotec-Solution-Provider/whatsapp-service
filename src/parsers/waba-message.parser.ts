@@ -95,7 +95,7 @@ export default class WABAMessageParser {
 				}
 				case "reaction": {
 					parsed.type = "reaction";
-					data.reaction.message_id;
+					parsed.body = `(Reação) ${data.reaction.emoji}`;
 					break;
 				}
 				case "interactive": {
