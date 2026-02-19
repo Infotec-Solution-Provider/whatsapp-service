@@ -252,6 +252,7 @@ class WhatsappService {
 
 				options = {
 					...options,
+					fileId: data.fileId,
 					file: fileData,
 					localFileUrl: filesService.getFileDownloadUrl(data.fileId),
 					publicFileUrl,

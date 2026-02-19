@@ -221,15 +221,13 @@ class WABAWhatsappClient implements WhatsappClient {
 
 	private getSendMessageType(options: SendMessageOptions) {
 		if ("file" in options) {
-			return this.getSendFileType(options.file.mime_type, !!options.sendAsAudio, !!options.sendAsDocument);
+			return this.getSendFileType(options.file.mime_type,);
 		}
 
 		return "text";
 	}
 
-	private getSendFileType(mimeType: string, sendAsAudio: boolean, sendAsDocument: boolean): string {
-		if (sendAsAudio) return "audio";
-		if (sendAsDocument) return "document";
+	private getSendFileType(mimeType: string,): string {
 		if (mimeType.startsWith("video/")) return "video";
 		if (mimeType.startsWith("image/")) return "image";
 		if (mimeType.startsWith("audio/")) return "audio";
