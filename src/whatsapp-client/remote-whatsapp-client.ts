@@ -1,4 +1,4 @@
-import { SocketEventType, SocketServerAdminRoom, SocketServerChatRoom } from "@in.pulse-crm/sdk";
+import { File, SocketEventType, SocketServerAdminRoom, SocketServerChatRoom } from "@in.pulse-crm/sdk";
 import { TemplateMessage } from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
 import internalMessageQueueService from "../services/internal-message-queue.service";
@@ -6,13 +6,36 @@ import messageQueueService from "../services/message-queue.service";
 import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
 import MessageDto from "../types/remote-client.types";
-import { EditMessageOptions, SendMessageOptions, SendTemplateOptions, WhatsappGroup } from "../types/whatsapp-instance.types";
+import { EditMessageOptions, Mentions, SendFileType, SendMessageOptions, SendTemplateOptions, WhatsappGroup } from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
 import socketService from "../services/socket.service";
 import { WppMessageStatus } from "@prisma/client";
 import { Logger } from "@in.pulse-crm/utils";
 import axios from "axios";
+
+interface BaseSendMessageOptions {
+	to: string;
+	quotedId?: string | null;
+	mentions?: Mentions;
+	isGroup?: boolean;
+}
+
+export interface SendFileOptions extends BaseSendMessageOptions {
+	text: string;
+	sendAsAudio?: boolean;
+	sendAsDocument?: boolean;
+	fileUrl?: string;
+	fileName?: string;
+	fileType?: SendFileType;
+	file?: File;
+}
+
+export interface SendTextOptions extends BaseSendMessageOptions {
+	text: string;
+}
+
+export type RemoteSendMessageOptions = SendTextOptions | SendFileOptions;
 
 class RemoteWhatsappClient implements WhatsappClient {
 	constructor(
@@ -174,6 +197,24 @@ class RemoteWhatsappClient implements WhatsappClient {
 		return false;
 	}
 
+	private getSendFileType(props: SendMessageOptions): SendFileType {
+		if ("file" in props && props.file) {
+			const mimeType = props.file.mime_type;
+			if (mimeType.startsWith("image/") && !props.sendAsDocument) {
+				return "image";
+			} else if (mimeType.startsWith("video/") && !props.sendAsDocument) {
+				return "video";
+			} else if (mimeType.startsWith("audio/") && !props.sendAsAudio) {
+				return "audio";
+			} else {
+				return "document";
+			}
+		}
+		// Default to document if file is present but type is undetermined
+		return "document";
+	}
+
+
 	public async sendMessage(props: SendMessageOptions, isGroup: boolean): Promise<CreateMessageDto> {
 		const id = `send-msg-${Date.now()}`;
 		const process = new ProcessingLogger(this.instance, "rc-send-message", id, props);
@@ -181,11 +222,21 @@ class RemoteWhatsappClient implements WhatsappClient {
 		try {
 			process.log("Sending message via wwebjs-api");
 
-			if ("fileUrl" in props && props.fileUrl) {
-				props.fileUrl = props.fileUrl.replace("http://localhost:8003", "https://inpulse.infotecrs.inf.br")
+			const options: RemoteSendMessageOptions = {
+				text: props.text || "",
+				to: props.to,
+				quotedId: props.quotedId || null,
+				isGroup,
+				...(props.mentions ? { mentions: props.mentions } : {}),
+				...("file" in props && props.file ? {
+					file: props.file,
+					fileName: props.file.name,
+					fileType: this.getSendFileType(props),
+					fileUrl: props.publicFileUrl,
+				} : {})
 			}
 
-			const response = await axios.post<MessageDto>(`${this.clientUrl}/api/send-message`, { ...props, isGroup: isGroup });
+			const response = await axios.post<MessageDto>(`${this.clientUrl}/api/send-message`, options);
 
 			if (!response.data) {
 				throw new Error("No response from send-message endpoint");

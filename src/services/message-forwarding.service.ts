@@ -315,7 +315,7 @@ class MessageForwardingService {
 		} as SendMessageOptions | SendFileOptions;
 
 		if (originalMessage.fileId) {
-			(options as SendFileOptions).fileUrl = filesService.getFileDownloadUrl(originalMessage.fileId);
+			(options as SendFileOptions).localFileUrl = filesService.getFileDownloadUrl(originalMessage.fileId);
 			(options as SendFileOptions).fileName = originalMessage.fileName!;
 			(options as SendFileOptions).fileType = originalMessage.fileType! as SendFileType;
 			(options as SendFileOptions).sendAsAudio = originalMessage.type === "ptt";

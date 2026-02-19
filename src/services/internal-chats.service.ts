@@ -847,7 +847,7 @@ class InternalChatsService {
 				const result = await client.sendMessage(
 					{
 						fileName: message.fileName!,
-						fileUrl,
+						localFileUrl: fileUrl,
 						to: groupId,
 						quotedId: data.quotedId || null,
 						sendAsAudio: data.sendAsAudio === "true",
@@ -1163,7 +1163,7 @@ class InternalChatsService {
 								};
 
 								if (originalMsg.fileId) {
-									(options as SendFileOptions).fileUrl = filesService.getFileDownloadUrl(
+									(options as SendFileOptions).localFileUrl = filesService.getFileDownloadUrl(
 										originalMsg.fileId
 									);
 									(options as SendFileOptions).fileName = originalMsg.fileName;
