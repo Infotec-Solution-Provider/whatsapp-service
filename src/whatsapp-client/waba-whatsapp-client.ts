@@ -243,7 +243,8 @@ class WABAWhatsappClient implements WhatsappClient {
 			const reqUrl = `${GRAPH_API_URL}/${this.wabaPhoneId}/media`;
 
 			process.log(`Buscando arquivo ID ${options.fileId}...`);
-			const fileBuffer = await filesService.fetchFile(options.fileId);
+			const fileResponse = await filesService.fetchFile(options.fileId);
+			const fileBuffer = this.normalizeFileToBuffer(fileResponse);
 			process.log(`Arquivo ID ${options.fileId} buscado com sucesso.`);
 
 			const form = new FormData();
@@ -252,7 +253,8 @@ class WABAWhatsappClient implements WhatsappClient {
 			form.append("type", options.file.mime_type);
 			form.append("file", fileBuffer, {
 				filename: options.file.name,
-				contentType: options.file.mime_type
+				contentType: options.file.mime_type,
+				knownLength: fileBuffer.length
 			});
 
 			const reqOptions = this.reqOptions;
@@ -280,6 +282,31 @@ class WABAWhatsappClient implements WhatsappClient {
 				"Erro ao enviar mídia a META Api. ID: " + processId + metaErrorDetails
 			);
 		}
+	}
+
+	private normalizeFileToBuffer(fileResponse: unknown): Buffer {
+		if (Buffer.isBuffer(fileResponse)) {
+			return fileResponse;
+		}
+
+		if (fileResponse instanceof Uint8Array) {
+			return Buffer.from(fileResponse);
+		}
+
+		if (fileResponse instanceof ArrayBuffer) {
+			return Buffer.from(new Uint8Array(fileResponse));
+		}
+
+		if (
+			fileResponse &&
+			typeof fileResponse === "object" &&
+			"data" in fileResponse &&
+			(fileResponse as { data: unknown }).data instanceof Uint8Array
+		) {
+			return Buffer.from((fileResponse as { data: Uint8Array }).data);
+		}
+
+		throw new Error("Formato de arquivo inválido para upload WABA.");
 	}
 
 	public async sendTemplate(
