@@ -1,18 +1,19 @@
-import "dotenv/config";
-import { FileDirType, SessionData } from "@in.pulse-crm/sdk";
+import { SessionData } from "@in.pulse-crm/sdk";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { InternalMessage, WppChat, WppClientType, WppMessage, WppSector } from "@prisma/client";
 import { BadRequestError, InternalServerError } from "@rgranatodutra/http-errors";
+import "dotenv/config";
+import { TemplateMessage } from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
+import { TemplateVariables } from "../types/whatsapp-api.types";
 import {
 	EditMessageOptions,
 	SendFileOptions,
-	SendFileType,
 	SendMessageOptions
 } from "../types/whatsapp-instance.types";
-import WhatsappAudioConverter from "../utils/whatsapp-audio-converter";
 import ProcessingLogger from "../utils/processing-logger";
 import GupshupWhatsappClient from "../whatsapp-client/gupshup-whatsapp-client";
+import RemoteWhatsappClient from "../whatsapp-client/remote-whatsapp-client";
 import WABAWhatsappClient from "../whatsapp-client/waba-whatsapp-client";
 import WhatsappClient from "../whatsapp-client/whatsapp-client";
 import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
@@ -22,9 +23,6 @@ import internalChatsService from "./internal-chats.service";
 import messagesDistributionService from "./messages-distribution.service";
 import messagesService from "./messages.service";
 import prismaService from "./prisma.service";
-import { TemplateMessage } from "../adapters/template.adapter";
-import { TemplateVariables } from "../types/whatsapp-api.types";
-import RemoteWhatsappClient from "../whatsapp-client/remote-whatsapp-client";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -53,7 +51,6 @@ interface SendMessageData {
 	quotedId?: number | null;
 	chatId?: number | null;
 	text?: string | null;
-	file?: Express.Multer.File;
 	fileId?: number;
 	isForwarded?: boolean;
 }
@@ -192,16 +189,14 @@ class WhatsappService {
 	}
 
 	public async sendMessage(session: SessionData, clientId: number, to: string, data: SendMessageData) {
-		const { file, ...logData } = data;
-
-		// Ensure boolean fields are properly typed (handle string values from form data)
 		if (typeof data.sendAsDocument === 'string') {
 			data.sendAsDocument = data.sendAsDocument === 'true';
 		}
 		if (typeof data.sendAsAudio === 'string') {
 			data.sendAsAudio = data.sendAsAudio === 'true';
 		}
-		const process = new ProcessingLogger(session.instance, "send-message", `${to}-${Date.now()}`, logData);
+
+		const process = new ProcessingLogger(session.instance, "send-message", `${to}-${Date.now()}`, data);
 
 		process.log("Iniciando o envio da mensagem.");
 		try {
@@ -224,12 +219,12 @@ class WhatsappService {
 				from: `me:${client._phone}`,
 				to: `${to}`,
 				type: "chat",
-				body: data.text || "",
+				body: text,
 				userId: session.userId,
 				clientId: client.id,
 			} as CreateMessageDto;
 
-			let options = { to, text: text } as SendMessageOptions;
+			let options = { to, text } as SendMessageOptions;
 
 			data.contactId && (message.contactId = +data.contactId);
 			data.chatId && (message.chatId = +data.chatId);
@@ -253,103 +248,23 @@ class WhatsappService {
 				const fileData = await filesService.fetchFileMetadata(data.fileId);
 
 				process.log(`Arquivo encontrado: ${fileData.name}`);
-				let fileType = "document";
-
-				if (fileData.mime_type.startsWith("image/")) {
-					fileType = "image";
-				}
-				if (fileData.mime_type.startsWith("video/")) {
-					fileType = "video";
-				}
-				if (data.sendAsAudio) {
-					fileType = "audio";
-				}
+				const publicFileUrl = `https://inpulse.infotecrs.inf.br/public/${session.instance}/files/${fileData.public_id}`;
 
 				options = {
 					...options,
-					fileUrl: filesService.getFileDownloadUrl(data.fileId),
+					fileId: data.fileId,
+					file: fileData,
+					localFileUrl: filesService.getFileDownloadUrl(data.fileId),
+					publicFileUrl,
 					sendAsAudio: !!data.sendAsAudio,
 					sendAsDocument: !!data.sendAsDocument,
-					fileName: fileData.name,
-					fileType,
-					file: fileData
-				} as SendFileOptions;
+				};
 
 				message.fileId = +data.fileId;
 				message.fileName = fileData.name;
 				message.fileType = fileData.mime_type;
 				message.fileSize = String(fileData.size);
 				message.type = getMessageType(fileData.mime_type, !!data.sendAsAudio, !!data.sendAsDocument);
-				process.log("Arquivo processado com sucesso.", message);
-			}
-
-			if ("file" in data && !!data.file) {
-				process.log(`Processando arquivo enviado diretamente: ${data.file.originalname}`);
-
-				if (data.sendAsAudio) {
-					const convertedAudio = await WhatsappAudioConverter.convertToCompatible(
-						data.file.buffer,
-						data.file.mimetype
-					);
-
-					process.log("Mensagem de audio, convertendo arquivo para " + convertedAudio.extension);
-
-					data.file.buffer = convertedAudio.buffer;
-					data.file.mimetype = convertedAudio.mimeType;
-					data.file.originalname = data.file.originalname.replace(
-						/\.[^/.]+$/,
-						"." + convertedAudio.extension
-					);
-					data.file.size = convertedAudio.size;
-
-					process.log("Mensagem convertida com sucesso.");
-				}
-
-				const savedFile = await filesService.uploadFile({
-					instance: session.instance,
-					fileName: data.file.originalname,
-					mimeType: data.file.mimetype,
-					buffer: data.file.buffer,
-					dirType: FileDirType.PUBLIC
-				});
-
-				process.log(`Arquivo salvo com sucesso!`, savedFile);
-
-				const fileUrl = filesService.getFileDownloadUrl(savedFile.id);
-				let fileType = "document";
-				let sendAsAudio = false;
-				let sendAsDocument = !!data.sendAsDocument;
-
-				if (data.file.mimetype.startsWith("image/")) {
-					fileType = "image";
-					sendAsDocument = false; // Imagens não devem ser enviadas como documento
-				}
-				if (data.file.mimetype.startsWith("video/")) {
-					fileType = "video";
-					sendAsDocument = false; // Vídeos não devem ser enviados como documento
-				}
-				if (data.sendAsAudio) {
-					fileType = "audio";
-
-					sendAsAudio = true;
-					sendAsDocument = false;
-				}
-
-				options = {
-					...options,
-					fileUrl,
-					fileType,
-					sendAsAudio,
-					sendAsDocument,
-					file: savedFile
-				} as SendFileOptions;
-
-				message.fileId = savedFile.id;
-				message.fileName = savedFile.name;
-				message.fileType = savedFile.mime_type;
-				message.fileSize = String(savedFile.size);
-
-				message.type = getMessageType(data.file.mimetype, !!data.sendAsAudio, !!data.sendAsDocument);
 				process.log("Arquivo processado com sucesso.", message);
 			}
 
@@ -701,11 +616,9 @@ class WhatsappService {
 								} as SendMessageOptions | SendFileOptions;
 
 								if (originalMsg.fileId) {
-									(options as SendFileOptions).fileUrl = filesService.getFileDownloadUrl(
+									(options as SendFileOptions).localFileUrl = filesService.getFileDownloadUrl(
 										originalMsg.fileId
 									);
-									(options as SendFileOptions).fileName = originalMsg.fileName!;
-									(options as SendFileOptions).fileType = originalMsg.fileType! as SendFileType;
 									(options as SendFileOptions).sendAsAudio = originalMsg.type === "ptt";
 									(options as SendFileOptions).sendAsDocument = originalMsg.type === "document";
 								}
@@ -776,23 +689,25 @@ class WhatsappService {
 			// Prepara as opções de envio (texto ou arquivo)
 			let options: SendMessageOptions | SendFileOptions = { to, text };
 			let messageType = "chat";
-			let fileData;
+
 
 			if (fileId) {
-				fileData = await filesService.fetchFileMetadata(fileId);
-				const fileUrl = filesService.getFileDownloadUrl(fileId);
-
+				const fileData = await filesService.fetchFileMetadata(fileId);
+				options = {
+					...options,
+					file: fileData,
+					fileId: fileId,
+					localFileUrl: filesService.getFileDownloadUrl(fileId),
+					publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${instance}/files/${fileId}`,
+					sendAsAudio: false,
+					sendAsDocument: ["image", "video"].every((type) => !fileData.mime_type.startsWith(type)),
+				}
+					;
 				messageType = getMessageType(fileData.mime_type, false, false);
-
-				(options as SendFileOptions).fileUrl = fileUrl;
-				(options as SendFileOptions).fileName = fileData.name;
-				(options as SendFileOptions).fileType = messageType as "image" | "video" | "audio" | "document";
 			}
 
-			// Envia a mensagem (texto ou mídia) pelo client
 			const sentMsgInfo = await client.sendMessage(options);
 
-			// Cria o objeto para salvar no histórico do banco de dados
 			const now = new Date();
 			const messageToSave: CreateMessageDto = {
 				clientId: client.id,
@@ -806,11 +721,14 @@ class WhatsappService {
 				sentAt: now,
 				contactId: contact?.id ?? null,
 				chatId: chat?.id ?? null,
-				fileId: fileId || null,
-				fileName: fileId ? (options as SendFileOptions).fileName : null,
-				fileType: fileId && fileData ? fileData.mime_type : null,
 				wwebjsId: sentMsgInfo.wwebjsId || null,
-				wabaId: sentMsgInfo.wabaId || null
+				wabaId: sentMsgInfo.wabaId || null,
+				...("file" in options ? {
+					fileId: options.file.id,
+					fileName: options.file.name,
+					fileType: options.file.mime_type,
+					fileSize: String(options.file.size)
+				} : {})
 			};
 
 			const savedMsg = await messagesService.insertMessage(messageToSave);

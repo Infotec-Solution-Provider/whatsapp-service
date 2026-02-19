@@ -1,13 +1,13 @@
 import axios from "axios";
-import CreateMessageDto from "../dtos/create-message.dto";
-import { EditMessageOptions, SendMessageOptions, SendTemplateOptions, WhatsappGroup } from "../types/whatsapp-instance.types";
-import WhatsappClient from "./whatsapp-client";
-import { GSRecoverTemplatesResponse } from "../types/gupshup-api.types";
-import ProcessingLogger from "../utils/processing-logger";
 import { randomUUID } from "crypto";
 import TemplateAdapter from "../adapters/template.adapter";
+import CreateMessageDto from "../dtos/create-message.dto";
 import filesService from "../services/files.service";
 import prismaService from "../services/prisma.service";
+import { GSRecoverTemplatesResponse } from "../types/gupshup-api.types";
+import { EditMessageOptions, SendMessageOptions, SendTemplateOptions, WhatsappGroup } from "../types/whatsapp-instance.types";
+import ProcessingLogger from "../utils/processing-logger";
+import WhatsappClient from "./whatsapp-client";
 
 const GUP_URL = "https://api.gupshup.io";
 
@@ -39,6 +39,26 @@ class GupshupWhatsappClient implements WhatsappClient {
 		throw new Error("Method not implemented.");
 	}
 
+	private getSendType(options: SendMessageOptions): "text" | "image" | "video" | "audio" | "file" {
+		if ("file" in options) {
+			if (options.sendAsDocument) {
+				return "file";
+			}
+			if (options.sendAsAudio || options.file.mime_type.startsWith("audio/")) {
+				return "audio";
+			}
+			if (options.file.mime_type.startsWith("image/")) {
+				return "image";
+			}
+			if (options.file.mime_type.startsWith("video/")) {
+				return "video";
+			}
+
+			return "file";
+		}
+		return "text";
+	}
+
 	public async sendMessage(options: SendMessageOptions): Promise<CreateMessageDto> {
 		const logger = new ProcessingLogger(this.instance, "gs-send-message", randomUUID(), options);
 
@@ -52,11 +72,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 			data.append("source", this._phone);
 			data.append("destination", options.to);
 
-			let msgType = (() => {
-				if (!("fileUrl" in options)) return "text";
-				if (!options.fileType || options.fileType === "document") return "file";
-				return options.fileType;
-			})();
+			let msgType = this.getSendType(options);
 			logger.log("[Gupshup] Tipo de mensagem determinado: " + msgType);
 
 			let msg: any = {};
@@ -66,16 +82,11 @@ class GupshupWhatsappClient implements WhatsappClient {
 				msg.context = { msgId: options.quotedId };
 			}
 
-			if ("fileUrl" in options) {
-				const urlKey = options.fileType === "image" ? "originalUrl" : "url";
-				const updatedFileUrl = options.fileUrl.replace(
-					"http://localhost:8003",
-					"https://inpulse.infotecrs.inf.br"
-				);
-				logger.log("[Gupshup] Montando payload de mídia.", updatedFileUrl);
-
+			if ("publicFileUrl" in options) {
+				const urlKey = msgType === "image" ? "originalUrl" : "url";
+				logger.log("[Gupshup] Montando payload de mídia.", options.publicFileUrl);
 				msg.type = msgType;
-				msg[urlKey] = updatedFileUrl;
+				msg[urlKey] = options.publicFileUrl.replace("https://inpulse", "https://lux");
 
 				if (options.text && !options.sendAsAudio && msgType !== "file") {
 					msg["caption"] = options.text;
@@ -104,17 +115,15 @@ class GupshupWhatsappClient implements WhatsappClient {
 					headers: { "Content-Type": "application/x-www-form-urlencoded" }
 				});
 			} catch (mediaError: any) {
-				if (!("fileUrl" in options)) {
+				if (!("publicFileUrl" in options)) {
 					throw mediaError;
 				}
 
-				const fileMetadata = await filesService.fetchFileMetadata(options.fileId);
-				const fileDownloadUrl = `https://inpulse.infotecrs.inf.br/public/files/${fileMetadata.public_id}`;
-				const fallbackText = options.text ? `${options.text}\n\n${fileDownloadUrl}` : fileDownloadUrl;
+				const fallbackText = options.text ? `${options.text}\n\n${options.publicFileUrl}` : options.publicFileUrl;
 
 				logger.log("[Gupshup] Falha no envio de mídia. Aplicando fallback para texto com link.", {
 					fileId: options.file.id,
-					fileDownloadUrl,
+					fileDownloadUrl: options.publicFileUrl,
 					error: mediaError?.response?.data || mediaError?.message || String(mediaError)
 				});
 
@@ -277,11 +286,12 @@ class GupshupWhatsappClient implements WhatsappClient {
 				sendOptions = {
 					to,
 					text: originalMessage.body ?? null,
-					fileName: originalMessage.fileName || fileMetadata.name,
-					fileType: this.mapFileTypeForGupshup(originalMessage.type),
-					sendAsAudio: originalMessage.type === "ptt",
+					sendAsAudio: originalMessage.type === "ptt" || originalMessage.type === "audio",
 					sendAsDocument: originalMessage.type === "document",
-					file: fileMetadata
+					file: fileMetadata,
+					fileId: originalMessage.fileId,
+					localFileUrl: filesService.getFileDownloadUrl(originalMessage.fileId),
+					publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${this.instance}/files/${fileMetadata.public_id}`,
 				};
 			} else {
 				// Mensagem de texto
@@ -299,20 +309,6 @@ class GupshupWhatsappClient implements WhatsappClient {
 			logger.log("[Gupshup] Erro no forward simulado", error);
 			logger.failed(error);
 			throw error;
-		}
-	}
-
-	private mapFileTypeForGupshup(messageType: string): "image" | "video" | "audio" | "document" {
-		switch (messageType) {
-			case "image":
-				return "image";
-			case "video":
-				return "video";
-			case "audio":
-			case "ptt":
-				return "audio";
-			default:
-				return "document";
 		}
 	}
 

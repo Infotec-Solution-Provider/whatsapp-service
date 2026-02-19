@@ -403,17 +403,23 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		const chatId = options.to;
 
 		// Payload para persistir no banco
-		const payload = {
+		const basePayload = {
 			to: options.to,
-			text: options.text,
-			fileUrl: "fileUrl" in options ? options.fileUrl : undefined,
-			fileName: "fileName" in options ? options.fileName : undefined,
-			sendAsAudio: "sendAsAudio" in options ? options.sendAsAudio : undefined,
-			sendAsDocument: "sendAsDocument" in options ? options.sendAsDocument : undefined,
-			quotedId: options.quotedId,
-			mentions: options.mentions,
+			text: options.text || "",
+			...(options.quotedId !== undefined ? { quotedId: options.quotedId } : {}),
+			...(options.mentions !== undefined ? { mentions: options.mentions } : {}),
 			isGroup
 		};
+
+		const payload: SendMessageOptions & { isGroup: boolean } = "file" in options
+			? {
+				...basePayload,
+				file: options.file,
+				fileId: options.fileId,
+				publicFileUrl: options.publicFileUrl,
+				localFileUrl: options.localFileUrl,
+			}
+			: basePayload;
 
 		// Enfileira a mensagem para envio sequencial com persistência
 		return this.messageQueue.enqueue(this.instance, this.id, chatId, id, payload, isGroup, async () => {
@@ -454,8 +460,8 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 
 		let content: string | WAWebJS.MessageMedia;
 
-		if ("fileUrl" in options) {
-			process.log("Preparando mídia via fileUrl:", options.fileUrl);
+		if ("publicFileUrl" in options) {
+			process.log("Preparando mídia via publicFileUrl:", options.publicFileUrl);
 
 			if (options.sendAsAudio) {
 				params.sendAudioAsVoice = true;
@@ -472,9 +478,9 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			}
 
 			try {
-				content = await WAWebJS.MessageMedia.fromUrl(options.fileUrl, {
+				content = await WAWebJS.MessageMedia.fromUrl(options.publicFileUrl, {
 					unsafeMime: true,
-					filename: options.fileName
+					filename: options.file.name
 				});
 			} catch (err) {
 				process.log("Erro ao carregar mídia:", err);

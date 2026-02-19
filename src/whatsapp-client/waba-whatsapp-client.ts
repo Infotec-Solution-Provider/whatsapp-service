@@ -68,8 +68,8 @@ class WABAWhatsappClient implements WhatsappClient {
 			let msgType = this.getSendMessageType(options);
 			process.log("Tipo de mensagem determinado: " + msgType);
 
-			if (msgType !== "text" && "file" in options) {
-				process.log("Iniciando upload de mídia...", options.file);
+			if (msgType !== "text" && "fileId" in options) {
+				process.log("Iniciando upload de mídia...", options.fileId);
 				try {
 					const uploadedFile = await this.uploadMediaFromFileId(options);
 					process.log("Upload de mídia concluído.", uploadedFile);
@@ -86,15 +86,13 @@ class WABAWhatsappClient implements WhatsappClient {
 						...(msgType === "document" ? { filename: options.file.name } : {})
 					};
 				} catch (uploadError) {
-					const fileMetadata = await filesService.fetchFileMetadata(options.fileId);
-					const fileDownloadUrl = `https://inpulse.infotecrs.inf.br/public/files/${fileMetadata.public_id}`;
 					const fallbackText = options.text
-						? `${options.text}\n\n${fileDownloadUrl}`
-						: `${fileDownloadUrl}`;
+						? `${options.text}\n\n${options.publicFileUrl}`
+						: `${options.publicFileUrl}`;
 
 					process.log("Falha no upload de mídia. Aplicando fallback de URL para download.", {
 						fileId: options.fileId,
-						fileDownloadUrl,
+						publicFileUrl: options.publicFileUrl,
 						error: uploadError instanceof Error ? uploadError.message : uploadError
 					});
 
@@ -178,40 +176,30 @@ class WABAWhatsappClient implements WhatsappClient {
 			let sendOptions: SendMessageOptions;
 
 			if (originalMessage.fileId) {
-				// Mensagem com arquivo - reutiliza o arquivo existente
 				process.log("Preparando forward de mídia - buscando metadados do arquivo");
 
 				const fileMetadata = await filesService.fetchFileMetadata(originalMessage.fileId);
 
 				sendOptions = {
 					to,
-					text: originalMessage.body ?? null,
+					text: originalMessage.body,
 					fileId: originalMessage.fileId,
-					fileUrl: filesService.getFileDownloadUrl(originalMessage.fileId),
-					fileName: originalMessage.fileName || fileMetadata.name,
-					fileType: this.mapFileTypeForWABA(originalMessage.type),
-					sendAsAudio: originalMessage.type === "ptt" || originalMessage.type === "audio",
+					localFileUrl: filesService.getFileDownloadUrl(originalMessage.fileId),
+					publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${this.instance}/files/${fileMetadata.public_id}`,
+					sendAsAudio: originalMessage.type === "ptt",
 					sendAsDocument: originalMessage.type === "document",
 					file: fileMetadata
-				};
+				} satisfies SendFileOptions;
 
-				process.log("Opções de envio de mídia preparadas", {
-					fileId: sendOptions.fileId,
-					fileName: sendOptions.fileName,
-					fileType: sendOptions.fileType,
-					sendAsAudio: sendOptions.sendAsAudio,
-					sendAsDocument: sendOptions.sendAsDocument
-				});
+				process.log("Opções de envio de mídia preparadas", sendOptions);
 			} else {
-				// Mensagem de texto
-				process.log("Preparando forward de texto");
 				sendOptions = {
 					to,
 					text: originalMessage.body || ""
 				};
+				process.log("Preparando forward de texto", sendOptions);
 			}
 
-			// Envia a mensagem
 			process.log("Enviando mensagem forward...");
 			await this.sendMessage(sendOptions);
 			process.log("Forward simulado concluído com sucesso");
@@ -220,20 +208,6 @@ class WABAWhatsappClient implements WhatsappClient {
 			process.log("Erro no forward simulado", error);
 			process.failed(error);
 			throw error;
-		}
-	}
-
-	private mapFileTypeForWABA(messageType: string): "image" | "video" | "audio" | "document" {
-		switch (messageType) {
-			case "image":
-				return "image";
-			case "video":
-				return "video";
-			case "audio":
-			case "ptt":
-				return "audio";
-			default:
-				return "document";
 		}
 	}
 
@@ -247,15 +221,13 @@ class WABAWhatsappClient implements WhatsappClient {
 
 	private getSendMessageType(options: SendMessageOptions) {
 		if ("file" in options) {
-			return this.getSendFileType(options.file.mime_type, !!options.sendAsAudio, !!options.sendAsDocument);
+			return this.getSendFileType(options.file.mime_type,);
 		}
 
 		return "text";
 	}
 
-	private getSendFileType(mimeType: string, sendAsAudio: boolean, sendAsDocument: boolean): string {
-		if (sendAsAudio) return "audio";
-		if (sendAsDocument) return "document";
+	private getSendFileType(mimeType: string,): string {
 		if (mimeType.startsWith("video/")) return "video";
 		if (mimeType.startsWith("image/")) return "image";
 		if (mimeType.startsWith("audio/")) return "audio";
@@ -270,17 +242,33 @@ class WABAWhatsappClient implements WhatsappClient {
 			process.log("Iniciando processo de upload de mídia...");
 			const reqUrl = `${GRAPH_API_URL}/${this.wabaPhoneId}/media`;
 
-			process.log(`Buscando arquivo ID ${options.file.id}...`);
-			const fileBuffer = await filesService.fetchFile(options.file.id);
-			process.log(`Arquivo ID ${options.file.id} buscado com sucesso.`);
+			process.log(`Buscando arquivo ID ${options.fileId}...`);
+			let fileBuffer: Buffer;
+
+			try {
+				const localFileResponse = await axios.get(options.localFileUrl, { responseType: "arraybuffer" });
+				fileBuffer = Buffer.from(localFileResponse.data);
+				process.log("Arquivo baixado via localFileUrl com arraybuffer.", {
+					url: options.localFileUrl,
+					size: fileBuffer.length
+				});
+			} catch (localDownloadError) {
+				process.log("Falha no download via localFileUrl, usando fallback do SDK.", {
+					error: localDownloadError instanceof Error ? localDownloadError.message : localDownloadError
+				});
+				const fileResponse = await filesService.fetchFile(options.fileId);
+				fileBuffer = this.normalizeFileToBuffer(fileResponse);
+			}
+			process.log(`Arquivo ID ${options.fileId} buscado com sucesso.`);
 
 			const form = new FormData();
 
 			form.append("messaging_product", "whatsapp");
-			form.append("type", options.file.mime_type || "application/octet-stream");
+			form.append("type", options.file.mime_type);
 			form.append("file", fileBuffer, {
 				filename: options.file.name,
-				contentType: options.file.mime_type
+				contentType: options.file.mime_type,
+				knownLength: fileBuffer.length
 			});
 
 			const reqOptions = this.reqOptions;
@@ -308,6 +296,31 @@ class WABAWhatsappClient implements WhatsappClient {
 				"Erro ao enviar mídia a META Api. ID: " + processId + metaErrorDetails
 			);
 		}
+	}
+
+	private normalizeFileToBuffer(fileResponse: unknown): Buffer {
+		if (Buffer.isBuffer(fileResponse)) {
+			return fileResponse;
+		}
+
+		if (fileResponse instanceof Uint8Array) {
+			return Buffer.from(fileResponse);
+		}
+
+		if (fileResponse instanceof ArrayBuffer) {
+			return Buffer.from(new Uint8Array(fileResponse));
+		}
+
+		if (
+			fileResponse &&
+			typeof fileResponse === "object" &&
+			"data" in fileResponse &&
+			(fileResponse as { data: unknown }).data instanceof Uint8Array
+		) {
+			return Buffer.from((fileResponse as { data: Uint8Array }).data);
+		}
+
+		throw new Error("Formato de arquivo inválido para upload WABA.");
 	}
 
 	public async sendTemplate(
