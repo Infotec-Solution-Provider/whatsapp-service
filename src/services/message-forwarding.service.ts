@@ -3,7 +3,7 @@ import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { InternalMessage, WppMessage } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import CreateMessageDto from "../dtos/create-message.dto";
-import { SendFileOptions, SendFileType, SendMessageOptions } from "../types/whatsapp-instance.types";
+import { SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
 import GupshupWhatsappClient from "../whatsapp-client/gupshup-whatsapp-client";
 import WABAWhatsappClient from "../whatsapp-client/waba-whatsapp-client";
@@ -93,22 +93,22 @@ class MessageForwardingService {
 			await Promise.allSettled([
 				whatsappTargets.length > 0
 					? this.forwardToWhatsapp({
-							session,
-							originalMessages,
-							sourceType,
-							whatsappTargets,
-							client: client!,
-							logger
-						})
+						session,
+						originalMessages,
+						sourceType,
+						whatsappTargets,
+						client: client!,
+						logger
+					})
 					: Promise.resolve(),
 				internalTargets.length > 0
 					? this.forwardToInternal({
-							session,
-							originalMessages,
-							sourceType,
-							internalTargets,
-							logger
-						})
+						session,
+						originalMessages,
+						sourceType,
+						internalTargets,
+						logger
+					})
 					: Promise.resolve()
 			]);
 
@@ -219,11 +219,11 @@ class MessageForwardingService {
 
 		const chat = contact
 			? await prismaService.wppChat.findFirst({
-					where: {
-						instance,
-						contactId: contact.id
-					}
-				})
+				where: {
+					instance,
+					contactId: contact.id
+				}
+			})
 			: null;
 
 		return { contact, chat };
@@ -309,17 +309,20 @@ class MessageForwardingService {
 		target: WhatsappForwardTarget,
 		client: WhatsappClient
 	): Promise<void> {
-		const options = {
+		let options = {
 			to: target.id,
 			text: originalMessage.body || undefined
 		} as SendMessageOptions | SendFileOptions;
 
 		if (originalMessage.fileId) {
-			(options as SendFileOptions).localFileUrl = filesService.getFileDownloadUrl(originalMessage.fileId);
-			(options as SendFileOptions).fileName = originalMessage.fileName!;
-			(options as SendFileOptions).fileType = originalMessage.fileType! as SendFileType;
-			(options as SendFileOptions).sendAsAudio = originalMessage.type === "ptt";
-			(options as SendFileOptions).sendAsDocument = originalMessage.type === "document";
+			const fileData = await filesService.fetchFileMetadata(originalMessage.fileId);
+			options = {
+				...options,
+				file: fileData,
+				fileId: originalMessage.fileId,
+				localFileUrl: filesService.getFileDownloadUrl(originalMessage.fileId),
+				publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${client.instance}/files/${fileData.public_id}`,
+			}
 		}
 
 		await client.sendMessage(options);

@@ -12,16 +12,16 @@ import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { InternalChat, Prisma } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import CreateMessageDto from "../dtos/create-message.dto";
-import { Mention, SendFileOptions, SendMessageOptions } from "../types/whatsapp-instance.types";
+import { Mention, SendMessageOptions } from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappAudioConverter from "../utils/whatsapp-audio-converter";
 import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 import filesService from "./files.service";
 import instancesService from "./instances.service";
+import internalMessageQueueService from "./internal-message-queue.service";
 import prismaService from "./prisma.service";
 import socketService from "./socket.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
-import internalMessageQueueService from "./internal-message-queue.service";
 
 interface ChatsFilters {
 	userId?: string;
@@ -840,14 +840,17 @@ class InternalChatsService {
 
 			if (groupId && client && message.fileId && message.fileName) {
 				process.log(`Enviando mensagem com arquivo. Arquivo ID: ${message.fileId}, Nome: ${message.fileName}`);
+				const fileData = await filesService.fetchFileMetadata(message.fileId);
 				const fileUrl = filesService.getFileDownloadUrl(message.fileId);
 				process.log(`URL do arquivo gerada: ${fileUrl}`);
 
 				process.log(`Enviando mensagem com arquivo para grupo ${groupId}`);
 				const result = await client.sendMessage(
 					{
-						fileName: message.fileName!,
+						file: fileData,
+						fileId: message.fileId,
 						localFileUrl: fileUrl,
+						publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${session.instance}/files/${fileData.public_id}`,
 						to: groupId,
 						quotedId: data.quotedId || null,
 						sendAsAudio: data.sendAsAudio === "true",
@@ -1157,19 +1160,23 @@ class InternalChatsService {
 							}
 
 							if (sourceType === "internal") {
-								const options: SendMessageOptions = {
+								let options: SendMessageOptions = {
 									to: internalChat.wppGroupId,
 									text: `_→ Encaminhada_\n${messageBody}`
 								};
 
 								if (originalMsg.fileId) {
-									(options as SendFileOptions).localFileUrl = filesService.getFileDownloadUrl(
-										originalMsg.fileId
-									);
-									(options as SendFileOptions).fileName = originalMsg.fileName;
-									(options as SendFileOptions).fileType = originalMsg.fileType;
-									(options as SendFileOptions).sendAsAudio = originalMsg.type === "ptt";
-									(options as SendFileOptions).sendAsDocument = originalMsg.type === "document";
+									const fileData = await filesService.fetchFileMetadata(originalMsg.fileId);
+
+									options = {
+										...options,
+										file: fileData,
+										fileId: originalMsg.fileId,
+										localFileUrl: filesService.getFileDownloadUrl(originalMsg.fileId),
+										publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${session.instance}/files/${fileData.public_id}`,
+										sendAsAudio: false,
+										sendAsDocument: false
+									}
 								}
 
 								await client.sendMessage(options, true);
