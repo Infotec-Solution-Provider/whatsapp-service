@@ -86,7 +86,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 				const urlKey = msgType === "image" ? "originalUrl" : "url";
 				logger.log("[Gupshup] Montando payload de mídia.", options.publicFileUrl);
 				msg.type = msgType;
-				msg[urlKey] = options.publicFileUrl;
+				msg[urlKey] = options.publicFileUrl.replace("https://inpulse", "https://lux");
 
 				if (options.text && !options.sendAsAudio && msgType !== "file") {
 					msg["caption"] = options.text;
