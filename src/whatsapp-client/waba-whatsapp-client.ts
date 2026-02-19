@@ -243,8 +243,22 @@ class WABAWhatsappClient implements WhatsappClient {
 			const reqUrl = `${GRAPH_API_URL}/${this.wabaPhoneId}/media`;
 
 			process.log(`Buscando arquivo ID ${options.fileId}...`);
-			const fileResponse = await filesService.fetchFile(options.fileId);
-			const fileBuffer = this.normalizeFileToBuffer(fileResponse);
+			let fileBuffer: Buffer;
+
+			try {
+				const localFileResponse = await axios.get(options.localFileUrl, { responseType: "arraybuffer" });
+				fileBuffer = Buffer.from(localFileResponse.data);
+				process.log("Arquivo baixado via localFileUrl com arraybuffer.", {
+					url: options.localFileUrl,
+					size: fileBuffer.length
+				});
+			} catch (localDownloadError) {
+				process.log("Falha no download via localFileUrl, usando fallback do SDK.", {
+					error: localDownloadError instanceof Error ? localDownloadError.message : localDownloadError
+				});
+				const fileResponse = await filesService.fetchFile(options.fileId);
+				fileBuffer = this.normalizeFileToBuffer(fileResponse);
+			}
 			process.log(`Arquivo ID ${options.fileId} buscado com sucesso.`);
 
 			const form = new FormData();
