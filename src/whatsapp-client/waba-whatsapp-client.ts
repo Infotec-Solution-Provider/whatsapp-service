@@ -1,6 +1,5 @@
 import { Logger } from "@in.pulse-crm/utils";
 import axios, { AxiosError } from "axios";
-import FormData from "form-data";
 import TemplateAdapter from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
 import filesService from "../services/files.service";
@@ -88,35 +87,12 @@ class WABAWhatsappClient implements WhatsappClient {
 					reqBody["type"] = "text";
 					reqBody["text"] = { body: directLinkText };
 				} else {
-					process.log("Iniciando upload de mídia (máximo 2 tentativas)...", {
+					process.log("Iniciando upload de mídia...", {
 						fileId: options.fileId,
 						fileSize
 					});
 
-					let uploadedFile: { id: string } | null = null;
-					let lastUploadError: unknown = null;
-
-					for (let attempt = 1; attempt <= 2; attempt++) {
-						try {
-							process.log(`Tentativa de upload ${attempt}/2...`);
-							uploadedFile = await this.uploadMediaFromFileId(options);
-							process.log("Upload de mídia concluído.", uploadedFile);
-							break;
-						} catch (uploadError) {
-							lastUploadError = uploadError;
-							process.log(`Falha na tentativa ${attempt}/2 de upload de mídia.`, {
-								fileId: options.fileId,
-								error: uploadError instanceof Error ? uploadError.message : uploadError
-							});
-						}
-					}
-
-					if (!uploadedFile) {
-						throw new Error(
-							`Falha ao enviar mídia para WABA após 2 tentativas: ${lastUploadError instanceof Error ? lastUploadError.message : String(lastUploadError)
-							}`
-						);
-					}
+					const mediaId = await filesService.getWabaMedia(options.fileId);
 
 					process.log("Montando corpo da mensagem de mídia...");
 					reqBody["type"] = msgType;
@@ -126,7 +102,7 @@ class WABAWhatsappClient implements WhatsappClient {
 					}
 
 					reqBody[msgType] = {
-						id: uploadedFile.id,
+						id: mediaId,
 						...(options.text ? { caption: options.text } : {}),
 						...(msgType === "document" ? { filename: options.file.name } : {})
 					};
@@ -263,96 +239,6 @@ class WABAWhatsappClient implements WhatsappClient {
 		if (mimeType.startsWith("audio/")) return "audio";
 
 		return "document";
-	}
-
-	private async uploadMediaFromFileId(options: SendFileOptions) {
-		const processId = new Date().toISOString();
-		const process = new ProcessingLogger(this.instance, "waba-upload-media", processId, options);
-		try {
-			process.log("Iniciando processo de upload de mídia...");
-			const reqUrl = `${GRAPH_API_URL}/${this.wabaPhoneId}/media`;
-
-			process.log(`Buscando arquivo ID ${options.fileId}...`);
-			let fileBuffer: Buffer;
-
-			try {
-				const localFileResponse = await axios.get(options.localFileUrl, { responseType: "arraybuffer" });
-				fileBuffer = Buffer.from(localFileResponse.data);
-				process.log("Arquivo baixado via localFileUrl com arraybuffer.", {
-					url: options.localFileUrl,
-					size: fileBuffer.length
-				});
-			} catch (localDownloadError) {
-				process.log("Falha no download via localFileUrl, usando fallback do SDK.", {
-					error: localDownloadError instanceof Error ? localDownloadError.message : localDownloadError
-				});
-				const fileResponse = await filesService.fetchFile(options.fileId);
-				fileBuffer = this.normalizeFileToBuffer(fileResponse);
-			}
-			process.log(`Arquivo ID ${options.fileId} buscado com sucesso.`);
-
-			const form = new FormData();
-
-			form.append("messaging_product", "whatsapp");
-			form.append("type", options.file.mime_type);
-			form.append("file", fileBuffer, {
-				filename: options.file.name,
-				contentType: options.file.mime_type,
-				knownLength: fileBuffer.length
-			});
-
-			const reqOptions = this.reqOptions;
-			reqOptions.headers = { ...reqOptions.headers, ...form.getHeaders() };
-
-			process.log("Enviando mídia a Graph API...", { url: reqUrl, options: reqOptions });
-			const response = await axios.post(reqUrl, form, reqOptions);
-			const output = { id: response.data.id };
-			process.log("Upload de mídia concluído com sucesso.", output);
-			return output;
-		} catch (error) {
-			process.log("Falha ao enviar mídia a META Api...");
-			process.failed(error);
-			let metaErrorDetails = "";
-			if (error instanceof AxiosError) {
-				const responseData = error.response?.data;
-				const metaError = responseData?.error;
-				if (metaError) {
-					metaErrorDetails = metaError.message ? ` Detalhes: ${metaError.message}` : "";
-				} else {
-					metaErrorDetails = responseData ? ` Detalhes: ${JSON.stringify(responseData)}` : "";
-				}
-			}
-
-			Logger.debug("Erro ao enviar mídia a META Api:", error);
-			throw new Error(
-				"Erro ao enviar mídia a META Api. ID: " + processId + metaErrorDetails
-			);
-		}
-	}
-
-	private normalizeFileToBuffer(fileResponse: unknown): Buffer {
-		if (Buffer.isBuffer(fileResponse)) {
-			return fileResponse;
-		}
-
-		if (fileResponse instanceof Uint8Array) {
-			return Buffer.from(fileResponse);
-		}
-
-		if (fileResponse instanceof ArrayBuffer) {
-			return Buffer.from(new Uint8Array(fileResponse));
-		}
-
-		if (
-			fileResponse &&
-			typeof fileResponse === "object" &&
-			"data" in fileResponse &&
-			(fileResponse as { data: unknown }).data instanceof Uint8Array
-		) {
-			return Buffer.from((fileResponse as { data: Uint8Array }).data);
-		}
-
-		throw new Error("Formato de arquivo inválido para upload WABA.");
 	}
 
 	private parseFileSizeBytes(size: unknown): number | null {
