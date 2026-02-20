@@ -23,6 +23,7 @@ interface GetTemplateVariablesProps {
 }
 
 const GRAPH_API_URL = "https://graph.facebook.com/v16.0";
+const WABA_MAX_MEDIA_UPLOAD_BYTES = 16 * 1024 * 1024;
 
 class WABAWhatsappClient implements WhatsappClient {
 	constructor(
@@ -69,10 +70,55 @@ class WABAWhatsappClient implements WhatsappClient {
 			process.log("Tipo de mensagem determinado: " + msgType);
 
 			if (msgType !== "text" && "fileId" in options) {
-				process.log("Iniciando upload de mídia...", options.fileId);
-				try {
-					const uploadedFile = await this.uploadMediaFromFileId(options);
-					process.log("Upload de mídia concluído.", uploadedFile);
+				const fileSize = this.parseFileSizeBytes(options.file.size);
+
+				if (fileSize !== null && fileSize > WABA_MAX_MEDIA_UPLOAD_BYTES) {
+					const directLinkText = options.text
+						? `${options.text}\n\n${options.publicFileUrl}`
+						: `${options.publicFileUrl}`;
+
+					process.log("Arquivo acima de 16MB. Enviando apenas link direto.", {
+						fileId: options.fileId,
+						fileSize,
+						publicFileUrl: options.publicFileUrl
+					});
+
+					msgType = "text";
+					options.text = directLinkText;
+					reqBody["type"] = "text";
+					reqBody["text"] = { body: directLinkText };
+				} else {
+					process.log("Iniciando upload de mídia (máximo 2 tentativas)...", {
+						fileId: options.fileId,
+						fileSize
+					});
+
+					let uploadedFile: { id: string } | null = null;
+					let lastUploadError: unknown = null;
+
+					for (let attempt = 1; attempt <= 2; attempt++) {
+						try {
+							process.log(`Tentativa de upload ${attempt}/2...`);
+							uploadedFile = await this.uploadMediaFromFileId(options);
+							process.log("Upload de mídia concluído.", uploadedFile);
+							break;
+						} catch (uploadError) {
+							lastUploadError = uploadError;
+							process.log(`Falha na tentativa ${attempt}/2 de upload de mídia.`, {
+								fileId: options.fileId,
+								error: uploadError instanceof Error ? uploadError.message : uploadError
+							});
+						}
+					}
+
+					if (!uploadedFile) {
+						throw new Error(
+							`Falha ao enviar mídia para WABA após 2 tentativas: ${
+								lastUploadError instanceof Error ? lastUploadError.message : String(lastUploadError)
+							}`
+						);
+					}
+
 					process.log("Montando corpo da mensagem de mídia...");
 					reqBody["type"] = msgType;
 
@@ -85,21 +131,6 @@ class WABAWhatsappClient implements WhatsappClient {
 						...(options.text ? { caption: options.text } : {}),
 						...(msgType === "document" ? { filename: options.file.name } : {})
 					};
-				} catch (uploadError) {
-					const fallbackText = options.text
-						? `${options.text}\n\n${options.publicFileUrl}`
-						: `${options.publicFileUrl}`;
-
-					process.log("Falha no upload de mídia. Aplicando fallback de URL para download.", {
-						fileId: options.fileId,
-						publicFileUrl: options.publicFileUrl,
-						error: uploadError instanceof Error ? uploadError.message : uploadError
-					});
-
-					msgType = "text";
-					options.text = fallbackText;
-					reqBody["type"] = "text";
-					reqBody["text"] = { body: fallbackText };
 				}
 			} else {
 				process.log("Montando corpo da mensagem de texto...");
@@ -321,6 +352,21 @@ class WABAWhatsappClient implements WhatsappClient {
 		}
 
 		throw new Error("Formato de arquivo inválido para upload WABA.");
+	}
+
+	private parseFileSizeBytes(size: unknown): number | null {
+		if (typeof size === "number" && Number.isFinite(size)) {
+			return size;
+		}
+
+		if (typeof size === "string") {
+			const parsed = Number(size);
+			if (Number.isFinite(parsed)) {
+				return parsed;
+			}
+		}
+
+		return null;
 	}
 
 	public async sendTemplate(
