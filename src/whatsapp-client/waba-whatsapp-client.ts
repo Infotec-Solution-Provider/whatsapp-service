@@ -113,8 +113,7 @@ class WABAWhatsappClient implements WhatsappClient {
 
 					if (!uploadedFile) {
 						throw new Error(
-							`Falha ao enviar mídia para WABA após 2 tentativas: ${
-								lastUploadError instanceof Error ? lastUploadError.message : String(lastUploadError)
+							`Falha ao enviar mídia para WABA após 2 tentativas: ${lastUploadError instanceof Error ? lastUploadError.message : String(lastUploadError)
 							}`
 						);
 					}
@@ -323,6 +322,8 @@ class WABAWhatsappClient implements WhatsappClient {
 					metaErrorDetails = responseData ? ` Detalhes: ${JSON.stringify(responseData)}` : "";
 				}
 			}
+
+			Logger.debug("Erro ao enviar mídia a META Api:", error);
 			throw new Error(
 				"Erro ao enviar mídia a META Api. ID: " + processId + metaErrorDetails
 			);
