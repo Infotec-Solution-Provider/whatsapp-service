@@ -532,12 +532,14 @@ class ChatsService {
 				logger.log(`Chat sem contato ou cliente vinculado. Pulando fidelização`);
 			}
 
-			if (result && result.WHATS_ACAO === "trigger-survey") {
+			if (chat.instance === "exatron" && result && result.WHATS_ACAO === "trigger-survey") {
 				logger.log(`Iniciando bot de satisfação. WHATS_ACAO: ${result?.WHATS_ACAO}`);
 				await exatronSatisfactionBot.startBot(chat, chat.contact!, chat.contact!.phone);
 				logger.log(`Bot de satisfação iniciado com sucesso`);
 			} else {
-				logger.log(`Bot de satisfação não será acionado. WHATS_ACAO: ${result?.WHATS_ACAO}`);
+				logger.log(
+					`Bot de satisfação não será acionado. Instance: ${chat.instance}, WHATS_ACAO: ${result?.WHATS_ACAO}`
+				);
 			}
 
 			logger.success(`Chat finalizado com sucesso. Chat ID: ${chat.id}`);
@@ -1023,8 +1025,8 @@ class ChatsService {
 
 			const query = `
 				INSERT INTO wpp_chats (
-					id, original_id, instance, type, avatar_url, user_id, contact_id, 
-					sector_id, started_at, finished_at, finished_by, 
+					id, original_id, instance, type, avatar_url, user_id, contact_id,
+					sector_id, started_at, finished_at, finished_by,
 					result_id, is_finished, is_schedule
 				)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

@@ -15,7 +15,7 @@ type RunningSession = {
 	chatId: number;
 	sectorId?: number; // optional sector ID for fetching client
 	userId: number | null;
-	step: number; // 0 -> espera nota inicial; 1 -> respondendo perguntas; 2 -> finalização
+	step: number; // 0 -> legado (nota inicial); 1 -> respondendo perguntas; 2 -> finalização
 	questionIndex: number;
 	lastActivity: number; // timestamp (ms) da última interação
 	timeoutms?: number; // opcionalmente pode ter timeout customizado
@@ -23,7 +23,7 @@ type RunningSession = {
 
 const QUESTIONS: readonly string[] = [
 	"Os produtos da Exatron atendem às suas expectativas em termos de qualidade, inovação e clareza nas informações de instalação e uso?\n- Avalie com um número de 1 a 10.",
-	"Caso tenha utilizado nossa Assistência Técnica, como avalia a experiência em relação ao atendimento, esclarecimento de dúvidas e tempo de resposta?\n- Avalie com um número de 1 a 10.",
+	"Caso tenha utilizado nossa Assistência Técnica, como avalia a experiência em relação ao atendimento, esclarecimento de dúvidas e tempo de resposta?\n- Avalie com um número de 1 a 10.\n- Se nunca utilizou, responda 99.",
 	"O atendimento da nossa equipe (funcionários e representantes) atendeu suas necessidades de forma satisfatória?\n- Avalie com um número de 1 a 10.",
 	"De forma geral, quão satisfeito está com a Exatron?\n- Avalie com um número de 1 a 10."
 ];
@@ -31,6 +31,8 @@ const QUESTIONS: readonly string[] = [
 const INITIAL_QUESTION =
 	"Como foi sua experiência? Por favor, avalie nosso atendimento de 1 a 10.\n\nPara avaliar, basta responder com a sua nota.";
 const INVALID_RATING_MSG = "Resposta inválida, por favor digite uma opção válida (um número de 1 a 10).";
+const INVALID_RATING_ASSISTANCE_MSG =
+	"Resposta inválida. Para esta pergunta, responda com um número de 1 a 10 ou 99 caso nunca tenha utilizado a Assistência Técnica.";
 const THANKS_MSG = "Obrigado pela sua avaliação! Se precisar de algo mais, estou à disposição.";
 const FINISH_MSG = "Atendimento finalizado, pesquisa respondida.";
 const TIMEOUT_MSG = "Atendimento finalizado por inatividade na pesquisa.";
@@ -84,7 +86,7 @@ class ExatronSatisfactionBot {
 			const newSession: RunningSession = {
 				chatId: chat.id,
 				userId: chat.contactId,
-				step: 0,
+				step: 1,
 				questionIndex: 0,
 				lastActivity: Date.now(),
 				timeoutms
@@ -110,7 +112,7 @@ class ExatronSatisfactionBot {
 		await this.ensureLoaded();
 		const newSession: RunningSession = {
 			chatId,
-			step: 0,
+			step: 1,
 			questionIndex: 0,
 			lastActivity: Date.now(),
 			userId
@@ -180,6 +182,16 @@ class ExatronSatisfactionBot {
 		const n = Number(match[1]);
 		if (!Number.isFinite(n) || n < 1 || n > 10) return null;
 		return n;
+	}
+
+	private getQuestionAnswer(text: string, questionIndex: number): number | null {
+		// Pergunta 2 (índice 1): aceita 1..10 ou 99 (não utilizou assistência)
+		if (questionIndex === 1) {
+			const match99 = text.match(/(?:^|\D)(99)(?:\D|$)/);
+			if (match99) return 99;
+		}
+
+		return this.getRating(text);
 	}
 
 	/** Helper para enviar texto do bot, citando opcionalmente a mensagem do cliente. */
@@ -292,6 +304,10 @@ class ExatronSatisfactionBot {
 	 * Útil quando você quer disparar a pesquisa sem aguardar mensagem do cliente.
 	 */
 	public async startInitialRating(chat: WppChat, contact: WppContact, to: string, quotedId?: number) {
+		if (chat.instance !== "exatron") {
+			return;
+		}
+
 		await this.ensureLoaded();
 		const session = await this.getOrCreate(chat);
 
@@ -321,6 +337,10 @@ class ExatronSatisfactionBot {
 	 * Use quando quiser pular a nota inicial e começar pelo questionário.
 	 */
 	public async startBot(chat: WppChat, contact: WppContact, to: string, quotedId?: number) {
+		if (chat.instance !== "exatron") {
+			return;
+		}
+
 		await this.ensureLoaded();
 		const session = await this.getOrCreate(chat);
 
@@ -345,7 +365,7 @@ class ExatronSatisfactionBot {
 			store.scheduleSave(() => this.sessions.values());
 
 			logger.log("Enviando primeira pergunta (Step 1, questionIndex=0)");
-			await this.startInitialRating(chat, contact, to, quotedId);
+			await this.sendQuestion(to, chat, session.questionIndex, quotedId);
 			logger.success({ step: session.step, questionIndex: session.questionIndex });
 		} catch (err) {
 			logger.failed(err);
@@ -353,6 +373,10 @@ class ExatronSatisfactionBot {
 	}
 
 	public async processMessage(chat: WppChat, contact: WppContact, message: WppMessage) {
+		if (chat.instance !== "exatron") {
+			return;
+		}
+
 		await this.ensureLoaded();
 		const session = await this.getOrCreate(chat);
 		session.lastActivity = Date.now();
@@ -424,11 +448,12 @@ class ExatronSatisfactionBot {
 		logger: ProcessingLogger
 	): Promise<void> {
 		logger.log("Step 1: aguardando resposta da pergunta", { index: session.questionIndex });
-		const rating = this.getRating(message.body);
+		const rating = this.getQuestionAnswer(message.body, session.questionIndex);
 
 		if (rating === null) {
 			logger.log("Resposta inválida para pergunta", { index: session.questionIndex });
-			await this.sendBotText(message.from, chat, INVALID_RATING_MSG, message.id);
+			const invalidMsg = session.questionIndex === 1 ? INVALID_RATING_ASSISTANCE_MSG : INVALID_RATING_MSG;
+			await this.sendBotText(message.from, chat, invalidMsg, message.id);
 			return;
 		}
 
