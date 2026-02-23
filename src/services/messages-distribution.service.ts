@@ -266,8 +266,8 @@ class MessagesDistributionService {
 			// 3. Processa mensagem em chat existente
 			if (currChat) {
 				logger.log("Chat anterior encontrado para o contato.", currChat);
-				const outputMessage = await this.insertAndNotify(logger, currChat, msg);
 				await this.processBotMessage(currChat, contact, msg, logger);
+				const outputMessage = await this.insertAndNotify(logger, currChat, msg);
 				return outputMessage;
 			}
 
