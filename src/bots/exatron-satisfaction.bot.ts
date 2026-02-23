@@ -237,7 +237,7 @@ class ExatronSatisfactionBot {
 		}
 
 		const now = new Date();
-		const message = await messagesService.insertMessage({
+		const message: WppMessage = await messagesService.insertMessage({
 			body: text,
 			from: "system",
 			to: "system",
@@ -252,7 +252,7 @@ class ExatronSatisfactionBot {
 		});
 
 		if (notify) {
-			const chatRoom = `${chat.instance}:chat:${chat.id}`;
+			const chatRoom = `${chat.instance}:chat:${chat.id}` as const;
 			await socketService.emit(SocketEventType.WppMessage, chatRoom, { message });
 		}
 	}
