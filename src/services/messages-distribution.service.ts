@@ -470,8 +470,8 @@ class MessagesDistributionService {
 			await this.notifyChatStarted(logger, chat);
 		}
 		await this.notifyMessage(logger, insertedMsg);
-		
-		if (isChatNew) {
+
+		if (isChatNew || chat.botId === 2) {
 			logger.success(insertedMsg);
 		}
 
