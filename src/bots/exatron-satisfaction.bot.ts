@@ -357,6 +357,12 @@ class ExatronSatisfactionBot {
 			{ chatId: chat.id, contactId: contact.id, mode: "first-question" }
 		);
 		try {
+			logger.log("Iniciando startBot", {
+				to,
+				quotedId: quotedId ?? null,
+				sectorId: chat.sectorId ?? null,
+				contactPhone: contact.phone || null
+			});
 			await messagesDistributionService.addSystemMessage(chat, "Iniciando pesquisa de satisfação.", false);
 
 			const updated = await prismaService.wppChat.update({
@@ -370,7 +376,7 @@ class ExatronSatisfactionBot {
 			session.lastActivity = Date.now();
 			store.scheduleSave(() => this.sessions.values());
 
-			logger.log("Enviando primeira pergunta (Step 1, questionIndex=0)");
+			logger.log("Enviando primeira pergunta (Step 1, questionIndex=0)", { target: to });
 			await this.sendQuestion(to, chat, session.questionIndex, quotedId);
 			logger.success({ step: session.step, questionIndex: session.questionIndex });
 		} catch (err) {
@@ -396,6 +402,11 @@ class ExatronSatisfactionBot {
 			messageId: message.id,
 			step: session.step,
 			questionIndex: session.questionIndex
+		});
+		logger.log("Mensagem recebida", {
+			from: message.from,
+			body: (message.body || "").slice(0, 200),
+			chatFinished: chat.isFinished
 		});
 
 		try {
@@ -430,6 +441,7 @@ class ExatronSatisfactionBot {
 		if (rating === null) {
 			logger.log("Nota inválida recebida");
 			const target = this.getMessageTarget(contact, message);
+			logger.log("Enviando mensagem de validação", { target });
 			await this.sendBotText(target, chat, INVALID_RATING_MSG, message.id);
 			return;
 		}
@@ -444,7 +456,7 @@ class ExatronSatisfactionBot {
 		store.scheduleSave(() => this.sessions.values());
 
 		const target = this.getMessageTarget(contact, message);
-		logger.log("Enviando primeira pergunta", { index: session.questionIndex });
+		logger.log("Enviando primeira pergunta", { index: session.questionIndex, target });
 		await this.sendQuestion(target, chat, session.questionIndex, message.id);
 		logger.success({ step: session.step, questionIndex: session.questionIndex });
 	}
@@ -463,6 +475,7 @@ class ExatronSatisfactionBot {
 			logger.log("Resposta inválida para pergunta", { index: session.questionIndex });
 			const invalidMsg = session.questionIndex === 1 ? INVALID_RATING_ASSISTANCE_MSG : INVALID_RATING_MSG;
 			const target = this.getMessageTarget(contact, message);
+			logger.log("Enviando mensagem de validação", { target, index: session.questionIndex });
 			await this.sendBotText(target, chat, invalidMsg, message.id);
 			return;
 		}
@@ -475,6 +488,7 @@ class ExatronSatisfactionBot {
 		session.lastActivity = Date.now();
 		store.scheduleSave(() => this.sessions.values());
 		const target = this.getMessageTarget(contact, message);
+		logger.log("Avancando pergunta", { nextIndex: session.questionIndex, target });
 
 		if (session.questionIndex < QUESTIONS.length) {
 			logger.log("Enviando próxima pergunta", { index: session.questionIndex });
