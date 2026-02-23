@@ -11,7 +11,7 @@ import MessageFlow from "../message-flow/message-flow";
 import MessageFlowFactory from "../message-flow/message-flow.factory";
 import prismaService from "./prisma.service";
 import contactsService from "./contacts.service";
-import { Formatter, sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { Formatter, Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import ProcessingLogger from "../utils/processing-logger";
 import socketService from "./socket.service";
 import {
@@ -95,6 +95,7 @@ class MessagesDistributionService {
 
 		const bot = BOTS[botId];
 		if (!bot) {
+			Logger.debug(`Bot ID ${botId} não encontrado no registry`, bot);
 			logger.log(`Bot ID ${botId} não encontrado no registry`);
 			return;
 		}
