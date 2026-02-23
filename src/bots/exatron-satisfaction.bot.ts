@@ -21,11 +21,30 @@ type RunningSession = {
 	timeoutms?: number; // opcionalmente pode ter timeout customizado
 };
 
-const QUESTIONS: readonly string[] = [
-	"Os produtos da Exatron atendem às suas expectativas em termos de qualidade, inovação e clareza nas informações de instalação e uso?\nDigite de 1 a 10",
-	"Caso tenha utilizado nossa assistência técnica, como avalia a experiência em relação ao atendimento, esclarecimento de dúvidas e tempo de resposta?\nDigite de 1 a 10 ou 99 caso nunca tenha usado a assistência técnica",
-	"O atendimento da nossa equipe (Funcionários e Representantes) atendeu suas necessidades de forma satisfatória?\nDigite de 1 a 10",
-	"De forma geral, quão satisfeito está com a Exatron?\nDigite de 1 a 10"
+type SatisfactionQuestionKey = "q1" | "q2" | "q3" | "q4";
+
+interface SatisfactionQuestion {
+	key: SatisfactionQuestionKey;
+	text: string;
+}
+
+const QUESTIONS: readonly SatisfactionQuestion[] = [
+	{
+		key: "q1",
+		text: "Os produtos da Exatron atendem às suas expectativas em termos de qualidade, inovação e clareza nas informações de instalação e uso?\nDigite de 1 a 10"
+	},
+	{
+		key: "q2",
+		text: "Caso tenha utilizado nossa assistência técnica, como avalia a experiência em relação ao atendimento, esclarecimento de dúvidas e tempo de resposta?\nDigite de 1 a 10 ou 99 caso nunca tenha usado a assistência técnica"
+	},
+	{
+		key: "q3",
+		text: "O atendimento da nossa equipe (Funcionários e Representantes) atendeu suas necessidades de forma satisfatória?\nDigite de 1 a 10"
+	},
+	{
+		key: "q4",
+		text: "De forma geral, quão satisfeito está com a Exatron?\nDigite de 1 a 10"
+	}
 ];
 
 const INITIAL_QUESTION =
@@ -217,8 +236,12 @@ class ExatronSatisfactionBot {
 
 	/** Envia a pergunta pelo índice. */
 	private async sendQuestion(from: string, chat: WppChat, index: number, quotedId?: number) {
-		const q = QUESTIONS[index]!;
-		await this.sendBotText(from, chat, q, quotedId);
+		const question = QUESTIONS[index]!;
+		await this.sendBotText(from, chat, question.text, quotedId);
+	}
+
+	private buildQuestionStorageText(question: SatisfactionQuestion): string {
+		return `[${question.key}] ${question.text}`;
 	}
 
 	private async addSystemMessageForChat(
@@ -274,9 +297,10 @@ class ExatronSatisfactionBot {
 		instance: string,
 		chat: WppChat,
 		contact: WppContact,
-		question: string,
+		question: SatisfactionQuestion,
 		originalMessage: string | undefined,
 		rating: number,
+		questionIndex: number,
 		logger?: ProcessingLogger
 	) {
 		try {
@@ -295,12 +319,41 @@ class ExatronSatisfactionBot {
 				if (res.length > 0 && res[0]) numberId = res[0].CODIGO;
 			} catch { }
 
-			logger?.log("Persistindo resposta de pergunta no legado (se disponível)", { question, rating });
-			await instancesService.executeQuery<any>(
-				instance,
-				"INSERT INTO w_questionarios_respostas (CODIGO_ATENDIMENTO, CODIGO_NUMERO, PERGUNTA, RESPOSTA, NOTA) VALUES (?, ?, ?, ?, ?)",
-				[chat.id, numberId, question, originalMessage || "", rating]
-			);
+			const questionStored = this.buildQuestionStorageText(question);
+			const isNotApplicable = rating === 99 ? 1 : 0;
+
+			logger?.log("Persistindo resposta de pergunta no legado (v2)", {
+				questionKey: question.key,
+				rating,
+				questionIndex
+			});
+
+			try {
+				await instancesService.executeQuery<any>(
+					instance,
+					"INSERT INTO w_questionarios_respostas (CODIGO_ATENDIMENTO, CODIGO_NUMERO, PERGUNTA, RESPOSTA, NOTA, QUESTION_KEY, SURVEY_VERSION, QUESTION_INDEX, IS_NOT_APPLICABLE, SCALE_MIN, SCALE_MAX) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+					[
+						chat.id,
+						numberId,
+						questionStored,
+						originalMessage || "",
+						rating,
+						question.key,
+						"EXA_V2_1_10",
+						questionIndex + 1,
+						isNotApplicable,
+						1,
+						10
+					]
+				);
+			} catch {
+				await instancesService.executeQuery<any>(
+					instance,
+					"INSERT INTO w_questionarios_respostas (CODIGO_ATENDIMENTO, CODIGO_NUMERO, PERGUNTA, RESPOSTA, NOTA) VALUES (?, ?, ?, ?, ?)",
+					[chat.id, numberId, questionStored, originalMessage || "", rating]
+				);
+			}
+
 			logger?.log("Resposta persistida com sucesso");
 		} catch (e) {
 			// silencioso: base pode não ter a tabela/colunas
@@ -523,7 +576,16 @@ class ExatronSatisfactionBot {
 
 		const question = QUESTIONS[session.questionIndex]!;
 		logger.log("Resposta válida recebida para pergunta", { index: session.questionIndex, rating });
-		await this.tryStoreQuestionAnswer(chat.instance, chat, contact, question, message.body, rating, logger);
+		await this.tryStoreQuestionAnswer(
+			chat.instance,
+			chat,
+			contact,
+			question,
+			message.body,
+			rating,
+			session.questionIndex,
+			logger
+		);
 
 		session.questionIndex++;
 		session.lastActivity = Date.now();
