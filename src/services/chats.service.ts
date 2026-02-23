@@ -598,28 +598,39 @@ class ChatsService {
 			logger.log(`Calculando nova data de agendamento baseado no código de ação: ${result.COD_ACAO}`);
 			const newScheduleDate = await this.getScheduleDate(result, scheduleDate);
 
-			if (newScheduleDate && lastCampaign.CONCLUIDO == "NAO") {
-				logger.log(
-					`Atualizando data de agendamento da campanha existente para: ${newScheduleDate.toISOString()}`
-				);
-				const updateQuery = `UPDATE campanhas_clientes SET DT_AGENDAMENTO = ?, OPERADOR = ? WHERE CODIGO = ?`;
-				await instancesService.executeQuery(chat.instance, updateQuery, [
-					formatDateForMySQL(newScheduleDate),
-					chat.userId,
-					lastCampaign.CODIGO
-				]);
+			if (lastCampaign.CONCLUIDO == "NAO") {
+				logger.log(`Atualizando campanha para cliente ${customer.CODIGO}. Novo operador: ${chat.userId}.`);
+
+				const params: Array<any> = [chat.userId];
+				let updateQuery = `UPDATE campanhas_clientes SET OPERADOR = ?, FIDELIZA = 'S'`;
+
+				if (newScheduleDate instanceof Date) {
+					logger.log(`Nova data de agendamento calculada: ${newScheduleDate.toISOString()}. Atualizando campanha com nova data.`);
+					updateQuery = updateQuery + `, DATA_AGENDAMENTO = ?`;
+					params.push(formatDateForMySQL(newScheduleDate));
+				}
+
+				updateQuery = updateQuery + ` WHERE CODIGO = ?`;
+				params.push(lastCampaign.CODIGO);
+
+				await instancesService.executeQuery(chat.instance, updateQuery, params);
 				logger.log(`Campanha atualizada com sucesso`);
-			} else if (newScheduleDate && lastCampaign.CONCLUIDO == "SIM") {
-				logger.log(`Criando nova campanha agendada para: ${newScheduleDate.toISOString()}`);
+			} else {
+
+				const thirtyDaysLater = new Date();
+				thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
+
 				const insertQueryKeys = {
 					CLIENTE: contact.customerId,
-					CAMPANHA: lastCampaign.CAMPANHA,
-					DT_AGENDAMENTO: formatDateForMySQL(newScheduleDate),
+					CAMPANHA: lastCampaign.CAMPANHA,	
+					AGENDA: 0,
+					DT_AGENDAMENTO: formatDateForMySQL(newScheduleDate || thirtyDaysLater),
 					CONCLUIDO: "NAO",
 					FONE1: lastCampaign.FONE1,
 					FONE2: lastCampaign.FONE2,
 					FONE3: lastCampaign.FONE3,
 					ORDEM: lastCampaign.ORDEM,
+					FIDELIZA: 'S',
 					OPERADOR: chat.userId
 				};
 
@@ -632,8 +643,6 @@ class ChatsService {
 
 				await instancesService.executeQuery(chat.instance, insertQuery, insertValues);
 				logger.log(`Nova campanha criada com sucesso`);
-			} else {
-				logger.log(`Nenhuma data de agendamento calculada. Concluído: ${lastCampaign.CONCLUIDO}`);
 			}
 
 			if (result.FIDELIZARCOTACAO === "SIM") {

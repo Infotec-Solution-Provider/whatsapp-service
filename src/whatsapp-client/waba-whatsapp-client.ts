@@ -1,6 +1,5 @@
 import { Logger } from "@in.pulse-crm/utils";
 import axios, { AxiosError } from "axios";
-import FormData from "form-data";
 import TemplateAdapter from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
 import filesService from "../services/files.service";
@@ -23,6 +22,7 @@ interface GetTemplateVariablesProps {
 }
 
 const GRAPH_API_URL = "https://graph.facebook.com/v16.0";
+const WABA_MAX_MEDIA_UPLOAD_BYTES = 16 * 1024 * 1024;
 
 class WABAWhatsappClient implements WhatsappClient {
 	constructor(
@@ -69,10 +69,31 @@ class WABAWhatsappClient implements WhatsappClient {
 			process.log("Tipo de mensagem determinado: " + msgType);
 
 			if (msgType !== "text" && "fileId" in options) {
-				process.log("Iniciando upload de mídia...", options.fileId);
-				try {
-					const uploadedFile = await this.uploadMediaFromFileId(options);
-					process.log("Upload de mídia concluído.", uploadedFile);
+				const fileSize = this.parseFileSizeBytes(options.file.size);
+
+				if (fileSize !== null && fileSize > WABA_MAX_MEDIA_UPLOAD_BYTES) {
+					const directLinkText = options.text
+						? `${options.text}\n\n${options.publicFileUrl}`
+						: `${options.publicFileUrl}`;
+
+					process.log("Arquivo acima de 16MB. Enviando apenas link direto.", {
+						fileId: options.fileId,
+						fileSize,
+						publicFileUrl: options.publicFileUrl
+					});
+
+					msgType = "text";
+					options.text = directLinkText;
+					reqBody["type"] = "text";
+					reqBody["text"] = { body: directLinkText };
+				} else {
+					process.log("Iniciando upload de mídia...", {
+						fileId: options.fileId,
+						fileSize
+					});
+
+					const mediaId = await filesService.getWabaMedia(options.fileId);
+
 					process.log("Montando corpo da mensagem de mídia...");
 					reqBody["type"] = msgType;
 
@@ -81,25 +102,10 @@ class WABAWhatsappClient implements WhatsappClient {
 					}
 
 					reqBody[msgType] = {
-						id: uploadedFile.id,
+						id: mediaId,
 						...(options.text ? { caption: options.text } : {}),
 						...(msgType === "document" ? { filename: options.file.name } : {})
 					};
-				} catch (uploadError) {
-					const fallbackText = options.text
-						? `${options.text}\n\n${options.publicFileUrl}`
-						: `${options.publicFileUrl}`;
-
-					process.log("Falha no upload de mídia. Aplicando fallback de URL para download.", {
-						fileId: options.fileId,
-						publicFileUrl: options.publicFileUrl,
-						error: uploadError instanceof Error ? uploadError.message : uploadError
-					});
-
-					msgType = "text";
-					options.text = fallbackText;
-					reqBody["type"] = "text";
-					reqBody["text"] = { body: fallbackText };
 				}
 			} else {
 				process.log("Montando corpo da mensagem de texto...");
@@ -235,92 +241,19 @@ class WABAWhatsappClient implements WhatsappClient {
 		return "document";
 	}
 
-	private async uploadMediaFromFileId(options: SendFileOptions) {
-		const processId = new Date().toISOString();
-		const process = new ProcessingLogger(this.instance, "waba-upload-media", processId, options);
-		try {
-			process.log("Iniciando processo de upload de mídia...");
-			const reqUrl = `${GRAPH_API_URL}/${this.wabaPhoneId}/media`;
+	private parseFileSizeBytes(size: unknown): number | null {
+		if (typeof size === "number" && Number.isFinite(size)) {
+			return size;
+		}
 
-			process.log(`Buscando arquivo ID ${options.fileId}...`);
-			let fileBuffer: Buffer;
-
-			try {
-				const localFileResponse = await axios.get(options.localFileUrl, { responseType: "arraybuffer" });
-				fileBuffer = Buffer.from(localFileResponse.data);
-				process.log("Arquivo baixado via localFileUrl com arraybuffer.", {
-					url: options.localFileUrl,
-					size: fileBuffer.length
-				});
-			} catch (localDownloadError) {
-				process.log("Falha no download via localFileUrl, usando fallback do SDK.", {
-					error: localDownloadError instanceof Error ? localDownloadError.message : localDownloadError
-				});
-				const fileResponse = await filesService.fetchFile(options.fileId);
-				fileBuffer = this.normalizeFileToBuffer(fileResponse);
+		if (typeof size === "string") {
+			const parsed = Number(size);
+			if (Number.isFinite(parsed)) {
+				return parsed;
 			}
-			process.log(`Arquivo ID ${options.fileId} buscado com sucesso.`);
-
-			const form = new FormData();
-
-			form.append("messaging_product", "whatsapp");
-			form.append("type", options.file.mime_type);
-			form.append("file", fileBuffer, {
-				filename: options.file.name,
-				contentType: options.file.mime_type,
-				knownLength: fileBuffer.length
-			});
-
-			const reqOptions = this.reqOptions;
-			reqOptions.headers = { ...reqOptions.headers, ...form.getHeaders() };
-
-			process.log("Enviando mídia a Graph API...", { url: reqUrl, options: reqOptions });
-			const response = await axios.post(reqUrl, form, reqOptions);
-			const output = { id: response.data.id };
-			process.log("Upload de mídia concluído com sucesso.", output);
-			return output;
-		} catch (error) {
-			process.log("Falha ao enviar mídia a META Api...");
-			process.failed(error);
-			let metaErrorDetails = "";
-			if (error instanceof AxiosError) {
-				const responseData = error.response?.data;
-				const metaError = responseData?.error;
-				if (metaError) {
-					metaErrorDetails = metaError.message ? ` Detalhes: ${metaError.message}` : "";
-				} else {
-					metaErrorDetails = responseData ? ` Detalhes: ${JSON.stringify(responseData)}` : "";
-				}
-			}
-			throw new Error(
-				"Erro ao enviar mídia a META Api. ID: " + processId + metaErrorDetails
-			);
-		}
-	}
-
-	private normalizeFileToBuffer(fileResponse: unknown): Buffer {
-		if (Buffer.isBuffer(fileResponse)) {
-			return fileResponse;
 		}
 
-		if (fileResponse instanceof Uint8Array) {
-			return Buffer.from(fileResponse);
-		}
-
-		if (fileResponse instanceof ArrayBuffer) {
-			return Buffer.from(new Uint8Array(fileResponse));
-		}
-
-		if (
-			fileResponse &&
-			typeof fileResponse === "object" &&
-			"data" in fileResponse &&
-			(fileResponse as { data: unknown }).data instanceof Uint8Array
-		) {
-			return Buffer.from((fileResponse as { data: Uint8Array }).data);
-		}
-
-		throw new Error("Formato de arquivo inválido para upload WABA.");
+		return null;
 	}
 
 	public async sendTemplate(

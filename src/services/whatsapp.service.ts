@@ -197,6 +197,7 @@ class WhatsappService {
 		}
 
 		const process = new ProcessingLogger(session.instance, "send-message", `${to}-${Date.now()}`, data);
+		let pendingMsg: WppMessage | null = null;
 
 		process.log("Iniciando o envio da mensagem.");
 		try {
@@ -269,7 +270,7 @@ class WhatsappService {
 			}
 
 			process.log("Salvando mensagem no banco de dados.", message);
-			const pendingMsg = await messagesService.insertMessage(message);
+			pendingMsg = await messagesService.insertMessage(message);
 			process.log("Enviando mensagem para o cliente.");
 
 			messagesDistributionService.notifyMessage(process, pendingMsg);
@@ -299,6 +300,16 @@ class WhatsappService {
 
 			return savedMsg;
 		} catch (err) {
+			if (pendingMsg) {
+				try {
+					const errorMessage = await messagesService.updateMessage(pendingMsg.id, { status: "ERROR" });
+					await messagesDistributionService.notifyMessage(process, errorMessage);
+					process.log("Mensagem marcada como ERROR após falha no envio.", { messageId: pendingMsg.id });
+				} catch (statusErr) {
+					process.log("Falha ao marcar mensagem como ERROR.", sanitizeErrorMessage(statusErr));
+				}
+			}
+
 			process.failed("Erro ao enviar mensagem: " + sanitizeErrorMessage(err));
 			throw new BadRequestError("Erro ao enviar mensagem: " + sanitizeErrorMessage(err), err);
 		}
@@ -306,6 +317,7 @@ class WhatsappService {
 
 	public async sendBotMessage(to: string, clientId: number, data: SendBotMessageData) {
 		const process = new ProcessingLogger(data.chat.instance, "send-bot-message", `${to}-${Date.now()}`, data);
+		let pendingMsg: WppMessage | null = null;
 
 		process.log("Iniciando o envio da mensagem.");
 		try {
@@ -346,7 +358,7 @@ class WhatsappService {
 				message.quotedId = quotedMsg.id;
 			}
 			process.log("Salvando mensagem no banco de dados.", message);
-			const pendingMsg = await messagesService.insertMessage(message);
+			pendingMsg = await messagesService.insertMessage(message);
 			process.log("Enviando mensagem para o cliente.", options);
 
 			const delay = Math.floor(Math.random() * (5000 - 500 + 1)) + 500;
@@ -375,6 +387,16 @@ class WhatsappService {
 
 			return savedMsg;
 		} catch (err) {
+			if (pendingMsg) {
+				try {
+					const errorMessage = await messagesService.updateMessage(pendingMsg.id, { status: "ERROR" });
+					await messagesDistributionService.notifyMessage(process, errorMessage);
+					process.log("Mensagem de bot marcada como ERROR após falha no envio.", { messageId: pendingMsg.id });
+				} catch (statusErr) {
+					process.log("Falha ao marcar mensagem de bot como ERROR.", sanitizeErrorMessage(statusErr));
+				}
+			}
+
 			process.failed("Erro ao enviar mensagem: " + sanitizeErrorMessage(err));
 			throw new BadRequestError("Erro ao enviar mensagem.", err);
 		}
