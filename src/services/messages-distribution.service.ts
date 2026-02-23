@@ -102,7 +102,7 @@ class MessagesDistributionService {
 
 		const bot = BOTS[botId];
 		if (!bot) {
-			Logger.debug(`Bot ID ${botId} não encontrado no registry`, bot);
+			Logger.debug(`Bot ID ${botId} não encontrado no registry`, BOTS);
 			logger.log(`Bot ID ${botId} não encontrado no registry`);
 			return;
 		}
