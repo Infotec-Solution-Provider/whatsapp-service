@@ -35,12 +35,21 @@ import messageQueueService from "./message-queue.service";
 
 // Interface para bots que processam mensagens
 interface BotProcessor {
-	processMessage(chat: WppChat, contact: WppContact, message: WppMessage): Promise<void>;
-	startBot?(chat: WppChat, contact: WppContact, to: string, quotedId?: number): Promise<void>;
+	processMessage(
+		chat: WppChat,
+		contact: WppContact,
+		message: WppMessage,
+		service?: MessagesDistributionService
+	): Promise<void>;
+	startBot?(
+		chat: WppChat,
+		contact: WppContact,
+		to: string,
+		quotedId?: number,
+		service?: MessagesDistributionService
+	): Promise<void>;
 	shouldActivate?(chat: WppChat, contact: WppContact): Promise<boolean>;
 }
-
-
 
 const BOTS: { [key: number]: BotProcessor } = {
 	1: chooseSectorBot,
@@ -50,8 +59,6 @@ const BOTS: { [key: number]: BotProcessor } = {
 
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
-
-
 
 	public async getFlow(instance: string, sectorId: number): Promise<MessageFlow> {
 		const flowKey = `${instance}:${sectorId}`;
@@ -101,7 +108,7 @@ class MessagesDistributionService {
 		}
 
 		logger.log(`Processando mensagem com bot ID ${botId}`);
-		await bot.processMessage(chat, contact, msg);
+		await bot.processMessage(chat, contact, msg, this);
 	}
 
 	/**
@@ -131,9 +138,9 @@ class MessagesDistributionService {
 
 		// Se o bot tem método startBot, usa; caso contrário, usa processMessage
 		if (bot.startBot) {
-			await bot.startBot(chat, contact, msg.from, msg.id);
+			await bot.startBot(chat, contact, msg.from, msg.id, this);
 		} else {
-			await bot.processMessage(chat, contact, msg);
+			await bot.processMessage(chat, contact, msg, this);
 		}
 	}
 

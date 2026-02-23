@@ -2,7 +2,7 @@ import { SocketEventType } from "@in.pulse-crm/sdk";
 import { WppChat, WppContact, WppMessage } from "@prisma/client";
 import "dotenv/config";
 import instancesService from "../services/instances.service";
-import messagesDistributionService from "../services/messages-distribution.service";
+import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
 import socketService from "../services/socket.service";
 import whatsappService from "../services/whatsapp.service";
@@ -19,6 +19,10 @@ type RunningSession = {
 	questionIndex: number;
 	lastActivity: number; // timestamp (ms) da última interação
 	timeoutms?: number; // opcionalmente pode ter timeout customizado
+};
+
+type MessagesDistributionLike = {
+	addSystemMessage(chat: WppChat, text: string, notify?: boolean): Promise<void>;
 };
 
 const QUESTIONS: readonly string[] = [
@@ -221,6 +225,38 @@ class ExatronSatisfactionBot {
 		await this.sendBotText(from, chat, q, quotedId);
 	}
 
+	private async addSystemMessageForChat(
+		chat: WppChat,
+		text: string,
+		notify: boolean,
+		service?: MessagesDistributionLike
+	) {
+		if (service) {
+			await service.addSystemMessage(chat, text, notify);
+			return;
+		}
+
+		const now = new Date();
+		const message = await messagesService.insertMessage({
+			body: text,
+			from: "system",
+			to: "system",
+			instance: chat.instance,
+			status: "RECEIVED",
+			timestamp: now.getTime().toString(),
+			sentAt: now,
+			type: "chat",
+			chatId: chat.id,
+			contactId: chat.contactId,
+			clientId: null
+		});
+
+		if (notify) {
+			const chatRoom = `${chat.instance}:chat:${chat.id}`;
+			await socketService.emit(SocketEventType.WppMessage, chatRoom, { message });
+		}
+	}
+
 	// Tenta persistir a nota/resposta no banco da instância (se existir a estrutura antiga). Ignora falhas.
 	private async tryStoreInitialRating(
 		instance: string,
@@ -282,7 +318,7 @@ class ExatronSatisfactionBot {
 		}
 	}
 
-	private async finishChat(chat: WppChat, logger?: ProcessingLogger) {
+	private async finishChat(chat: WppChat, logger?: ProcessingLogger, service?: MessagesDistributionLike) {
 		// Finaliza no padrão do projeto atual (similar ao choose-sector.bot)
 		logger?.log("Finalizando chat pelo bot de satisfação");
 		const updated = await prismaService.wppChat.update({
@@ -297,7 +333,7 @@ class ExatronSatisfactionBot {
 
 		// Usa mensagem de sistema para registrar no histórico do chat atual
 		logger?.log("Adicionando mensagem de sistema de finalização");
-		await messagesDistributionService.addSystemMessage(updated, FINISH_MSG);
+		await this.addSystemMessageForChat(updated, FINISH_MSG, true, service);
 
 		logger?.log("Emitindo evento de finalização no socket");
 		await socketService.emit(SocketEventType.WppChatFinished, `${updated.instance}:chat:${updated.id}`, {
@@ -342,7 +378,13 @@ class ExatronSatisfactionBot {
 	 * Inicia o fluxo diretamente na primeira pergunta (Step 1, questionIndex=0).
 	 * Use quando quiser pular a nota inicial e começar pelo questionário.
 	 */
-	public async startBot(chat: WppChat, contact: WppContact, to: string, quotedId?: number) {
+	public async startBot(
+		chat: WppChat,
+		contact: WppContact,
+		to: string,
+		quotedId?: number,
+		service?: MessagesDistributionLike
+	) {
 		if (chat.instance !== "exatron") {
 			return;
 		}
@@ -363,7 +405,7 @@ class ExatronSatisfactionBot {
 				sectorId: chat.sectorId ?? null,
 				contactPhone: contact.phone || null
 			});
-			await messagesDistributionService.addSystemMessage(chat, "Iniciando pesquisa de satisfação.", false);
+			await this.addSystemMessageForChat(chat, "Iniciando pesquisa de satisfação.", false, service);
 
 			const updated = await prismaService.wppChat.update({
 				where: { id: chat.id },
@@ -384,7 +426,12 @@ class ExatronSatisfactionBot {
 		}
 	}
 
-	public async processMessage(chat: WppChat, contact: WppContact, message: WppMessage) {
+	public async processMessage(
+		chat: WppChat,
+		contact: WppContact,
+		message: WppMessage,
+		service?: MessagesDistributionLike
+	) {
 		if (chat.instance !== "exatron") {
 			return;
 		}
@@ -415,10 +462,10 @@ class ExatronSatisfactionBot {
 					await this.handleInitialRating(chat, contact, session, message, logger);
 					break;
 				case 1:
-					await this.handleQuestionAnswer(chat, contact, session, message, logger);
+					await this.handleQuestionAnswer(chat, contact, session, message, logger, service);
 					break;
 				case 2:
-					await this.handleCompletion(chat, session, message, logger);
+					await this.handleCompletion(chat, session, message, logger, service);
 					break;
 				default:
 					logger.log(`Unknown step: ${session.step}`);
@@ -466,7 +513,8 @@ class ExatronSatisfactionBot {
 		contact: WppContact,
 		session: RunningSession,
 		message: WppMessage,
-		logger: ProcessingLogger
+		logger: ProcessingLogger,
+		service?: MessagesDistributionLike
 	): Promise<void> {
 		logger.log("Step 1: aguardando resposta da pergunta", { index: session.questionIndex });
 		const rating = this.getQuestionAnswer(message.body, session.questionIndex);
@@ -496,7 +544,7 @@ class ExatronSatisfactionBot {
 			logger.success({ step: session.step, questionIndex: session.questionIndex });
 		} else {
 			logger.log("Todas perguntas respondidas, finalizando atendimento");
-			await this.finishChat(chat, logger);
+			await this.finishChat(chat, logger, service);
 			await this.sendBotText(target, chat, THANKS_MSG, message.id);
 			this.remove(chat.id);
 			logger.success({ step: session.step, finished: true });
@@ -507,9 +555,10 @@ class ExatronSatisfactionBot {
 		chat: WppChat,
 		session: RunningSession,
 		message: WppMessage,
-		logger: ProcessingLogger
+		logger: ProcessingLogger,
+		service?: MessagesDistributionLike
 	): Promise<void> {
-		await this.finishChat(chat, logger);
+		await this.finishChat(chat, logger, service);
 		await this.sendBotText(message.from, chat, THANKS_MSG, message.id);
 		this.remove(chat.id);
 		logger.success({ step: session.step, finished: true });
