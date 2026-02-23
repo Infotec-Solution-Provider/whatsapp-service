@@ -1,20 +1,4 @@
 import {
-	AutomaticResponseRule,
-	AutomaticResponseSchedule,
-	WppChat,
-	WppContact,
-	WppMessage,
-	WppMessageStatus,
-	WppSector
-} from "@prisma/client";
-import MessageFlow from "../message-flow/message-flow";
-import MessageFlowFactory from "../message-flow/message-flow.factory";
-import prismaService from "./prisma.service";
-import contactsService from "./contacts.service";
-import { Formatter, Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
-import ProcessingLogger from "../utils/processing-logger";
-import socketService from "./socket.service";
-import {
 	SocketEventType,
 	SocketServerAdminRoom,
 	SocketServerChatRoom,
@@ -24,38 +8,29 @@ import {
 	User,
 	WppMessageEventData
 } from "@in.pulse-crm/sdk";
-import chatsService from "./chats.service";
-import messagesService from "./messages.service";
-import whatsappService from "./whatsapp.service";
-import chooseSectorBot from "../bots/choose-sector.bot";
-import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
-import customerLinkingBot from "../bots/customer-linking.bot";
+import { Formatter, Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import {
+	AutomaticResponseRule,
+	AutomaticResponseSchedule,
+	WppChat,
+	WppContact,
+	WppMessage,
+	WppMessageStatus,
+	WppSector
+} from "@prisma/client";
 import { InternalServerError } from "@rgranatodutra/http-errors";
+import MessageFlow from "../message-flow/message-flow";
+import MessageFlowFactory from "../message-flow/message-flow.factory";
+import ProcessingLogger from "../utils/processing-logger";
+import chatsService from "./chats.service";
+import contactsService from "./contacts.service";
 import messageQueueService from "./message-queue.service";
+import messagesService from "./messages.service";
+import prismaService from "./prisma.service";
+import socketService from "./socket.service";
+import whatsappService from "./whatsapp.service";
+import botsRegistry from "../bots/bots-registry";
 
-// Interface para bots que processam mensagens
-interface BotProcessor {
-	processMessage(
-		chat: WppChat,
-		contact: WppContact,
-		message: WppMessage,
-		service?: MessagesDistributionService
-	): Promise<void>;
-	startBot?(
-		chat: WppChat,
-		contact: WppContact,
-		to: string,
-		quotedId?: number,
-		service?: MessagesDistributionService
-	): Promise<void>;
-	shouldActivate?(chat: WppChat, contact: WppContact): Promise<boolean>;
-}
-
-const BOTS: { [key: number]: BotProcessor } = {
-	1: chooseSectorBot,
-	2: exatronSatisfactionBot,
-	3: customerLinkingBot
-}
 
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
@@ -100,15 +75,15 @@ class MessagesDistributionService {
 			return;
 		}
 
-		const bot = BOTS[botId];
+		const bot = botsRegistry.get(botId);
 		if (!bot) {
-			Logger.debug(`Bot ID ${botId} não encontrado no registry`, BOTS);
+			Logger.debug(`Bot ID ${botId} não encontrado no registry`, botsRegistry);
 			logger.log(`Bot ID ${botId} não encontrado no registry`);
 			return;
 		}
 
 		logger.log(`Processando mensagem com bot ID ${botId}`);
-		await bot.processMessage(chat, contact, msg, this);
+		await bot.processMessage(chat, contact, msg);
 	}
 
 	/**
@@ -128,7 +103,7 @@ class MessagesDistributionService {
 			return;
 		}
 
-		const bot = BOTS[botId]	;
+		const bot = botsRegistry.get(botId);
 		if (!bot) {
 			logger.log(`Bot ID ${botId} não encontrado no registry para inicialização`);
 			return;
@@ -138,9 +113,9 @@ class MessagesDistributionService {
 
 		// Se o bot tem método startBot, usa; caso contrário, usa processMessage
 		if (bot.startBot) {
-			await bot.startBot(chat, contact, msg.from, msg.id, this);
+			await bot.startBot(chat, contact, msg.from, msg.id);
 		} else {
-			await bot.processMessage(chat, contact, msg, this);
+			await bot.processMessage(chat, contact, msg);
 		}
 	}
 
@@ -153,7 +128,7 @@ class MessagesDistributionService {
 		logger: ProcessingLogger
 	): Promise<number | null> {
 		// Verifica bots com método shouldActivate (ordem de prioridade)
-		for (const [botId, bot] of Object.entries(BOTS)) {
+		for (const [botId, bot] of botsRegistry.entries()) {
 			if (!bot) {
 				logger.log(`Bot ID ${botId} não está registrado corretamente (undefined)`);
 				continue;

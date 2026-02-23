@@ -1,14 +1,14 @@
+import { Customer } from "@in.pulse-crm/sdk";
 import { WppChat, WppContact, WppMessage } from "@prisma/client";
 import "dotenv/config";
+import chatsService from "../services/chats.service";
 import instancesService from "../services/instances.service";
 import messagesDistributionService from "../services/messages-distribution.service";
+import parametersService from "../services/parameters.service";
 import prismaService from "../services/prisma.service";
 import whatsappService from "../services/whatsapp.service";
 import JsonSessionStore from "../utils/json-session-store";
 import ProcessingLogger from "../utils/processing-logger";
-import parametersService from "../services/parameters.service";
-import chatsService from "../services/chats.service";
-import { Customer } from "@in.pulse-crm/sdk";
 
 type RunningSession = {
 	chatId: number;
