@@ -425,6 +425,9 @@ class ChatsService {
 				logger.log(`Aviso: Resultado não encontrado para resultId ${resultId}`);
 			}
 
+			const shouldTriggerSurvey =
+				session.instance === "exatron" && result?.WHATS_ACAO === "trigger-survey";
+
 			const { instance, userId } = session;
 			const usersService = getUsersClient();
 			usersService.setAuth(token || "");
@@ -435,6 +438,46 @@ class ChatsService {
 				logger.log(`Usuário encontrado: ${user.NOME} (ID: ${user.CODIGO})`);
 			} else {
 				logger.log(`Chat finalizado pelo sistema (resultId: -50 ou usuário não encontrado)`);
+			}
+
+			if (shouldTriggerSurvey) {
+				logger.log("Resultado configurado para pesquisa de satisfação. Não finalizando atendimento.");
+
+				const chat = await prismaService.wppChat.findUnique({
+					where: { id },
+					include: {
+						contact: true
+					}
+				});
+
+				if (!chat) {
+					throw new Error(`Chat ${id} não encontrado para disparo da pesquisa`);
+				}
+
+				if (!chat.contact) {
+					throw new Error(`Chat ${id} sem contato para disparo da pesquisa`);
+				}
+
+				const surveyChat = await prismaService.wppChat.update({
+					where: { id: chat.id },
+					data: {
+						isFinished: false,
+						finishedAt: null,
+						finishedBy: null,
+						resultId
+					}
+				});
+
+				await this.syncChatToLocal(surveyChat);
+				await messagesDistributionService.addSystemMessage(
+					surveyChat,
+					"Pesquisa de satisfação iniciada. O atendimento seguirá ativo durante a coleta das respostas."
+				);
+
+				logger.log(`Iniciando bot de satisfação. WHATS_ACAO: ${result?.WHATS_ACAO}`);
+				await exatronSatisfactionBot.startBot(surveyChat, chat.contact, chat.contact.phone);
+				logger.success(`Pesquisa de satisfação disparada sem finalizar o chat. Chat ID: ${chat.id}`);
+				return;
 			}
 
 			logger.log(`Atualizando chat no banco de dados. Marcando como finalizado`);
@@ -532,15 +575,9 @@ class ChatsService {
 				logger.log(`Chat sem contato ou cliente vinculado. Pulando fidelização`);
 			}
 
-			if (chat.instance === "exatron" && result && result.WHATS_ACAO === "trigger-survey") {
-				logger.log(`Iniciando bot de satisfação. WHATS_ACAO: ${result?.WHATS_ACAO}`);
-				await exatronSatisfactionBot.startBot(chat, chat.contact!, chat.contact!.phone);
-				logger.log(`Bot de satisfação iniciado com sucesso`);
-			} else {
-				logger.log(
-					`Bot de satisfação não será acionado. Instance: ${chat.instance}, WHATS_ACAO: ${result?.WHATS_ACAO}`
-				);
-			}
+			logger.log(
+				`Bot de satisfação não será acionado. Instance: ${chat.instance}, WHATS_ACAO: ${result?.WHATS_ACAO}`
+			);
 
 			logger.success(`Chat finalizado com sucesso. Chat ID: ${chat.id}`);
 		} catch (err) {

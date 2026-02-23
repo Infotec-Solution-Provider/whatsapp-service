@@ -311,12 +311,18 @@ class ExatronSatisfactionBot {
 	private async finishChat(chat: WppChat, logger?: ProcessingLogger) {
 		// Finaliza no padrão do projeto atual (similar ao choose-sector.bot)
 		logger?.log("Finalizando chat pelo bot de satisfação");
+		const finishedBy =
+			typeof chat.userId === "number"
+				? chat.userId
+				: typeof chat.finishedBy === "number"
+					? chat.finishedBy
+					: null;
 		const updated = await prismaService.wppChat.update({
 			where: { id: chat.id },
 			data: {
 				isFinished: true,
 				finishedAt: new Date(),
-				finishedBy: null
+				finishedBy
 			}
 		});
 		await chatsService.syncChatToLocal(updated);
