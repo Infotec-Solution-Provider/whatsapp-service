@@ -93,6 +93,7 @@ class MessagesDistributionService {
 	 * Processa bot ativo em um chat existente
 	 */
 	private async processBotMessage(chat: WppChat, contact: WppContact, msg: WppMessage, logger: ProcessingLogger) {
+		logger.log(`Verificando se o chat tem bot ativo para processar a mensagem. Bot ID: ${chat.botId}`);
 		if (!chat.botId) return;
 
 		const bot = this.botRegistry.get(chat.botId);
