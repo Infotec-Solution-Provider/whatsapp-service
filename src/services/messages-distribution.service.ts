@@ -96,13 +96,19 @@ class MessagesDistributionService {
 		logger.log(`Verificando se o chat tem bot ativo para processar a mensagem. Bot ID: ${chat.botId}`);
 		if (!chat.botId) return;
 
-		const bot = this.botRegistry.get(chat.botId);
-		if (!bot) {
-			logger.log(`Bot ID ${chat.botId} não encontrado no registry`);
+		const botId = Number(chat.botId);
+		if (!Number.isFinite(botId)) {
+			logger.log(`Bot ID inválido para registry lookup: ${chat.botId}`);
 			return;
 		}
 
-		logger.log(`Processando mensagem com bot ID ${chat.botId}`);
+		const bot = this.botRegistry.get(botId);
+		if (!bot) {
+			logger.log(`Bot ID ${botId} não encontrado no registry`);
+			return;
+		}
+
+		logger.log(`Processando mensagem com bot ID ${botId}`);
 		await bot.processMessage(chat, contact, msg);
 	}
 
@@ -117,13 +123,19 @@ class MessagesDistributionService {
 	) {
 		if (!chat.botId) return;
 
-		const bot = this.botRegistry.get(chat.botId);
-		if (!bot) {
-			logger.log(`Bot ID ${chat.botId} não encontrado no registry para inicialização`);
+		const botId = Number(chat.botId);
+		if (!Number.isFinite(botId)) {
+			logger.log(`Bot ID inválido para inicialização: ${chat.botId}`);
 			return;
 		}
 
-		logger.log(`Inicializando bot ID ${chat.botId} para novo chat`);
+		const bot = this.botRegistry.get(botId);
+		if (!bot) {
+			logger.log(`Bot ID ${botId} não encontrado no registry para inicialização`);
+			return;
+		}
+
+		logger.log(`Inicializando bot ID ${botId} para novo chat`);
 
 		// Se o bot tem método startBot, usa; caso contrário, usa processMessage
 		if (bot.startBot) {
