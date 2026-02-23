@@ -40,27 +40,18 @@ interface BotProcessor {
 	shouldActivate?(chat: WppChat, contact: WppContact): Promise<boolean>;
 }
 
-// Registry de bots por ID
-type BotRegistry = Map<number, BotProcessor>;
+
+
+const BOTS: { [key: number]: BotProcessor } = {
+	1: chooseSectorBot,
+	2: exatronSatisfactionBot,
+	3: customerLinkingBot
+}
 
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
-	private botRegistry: BotRegistry = new Map();
 
-	constructor() {
-		this.registerBots();
-	}
 
-	/**
-	 * Registra todos os bots disponíveis no sistema
-	 * Facilita adicionar novos bots sem modificar a lógica principal
-	 */
-	private registerBots() {
-		this.botRegistry.set(1, chooseSectorBot);
-		this.botRegistry.set(2, exatronSatisfactionBot);
-		this.botRegistry.set(3, customerLinkingBot);
-		// Adicionar novos bots aqui é simples: this.botRegistry.set(5, newBot);
-	}
 
 	public async getFlow(instance: string, sectorId: number): Promise<MessageFlow> {
 		const flowKey = `${instance}:${sectorId}`;
@@ -102,7 +93,7 @@ class MessagesDistributionService {
 			return;
 		}
 
-		const bot = this.botRegistry.get(botId);
+		const bot = BOTS[botId];
 		if (!bot) {
 			logger.log(`Bot ID ${botId} não encontrado no registry`);
 			return;
@@ -129,7 +120,7 @@ class MessagesDistributionService {
 			return;
 		}
 
-		const bot = this.botRegistry.get(botId);
+		const bot = BOTS[botId]	;
 		if (!bot) {
 			logger.log(`Bot ID ${botId} não encontrado no registry para inicialização`);
 			return;
@@ -154,7 +145,7 @@ class MessagesDistributionService {
 		logger: ProcessingLogger
 	): Promise<number | null> {
 		// Verifica bots com método shouldActivate (ordem de prioridade)
-		for (const [botId, bot] of this.botRegistry.entries()) {
+		for (const [botId, bot] of Object.entries(BOTS)) {
 			if (!bot) {
 				logger.log(`Bot ID ${botId} não está registrado corretamente (undefined)`);
 				continue;
@@ -163,7 +154,7 @@ class MessagesDistributionService {
 				const shouldActivate = await bot.shouldActivate(chat, contact);
 				if (shouldActivate) {
 					logger.log(`Bot ID ${botId} será ativado (via shouldActivate)`);
-					return botId;
+					return Number(botId);
 				}
 			}
 		}
