@@ -10,7 +10,6 @@ import socketService from "../services/socket.service";
 import whatsappService from "../services/whatsapp.service";
 import JsonSessionStore from "../utils/json-session-store";
 import ProcessingLogger from "../utils/processing-logger";
-import messageDeliveryService from "../services/messages-distribution.service";
 
 type RunningSession = {
 	chatId: number;
@@ -227,10 +226,6 @@ class ExatronSatisfactionBot {
 		text: string,
 		notify: boolean,
 	) {
-
-		await messageDeliveryService.addSystemMessage(chat, text, notify);
-
-
 		const now = new Date();
 		const message: WppMessage = await messagesService.insertMessage({
 			body: text,
