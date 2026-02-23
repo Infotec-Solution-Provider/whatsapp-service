@@ -77,7 +77,7 @@ class MessagesDistributionService {
 
 		const bot = botsRegistry.get(botId);
 		if (!bot) {
-			Logger.debug(`Bot ID ${botId} não encontrado no registry`, botsRegistry);
+			Logger.debug(`Bot ID ${botId} não encontrado no registry`, botsRegistry.snapshot());
 			logger.log(`Bot ID ${botId} não encontrado no registry`);
 			return;
 		}
