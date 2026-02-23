@@ -22,10 +22,10 @@ type RunningSession = {
 };
 
 const QUESTIONS: readonly string[] = [
-	"Os produtos da Exatron atendem às suas expectativas em termos de qualidade, inovação e clareza nas informações de instalação e uso?\n- Avalie com um número de 1 a 10.",
-	"Caso tenha utilizado nossa Assistência Técnica, como avalia a experiência em relação ao atendimento, esclarecimento de dúvidas e tempo de resposta?\n- Avalie com um número de 1 a 10.\n- Se nunca utilizou, responda 99.",
-	"O atendimento da nossa equipe (funcionários e representantes) atendeu suas necessidades de forma satisfatória?\n- Avalie com um número de 1 a 10.",
-	"De forma geral, quão satisfeito está com a Exatron?\n- Avalie com um número de 1 a 10."
+	"Os produtos da Exatron atendem às suas expectativas em termos de qualidade, inovação e clareza nas informações de instalação e uso?\nDigite de 1 a 10",
+	"Caso tenha utilizado nossa assistência técnica, como avalia a experiência em relação ao atendimento, esclarecimento de dúvidas e tempo de resposta?\nDigite de 1 a 10 ou 99 caso nunca tenha usado a assistência técnica",
+	"O atendimento da nossa equipe (Funcionários e Representantes) atendeu suas necessidades de forma satisfatória?\nDigite de 1 a 10",
+	"De forma geral, quão satisfeito está com a Exatron?\nDigite de 1 a 10"
 ];
 
 const INITIAL_QUESTION =
@@ -192,6 +192,12 @@ class ExatronSatisfactionBot {
 		}
 
 		return this.getRating(text);
+	}
+
+	private getMessageTarget(contact: WppContact, message: WppMessage): string {
+		const contactPhone = (contact.phone || "").trim();
+		if (contactPhone) return contactPhone;
+		return message.from;
 	}
 
 	/** Helper para enviar texto do bot, citando opcionalmente a mensagem do cliente. */
@@ -395,7 +401,7 @@ class ExatronSatisfactionBot {
 		try {
 			switch (session.step) {
 				case 0:
-					await this.handleInitialRating(chat, session, message, logger);
+					await this.handleInitialRating(chat, contact, session, message, logger);
 					break;
 				case 1:
 					await this.handleQuestionAnswer(chat, contact, session, message, logger);
@@ -413,6 +419,7 @@ class ExatronSatisfactionBot {
 
 	private async handleInitialRating(
 		chat: WppChat,
+		contact: WppContact,
 		session: RunningSession,
 		message: WppMessage,
 		logger: ProcessingLogger
@@ -422,7 +429,8 @@ class ExatronSatisfactionBot {
 
 		if (rating === null) {
 			logger.log("Nota inválida recebida");
-			await this.sendBotText(message.from, chat, INVALID_RATING_MSG, message.id);
+			const target = this.getMessageTarget(contact, message);
+			await this.sendBotText(target, chat, INVALID_RATING_MSG, message.id);
 			return;
 		}
 
@@ -435,8 +443,9 @@ class ExatronSatisfactionBot {
 		session.lastActivity = Date.now();
 		store.scheduleSave(() => this.sessions.values());
 
+		const target = this.getMessageTarget(contact, message);
 		logger.log("Enviando primeira pergunta", { index: session.questionIndex });
-		await this.sendQuestion(message.from, chat, session.questionIndex, message.id);
+		await this.sendQuestion(target, chat, session.questionIndex, message.id);
 		logger.success({ step: session.step, questionIndex: session.questionIndex });
 	}
 
@@ -453,7 +462,8 @@ class ExatronSatisfactionBot {
 		if (rating === null) {
 			logger.log("Resposta inválida para pergunta", { index: session.questionIndex });
 			const invalidMsg = session.questionIndex === 1 ? INVALID_RATING_ASSISTANCE_MSG : INVALID_RATING_MSG;
-			await this.sendBotText(message.from, chat, invalidMsg, message.id);
+			const target = this.getMessageTarget(contact, message);
+			await this.sendBotText(target, chat, invalidMsg, message.id);
 			return;
 		}
 
@@ -464,17 +474,18 @@ class ExatronSatisfactionBot {
 		session.questionIndex++;
 		session.lastActivity = Date.now();
 		store.scheduleSave(() => this.sessions.values());
+		const target = this.getMessageTarget(contact, message);
 
 		if (session.questionIndex < QUESTIONS.length) {
 			logger.log("Enviando próxima pergunta", { index: session.questionIndex });
-			await this.sendQuestion(message.from, chat, session.questionIndex, message.id);
+			await this.sendQuestion(target, chat, session.questionIndex, message.id);
 			logger.success({ step: session.step, questionIndex: session.questionIndex });
 		} else {
-			// No more questions - advance to completion
-			session.step = 2;
-			session.lastActivity = Date.now();
-			store.scheduleSave(() => this.sessions.values());
-			logger.log("Todas perguntas respondidas, avançando para finalização");
+			logger.log("Todas perguntas respondidas, finalizando atendimento");
+			await this.finishChat(chat, logger);
+			await this.sendBotText(target, chat, THANKS_MSG, message.id);
+			this.remove(chat.id);
+			logger.success({ step: session.step, finished: true });
 		}
 	}
 
