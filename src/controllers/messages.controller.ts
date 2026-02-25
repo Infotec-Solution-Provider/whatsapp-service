@@ -126,7 +126,7 @@ class MessagesController {
 		const { minDate, maxDate, userId, chatId, contactId } = req.query;
 
 		const hasDateFilters = minDate && maxDate;
-		const hasChatFilter = chatId !== undefined || contactId !== undefined;
+		const hasChatFilter = chatId|| contactId;
 
 		if (!hasDateFilters && !hasChatFilter) {
 			throw new BadRequestError("Min and Max date are required for multi-chats report!");
