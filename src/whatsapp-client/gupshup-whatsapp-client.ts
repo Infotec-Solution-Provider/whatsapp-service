@@ -83,17 +83,30 @@ class GupshupWhatsappClient implements WhatsappClient {
 			}
 
 			if ("publicFileUrl" in options) {
-				const urlKey = msgType === "image" ? "originalUrl" : "url";
-				logger.log("[Gupshup] Montando payload de mídia.", options.publicFileUrl);
-				msg.type = msgType;
-				msg[urlKey] = options.publicFileUrl.replace("https://inpulse", "https://lux");
+				const isPdf = "file" in options && options.file.mime_type.toLowerCase().includes("pdf");
 
-				if (options.text && !options.sendAsAudio && msgType !== "file") {
-					msg["caption"] = options.text;
+				if (isPdf) {
+					const pdfText = options.text ? `${options.text}\n\n${options.publicFileUrl}` : options.publicFileUrl;
+					msg.type = "text";
+					msg.text = pdfText;
+					msgType = "text";
+					options.text = pdfText;
+
+					data.append("message", JSON.stringify(msg));
+					logger.log("[Gupshup] Arquivo PDF detectado. Enviando como texto com link.", pdfText);
+				} else {
+					const urlKey = msgType === "image" ? "originalUrl" : "url";
+					logger.log("[Gupshup] Montando payload de mídia.", options.publicFileUrl);
+					msg.type = msgType;
+					msg[urlKey] = options.publicFileUrl.replace("https://inpulse", "https://lux");
+
+					if (options.text && !options.sendAsAudio && msgType !== "file") {
+						msg["caption"] = options.text;
+					}
+
+					data.append("message", JSON.stringify(msg));
+					logger.log("[Gupshup] Payload de mídia pronto.");
 				}
-
-				data.append("message", JSON.stringify(msg));
-				logger.log("[Gupshup] Payload de mídia pronto.");
 			} else {
 				if (!("text" in options)) {
 					logger.failed("Texto é obrigatório para mensagens de texto.");
