@@ -89,16 +89,6 @@ class GupshupWebhookQueueService {
     });
 
     try {
-      // Handle redirect for exatron instance
-      const redirectExatron = process.env["REDIRECT_EXATRON_GUPSHUP_WEBHOOK"] === "true";
-      if (item.instance === "exatron" && redirectExatron && !item.redirected) {
-        await this.redirectExatronWebhook(item.payload);
-        await prisma.gupshupWebhookQueue.update({
-          where: { id },
-          data: { redirected: true }
-        });
-      }
-
       // Process the webhook
       await gupshupService.handleWebhookEntry(item.instance, item.payload);
 
@@ -124,18 +114,6 @@ class GupshupWebhookQueueService {
         }
       });
     }
-  }
-
-  private async redirectExatronWebhook(payload: unknown): Promise<void> {
-    const exatronWebhookUrl = process.env["EXATRON_GUPSHUP_WEBHOOK_URL"];
-    if (!exatronWebhookUrl) {
-      throw new Error("Exatron webhook URL is not configured");
-    }
-    await fetch(exatronWebhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
   }
 
   private sleep(ms: number): Promise<void> {
