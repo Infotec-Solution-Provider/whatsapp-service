@@ -46,6 +46,10 @@ class GupshupWebhookQueueService {
   stopProcessor(): void {
     this.isProcessing = false;
     Logger.info("Stopping Gupshup webhook queue processor");
+
+    this.resetProcessingToPending().catch((err) => {
+      Logger.error("Error resetting PROCESSING items to PENDING on stop", err as Error);
+    });
   }
 
   private async processLoop(): Promise<void> {
@@ -66,6 +70,8 @@ class GupshupWebhookQueueService {
 
       await this.sleep(QUEUE_POLL_INTERVAL);
     }
+
+    await this.resetProcessingToPending();
   }
 
   private async getNextPendingItem() {
@@ -118,6 +124,22 @@ class GupshupWebhookQueueService {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async resetProcessingToPending(): Promise<void> {
+    const result = await prisma.gupshupWebhookQueue.updateMany({
+      where: {
+        status: GupshupWebhookQueueStatus.PROCESSING
+      },
+      data: {
+        status: GupshupWebhookQueueStatus.PENDING,
+        processingStartedAt: null
+      }
+    });
+
+    if (result.count > 0) {
+      Logger.info(`Reset ${result.count} Gupshup webhook queue items from PROCESSING to PENDING`);
+    }
   }
 
   /**
