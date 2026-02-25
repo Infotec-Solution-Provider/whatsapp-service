@@ -123,20 +123,25 @@ class MessagesController {
 	}
 
 	private fetchMessages = async (req: Request, res: Response) => {
-		const { minDate, maxDate, userId } = req.query;
+		const { minDate, maxDate, userId, chatId, contactId } = req.query;
 
-		if (!minDate || !maxDate) {
-			throw new BadRequestError("Min and Max date are required!");
+		const hasDateFilters = minDate && maxDate;
+		const hasChatFilter = chatId !== undefined || contactId !== undefined;
+
+		if (!hasDateFilters && !hasChatFilter) {
+			throw new BadRequestError("Min and Max date are required for multi-chats report!");
 		}
 
-		if (typeof minDate !== "string" || typeof maxDate !== "string") {
+		if (hasDateFilters && (typeof minDate !== "string" || typeof maxDate !== "string")) {
 			throw new BadRequestError("Min and Max date must be strings!");
 		}
 
 		const messages = await messagesService.fetchMessages(req.session, {
 			minDate: String(minDate),
 			maxDate: String(maxDate),
-			userId: userId ? Number(userId) : null
+			userId: userId ? Number(userId) : null,
+			chatId: chatId ? Number(chatId) : null,
+			contactId: contactId ? Number(contactId) : null
 		});
 
 		res.status(200).send({

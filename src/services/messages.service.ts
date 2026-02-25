@@ -12,9 +12,11 @@ import localSyncService from "./local-sync.service";
 import { safeEncode } from "../utils/safe-encode";
 
 interface FetchMessagesFilter {
-	minDate: string;
-	maxDate: string;
+	minDate?: string;
+	maxDate?: string;
 	userId?: number | null;
+	chatId?: number | null;
+	contactId?: number | null;
 }
 
 interface EditMessageOptions {
@@ -143,13 +145,71 @@ class MessagesService {
 	}
 
 	public async fetchMessages(session: SessionData, filters: FetchMessagesFilter) {
-		// Garante que a data mínima comece em 00:00:00
-		const minDate = new Date(filters.minDate);
+		const minDate = new Date(filters.minDate || "2000-01-01");
 		minDate.setHours(0, 0, 0, 0);
 
-		// Garante que a data máxima termine em 23:59:59
-		const maxDate = new Date(filters.maxDate);
+		const maxDate = new Date(filters.maxDate || "2099-12-31");
 		maxDate.setHours(23, 59, 59, 999);
+
+		if (filters.userId) {
+			const chats = await prismaService.wppChat.findMany({
+				where: {
+					instance: session.instance,
+					userId: filters.userId,
+				}
+			});
+
+			const contactIds: number[] = [];
+			chats.forEach(chat => {
+				if (chat.contactId) {
+					contactIds.push(chat.contactId);
+				}
+			});
+
+			const messages = await prismaService.wppMessage.findMany({
+				where: {
+					instance: session.instance,
+					sentAt: {
+						gte: minDate,
+						lte: maxDate
+					},
+					contactId: {
+						in: contactIds,
+					},
+				},
+				include: {
+					WppContact: true
+				}
+			});
+
+			return messages;
+		}
+		if (filters.chatId) {
+			const messages = await prismaService.wppMessage.findMany({
+				where: {
+					instance: session.instance,
+					chatId: filters.chatId,
+				},
+				include: {
+					WppContact: true
+				}
+			});
+
+			return messages;
+		}
+		if (filters.contactId) {
+			const messages = await prismaService.wppMessage.findMany({
+				where: {
+					instance: session.instance,
+					contactId: filters.contactId,
+				},
+				include: {
+					WppContact: true
+				}
+			});
+
+			return messages;
+		}
 
 		const messages = await prismaService.wppMessage.findMany({
 			where: {
@@ -158,7 +218,6 @@ class MessagesService {
 					gte: minDate,
 					lte: maxDate
 				},
-				...(filters.userId ? { userId: Number(filters.userId) } : {})
 			},
 			include: {
 				WppContact: true
