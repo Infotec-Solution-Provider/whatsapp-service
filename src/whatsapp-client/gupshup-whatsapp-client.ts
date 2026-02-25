@@ -83,9 +83,9 @@ class GupshupWhatsappClient implements WhatsappClient {
 			}
 
 			if ("publicFileUrl" in options) {
-				const isPdf = "file" in options && options.file.mime_type.toLowerCase().includes("pdf");
+				const isDocument = msgType === "file";
 
-				if (isPdf) {
+				if (isDocument) {
 					const pdfText = options.text ? `${options.text}\n\n${options.publicFileUrl}` : options.publicFileUrl;
 					msg.type = "text";
 					msg.text = pdfText;
