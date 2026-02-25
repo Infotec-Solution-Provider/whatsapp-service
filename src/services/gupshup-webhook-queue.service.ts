@@ -119,7 +119,7 @@ class GupshupWebhookQueueService {
         data: {
           status: shouldRetry ? GupshupWebhookQueueStatus.PENDING : GupshupWebhookQueueStatus.FAILED,
           retryCount: newRetryCount,
-          error: err?.message || "Unknown error",
+          error: JSON.stringify({ message: err?.message, stack: err?.stack }),
           processedAt: shouldRetry ? null : new Date()
         }
       });
