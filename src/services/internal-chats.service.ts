@@ -29,8 +29,8 @@ interface ChatsFilters {
 }
 
 interface InternalSendMessageData {
-	sendAsAudio?: string;
-	sendAsDocument?: string;
+	sendAsAudio?: string | boolean;
+	sendAsDocument?: string | boolean;
 	quotedId?: string | null;
 	chatId: string;
 	text: string;
@@ -363,6 +363,8 @@ class InternalChatsService {
 	// Envia uma mensagem no chat interno
 	public async sendMessage(session: SessionData, data: InternalSendMessageData) {
 		const { file, ...logData } = data;
+		const sendAsAudio = data.sendAsAudio === true || data.sendAsAudio === "true";
+		const sendAsDocument = data.sendAsDocument === true || data.sendAsDocument === "true";
 
 		const process = new ProcessingLogger(
 			session.instance,
@@ -375,7 +377,7 @@ class InternalChatsService {
 			`Iniciando envio de mensagem interna. Usuário: ${session.userId} (${session.name}), Chat ID: ${data.chatId}`
 		);
 		process.log(
-			`Dados da requisição - Tipo de mensagem: ${data.sendAsAudio ? "áudio" : data.sendAsDocument ? "documento" : "texto"}, Com arquivo: ${!!file}, Com citação: ${!!data.quotedId}, Menções: ${data.mentions?.length || 0}`
+			`Dados da requisição - Tipo de mensagem: ${sendAsAudio ? "áudio" : sendAsDocument ? "documento" : "texto"}, Com arquivo: ${!!file}, Com citação: ${!!data.quotedId}, Menções: ${data.mentions?.length || 0}`
 		);
 
 		try {
@@ -445,7 +447,7 @@ class InternalChatsService {
 					`Processando arquivo anexado: ${data.file.originalname} (${data.file.size} bytes, mime: ${data.file.mimetype})`
 				);
 
-				if (data.sendAsAudio) {
+				if (sendAsAudio) {
 					process.log(
 						`Convertendo arquivo para áudio compatível (extensão: ${data.file.originalname.split(".").pop()})`
 					);
@@ -484,7 +486,7 @@ class InternalChatsService {
 				message.fileName = file.name;
 				message.fileType = file.mime_type;
 				message.fileSize = String(file.size);
-				message.type = getMessageType(file.mime_type, !!data.sendAsAudio, !!data.sendAsDocument);
+				message.type = getMessageType(file.mime_type, sendAsAudio, sendAsDocument);
 			}
 
 			process.log(`Salvando mensagem no banco de dados do chat ID: ${data.chatId}`);
@@ -843,6 +845,8 @@ class InternalChatsService {
 				const fileData = await filesService.fetchFileMetadata(message.fileId);
 				const fileUrl = filesService.getFileDownloadUrl(message.fileId);
 				process.log(`URL do arquivo gerada: ${fileUrl}`);
+				const sendAsAudio = data.sendAsAudio === true || data.sendAsAudio === "true";
+				const sendAsDocument = data.sendAsDocument === true || data.sendAsDocument === "true";
 
 				process.log(`Enviando mensagem com arquivo para grupo ${groupId}`);
 				const result = await client.sendMessage(
@@ -853,8 +857,8 @@ class InternalChatsService {
 						publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${session.instance}/files/${fileData.public_id}`,
 						to: groupId,
 						quotedId: data.quotedId || null,
-						sendAsAudio: data.sendAsAudio === "true",
-						sendAsDocument: data.sendAsDocument === "true",
+						sendAsAudio,
+						sendAsDocument,
 						text,
 						mentions: waMentions
 					},

@@ -189,12 +189,20 @@ class WhatsappService {
 	}
 
 	public async sendMessage(session: SessionData, clientId: number, to: string, data: SendMessageData) {
-		if (typeof data.sendAsDocument === 'string') {
-			data.sendAsDocument = data.sendAsDocument === 'true';
-		}
-		if (typeof data.sendAsAudio === 'string') {
-			data.sendAsAudio = data.sendAsAudio === 'true';
-		}
+		const parseBoolean = (value: unknown): boolean => {
+			if (typeof value === "boolean") {
+				return value;
+			}
+
+			if (typeof value === "string") {
+				return value.trim().toLowerCase() === "true";
+			}
+
+			return false;
+		};
+
+		data.sendAsDocument = parseBoolean(data.sendAsDocument);
+		data.sendAsAudio = parseBoolean(data.sendAsAudio);
 
 		const process = new ProcessingLogger(session.instance, "send-message", `${to}-${Date.now()}`, data);
 		let pendingMsg: WppMessage | null = null;
@@ -257,15 +265,19 @@ class WhatsappService {
 					file: fileData,
 					localFileUrl: filesService.getFileDownloadUrl(data.fileId),
 					publicFileUrl,
-					sendAsAudio: !!data.sendAsAudio,
-					sendAsDocument: !!data.sendAsDocument,
+					sendAsAudio: data.sendAsAudio === true,
+					sendAsDocument: data.sendAsDocument === true,
 				};
 
 				message.fileId = +data.fileId;
 				message.fileName = fileData.name;
 				message.fileType = fileData.mime_type;
 				message.fileSize = String(fileData.size);
-				message.type = getMessageType(fileData.mime_type, !!data.sendAsAudio, !!data.sendAsDocument);
+				message.type = getMessageType(
+					fileData.mime_type,
+					data.sendAsAudio === true,
+					data.sendAsDocument === true
+				);
 				process.log("Arquivo processado com sucesso.", message);
 			}
 
