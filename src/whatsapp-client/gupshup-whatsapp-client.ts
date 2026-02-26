@@ -41,7 +41,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 
 	private getSendType(options: SendMessageOptions): "text" | "image" | "video" | "audio" | "file" {
 		if ("file" in options) {
-			if (options.sendAsAudio && options.file.mime_type.startsWith("audio/")) {
+			if (options.file.mime_type.startsWith("audio/")) {
 				return "audio";
 			}
 
