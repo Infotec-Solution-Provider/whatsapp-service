@@ -95,8 +95,10 @@ class GupshupWhatsappClient implements WhatsappClient {
 					data.append("message", JSON.stringify(msg));
 					logger.log("[Gupshup] Arquivo PDF detectado. Enviando como texto com link.", pdfText);
 				} else {
+					const urlKey = msgType === "image" ? "originalUrl" : "url";
 					logger.log("[Gupshup] Montando payload de mídia.", options.publicFileUrl);
 					msg.type = msgType;
+					msg[urlKey] = options.publicFileUrl
 
 					if (options.text && !options.sendAsAudio && msgType !== "file") {
 						msg["caption"] = options.text;
