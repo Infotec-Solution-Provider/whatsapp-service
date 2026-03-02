@@ -643,7 +643,7 @@ class ChatsService {
 
 				if (newScheduleDate instanceof Date) {
 					logger.log(`Nova data de agendamento calculada: ${newScheduleDate.toISOString()}. Atualizando campanha com nova data.`);
-					updateQuery = updateQuery + `, DATA_AGENDAMENTO = ?`;
+					updateQuery = updateQuery + `, DT_AGENDAMENTO = ?`;
 					params.push(formatDateForMySQL(newScheduleDate));
 				}
 
