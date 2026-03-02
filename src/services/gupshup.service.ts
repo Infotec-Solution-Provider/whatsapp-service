@@ -141,7 +141,10 @@ class GupshupService {
 					logger.processName = logger.processName + "/status";
 					logger.log("processando status de mensagem recebida");
 					const status = GUPSHUPMessageParser.parseStatus(entry.data);
-					await mdservice.processMessageStatusGS(entry.data.gs_id, entry.data.meta_msg_id, status);
+					await mdservice.processMessageStatusGS(entry.data.gs_id, entry.data.meta_msg_id, status, {
+						statusTimestamp: entry.data.timestamp,
+						throwIfNotFound: true
+					});
 
 					if ("errors" in entry.data && entry.data.errors[0]) {
 						const error = entry.data.errors[0];

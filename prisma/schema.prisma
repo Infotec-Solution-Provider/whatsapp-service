@@ -74,6 +74,7 @@ model WppMessage {
   isEdited         Boolean          @default(false) @map("is_edited")
   body             String
   timestamp        String
+  statusTimestamp  String?          @map("status_timestamp")
   sentAt           DateTime         @map("sent_at")
   status           WppMessageStatus
   fileId           Int?             @map("file_id")

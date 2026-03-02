@@ -31,9 +31,132 @@ import socketService from "./socket.service";
 import whatsappService from "./whatsapp.service";
 import botsRegistry from "../bots/bots-registry";
 
+type MessageStatusProvider = "wwebjs" | "waba";
+
+interface ProcessMessageStatusOptions {
+	statusTimestamp?: string | number | Date | null;
+	throwIfNotFound?: boolean;
+}
+
+interface MessageStatusLookupRow {
+	id: number;
+	instance: string;
+	chatId: number | null;
+	contactId: number | null;
+	status: WppMessageStatus;
+	statusTimestamp: string | null;
+}
+
+class MessageStatusTargetNotFoundError extends Error {
+	constructor(public readonly provider: MessageStatusProvider | "gupshup", public readonly externalId: string) {
+		super(`Mensagem não encontrada para atualização de status (${provider}:${externalId})`);
+		this.name = "MessageStatusTargetNotFoundError";
+	}
+}
+
 
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
+
+	private getStatusPriority(status: WppMessageStatus): number {
+		switch (status) {
+			case "PENDING":
+				return 0;
+			case "SENT":
+				return 1;
+			case "RECEIVED":
+				return 2;
+			case "READ":
+				return 3;
+			case "DOWNLOADED":
+				return 4;
+			case "ERROR":
+				return 5;
+			case "REVOKED":
+				return 6;
+			default:
+				return -1;
+		}
+	}
+
+	private normalizeStatusTimestamp(input?: string | number | Date | null): number | null {
+		if (input === null || input === undefined) {
+			return null;
+		}
+
+		if (input instanceof Date) {
+			const dateValue = input.getTime();
+			return Number.isNaN(dateValue) ? null : dateValue;
+		}
+
+		if (typeof input === "number") {
+			if (!Number.isFinite(input)) {
+				return null;
+			}
+			return input < 1e12 ? Math.trunc(input * 1000) : Math.trunc(input);
+		}
+
+		const trimmed = input.trim();
+		if (!trimmed) {
+			return null;
+		}
+
+		if (/^\d+$/.test(trimmed)) {
+			const asNumber = Number(trimmed);
+			if (!Number.isFinite(asNumber)) {
+				return null;
+			}
+			return trimmed.length <= 10 ? Math.trunc(asNumber * 1000) : Math.trunc(asNumber);
+		}
+
+		const parsedDate = Date.parse(trimmed);
+		return Number.isNaN(parsedDate) ? null : parsedDate;
+	}
+
+	private shouldApplyStatus(
+		currentStatus: WppMessageStatus,
+		incomingStatus: WppMessageStatus,
+		currentTimestamp: number | null,
+		incomingTimestamp: number | null
+	): boolean {
+		if (incomingTimestamp !== null && currentTimestamp !== null) {
+			if (incomingTimestamp > currentTimestamp) {
+				return true;
+			}
+			if (incomingTimestamp < currentTimestamp) {
+				return false;
+			}
+		}
+
+		if (incomingTimestamp !== null && currentTimestamp === null) {
+			return true;
+		}
+
+		const currentPriority = this.getStatusPriority(currentStatus);
+		const incomingPriority = this.getStatusPriority(incomingStatus);
+
+		return incomingPriority >= currentPriority;
+	}
+
+	private async getMessageForStatus(provider: MessageStatusProvider, externalId: string): Promise<MessageStatusLookupRow | null> {
+		const idColumn = provider === "waba" ? "waba_id" : "wwebjs_id";
+
+		const rows = await prismaService.$queryRawUnsafe<MessageStatusLookupRow[]>(
+			`SELECT
+				id,
+				instance,
+				chat_id AS chatId,
+				contact_id AS contactId,
+				status,
+				status_timestamp AS statusTimestamp
+			 FROM messages
+			 WHERE ${idColumn} = ?
+			 LIMIT 1`,
+			externalId
+		);
+
+		return rows[0] || null;
+	}
 
 	public async getFlow(instance: string, sectorId: number): Promise<MessageFlow> {
 		const flowKey = `${instance}:${sectorId}`;
@@ -465,46 +588,96 @@ class MessagesDistributionService {
 		return insertedMsg;
 	}
 
-	public async processMessageStatus(type: "wwebjs" | "waba", id: string, status: WppMessageStatus) {
+	public async processMessageStatus(
+		type: MessageStatusProvider,
+		id: string,
+		status: WppMessageStatus,
+		options?: ProcessMessageStatusOptions
+	) {
 		try {
-			const message = await prismaService.wppMessage.update({
-				where: {
-					[(type + "Id") as "wwebjsId"]: id
-				},
-				data: {
-					status
-				}
-			});
+			const message = await this.getMessageForStatus(type, id);
 
-			if (message.chatId === null) {
+			if (!message) {
+				if (options?.throwIfNotFound) {
+					throw new MessageStatusTargetNotFoundError(type, id);
+				}
+				return;
+			}
+
+			const incomingTimestamp = this.normalizeStatusTimestamp(options?.statusTimestamp);
+			const currentTimestamp = this.normalizeStatusTimestamp(message.statusTimestamp);
+
+			if (!this.shouldApplyStatus(message.status, status, currentTimestamp, incomingTimestamp)) {
+				return;
+			}
+
+			const nextStatusTimestamp = incomingTimestamp !== null
+				? String(incomingTimestamp)
+				: message.statusTimestamp;
+
+			await prismaService.$executeRawUnsafe(
+				`UPDATE messages
+				 SET
+					status = ?,
+					status_timestamp = ?
+				 WHERE id = ?`,
+				status,
+				nextStatusTimestamp,
+				message.id
+			);
+
+			if (message.chatId === null || message.contactId === null) {
 				return;
 			}
 
 			const chatRoom: SocketServerChatRoom = `${message.instance}:chat:${message.chatId}`;
 			socketService.emit(SocketEventType.WppMessageStatus, chatRoom, {
 				messageId: message.id,
-				contactId: message.contactId!,
+				contactId: message.contactId,
 				status
 			});
 		} catch (err) {
+			if (options?.throwIfNotFound && err instanceof MessageStatusTargetNotFoundError) {
+				throw err;
+			}
 			console.log("Não foi possível atualizar a mensagem de id: " + id);
 		}
 	}
 
-	public async processMessageStatusGS(gs_id: string, id: string, status: WppMessageStatus) {
+	public async processMessageStatusGS(
+		gs_id: string,
+		id: string,
+		status: WppMessageStatus,
+		options?: ProcessMessageStatusOptions
+	) {
 		const logger = new ProcessingLogger("", "gs-message-status", `gs:${gs_id}`, { gs_id, meta_msg_id: id, status });
 
 		try {
 			logger.log("Iniciando atualização de status Gupshup/META", { gs_id, meta_msg_id: id, status });
 
-			const findMsg = await prismaService.wppMessage.findFirst({
-				where: {
-					OR: [{ gupshupId: gs_id }, { wabaId: id }]
-				}
-			});
+			const rows = await prismaService.$queryRawUnsafe<MessageStatusLookupRow[]>(
+				`SELECT
+					id,
+					instance,
+					chat_id AS chatId,
+					contact_id AS contactId,
+					status,
+					status_timestamp AS statusTimestamp
+				 FROM messages
+				 WHERE gupshup_id = ? OR waba_id = ?
+				 ORDER BY id DESC
+				 LIMIT 1`,
+				gs_id,
+				id
+			);
+
+			const findMsg = rows[0] || null;
 
 			if (!findMsg) {
 				logger.log("Mensagem não encontrada para atualizar status", { triedKeys: [gs_id, id] });
+				if (options?.throwIfNotFound) {
+					throw new MessageStatusTargetNotFoundError("gupshup", gs_id || id);
+				}
 				return;
 			}
 
@@ -514,33 +687,54 @@ class MessagesDistributionService {
 				hasChat: findMsg.chatId !== null
 			});
 
-			const updatedMsg = await prismaService.wppMessage.update({
-				where: {
-					id: findMsg.id
-				},
-				data: {
-					status,
-					wabaId: id,
-					gupshupId: gs_id
-				}
-			});
+			const incomingTimestamp = this.normalizeStatusTimestamp(options?.statusTimestamp);
+			const currentTimestamp = this.normalizeStatusTimestamp(findMsg.statusTimestamp);
+
+			if (!this.shouldApplyStatus(findMsg.status, status, currentTimestamp, incomingTimestamp)) {
+				logger.log("Status recebido é mais antigo que o persistido. Ignorando atualização.", {
+					currentStatus: findMsg.status,
+					incomingStatus: status,
+					currentTimestamp,
+					incomingTimestamp
+				});
+				return;
+			}
+
+			const nextStatusTimestamp = incomingTimestamp !== null
+				? String(incomingTimestamp)
+				: findMsg.statusTimestamp;
+
+			await prismaService.$executeRawUnsafe(
+				`UPDATE messages
+				 SET
+					status = ?,
+					waba_id = ?,
+					gupshup_id = ?,
+					status_timestamp = ?
+				 WHERE id = ?`,
+				status,
+				id,
+				gs_id,
+				nextStatusTimestamp,
+				findMsg.id
+			);
 
 			logger.log("Status da mensagem atualizado", {
-				dbId: updatedMsg.id,
-				newStatus: updatedMsg.status,
-				chatId: updatedMsg.chatId
+				dbId: findMsg.id,
+				newStatus: status,
+				chatId: findMsg.chatId
 			});
 
-			if (updatedMsg.chatId === null) {
+			if (findMsg.chatId === null || findMsg.contactId === null) {
 				logger.log("Mensagem sem chat associado após update. Encerrando fluxo.");
 				logger.success("Processo concluído (sem socket emit).");
 				return;
 			}
 
-			const chatRoom: SocketServerChatRoom = `${updatedMsg.instance}:chat:${updatedMsg.chatId}`;
+			const chatRoom: SocketServerChatRoom = `${findMsg.instance}:chat:${findMsg.chatId}`;
 			socketService.emit(SocketEventType.WppMessageStatus, chatRoom, {
-				messageId: updatedMsg.id,
-				contactId: updatedMsg.contactId!,
+				messageId: findMsg.id,
+				contactId: findMsg.contactId,
 				status
 			});
 

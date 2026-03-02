@@ -6,6 +6,7 @@ import wabaService from "./waba.service";
 
 const QUEUE_POLL_INTERVAL = parseInt(process.env["WABA_WEBHOOK_QUEUE_POLL_INTERVAL"] || "1000", 10);
 const MAX_CONCURRENT_PROCESSING = parseInt(process.env["WABA_WEBHOOK_MAX_CONCURRENT"] || "5", 10);
+const MAX_RETRIES = parseInt(process.env["WABA_WEBHOOK_MAX_RETRIES"] || "30", 10);
 
 const WABA_QUEUE_STATUS = {
 	PENDING: "PENDING",
@@ -36,11 +37,12 @@ class WABAWebhookQueueService {
 		await prismaService.$executeRawUnsafe(
 			`INSERT INTO waba_webhook_queue (
 				id, instance, payload, status, retry_count, max_retries, created_at, updated_at
-			) VALUES (?, ?, CAST(? AS JSON), ?, 0, 3, NOW(3), NOW(3))`,
+			) VALUES (?, ?, CAST(? AS JSON), ?, 0, ?, NOW(3), NOW(3))`,
 			id,
 			instance,
 			payloadJson,
-			WABA_QUEUE_STATUS.PENDING
+			WABA_QUEUE_STATUS.PENDING,
+			MAX_RETRIES
 		);
 
 		return id;

@@ -145,7 +145,10 @@ class WABAService {
 					logger.processName += "/status";
 					logger.log("Processando status WABA");
 					const status = WABAMessageParser.parseStatus(validated.data);
-					await messagesDistributionService.processMessageStatus("waba", validated.data.id, status);
+					await messagesDistributionService.processMessageStatus("waba", validated.data.id, status, {
+						statusTimestamp: validated.data.timestamp,
+						throwIfNotFound: true
+					});
 
 					if (validated.data.errors && validated.data.errors[0]) {
 						const error = validated.data.errors[0];
