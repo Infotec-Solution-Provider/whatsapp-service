@@ -236,6 +236,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 				} : {})
 			}
 
+			console.log(`URL: ${this.clientUrl}/api/send-message`, options);
 			const response = await axios.post<MessageDto>(`${this.clientUrl}/api/send-message`, options);
 
 			if (!response.data) {

@@ -1,4 +1,4 @@
-import { WppChatPriority, WppChatType, WppContact } from "@prisma/client";
+import { WppChatPriority, WppChatType, WppContact, WppMessage } from "@prisma/client";
 import ProcessingLogger from "../../utils/processing-logger";
 import { Customer } from "@in.pulse-crm/sdk";
 
@@ -38,6 +38,7 @@ export interface StepConfig {
 }
 
 export interface StepContext {
+	message: WppMessage;
 	contact: WppContact;
 	logger: ProcessingLogger;
 	instance?: string;

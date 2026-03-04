@@ -1,13 +1,13 @@
 import ProcessingLogger from "../utils/processing-logger";
 
-import { WppContact } from "@prisma/client";
+import { WppContact, WppMessage } from "@prisma/client";
 import { BaseStep, ChatPayload, StepContext, StepResult } from "./base/base.step";
 
 export default class MessageFlow {
 	private steps: Map<number, BaseStep> = new Map(); // Map<stepNumber, BaseStep>
 	private activeFlows: Map<number, Promise<ChatPayload>> = new Map();
 
-	public async getChatPayload(logger: ProcessingLogger, contact: WppContact): Promise<ChatPayload> {
+	public async getChatPayload(logger: ProcessingLogger, contact: WppContact, message: WppMessage): Promise<ChatPayload> {
 		logger.log("╔═══════════════════════════════════════════════════════════");
 		logger.log("║ INICIANDO PROCESSAMENTO DE FLUXO");
 		logger.log(`║ Contato: ${contact.name || contact.phone} (ID: ${contact.id})`);
@@ -20,7 +20,7 @@ export default class MessageFlow {
 			return ongoingFlow;
 		}
 
-		const newFlow = this.processFlow(logger, contact);
+		const newFlow = this.processFlow(logger, contact, message);
 		this.activeFlows.set(contact.id, newFlow);
 
 		try {
@@ -39,10 +39,10 @@ export default class MessageFlow {
 		return null;
 	}
 
-	private async processFlow(logger: ProcessingLogger, contact: WppContact): Promise<ChatPayload> {
+	private async processFlow(logger: ProcessingLogger, contact: WppContact, message: WppMessage): Promise<ChatPayload> {
 		try {
 			let currentStepNumber = 1; // Começa sempre na etapa #1
-			let context: StepContext = { logger, contact };
+			let context: StepContext = { logger, contact, message };
 			let iterationCount = 0;
 			const maxIterations = 50; // Proteção contra loops infinitos
 

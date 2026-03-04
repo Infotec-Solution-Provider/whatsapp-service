@@ -275,6 +275,7 @@ class MessagesDistributionService {
 		instance: string,
 		sectors: WppSector[],
 		contact: WppContact,
+		message: WppMessage,
 		logger: ProcessingLogger,
 		skipBotCheck: boolean = false
 	): Promise<{ chat: WppChat; systemMessage: string | null }> {
@@ -340,7 +341,7 @@ class MessagesDistributionService {
 		// Sem bot: usa MessageFlow normal (atribui atendente)
 		logger.log("Nenhum bot ativo. Usando MessageFlow para atribuir atendente.");
 		const flow = await this.getFlow(instance, sectors[0]!.id);
-		const result = await flow.getChatPayload(logger, contact);
+		const result = await flow.getChatPayload(logger, contact, message);
 		const { systemMessage, ...chatData } = result;
 
 		const chat = await prismaService.wppChat.create({
@@ -383,7 +384,7 @@ class MessagesDistributionService {
 			// 4. Cria novo chat
 			logger.log("Nenhum chat encontrado para o contato.");
 			const sectors = await this.getSectors(clientId);
-			const { chat: newChat, systemMessage } = await this.createNewChat(instance, sectors, contact, logger);
+			const { chat: newChat, systemMessage } = await this.createNewChat(instance, sectors, contact, msg, logger);
 
 			if (!newChat) {
 				throw new Error("Nenhum chat foi criado.");
@@ -444,7 +445,7 @@ class MessagesDistributionService {
 		await this.processMessage(instance, clientId, message, contactName);
 	}
 
-	public async transferChatSector(sector: WppSector, contact: WppContact, chat: WppChat) {
+	public async transferChatSector(sector: WppSector, contact: WppContact, chat: WppChat, message: WppMessage) {
 		const logger = new ProcessingLogger(
 			sector.instance,
 			"transfer-chat-sector",
@@ -454,7 +455,7 @@ class MessagesDistributionService {
 
 		try {
 			const flow = await this.getFlow(sector.instance, sector.id);
-			const data = await flow.getChatPayload(logger, contact);
+			const data = await flow.getChatPayload(logger, contact, message);
 			const updatedChat = await prismaService.wppChat.update({
 				where: { id: chat.id },
 				data: { ...data, botId: null }
@@ -471,7 +472,7 @@ class MessagesDistributionService {
 		}
 	}
 
-	public async transferChatOperator(sector: WppSector, operador: User, contact: WppContact, chat: WppChat) {
+	public async transferChatOperator(sector: WppSector, operador: User, contact: WppContact, chat: WppChat, message: WppMessage) {
 		const logger = new ProcessingLogger(
 			sector.instance,
 			"transfer-chat-operator",
@@ -481,7 +482,7 @@ class MessagesDistributionService {
 
 		try {
 			const flow = await this.getFlow(sector.instance, sector.id);
-			const data = await flow.getChatPayload(logger, contact);
+			const data = await flow.getChatPayload(logger, contact, message);
 
 			const updatedChat = await prismaService.wppChat.update({
 				where: { id: chat.id },
