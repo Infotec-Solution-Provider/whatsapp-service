@@ -20,6 +20,8 @@
 		"start:all": "powershell -ExecutionPolicy Bypass -File scripts/start-all-services.ps1",
 		"sync:local": "ts-node src/scripts/sync-local.ts",
 		"sync:local:instance": "ts-node src/scripts/sync-local.ts",
+		"fix:messages:chat-contact": "ts-node src/routines/fix-messages-chat-contact.routine.ts",
+		"fix:messages:chat-contact:apply": "ts-node src/routines/fix-messages-chat-contact.routine.ts --apply",
 		"redis:start": "bash scripts/redis.sh start",
 		"redis:stop": "bash scripts/redis.sh stop",
 		"redis:restart": "bash scripts/redis.sh restart",
