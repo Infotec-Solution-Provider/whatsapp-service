@@ -1,6 +1,5 @@
 import { Logger } from "@in.pulse-crm/utils";
 import { WppChat, WppMessage } from "@prisma/client";
-import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
 
 interface FixOptions {
@@ -27,6 +26,7 @@ interface FixStats {
 type ContactMap = Map<string, number>;
 type ChatByIdMap = Map<number, WppChat>;
 type ChatTimelineCache = Map<string, WppChat[]>;
+type MessageCandidate = Pick<WppMessage, "id" | "instance" | "from" | "to" | "sentAt" | "contactId" | "chatId">;
 
 const MIN_SENT_AT = new Date("2026-03-01T00:00:00.000Z");
 
@@ -34,7 +34,7 @@ function normalizeDigits(value: string): string {
 	return value.replace(/\D/g, "");
 }
 
-function extractPhoneCandidate(message: Pick<WppMessage, "from" | "to">): string | null {
+function extractPhoneCandidate(message: Pick<MessageCandidate, "from" | "to">): string | null {
 	const isFromMe = message.from.startsWith("me:");
 	const raw = isFromMe ? message.to : message.from;
 	const digits = normalizeDigits(raw || "");
@@ -174,7 +174,7 @@ async function getChatTimeline(cache: ChatTimelineCache, instance: string, conta
 }
 
 async function resolveMissingRelations(
-	message: WppMessage,
+	message: MessageCandidate,
 	contactMap: ContactMap,
 	chatById: ChatByIdMap,
 	chatTimelineCache: ChatTimelineCache
@@ -247,6 +247,15 @@ async function fixMessagesForInstance(instance: string, options: ResolvedFixOpti
 				sentAt: { gte: MIN_SENT_AT },
 				OR: [{ chatId: null }, { contactId: null }]
 			},
+			select: {
+				id: true,
+				instance: true,
+				from: true,
+				to: true,
+				sentAt: true,
+				contactId: true,
+				chatId: true
+			},
 			orderBy: { id: "asc" },
 			take
 		});
@@ -286,13 +295,22 @@ async function fixMessagesForInstance(instance: string, options: ResolvedFixOpti
 					updatePayload.chatId = resolved.chatId;
 				}
 
-				await messagesService.updateMessage(message.id, updatePayload);
+				await prismaService.wppMessage.update({
+					where: { id: message.id },
+					data: updatePayload
+				});
 
 				stats.fixed++;
 			} catch (err: any) {
 				stats.failed++;
 				Logger.error(
 					`[fix-messages-chat-contact] Erro ao processar message=${message.id} instance=${instance}: ${String(err?.message || err)}`
+				);
+			}
+
+			if (stats.processed % 500 === 0) {
+				Logger.info(
+					`[fix-messages-chat-contact] Progresso ${instance}: processadas=${stats.processed}, corrigidas=${stats.fixed}, puladas=${stats.skipped}, falhas=${stats.failed}`
 				);
 			}
 		}
