@@ -239,7 +239,7 @@ class CustomerLinkingBot {
 	}
 
 	/** Transfere para atendimento humano */
-	private async transferToHuman(chat: WppChat, logger: ProcessingLogger) {
+	private async transferToHuman(chat: WppChat, logger: ProcessingLogger, message?: WppMessage) {
 		try {
 			logger?.log("Transferindo para atendimento humano");
 
@@ -251,12 +251,27 @@ class CustomerLinkingBot {
 
 			const sector = await prismaService.wppSector.findUniqueOrThrow({ where: { id: chat.sectorId! } });
 			const contact = await prismaService.wppContact.findUniqueOrThrow({ where: { id: chat.contactId! } });
+			const transferMessage =
+				message ||
+				(await prismaService.wppMessage.findFirst({
+					where: { chatId: chat.id },
+					orderBy: { id: "desc" }
+				})) ||
+				(await prismaService.wppMessage.findFirst({
+					where: { instance: chat.instance, contactId: contact.id },
+					orderBy: { id: "desc" }
+				}));
+
+			if (!transferMessage) {
+				throw new Error(`Nenhuma mensagem encontrada para transferir o chat ${chat.id}`);
+			}
 
 			await chatsService.systemFinishChatById(chat.id, "Transferido para atendimento humano");
 			const { chat: newChat } = await messagesDistributionService.createNewChat(
 				chat.instance,
 				[sector],
 				contact,
+				transferMessage,
 				logger,
 				true
 			);
@@ -415,7 +430,7 @@ class CustomerLinkingBot {
 		session.lastActivity = Date.now();
 		store.scheduleSave(() => this.sessions.values());
 
-		await this.transferToHuman(chat, logger);
+		await this.transferToHuman(chat, logger, message);
 		this.remove(chat.id);
 
 		logger.success({ step: session.step, customerId, linked: true, transferredToHuman: true });
@@ -436,7 +451,7 @@ class CustomerLinkingBot {
 		session.lastActivity = Date.now();
 		store.scheduleSave(() => this.sessions.values());
 
-		await this.transferToHuman(chat, logger);
+		await this.transferToHuman(chat, logger, message);
 		this.remove(chat.id);
 
 		logger.success({ step: session.step, customerNotFound: true });

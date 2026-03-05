@@ -98,7 +98,7 @@ class ChooseSellerBot {
 						quotedId: message.id
 					});
 
-					await messagesDistributionService.transferChatOperator(sector, user, contact, chat);
+					await messagesDistributionService.transferChatOperator(sector, user, contact, chat, message);
 
 					this.remove(chat.id.toString());
 					break;
@@ -120,7 +120,7 @@ class ChooseSellerBot {
 						nextStepNumber: 1
 					});
 
-					const result = await step.run({ contact, logger });
+					const result = await step.run({ contact, logger, message });
 					const users = await instancesService.executeQuery<User[]>(chat.instance, `SELECT * FROM users`, []);
 					const sector = await prismaService.wppSector.findUniqueOrThrow({
 						where: {
@@ -150,7 +150,7 @@ class ChooseSellerBot {
 						quotedId: message.id
 					});
 
-					await messagesDistributionService.transferChatOperator(sector, user, contact, chat);
+					await messagesDistributionService.transferChatOperator(sector, user, contact, chat, message);
 
 					this.remove(chat.id.toString());
 					break;

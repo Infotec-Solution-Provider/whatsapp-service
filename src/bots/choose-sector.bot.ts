@@ -152,7 +152,7 @@ class ChooseSectorBot {
 					const operatoranswer = `*${chooseOp.NOME}*: Olá, em que posso ajudar?`;
 
 					this.removeRunningStep(chat.id);
-					await messagesDistributionService.transferChatOperator(sector, chooseOp, contact, chat);
+					await messagesDistributionService.transferChatOperator(sector, chooseOp, contact, chat, message);
 					whatsappService.sendBotMessage(message.from, message.clientId!, {
 						chat,
 						text: answer

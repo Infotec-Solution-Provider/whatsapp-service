@@ -9,6 +9,7 @@ interface FlowExecutionRequest {
   instance: string;
   sectorId: number;
   contactId: number;
+  messageId?: number;
 }
 
 interface FlowExecutionResponse {
@@ -34,7 +35,7 @@ class FlowExecutionController {
     const logger = new ProcessingLogger("", "flow-execution", `flow-exec-${Date.now()}`, req.body);
 
     try {
-      const { instance, sectorId, contactId } = req.body as FlowExecutionRequest;
+      const { instance, sectorId, contactId, messageId } = req.body as FlowExecutionRequest;
 
       // Validação básica
       if (!instance || !sectorId || !contactId) {
@@ -50,10 +51,21 @@ class FlowExecutionController {
         where: { id: contactId }
       });
 
+      const wppMessage = messageId
+        ? await prismaService.wppMessage.findUnique({ where: { id: messageId } })
+        : await prismaService.wppMessage.findFirst({
+            where: { instance, contactId },
+            orderBy: { id: "desc" }
+          });
+
+      if (!wppMessage) {
+        throw new BadRequestError("Nenhuma mensagem encontrada para executar o flow. Informe messageId ou envie uma mensagem do contato.");
+      }
+
       const flow = await messagesDistributionService.getFlow(instance, sectorId);
       logger.log(`Flow obtido para setor ${sectorId}`);
 
-      const chatPayload = await flow.getChatPayload(logger, wppContact);
+      const chatPayload = await flow.getChatPayload(logger, wppContact, wppMessage);
       logger.log(`Flow executado com sucesso`, chatPayload);
 
       const response: FlowExecutionResponse = {
