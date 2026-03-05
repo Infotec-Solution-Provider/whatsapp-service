@@ -201,13 +201,14 @@ class GupshupService {
 
 			if (event.deductions.billable) {
 				logger.log("Evento é faturável, inserindo na base de dados...");
-				await prismaService.wppMessage.update({
+				const message = await prismaService.wppMessage.findUniqueOrThrow({
 					where: {
 						gupshupId: event.references.gs_id
-					},
-					data: {
-						billingCategory: event.deductions.category
 					}
+				});
+
+				await messagesService.updateMessage(message.id, {
+					billingCategory: event.deductions.category
 				});
 				logger.success("Evento de cobrança processado com sucesso!");
 			} else {

@@ -1,5 +1,6 @@
 import { User } from "@in.pulse-crm/sdk";
 import instancesService from "../services/instances.service";
+import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
 import { Logger } from "@in.pulse-crm/utils";
 
@@ -33,23 +34,13 @@ async function fixMessagesUserId(instance: string) {
 
 			if (user) {
 				Logger.info(`Sucesso: Encontrou o usuário ${user.NOME} pela mensagem ${text} ...`);
-				await prismaService.wppMessage.update({
-					where: {
-						id: message.id
-					},
-					data: {
-						userId: user.CODIGO
-					}
+				await messagesService.updateMessage(message.id, {
+					userId: user.CODIGO
 				});
 			} else if (message.WppChat?.userId) {
 				Logger.info(`Sucesso: Encontrou o usuário ${message.WppChat.userId} via WppChat`);
-				await prismaService.wppMessage.update({
-					where: {
-						id: message.id
-					},
-					data: {
-						userId: message.WppChat.userId
-					}
+				await messagesService.updateMessage(message.id, {
+					userId: message.WppChat.userId
 				});
 			} else {
 				Logger.info(`Não foi possível associar userId ao message.id ${message.id}`);

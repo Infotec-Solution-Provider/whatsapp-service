@@ -555,15 +555,10 @@ class MessagesDistributionService {
 
 	private async insertMessageOnChat(logger: ProcessingLogger, message: WppMessage, chat: WppChat) {
 		try {
-			const insertedMessage = await prismaService.wppMessage.update({
-				where: {
-					id: message.id
-				},
-				data: {
-					contactId: chat.contactId,
-					chatId: chat.id,
-					status: "RECEIVED"
-				}
+			const insertedMessage = await messagesService.updateMessage(message.id, {
+				contactId: chat.contactId,
+				chatId: chat.id,
+				status: "RECEIVED"
 			});
 
 			logger.log("Mensagem inserida no chat.", insertedMessage);
@@ -616,16 +611,10 @@ class MessagesDistributionService {
 				? String(incomingTimestamp)
 				: message.statusTimestamp;
 
-			await prismaService.$executeRawUnsafe(
-				`UPDATE messages
-				 SET
-					status = ?,
-					status_timestamp = ?
-				 WHERE id = ?`,
+			await messagesService.updateMessage(message.id, {
 				status,
-				nextStatusTimestamp,
-				message.id
-			);
+				statusTimestamp: nextStatusTimestamp
+			});
 
 			if (message.chatId === null || message.contactId === null) {
 				return;
@@ -705,20 +694,12 @@ class MessagesDistributionService {
 				? String(incomingTimestamp)
 				: findMsg.statusTimestamp;
 
-			await prismaService.$executeRawUnsafe(
-				`UPDATE messages
-				 SET
-					status = ?,
-					waba_id = ?,
-					gupshup_id = ?,
-					status_timestamp = ?
-				 WHERE id = ?`,
+			await messagesService.updateMessage(findMsg.id, {
 				status,
-				id,
-				gs_id,
-				nextStatusTimestamp,
-				findMsg.id
-			);
+				wabaId: id,
+				gupshupId: gs_id,
+				statusTimestamp: nextStatusTimestamp
+			});
 
 			logger.log("Status da mensagem atualizado", {
 				dbId: findMsg.id,
@@ -779,14 +760,9 @@ class MessagesDistributionService {
 			logger.log("Mensagem original encontrada.", originalMessage);
 
 			// Atualiza a mensagem com o novo conteúdo e marca como editada
-			const updatedMessage = await prismaService.wppMessage.update({
-				where: {
-					[(type + "Id") as "wwebjsId"]: id
-				},
-				data: {
-					body: newBody,
-					isEdited: true
-				}
+			const updatedMessage = await messagesService.updateMessage(originalMessage.id, {
+				body: newBody,
+				isEdited: true
 			});
 
 			logger.log("Mensagem atualizada com sucesso.", updatedMessage);

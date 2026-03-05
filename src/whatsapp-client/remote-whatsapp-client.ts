@@ -163,13 +163,14 @@ class RemoteWhatsappClient implements WhatsappClient {
 
 	public async handleMessageStatus(messageId: string, status: string) {
 		try {
-			const message = await prismaService.wppMessage.update({
+			const currentMessage = await prismaService.wppMessage.findUniqueOrThrow({
 				where: {
 					wwebjsIdStanza: messageId
-				},
-				data: {
-					status: status as WppMessageStatus
 				}
+			});
+
+			const message = await messagesService.updateMessage(currentMessage.id, {
+				status: status as WppMessageStatus
 			});
 
 			if (message.chatId === null) {
@@ -273,15 +274,15 @@ class RemoteWhatsappClient implements WhatsappClient {
 
 			process.log("Message edited successfully from wwebjs-api");
 
-			// Update message status in database
-			await prismaService.wppMessage.update({
+			const currentMessage = await prismaService.wppMessage.findUniqueOrThrow({
 				where: {
 					wwebjsIdStanza: props.messageId
-				},
-				data: {
-					body: props.text || response.data.body,
-					status: "SENT" as WppMessageStatus
 				}
+			});
+
+			await messagesService.updateMessage(currentMessage.id, {
+				body: props.text || response.data.body,
+				status: "SENT" as WppMessageStatus
 			});
 
 			process.success("Message edited successfully");
