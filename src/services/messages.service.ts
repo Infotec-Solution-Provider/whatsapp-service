@@ -49,14 +49,24 @@ class MessagesService {
 	}
 
 	public async updateMessage(id: number, data: Partial<WppMessage>) {
-		delete data.id;
-		delete data.contactId;
-		delete data.chatId;
-		delete data.clientId;
+		const { id: _id, contactId, chatId, clientId, ...rest } = data as Partial<WppMessage>;
+		const updateData: any = { ...rest };
+
+		if (typeof contactId === "number" && contactId > 0) {
+			updateData.WppContact = { connect: { id: contactId } };
+		}
+
+		if (typeof chatId === "number" && chatId > 0) {
+			updateData.WppChat = { connect: { id: chatId } };
+		}
+
+		if (typeof clientId === "number" && clientId > 0) {
+			updateData.client = { connect: { id: clientId } };
+		}
 
 		const message = await prismaService.wppMessage.update({
 			where: { id },
-			data: { ...data },
+			data: updateData,
 			include: {
 				WppChat: true
 			}
