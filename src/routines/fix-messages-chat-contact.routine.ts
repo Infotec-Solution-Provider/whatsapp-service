@@ -28,6 +28,8 @@ type ContactMap = Map<string, number>;
 type ChatByIdMap = Map<number, WppChat>;
 type ChatTimelineCache = Map<string, WppChat[]>;
 
+const MIN_SENT_AT = new Date("2026-03-01T00:00:00.000Z");
+
 function normalizeDigits(value: string): string {
 	return value.replace(/\D/g, "");
 }
@@ -218,7 +220,9 @@ async function resolveMissingRelations(
 }
 
 async function fixMessagesForInstance(instance: string, options: ResolvedFixOptions): Promise<FixStats> {
-	Logger.info(`[fix-messages-chat-contact] Iniciando instância ${instance} (dryRun=${options.dryRun})`);
+	Logger.info(
+		`[fix-messages-chat-contact] Iniciando instância ${instance} (dryRun=${options.dryRun}, sentAt>=${MIN_SENT_AT.toISOString()})`
+	);
 
 	const stats: FixStats = {
 		processed: 0,
@@ -240,6 +244,7 @@ async function fixMessagesForInstance(instance: string, options: ResolvedFixOpti
 			where: {
 				instance,
 				id: { gt: lastId },
+				sentAt: { gte: MIN_SENT_AT },
 				OR: [{ chatId: null }, { contactId: null }]
 			},
 			orderBy: { id: "asc" },
@@ -313,6 +318,7 @@ export async function fixMessagesMissingChatAndContact(opts?: FixOptions) {
 		: (
 			await prismaService.wppMessage.findMany({
 				where: {
+					sentAt: { gte: MIN_SENT_AT },
 					OR: [{ chatId: null }, { contactId: null }]
 				},
 				select: { instance: true },
