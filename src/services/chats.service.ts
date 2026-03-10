@@ -17,6 +17,7 @@ import prismaService from "./prisma.service";
 import socketService from "./socket.service";
 import getUsersClient from "./users.service";
 import whatsappService, { SendTemplateData } from "./whatsapp.service";
+import parametersService from "./parameters.service";
 
 interface InpulseResult {
 	CODIGO: number;
@@ -659,7 +660,7 @@ class ChatsService {
 
 				const insertQueryKeys = {
 					CLIENTE: contact.customerId,
-					CAMPANHA: lastCampaign.CAMPANHA,	
+					CAMPANHA: lastCampaign.CAMPANHA,
 					AGENDA: 0,
 					DT_AGENDAMENTO: formatDateForMySQL(newScheduleDate || thirtyDaysLater),
 					CONCLUIDO: "NAO",
@@ -927,12 +928,20 @@ class ChatsService {
 			await this.checkIfChatExistsOrThrow(session.instance, contact.id);
 
 			const profilePicture = await whatsappService.getProfilePictureUrl(session.instance, contact.phone);
+
+			let userId = session.userId;
+			const params = await parametersService.getSessionParams(session);
+
+			if (params["start_chats_as_admin"]) {
+				userId = -1;
+			}
+
 			const newChat = await prismaService.wppChat.create({
 				data: {
 					instance: session.instance,
 					type: "ACTIVE",
 					avatarUrl: profilePicture,
-					userId: session.userId,
+					userId,
 					contactId,
 					sectorId: session.sectorId,
 					startedAt: new Date()
