@@ -932,7 +932,7 @@ class ChatsService {
 			let userId = session.userId;
 			const params = await parametersService.getSessionParams(session);
 
-			if (params["start_chats_as_admin"]) {
+			if (params["start_chats_as_admin"] === "true") {
 				userId = -1;
 			}
 
