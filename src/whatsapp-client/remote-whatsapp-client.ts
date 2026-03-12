@@ -294,7 +294,13 @@ class RemoteWhatsappClient implements WhatsappClient {
 	}
 
 	public async getGroups(): Promise<WhatsappGroup[]> {
-		return [];
+		try {
+			const response = await axios.get<WhatsappGroup[]>(`${this.clientUrl}/api/groups`);
+			return response.data || [];
+		} catch (err: any) {
+			Logger.error(`RemoteWhatsappClient.getGroups failed: ${err?.message}`);
+			return [];
+		}
 	}
 
 	public async getTemplates(): Promise<TemplateMessage[]> {
