@@ -472,6 +472,7 @@ enum WppMessageFlowStepType {
 
   // Steps específicos (compatibilidade)
   CHECK_AVAILABLE_USERS
+  CHECK_USER_ONLINE
   CHECK_LOALTY
   CHECK_ONLY_ADMIN
   SEND_TO_ADMIN

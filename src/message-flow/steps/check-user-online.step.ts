@@ -26,7 +26,7 @@ export default class CheckUserOnlineStep extends BaseStep {
 	 */
 	private async isUserOnline(userId: number): Promise<boolean> {
 		const sessions = await authService.getOnlineSessions(this.instance);
-		return sessions.some((session) => session.data.userId === userId);
+		return sessions.some((session) => session.data.userId === userId && session.onlineTokens.length > 0);
 	}
 
 	/**
