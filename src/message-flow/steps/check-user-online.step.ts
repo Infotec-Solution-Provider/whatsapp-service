@@ -1,6 +1,11 @@
 import authService from "../../services/auth.service";
 import { BaseStep, StepConfig, StepContext, StepResult } from "../base/base.step";
 
+interface CheckUserOnlineConnections {
+	onTrue?: number;  // Step se o usuário estiver ONLINE
+	onFalse?: number; // Step se o usuário estiver OFFLINE
+}
+
 /**
  * Step que verifica se um usuário específico está online.
  * 
@@ -63,14 +68,15 @@ export default class CheckUserOnlineStep extends BaseStep {
 			instance: this.instance
 		});
 
+		const connections = this.connections as CheckUserOnlineConnections;
 		const isOnline = await this.isUserOnline(userId);
 
 		if (isOnline) {
-			ctx.logger.log(`✓ Usuário #${userId} está ONLINE`, { userId });
-			return this.continue(ctx);
+			ctx.logger.log(`✓ Usuário #${userId} está ONLINE → Step #${connections.onTrue}`, { userId });
+			return this.continue(ctx, connections.onTrue);
 		}
 
-		ctx.logger.log(`✗ Usuário #${userId} está OFFLINE`, { userId });
-		return this.continue(ctx);
+		ctx.logger.log(`✗ Usuário #${userId} está OFFLINE → Step #${connections.onFalse}`, { userId });
+		return this.continue(ctx, connections.onFalse);
 	}
 }
