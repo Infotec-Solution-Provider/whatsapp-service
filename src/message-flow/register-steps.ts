@@ -10,6 +10,7 @@ import { RouterStep } from "./base/router.step";
 import CheckAvailableUsersStep from "./steps/check-available-users.step";
 import CheckLoyaltyStep from "./steps/check-loalty.step";
 import CheckOnlyAdminStep from "./steps/check-only-admin.step";
+import CheckUserOnlineStep from "./steps/check-user-online.step";
 import SendToAdminStep from "./steps/send-to-admin.step";
 import SendToSectorUserStep from "./steps/send-to-sector-user.step";
 
@@ -61,6 +62,12 @@ export function registerAllSteps(): void {
 	StepRegistry.register("CHECK_AVAILABLE_USERS", CheckAvailableUsersStep, {
 		description: "Distribui para usuário com menos chats ativos",
 		requiredConfig: [],
+		optionalConfig: []
+	});
+
+	StepRegistry.register("CHECK_USER_ONLINE", CheckUserOnlineStep, {
+		description: "Verifica se um usuário específico está online buscando o ID do contexto",
+		requiredConfig: ["userIdField"],
 		optionalConfig: []
 	});
 

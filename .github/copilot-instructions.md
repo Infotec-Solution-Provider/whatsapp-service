@@ -1,5 +1,10 @@
 # Copilot Instructions for `whatsapp-service`
 
+## Purpose
+`whatsapp-service` is the service responsible for the **WhatsApp integration** in the CRM. It manages everything WhatsApp-related: connecting clients, receiving/sending messages, chat routing, flow-based automation, WABA/Gupshup provider support, and scheduling.
+
+> **Technical debt notice**: This service currently has architectural issues — god classes, services with too many responsibilities, and mixed concerns. It is a candidate for future refactoring. When working here, make targeted changes and avoid expanding existing responsibilities further. Isolate new logic in separate files.
+
 ## Big picture (read this first)
 - Entry point is `src/main.ts`: builds WhatsApp clients, mounts all controllers, serves `public/`, and starts background workers (`gupshupWebhookQueueService`, `wabaWebhookQueueService`, `messageQueueService`, `internalMessageQueueService`).
 - App shape is **Controller → Service → Prisma**. Controllers are thin routers in `src/controllers`; business rules live in `src/services`; persistence uses `prismaService` (`src/services/prisma.service.ts`) and models in `prisma/schema.prisma`.
