@@ -51,15 +51,16 @@ export default class CheckUserOnlineStep extends BaseStep {
 
 		// Resolve o userId do contexto usando dot notation
 		const userId = this.resolveField(ctx, userIdField);
+		const connections = this.connections as CheckUserOnlineConnections;
 
 		if (!userId || typeof userId !== "number") {
-			ctx.logger.log("⚠️ Aviso: userId não encontrado ou inválido no contexto", {
+			ctx.logger.log("⚠️ Aviso: userId não encontrado ou inválido no contexto → Step #" + connections.onFalse, {
 				userIdField,
 				userId,
 				hasUserId: !!userId,
 				type: typeof userId
 			});
-			return this.continue(ctx);
+			return this.continue(ctx, connections.onFalse);
 		}
 
 		ctx.logger.log(`Verificando se usuário #${userId} está online...`, {
@@ -68,7 +69,6 @@ export default class CheckUserOnlineStep extends BaseStep {
 			instance: this.instance
 		});
 
-		const connections = this.connections as CheckUserOnlineConnections;
 		const isOnline = await this.isUserOnline(userId);
 
 		if (isOnline) {
