@@ -84,13 +84,14 @@ class MessageFlowsController {
 	 */
 	private async getFlowByInstanceAndSector(req: Request, res: Response) {
 		const { instance, sectorId } = req.params;
+		const normalizedInstance = Array.isArray(instance) ? instance[0] : instance;
 
-		if (!instance || !sectorId) {
+		if (!normalizedInstance || !sectorId) {
 			res.status(400).json({ error: "instance and sectorId are required" });
 			return;
 		}
 
-		const flow = await messageFlowsService.getFlowByInstanceAndSector(instance, Number(sectorId));
+		const flow = await messageFlowsService.getFlowByInstanceAndSector(normalizedInstance, Number(sectorId));
 
 		if (!flow) {
 			res.status(404).json({ error: "Flow not found" });

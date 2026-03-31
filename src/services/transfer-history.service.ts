@@ -63,12 +63,11 @@ class TransferHistoryService {
 				new Date()
 			);
 		} catch (error) {
-			Logger.error("Falha ao registrar histórico de transferência", {
-				error,
-				chatId: previousChat.id,
-				instance: previousChat.instance,
-				source
-			});
+			const reason = error instanceof Error ? error.message : String(error);
+			Logger.error(
+				`Falha ao registrar histórico de transferência: ${reason} | instance=${previousChat.instance} | chatId=${previousChat.id} | source=${source}`,
+				error instanceof Error ? error : new Error(reason)
+			);
 		}
 	}
 

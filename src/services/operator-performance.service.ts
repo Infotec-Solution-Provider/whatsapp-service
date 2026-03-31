@@ -1,3 +1,4 @@
+import { Logger } from "@in.pulse-crm/utils";
 import instancesService from "./instances.service";
 import prismaService from "./prisma.service";
 import transferHistoryService from "./transfer-history.service";
@@ -170,16 +171,26 @@ const parseBoundaryDate = (value: string | null | undefined, boundary: "start" |
 	const trimmed = String(value).trim();
 	if (!trimmed) return null;
 
+	const simpleDateMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+	if (simpleDateMatch) {
+		const [, yearRaw, monthRaw, dayRaw] = simpleDateMatch;
+		const year = Number(yearRaw);
+		const month = Number(monthRaw);
+		const day = Number(dayRaw);
+
+		if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+			return null;
+		}
+
+		if (boundary === "start") {
+			return new Date(year, month - 1, day, 0, 0, 0, 0);
+		}
+
+		return new Date(year, month - 1, day, 23, 59, 59, 999);
+	}
+
 	const date = new Date(trimmed);
 	if (Number.isNaN(date.getTime())) return null;
-
-	if (!trimmed.includes("T") && /^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-		if (boundary === "start") {
-			date.setHours(0, 0, 0, 0);
-		} else {
-			date.setHours(23, 59, 59, 999);
-		}
-	}
 
 	return date;
 };
@@ -207,6 +218,21 @@ const padDateUnit = (value: number) => String(value).padStart(2, "0");
 
 const formatDateKey = (value: Date) =>
 	`${value.getFullYear()}-${padDateUnit(value.getMonth() + 1)}-${padDateUnit(value.getDate())}`;
+
+const describeRange = (startDate: Date | null, endDate: Date | null) => ({
+	startDate: startDate ? formatDateKey(startDate) : null,
+	endDate: endDate ? formatDateKey(endDate) : null
+});
+
+const stringifyLogData = (data: Record<string, unknown>) => {
+	try {
+		return JSON.stringify(data);
+	} catch {
+		return "{\"serialization\":\"failed\"}";
+	}
+};
+
+const toError = (error: unknown) => (error instanceof Error ? error : new Error(String(error)));
 
 const formatShortDateLabel = (dateKey: string) => {
 	const [year, month, day] = dateKey.split("-");
@@ -646,6 +672,28 @@ class OperatorPerformanceService {
 				return left.userName.localeCompare(right.userName);
 			});
 
+		Logger.info(
+			`[OperatorPerformanceService] Period aggregation completed ${stringifyLogData({
+				instance,
+				...describeRange(startDate, endDate),
+				operatorFiltersCount: operatorIds?.length || 0,
+				sectorFiltersCount: sectorIds?.length || 0,
+				messageRows: messageRows.length,
+				finishedRows: finishedRows.length,
+				responseRows: responseRows.length,
+				pendingRows: pendingRows.length,
+				transferRows: transferRows.length,
+				resolvedOperators: operatorsMap.size,
+				visibleOperators: operatorPerformance.length,
+				hiddenOperators: rowsMap.size - operatorPerformance.length,
+				summary: {
+					messagesCount: operatorPerformance.reduce((sum, row) => sum + row.messagesCount, 0),
+					chatsFinishedCount: operatorPerformance.reduce((sum, row) => sum + row.chatsFinishedCount, 0),
+					pendingReturnsCount: operatorPerformance.reduce((sum, row) => sum + row.pendingReturnsCount, 0)
+				}
+			})}`
+		);
+
 		return {
 			summary: this.buildSummary(operatorPerformance, startDate, endDate),
 			operatorPerformance
@@ -910,6 +958,17 @@ class OperatorPerformanceService {
 			);
 		}
 
+		Logger.info(
+			`[OperatorPerformanceService] Daily series built ${stringifyLogData({
+				instance,
+				...describeRange(startDate, endDate),
+				currentDays: currentDays.length,
+				currentMetricsDays: currentMetrics.size,
+				previousDays: previousDays.length,
+				previousMetricsDays: previousMetrics.size
+			})}`
+		);
+
 		return currentDays.map((date, index) => {
 			const current = currentMetrics.get(date) || createEmptyDailyBucket();
 			const previousDate = previousDays[index] || null;
@@ -949,76 +1008,149 @@ class OperatorPerformanceService {
 		const operatorIds = parseIds(operatorsRaw);
 		const sectorIds = parseIds(sectorsRaw);
 
-		const currentPeriod = await this.buildPeriodPerformance(instance, startDate, endDate, operatorIds, sectorIds);
-
-		const comparisonEnabled = Boolean(
-			startDate &&
-			endDate &&
-			startDateRaw &&
-			endDateRaw &&
-			startDateRaw !== ALL_TIME_START &&
-			endDateRaw !== ALL_TIME_END
+		Logger.info(
+			`[OperatorPerformanceService] Report request received ${stringifyLogData({
+				instance,
+				startDateRaw,
+				endDateRaw,
+				operatorsRaw,
+				sectorsRaw,
+				parsedOperatorIds: operatorIds?.length || 0,
+				parsedSectorIds: sectorIds?.length || 0,
+				...describeRange(startDate, endDate)
+			})}`
 		);
 
-		let previousSummary: OperatorPerformanceSummary | null = null;
-		let previousRowsById = new Map<number, OperatorPerformanceRow>();
-		let previousStartDate: Date | null = null;
-		let previousEndDate: Date | null = null;
+		try {
+			const currentPeriod = await this.buildPeriodPerformance(instance, startDate, endDate, operatorIds, sectorIds);
 
-		if (comparisonEnabled && startDate && endDate) {
-			const previousRange = getPreviousRange(startDate, endDate);
-			previousStartDate = previousRange.previousStart;
-			previousEndDate = previousRange.previousEnd;
-
-			const previousPeriod = await this.buildPeriodPerformance(
-				instance,
-				previousStartDate,
-				previousEndDate,
-				operatorIds,
-				sectorIds
+			const comparisonEnabled = Boolean(
+				startDate &&
+				endDate &&
+				startDateRaw &&
+				endDateRaw &&
+				startDateRaw !== ALL_TIME_START &&
+				endDateRaw !== ALL_TIME_END
 			);
 
-			previousSummary = previousPeriod.summary;
-			previousRowsById = new Map(previousPeriod.operatorPerformance.map((row) => [row.userId, row]));
-		}
+			let previousSummary: OperatorPerformanceSummary | null = null;
+			let previousRowsById = new Map<number, OperatorPerformanceRow>();
+			let previousStartDate: Date | null = null;
+			let previousEndDate: Date | null = null;
 
-		const operatorPerformance = currentPeriod.operatorPerformance.map((row) => {
-			const previousRow = previousRowsById.get(row.userId);
-			return {
-				...row,
-				previousMessagesCount: previousRow?.messagesCount ?? 0,
-				previousChatsFinishedCount: previousRow?.chatsFinishedCount ?? 0,
-				previousPendingReturnsCount: previousRow?.pendingReturnsCount ?? 0,
-				previousTransfersSentCount: previousRow?.transfersSentCount ?? 0,
-				previousTransfersReceivedCount: previousRow?.transfersReceivedCount ?? 0,
-				previousAverageFirstResponseSeconds: previousRow?.averageFirstResponseSeconds ?? null,
-				previousAverageHandlingSeconds: previousRow?.averageHandlingSeconds ?? null
-			};
-		});
+			if (comparisonEnabled && startDate && endDate) {
+				const previousRange = getPreviousRange(startDate, endDate);
+				previousStartDate = previousRange.previousStart;
+				previousEndDate = previousRange.previousEnd;
 
-		const dailySeries =
-			comparisonEnabled &&
-			startDate &&
-			endDate &&
-			getRangeLengthInDays(startDate, endDate) <= MAX_DAILY_SERIES_DAYS
-				? await this.buildDailySeries(
+				Logger.info(
+					`[OperatorPerformanceService] Previous period enabled ${stringifyLogData({
+						instance,
+						currentRange: describeRange(startDate, endDate),
+						previousRange: describeRange(previousStartDate, previousEndDate)
+					})}`
+				);
+
+				const previousPeriod = await this.buildPeriodPerformance(
 					instance,
-					startDate,
-					endDate,
 					previousStartDate,
 					previousEndDate,
 					operatorIds,
 					sectorIds
-				)
-				: [];
+				);
 
-		return {
-			summary: currentPeriod.summary,
-			previousSummary,
-			comparisonEnabled,
-			operatorPerformance,
-			dailySeries
-		};
+				previousSummary = previousPeriod.summary;
+				previousRowsById = new Map(previousPeriod.operatorPerformance.map((row) => [row.userId, row]));
+			} else {
+				Logger.info(
+					`[OperatorPerformanceService] Previous period skipped ${stringifyLogData({
+						instance,
+						reason: !startDate || !endDate ? "missing-or-invalid-date-range" : "all-time-range",
+						startDateRaw,
+						endDateRaw
+					})}`
+				);
+			}
+
+			const operatorPerformance = currentPeriod.operatorPerformance.map((row) => {
+				const previousRow = previousRowsById.get(row.userId);
+				return {
+					...row,
+					previousMessagesCount: previousRow?.messagesCount ?? 0,
+					previousChatsFinishedCount: previousRow?.chatsFinishedCount ?? 0,
+					previousPendingReturnsCount: previousRow?.pendingReturnsCount ?? 0,
+					previousTransfersSentCount: previousRow?.transfersSentCount ?? 0,
+					previousTransfersReceivedCount: previousRow?.transfersReceivedCount ?? 0,
+					previousAverageFirstResponseSeconds: previousRow?.averageFirstResponseSeconds ?? null,
+					previousAverageHandlingSeconds: previousRow?.averageHandlingSeconds ?? null
+				};
+			});
+
+			const rangeLengthInDays = startDate && endDate ? getRangeLengthInDays(startDate, endDate) : null;
+			const dailySeries =
+				comparisonEnabled &&
+				startDate &&
+				endDate &&
+				rangeLengthInDays != null &&
+				rangeLengthInDays <= MAX_DAILY_SERIES_DAYS
+					? await this.buildDailySeries(
+						instance,
+						startDate,
+						endDate,
+						previousStartDate,
+						previousEndDate,
+						operatorIds,
+						sectorIds
+					)
+					: [];
+
+			if (comparisonEnabled && rangeLengthInDays != null && rangeLengthInDays > MAX_DAILY_SERIES_DAYS) {
+				Logger.info(
+					`[OperatorPerformanceService] Daily series skipped due to range length ${stringifyLogData({
+						instance,
+						rangeLengthInDays,
+						maxDays: MAX_DAILY_SERIES_DAYS
+					})}`
+				);
+			}
+
+			Logger.info(
+				`[OperatorPerformanceService] Report request completed ${stringifyLogData({
+					instance,
+					comparisonEnabled,
+					dailySeriesPoints: dailySeries.length,
+					operatorsReturned: operatorPerformance.length,
+					summary: {
+						messagesCount: currentPeriod.summary.messagesCount,
+						chatsFinishedCount: currentPeriod.summary.chatsFinishedCount,
+						pendingReturnsCount: currentPeriod.summary.pendingReturnsCount,
+						transfersSentCount: currentPeriod.summary.transfersSentCount,
+						transfersReceivedCount: currentPeriod.summary.transfersReceivedCount
+					}
+				})}`
+			);
+
+			return {
+				summary: currentPeriod.summary,
+				previousSummary,
+				comparisonEnabled,
+				operatorPerformance,
+				dailySeries
+			};
+		} catch (error) {
+			Logger.error(
+				`[OperatorPerformanceService] Failed to build report ${stringifyLogData({
+					instance,
+					startDateRaw,
+					endDateRaw,
+					operatorsRaw,
+					sectorsRaw,
+					...describeRange(startDate, endDate)
+				})}`,
+				toError(error)
+			);
+			throw error;
+		}
 	}
 }
 
