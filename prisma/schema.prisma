@@ -413,6 +413,26 @@ model Notification {
   @@map("notifications")
 }
 
+model WppChatTransferHistory {
+  id                Int      @id @default(autoincrement())
+  instance          String   @map("instance")
+  chatId            Int      @map("chat_id")
+  fromUserId        Int?     @map("from_user_id")
+  toUserId          Int?     @map("to_user_id")
+  fromSectorId      Int?     @map("from_sector_id")
+  toSectorId        Int?     @map("to_sector_id")
+  initiatedByUserId Int?     @map("initiated_by_user_id")
+  source            String   @db.VarChar(64)
+  reason            String?  @db.VarChar(255)
+  transferredAt     DateTime @default(now()) @map("transferred_at")
+
+  @@index([instance, transferredAt])
+  @@index([fromUserId, transferredAt])
+  @@index([toUserId, transferredAt])
+  @@index([chatId, transferredAt])
+  @@map("chat_transfer_history")
+}
+
 enum NotificationType {
   CHAT_AUTO_FINISHED
   CHAT_TRANSFERRED

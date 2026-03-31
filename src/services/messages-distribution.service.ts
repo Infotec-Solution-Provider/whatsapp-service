@@ -28,6 +28,7 @@ import messageQueueService from "./message-queue.service";
 import messagesService from "./messages.service";
 import prismaService from "./prisma.service";
 import socketService from "./socket.service";
+import transferHistoryService from "./transfer-history.service";
 import whatsappService from "./whatsapp.service";
 import botsRegistry from "../bots/bots-registry";
 
@@ -461,6 +462,22 @@ class MessagesDistributionService {
 				data: { ...data, botId: null }
 			});
 			await chatsService.syncChatToLocal(updatedChat);
+			await transferHistoryService.recordTransfer({
+				previousChat: {
+					id: chat.id,
+					instance: chat.instance,
+					userId: chat.userId,
+					sectorId: chat.sectorId
+				},
+				nextChat: {
+					id: updatedChat.id,
+					instance: updatedChat.instance,
+					userId: updatedChat.userId,
+					sectorId: updatedChat.sectorId
+				},
+				source: "auto-sector",
+				reason: `Automatic transfer to sector ${sector.name}`
+			});
 
 			await this.addSystemMessage(updatedChat, `Transferido para o setor ${sector.name}!`);
 
@@ -489,6 +506,22 @@ class MessagesDistributionService {
 				data: { ...data, userId: operador.CODIGO, botId: null }
 			});
 			await chatsService.syncChatToLocal(updatedChat);
+			await transferHistoryService.recordTransfer({
+				previousChat: {
+					id: chat.id,
+					instance: chat.instance,
+					userId: chat.userId,
+					sectorId: chat.sectorId
+				},
+				nextChat: {
+					id: updatedChat.id,
+					instance: updatedChat.instance,
+					userId: updatedChat.userId,
+					sectorId: updatedChat.sectorId
+				},
+				source: "auto-operator",
+				reason: `Automatic transfer to operator ${operador.NOME}`
+			});
 
 			await this.addSystemMessage(updatedChat, `Transferido para o setor ${sector.name}!`);
 

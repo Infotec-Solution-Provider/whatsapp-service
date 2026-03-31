@@ -7,6 +7,7 @@ import { SocketEventType, User } from "@in.pulse-crm/sdk";
 import socketService from "../services/socket.service";
 import prismaService from "../services/prisma.service";
 import chatsService from "../services/chats.service";
+import transferHistoryService from "../services/transfer-history.service";
 
 class ChooseSectorBot {
 	private readonly running: { step: number; chatId: number }[] = [];
@@ -220,6 +221,22 @@ class ChooseSectorBot {
 							data: { userId: user, botId: null }
 						});
 						await chatsService.syncChatToLocal(transferedChat);
+						await transferHistoryService.recordTransfer({
+							previousChat: {
+								id: chat.id,
+								instance: chat.instance,
+								userId: chat.userId,
+								sectorId: chat.sectorId
+							},
+							nextChat: {
+								id: transferedChat.id,
+								instance: transferedChat.instance,
+								userId: transferedChat.userId,
+								sectorId: transferedChat.sectorId
+							},
+							source: "bot-return-previous-operator",
+							reason: "Return chat to previous operator after bot intervention"
+						});
 
 						whatsappService.sendBotMessage(message.from, message.clientId!, {
 							chat,

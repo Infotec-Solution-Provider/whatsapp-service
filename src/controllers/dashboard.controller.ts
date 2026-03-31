@@ -1,6 +1,7 @@
 import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import dashboardService from "../services/dashboard.service";
+import operatorPerformanceService from "../services/operator-performance.service";
 
 class DashboardController {
 	constructor(public readonly router: Router) {
@@ -26,6 +27,12 @@ class DashboardController {
 			"/api/whatsapp/dashboard/messages-per-hour-day",
 			isAuthenticated,
 			this.messagesPerHourDay
+		);
+
+		this.router.get(
+			"/api/whatsapp/dashboard/operator-performance",
+			isAuthenticated,
+			this.operatorPerformance
 		);
 	}
 
@@ -81,6 +88,26 @@ class DashboardController {
 
 		res.status(200).send({
 			message: "Messages per hour/day retrieved successfully!",
+			data
+		});
+	}
+
+	private async operatorPerformance(req: Request, res: Response) {
+		const startDate = (req.query["startDate"] as string) || null;
+		const endDate = (req.query["endDate"] as string) || null;
+		const SETORES = (req.query["SETORES"] as string) || "*";
+		const OPERADORES = (req.query["OPERADORES"] as string) || "*";
+
+		const data = await operatorPerformanceService.getOperatorPerformance(
+			req.session.instance,
+			startDate,
+			endDate,
+			OPERADORES,
+			SETORES
+		);
+
+		res.status(200).send({
+			message: "Operator performance retrieved successfully!",
 			data
 		});
 	}

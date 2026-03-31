@@ -15,6 +15,7 @@ import instancesService from "./instances.service";
 import messagesDistributionService from "./messages-distribution.service";
 import prismaService from "./prisma.service";
 import socketService from "./socket.service";
+import transferHistoryService from "./transfer-history.service";
 import getUsersClient from "./users.service";
 import whatsappService, { SendTemplateData } from "./whatsapp.service";
 import parametersService from "./parameters.service";
@@ -373,6 +374,23 @@ class ChatsService {
 		});
 
 		await this.syncChatToLocal(chat);
+		await transferHistoryService.recordTransfer({
+			previousChat: {
+				id: chats.id,
+				instance: chats.instance,
+				userId: chats.userId,
+				sectorId: chats.sectorId
+			},
+			nextChat: {
+				id: chat.id,
+				instance: chat.instance,
+				userId: chat.userId,
+				sectorId: chat.sectorId
+			},
+			source: "manual",
+			initiatedByUserId: session.userId,
+			reason: `Manual transfer from ${user.NOME} to user ${userId}`
+		});
 
 		const event = SocketEventType.WppChatTransfer;
 		const monitorRoom: SocketServerMonitorRoom = `${chat.instance}:${chat.sectorId!}:monitor`;
