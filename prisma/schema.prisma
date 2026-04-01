@@ -90,6 +90,8 @@ model WppMessage {
 
   @@index([from, to, chatId])
   @@index([chatId, userId])
+  @@index([instance, sentAt, chatId], map: "messages_instance_sent_at_chat_id_idx")
+  @@index([instance, chatId, sentAt, id], map: "messages_instance_chat_id_sent_at_id_idx")
   @@map("messages")
 }
 
@@ -122,6 +124,9 @@ model WppChat {
   notifications Notification[]
 
   @@index([userId])
+  @@index([instance, isFinished, finishedAt], map: "chats_instance_is_finished_finished_at_idx")
+  @@index([instance, isFinished, userId, sectorId], map: "chats_instance_is_finished_user_id_sector_id_idx")
+  @@index([instance, contactId, isFinished, finishedAt], map: "chats_instance_contact_id_is_finished_finished_at_idx")
   @@map("chats")
 }
 
@@ -242,6 +247,23 @@ model WppContactSector {
 
   @@id([contactId, sectorId])
   @@map("contacts_sectors")
+}
+
+model CustomerProfileTag {
+  id           Int                    @id @default(autoincrement())
+  instance     String                 @map("instance")
+  customerId   Int                    @map("customer_id")
+  tagType      CustomerProfileTagType @map("tag_type")
+  tagValue     String                 @map("tag_value") @db.VarChar(64)
+  label        String                 @map("label") @db.VarChar(120)
+  color        String                 @map("color") @db.VarChar(32)
+  calculatedAt DateTime               @default(now()) @map("calculated_at")
+  metadataJson Json?                  @map("metadata_json")
+
+  @@unique([instance, customerId, tagType])
+  @@index([instance, customerId])
+  @@index([instance, tagType, tagValue])
+  @@map("customer_profile_tags")
 }
 
 model WppMessageFlow {
@@ -395,6 +417,14 @@ enum ParameterScope {
   INSTANCE
   SECTOR
   USER
+}
+
+enum CustomerProfileTagType {
+  INTERACTION_LEVEL
+  PURCHASE_LEVEL
+  CUSTOMER_AGE
+
+  @@map("customer_profile_tag_type")
 }
 
 model Notification {

@@ -4,7 +4,7 @@ import prismaService from "./prisma.service";
 import transferHistoryService from "./transfer-history.service";
 
 interface OperatorRow {
-	CODIGO: number;
+	CODIGO: bigint | number | string;
 	NOME: string;
 	ATIVO: string | number | null;
 	NIVEL: string | number | null;
@@ -13,7 +13,7 @@ interface OperatorRow {
 }
 
 interface OperatorMessagesAggregateRow {
-	operatorId: number | null;
+	operatorId: bigint | number | string | null;
 	messagesCount: bigint | number;
 	sentMessagesCount: bigint | number;
 	receivedMessagesCount: bigint | number;
@@ -22,20 +22,43 @@ interface OperatorMessagesAggregateRow {
 }
 
 interface OperatorFinishedChatsAggregateRow {
-	operatorId: number | null;
+	operatorId: bigint | number | string | null;
 	chatsFinishedCount: bigint | number;
 	averageHandlingSeconds: number | string | null;
 }
 
 interface OperatorFirstResponseAggregateRow {
-	operatorId: number | null;
+	operatorId: bigint | number | string | null;
 	respondedChatsCount: bigint | number;
 	averageFirstResponseSeconds: number | string | null;
 }
 
 interface OperatorPendingReturnsAggregateRow {
-	operatorId: number | null;
+	operatorId: bigint | number | string | null;
 	pendingReturnsCount: bigint | number;
+}
+
+interface OperatorFirstResponseDetailRow {
+	chatId: bigint | number;
+	contactId: bigint | number | null;
+	contactName: string | null;
+	contactPhone: string | null;
+	firstCustomerMessageAt: string | Date | null;
+	firstCustomerMessageBody: string | null;
+	firstResponseAt: string | Date | null;
+	firstResponseBody: string | null;
+	firstResponseSeconds: bigint | number | string | null;
+}
+
+interface OperatorPendingReturnDetailRow {
+	chatId: bigint | number;
+	contactId: bigint | number | null;
+	contactName: string | null;
+	contactPhone: string | null;
+	startedAt: string | Date | null;
+	lastCustomerMessageAt: string | Date | null;
+	lastCustomerMessageBody: string | null;
+	waitingSeconds: bigint | number | string | null;
 }
 
 interface DailyMetricsAggregateRow {
@@ -140,8 +163,74 @@ export interface OperatorPerformanceReportResult {
 	dailySeries: OperatorPerformanceDailySeriesRow[];
 }
 
-const FROM_US_SQL_CONDITION = (alias: string) =>
-	`(${alias}.user_id IS NOT NULL OR ${alias}.\`from\` LIKE 'me:%' OR ${alias}.\`from\` LIKE 'user:%' OR ${alias}.\`from\` LIKE 'system:%' OR ${alias}.\`from\` LIKE 'bot%' OR ${alias}.\`from\` LIKE 'thirdparty:%')`;
+export interface OperatorFirstResponseDetailItem {
+	chatId: number;
+	contactId: number | null;
+	contactName: string | null;
+	contactPhone: string | null;
+	firstCustomerMessageAt: string | null;
+	firstCustomerMessageBody: string | null;
+	firstResponseAt: string | null;
+	firstResponseBody: string | null;
+	firstResponseSeconds: number;
+}
+
+export interface OperatorPendingReturnDetailItem {
+	chatId: number;
+	contactId: number | null;
+	contactName: string | null;
+	contactPhone: string | null;
+	startedAt: string | null;
+	lastCustomerMessageAt: string | null;
+	lastCustomerMessageBody: string | null;
+	waitingSeconds: number;
+}
+
+export interface OperatorPerformanceDetailsResult {
+	operatorId: number;
+	firstResponses: OperatorFirstResponseDetailItem[];
+	pendingReturns: OperatorPendingReturnDetailItem[];
+}
+
+const SYSTEM_OR_THIRDPARTY_SQL_CONDITION = (alias: string) =>
+	`(${alias}.\`from\` LIKE 'system%' OR ${alias}.\`to\` LIKE 'system%' OR ${alias}.\`from\` LIKE 'thirdparty:%' OR ${alias}.\`to\` LIKE 'thirdparty:%' OR ${alias}.\`from\` LIKE 'bot%' OR ${alias}.\`to\` LIKE 'bot%')`;
+
+const OPERATION_MESSAGE_SQL_CONDITION = (alias: string) =>
+	`(${alias}.user_id IS NOT NULL OR ${alias}.\`from\` LIKE 'me:%' OR ${alias}.\`from\` LIKE 'user:%')`;
+
+const CUSTOMER_MESSAGE_SQL_CONDITION = (alias: string) =>
+	`(NOT ${SYSTEM_OR_THIRDPARTY_SQL_CONDITION(alias)} AND NOT ${OPERATION_MESSAGE_SQL_CONDITION(alias)} AND ${alias}.\`from\` REGEXP '^[0-9]')`;
+
+const RELEVANT_MESSAGE_SQL_CONDITION = (alias: string) =>
+	`(${OPERATION_MESSAGE_SQL_CONDITION(alias)} OR ${CUSTOMER_MESSAGE_SQL_CONDITION(alias)})`;
+
+const NORMALIZED_MESSAGE_BODY_SQL = (expression: string) => `TRIM(LOWER(COALESCE(${expression}, '')))`;
+
+const TRIVIAL_CUSTOMER_MESSAGE_SQL_CONDITION = (expression: string) =>
+	`(${NORMALIZED_MESSAGE_BODY_SQL(expression)} REGEXP '^(ok(ay)?|obg|obrigad[oa]s?|valeu|vlw|blz|beleza|bom[[:space:]]+dia|boa[[:space:]]+tarde|boa[[:space:]]+noite|certo|perfeito|show|joia|tmj|thanks?)[[:space:][:punct:]]*$')`;
+
+const TRIVIAL_POST_CLOSE_FOLLOW_UP_SQL_CONDITION = (
+	instanceExpression: string,
+	contactIdExpression: string,
+	currentChatIdExpression: string,
+	messageAtExpression: string,
+	bodyExpression: string
+) => `(
+		${contactIdExpression} IS NOT NULL
+		AND ${messageAtExpression} IS NOT NULL
+		AND ${TRIVIAL_CUSTOMER_MESSAGE_SQL_CONDITION(bodyExpression)}
+		AND EXISTS (
+			SELECT 1
+			FROM chats previous_chat
+			WHERE previous_chat.instance = ${instanceExpression}
+				AND previous_chat.contact_id = ${contactIdExpression}
+				AND previous_chat.id <> ${currentChatIdExpression}
+				AND previous_chat.is_finished = 1
+				AND previous_chat.finished_at IS NOT NULL
+				AND previous_chat.finished_at < ${messageAtExpression}
+				AND previous_chat.finished_at >= DATE_SUB(${messageAtExpression}, INTERVAL 1 HOUR)
+		)
+	)`;
 
 const SYSTEM_OPERATOR_ID = -1;
 const SYSTEM_OPERATOR_NAME = "Sistema/Admin";
@@ -149,21 +238,49 @@ const ALL_TIME_START = "2000-01-01";
 const ALL_TIME_END = "2099-12-31";
 const MAX_DAILY_SERIES_DAYS = 93;
 
-const toNumber = (value: bigint | number | string | null | undefined) => {
+const toNumber = (value: bigint | number | string | { toNumber?: () => number; toString(): string } | null | undefined) => {
 	if (typeof value === "bigint") return Number(value);
 	if (typeof value === "number") return value;
 	if (typeof value === "string") {
 		const parsed = Number(value);
 		return Number.isFinite(parsed) ? parsed : 0;
 	}
+	if (value && typeof value === "object") {
+		const parsed = typeof value.toNumber === "function" ? value.toNumber() : Number(value.toString());
+		return Number.isFinite(parsed) ? parsed : 0;
+	}
 	return 0;
 };
 
-const toAverageNumber = (value: number | string | null | undefined) => {
+const toAverageNumber = (value: number | string | { toNumber?: () => number; toString(): string } | null | undefined) => {
 	if (value == null) return null;
+	if (typeof value === "number") return Number.isFinite(value) ? value : null;
+	if (typeof value === "string") {
+		const parsed = Number(value);
+		return Number.isFinite(parsed) ? parsed : null;
+	}
+	if (typeof value === "object") {
+		const parsed = typeof value.toNumber === "function" ? value.toNumber() : Number(value.toString());
+		return Number.isFinite(parsed) ? parsed : null;
+	}
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : null;
+};
+
+const toOperatorId = (value: bigint | number | string | null | undefined) => {
+	if (value == null) return null;
+	if (typeof value === "bigint") return Number(value);
 	if (typeof value === "number") return Number.isFinite(value) ? value : null;
 	const parsed = Number(value);
 	return Number.isFinite(parsed) ? parsed : null;
+};
+
+const normalizeDateTime = (value: string | Date | null | undefined) => {
+	if (!value) return null;
+	if (value instanceof Date) return value.toISOString();
+
+	const parsed = new Date(value);
+	return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
 };
 
 const parseBoundaryDate = (value: string | null | undefined, boundary: "start" | "end") => {
@@ -219,6 +336,9 @@ const padDateUnit = (value: number) => String(value).padStart(2, "0");
 const formatDateKey = (value: Date) =>
 	`${value.getFullYear()}-${padDateUnit(value.getMonth() + 1)}-${padDateUnit(value.getDate())}`;
 
+const formatUtcDateKey = (value: Date) =>
+	`${value.getUTCFullYear()}-${padDateUnit(value.getUTCMonth() + 1)}-${padDateUnit(value.getUTCDate())}`;
+
 const describeRange = (startDate: Date | null, endDate: Date | null) => ({
 	startDate: startDate ? formatDateKey(startDate) : null,
 	endDate: endDate ? formatDateKey(endDate) : null
@@ -242,7 +362,7 @@ const formatShortDateLabel = (dateKey: string) => {
 
 const normalizeDayKey = (value: string | Date | null | undefined) => {
 	if (!value) return null;
-	if (value instanceof Date) return formatDateKey(value);
+	if (value instanceof Date) return formatUtcDateKey(value);
 	if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
 
 	const parsed = new Date(value);
@@ -316,7 +436,14 @@ class OperatorPerformanceService {
 		`;
 
 		const rows = await instancesService.executeQuery<OperatorRow[]>(instance, query, []);
-		return new Map(rows.map((row) => [row.CODIGO, row]));
+		return new Map(
+			rows
+				.map((row) => {
+					const operatorId = toOperatorId(row.CODIGO);
+					return operatorId == null ? null : ([operatorId, row] as const);
+				})
+				.filter((entry): entry is readonly [number, OperatorRow] => entry != null)
+		);
 	}
 
 	private createOperatorPerformanceRow(operatorId: number, operator?: OperatorRow): OperatorPerformanceRow {
@@ -384,14 +511,16 @@ class OperatorPerformanceService {
 	): OperatorPerformanceSummary {
 		const totalResponses = operatorPerformance.reduce((sum, row) => sum + row.respondedChatsCount, 0);
 		const totalHandledFinished = operatorPerformance.reduce((sum, row) => sum + row.chatsFinishedCount, 0);
+		const totalSentMessages = operatorPerformance.reduce((sum, row) => sum + row.sentMessagesCount, 0);
+		const totalReceivedMessages = operatorPerformance.reduce((sum, row) => sum + row.receivedMessagesCount, 0);
 
 		return {
 			periodStart: startDate ? formatDateKey(startDate) : null,
 			periodEnd: endDate ? formatDateKey(endDate) : null,
 			operatorsCount: operatorPerformance.length,
-			messagesCount: operatorPerformance.reduce((sum, row) => sum + row.messagesCount, 0),
-			sentMessagesCount: operatorPerformance.reduce((sum, row) => sum + row.sentMessagesCount, 0),
-			receivedMessagesCount: operatorPerformance.reduce((sum, row) => sum + row.receivedMessagesCount, 0),
+			messagesCount: totalSentMessages + totalReceivedMessages,
+			sentMessagesCount: totalSentMessages,
+			receivedMessagesCount: totalReceivedMessages,
 			contactsCount: operatorPerformance.reduce((sum, row) => sum + row.contactsCount, 0),
 			chatsHandledCount: operatorPerformance.reduce((sum, row) => sum + row.chatsHandledCount, 0),
 			chatsFinishedCount: totalHandledFinished,
@@ -442,7 +571,17 @@ class OperatorPerformanceService {
 			finishedParams.push(endDate);
 		}
 
-		const responseParams: Array<string | Date> = [instance, instance];
+		const responseParams: Array<string | Date> = [instance];
+		let responseCandidateDateClause = "";
+		if (startDate) {
+			responseCandidateDateClause += " AND msg.sent_at >= ?";
+			responseParams.push(startDate);
+		}
+		if (endDate) {
+			responseCandidateDateClause += " AND msg.sent_at <= ?";
+			responseParams.push(endDate);
+		}
+		responseParams.push(instance);
 		let responseDateClause = "";
 		if (startDate) {
 			responseDateClause += " AND response.sent_at >= ?";
@@ -454,15 +593,16 @@ class OperatorPerformanceService {
 		}
 
 		const pendingParams: Array<string | Date> = [instance];
-		let pendingDateClause = "";
+		let pendingCandidateDateClause = "";
 		if (startDate) {
-			pendingDateClause += " AND pending.lastCustomerMessageAt >= ?";
+			pendingCandidateDateClause += " AND msg.sent_at >= ?";
 			pendingParams.push(startDate);
 		}
 		if (endDate) {
-			pendingDateClause += " AND pending.lastCustomerMessageAt <= ?";
+			pendingCandidateDateClause += " AND msg.sent_at <= ?";
 			pendingParams.push(endDate);
 		}
+		pendingParams.push(instance);
 
 		const operatorMessageClause = buildInClause("COALESCE(msg.user_id, ch.user_id)", operatorIds);
 		const operatorFinishedClause = buildInClause("COALESCE(ch.finished_by, ch.user_id)", operatorIds);
@@ -477,14 +617,15 @@ class OperatorPerformanceService {
 		const messagesQuery = `
 			SELECT
 				COALESCE(msg.user_id, ch.user_id) AS operatorId,
-				COUNT(*) AS messagesCount,
-				SUM(CASE WHEN ${FROM_US_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS sentMessagesCount,
-				SUM(CASE WHEN NOT ${FROM_US_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS receivedMessagesCount,
+				SUM(CASE WHEN ${RELEVANT_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS messagesCount,
+				SUM(CASE WHEN ${OPERATION_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS sentMessagesCount,
+				SUM(CASE WHEN ${CUSTOMER_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS receivedMessagesCount,
 				COUNT(DISTINCT ch.id) AS chatsHandledCount,
 				COUNT(DISTINCT msg.contact_id) AS contactsCount
 			FROM messages msg
 			LEFT JOIN chats ch ON ch.id = msg.chat_id
 			WHERE msg.instance = ?
+				AND ${RELEVANT_MESSAGE_SQL_CONDITION("msg")}
 				AND COALESCE(msg.user_id, ch.user_id) IS NOT NULL
 				${messageDateClause}
 				${operatorMessageClause}
@@ -518,28 +659,45 @@ class OperatorPerformanceService {
 				SELECT
 					ch.id AS chatId,
 					COALESCE(response.user_id, ch.user_id) AS operatorId,
-					TIMESTAMPDIFF(SECOND, customer.firstCustomerMessageAt, response.sent_at) AS firstResponseSeconds
+					TIMESTAMPDIFF(SECOND, customer.sent_at, response.sent_at) AS firstResponseSeconds
 				FROM chats ch
 				INNER JOIN (
-					SELECT
-						msg.chat_id AS chatId,
-						MIN(msg.sent_at) AS firstCustomerMessageAt
+					SELECT DISTINCT msg.chat_id AS chatId
 					FROM messages msg
 					WHERE msg.instance = ?
 						AND msg.chat_id IS NOT NULL
-						AND NOT ${FROM_US_SQL_CONDITION("msg")}
-					GROUP BY msg.chat_id
-				) customer ON customer.chatId = ch.id
-				INNER JOIN messages response ON response.chat_id = ch.id
-					AND response.sent_at = (
-						SELECT MIN(msg2.sent_at)
-						FROM messages msg2
-						WHERE msg2.chat_id = ch.id
-							AND ${FROM_US_SQL_CONDITION("msg2")}
-							AND msg2.sent_at > customer.firstCustomerMessageAt
-					)
+						AND ${OPERATION_MESSAGE_SQL_CONDITION("msg")}
+						${responseCandidateDateClause}
+				) responseCandidate ON responseCandidate.chatId = ch.id
+				INNER JOIN messages customer ON customer.id = (
+					SELECT msg2.id
+					FROM messages msg2
+					WHERE msg2.instance = ch.instance
+						AND msg2.chat_id = ch.id
+						AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg2")}
+					ORDER BY msg2.sent_at ASC, msg2.id ASC
+					LIMIT 1
+				)
+				INNER JOIN messages response ON response.id = (
+					SELECT msg3.id
+					FROM messages msg3
+					WHERE msg3.instance = ch.instance
+						AND msg3.chat_id = ch.id
+						AND ${OPERATION_MESSAGE_SQL_CONDITION("msg3")}
+						AND msg3.sent_at > customer.sent_at
+					ORDER BY msg3.sent_at ASC, msg3.id ASC
+					LIMIT 1
+				)
 				WHERE ch.instance = ?
+					AND response.sent_at IS NOT NULL
 					AND COALESCE(response.user_id, ch.user_id) IS NOT NULL
+					AND NOT ${TRIVIAL_POST_CLOSE_FOLLOW_UP_SQL_CONDITION(
+						"ch.instance",
+						"ch.contact_id",
+						"ch.id",
+						"customer.sent_at",
+						"customer.body"
+					)}
 					${responseDateClause}
 					${operatorResponseClause}
 					${sectorResponseClause}
@@ -554,27 +712,52 @@ class OperatorPerformanceService {
 			FROM (
 				SELECT
 					ch.id AS chatId,
+					ch.instance AS instance,
+					ch.contact_id AS contactId,
 					ch.user_id AS operatorId,
-					(
-						SELECT MAX(msg.sent_at)
-						FROM messages msg
-						WHERE msg.chat_id = ch.id
-							AND NOT ${FROM_US_SQL_CONDITION("msg")}
-					) AS lastCustomerMessageAt
+					customerLast.sent_at AS lastCustomerMessageAt,
+					customerLast.body AS lastCustomerMessageBody
 				FROM chats ch
+				INNER JOIN (
+					SELECT
+						msg.instance AS instance,
+						msg.chat_id AS chatId,
+						msg.sent_at,
+						msg.body
+					FROM messages msg
+					WHERE msg.instance = ?
+						AND msg.chat_id IS NOT NULL
+						AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg")}
+						${pendingCandidateDateClause}
+						AND msg.id = (
+							SELECT msg2.id
+							FROM messages msg2
+							WHERE msg2.instance = msg.instance
+								AND msg2.chat_id = msg.chat_id
+								AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg2")}
+							ORDER BY msg2.sent_at DESC, msg2.id DESC
+							LIMIT 1
+						)
+				) customerLast ON customerLast.chatId = ch.id AND customerLast.instance = ch.instance
 				WHERE ch.instance = ?
 					AND ch.is_finished = 0
 					AND ch.user_id IS NOT NULL
 					${operatorPendingClause}
 					${sectorPendingClause}
 			) pending
-			WHERE pending.lastCustomerMessageAt IS NOT NULL
-				${pendingDateClause}
+			WHERE NOT ${TRIVIAL_POST_CLOSE_FOLLOW_UP_SQL_CONDITION(
+					"pending.instance",
+					"pending.contactId",
+					"pending.chatId",
+					"pending.lastCustomerMessageAt",
+					"pending.lastCustomerMessageBody"
+				)}
 				AND NOT EXISTS (
 					SELECT 1
 					FROM messages response
 					WHERE response.chat_id = pending.chatId
-						AND ${FROM_US_SQL_CONDITION("response")}
+						AND response.instance = pending.instance
+						AND ${OPERATION_MESSAGE_SQL_CONDITION("response")}
 						AND response.sent_at > pending.lastCustomerMessageAt
 				)
 			GROUP BY pending.operatorId
@@ -590,19 +773,24 @@ class OperatorPerformanceService {
 
 		const operatorIdSet = new Set<number>();
 		for (const row of messageRows) {
-			if (row.operatorId != null) operatorIdSet.add(row.operatorId);
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId != null) operatorIdSet.add(operatorId);
 		}
 		for (const row of finishedRows) {
-			if (row.operatorId != null) operatorIdSet.add(row.operatorId);
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId != null) operatorIdSet.add(operatorId);
 		}
 		for (const row of responseRows) {
-			if (row.operatorId != null) operatorIdSet.add(row.operatorId);
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId != null) operatorIdSet.add(operatorId);
 		}
 		for (const row of pendingRows) {
-			if (row.operatorId != null) operatorIdSet.add(row.operatorId);
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId != null) operatorIdSet.add(operatorId);
 		}
 		for (const row of transferRows) {
-			if (row.operatorId != null) operatorIdSet.add(row.operatorId);
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId != null) operatorIdSet.add(operatorId);
 		}
 
 		if (operatorIds?.length) {
@@ -624,44 +812,48 @@ class OperatorPerformanceService {
 		};
 
 		for (const row of messageRows) {
-			if (row.operatorId == null) continue;
-			const target = ensureRow(row.operatorId);
-			target.messagesCount = toNumber(row.messagesCount);
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId == null) continue;
+			const target = ensureRow(operatorId);
 			target.sentMessagesCount = toNumber(row.sentMessagesCount);
 			target.receivedMessagesCount = toNumber(row.receivedMessagesCount);
+			target.messagesCount = target.sentMessagesCount + target.receivedMessagesCount;
 			target.contactsCount = toNumber(row.contactsCount);
 			target.chatsHandledCount = toNumber(row.chatsHandledCount);
 		}
 
 		for (const row of finishedRows) {
-			if (row.operatorId == null) continue;
-			const target = ensureRow(row.operatorId);
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId == null) continue;
+			const target = ensureRow(operatorId);
 			target.chatsFinishedCount = toNumber(row.chatsFinishedCount);
 			target.averageHandlingSeconds = toAverageNumber(row.averageHandlingSeconds);
 		}
 
 		for (const row of responseRows) {
-			if (row.operatorId == null) continue;
-			const target = ensureRow(row.operatorId);
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId == null) continue;
+			const target = ensureRow(operatorId);
 			target.respondedChatsCount = toNumber(row.respondedChatsCount);
 			target.averageFirstResponseSeconds = toAverageNumber(row.averageFirstResponseSeconds);
 		}
 
 		for (const row of pendingRows) {
-			if (row.operatorId == null) continue;
-			const target = ensureRow(row.operatorId);
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId == null) continue;
+			const target = ensureRow(operatorId);
 			target.pendingReturnsCount = toNumber(row.pendingReturnsCount);
 		}
 
 		for (const row of transferRows) {
-			if (row.operatorId == null) continue;
-			const target = ensureRow(row.operatorId);
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId == null) continue;
+			const target = ensureRow(operatorId);
 			target.transfersSentCount = toNumber(row.transfersSentCount);
 			target.transfersReceivedCount = toNumber(row.transfersReceivedCount);
 		}
 
-		const operatorPerformance = Array.from(rowsMap.values())
-			.filter((row) => isVisibleOperator(row.userId, operatorsMap))
+		const aggregatedOperatorPerformance = Array.from(rowsMap.values())
 			.sort((left, right) => {
 				if (right.chatsFinishedCount !== left.chatsFinishedCount) {
 					return right.chatsFinishedCount - left.chatsFinishedCount;
@@ -671,6 +863,10 @@ class OperatorPerformanceService {
 				}
 				return left.userName.localeCompare(right.userName);
 			});
+
+		const operatorPerformance = aggregatedOperatorPerformance.filter((row) => isVisibleOperator(row.userId, operatorsMap));
+		const aggregatedSummary = this.buildSummary(aggregatedOperatorPerformance, startDate, endDate);
+		const visibleSummary = this.buildSummary(operatorPerformance, startDate, endDate);
 
 		Logger.info(
 			`[OperatorPerformanceService] Period aggregation completed ${stringifyLogData({
@@ -686,16 +882,21 @@ class OperatorPerformanceService {
 				resolvedOperators: operatorsMap.size,
 				visibleOperators: operatorPerformance.length,
 				hiddenOperators: rowsMap.size - operatorPerformance.length,
-				summary: {
-					messagesCount: operatorPerformance.reduce((sum, row) => sum + row.messagesCount, 0),
-					chatsFinishedCount: operatorPerformance.reduce((sum, row) => sum + row.chatsFinishedCount, 0),
-					pendingReturnsCount: operatorPerformance.reduce((sum, row) => sum + row.pendingReturnsCount, 0)
+				aggregatedSummary: {
+					messagesCount: aggregatedSummary.messagesCount,
+					chatsFinishedCount: aggregatedSummary.chatsFinishedCount,
+					pendingReturnsCount: aggregatedSummary.pendingReturnsCount
+				},
+				visibleSummary: {
+					messagesCount: visibleSummary.messagesCount,
+					chatsFinishedCount: visibleSummary.chatsFinishedCount,
+					pendingReturnsCount: visibleSummary.pendingReturnsCount
 				}
 			})}`
 		);
 
 		return {
-			summary: this.buildSummary(operatorPerformance, startDate, endDate),
+			summary: aggregatedSummary,
 			operatorPerformance
 		};
 	}
@@ -725,14 +926,15 @@ class OperatorPerformanceService {
 		const messagesQuery = `
 			SELECT
 				DATE(msg.sent_at) AS day,
-				COUNT(*) AS messagesCount,
-				SUM(CASE WHEN ${FROM_US_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS sentMessagesCount,
-				SUM(CASE WHEN NOT ${FROM_US_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS receivedMessagesCount
+				SUM(CASE WHEN ${RELEVANT_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS messagesCount,
+				SUM(CASE WHEN ${OPERATION_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS sentMessagesCount,
+				SUM(CASE WHEN ${CUSTOMER_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS receivedMessagesCount
 			FROM messages msg
 			LEFT JOIN chats ch ON ch.id = msg.chat_id
 			WHERE msg.instance = ?
 				AND msg.sent_at >= ?
 				AND msg.sent_at <= ?
+				AND ${RELEVANT_MESSAGE_SQL_CONDITION("msg")}
 				AND COALESCE(msg.user_id, ch.user_id) IS NOT NULL
 				${operatorMessageClause}
 				${sectorMessageClause}
@@ -764,30 +966,48 @@ class OperatorPerformanceService {
 			FROM (
 				SELECT
 					response.sent_at AS responseAt,
-					TIMESTAMPDIFF(SECOND, customer.firstCustomerMessageAt, response.sent_at) AS firstResponseSeconds
+					TIMESTAMPDIFF(SECOND, customer.sent_at, response.sent_at) AS firstResponseSeconds
 				FROM chats ch
 				INNER JOIN (
-					SELECT
-						msg.chat_id AS chatId,
-						MIN(msg.sent_at) AS firstCustomerMessageAt
+					SELECT DISTINCT msg.chat_id AS chatId
 					FROM messages msg
 					WHERE msg.instance = ?
 						AND msg.chat_id IS NOT NULL
-						AND NOT ${FROM_US_SQL_CONDITION("msg")}
-					GROUP BY msg.chat_id
-				) customer ON customer.chatId = ch.id
-				INNER JOIN messages response ON response.chat_id = ch.id
-					AND response.sent_at = (
-						SELECT MIN(msg2.sent_at)
-						FROM messages msg2
-						WHERE msg2.chat_id = ch.id
-							AND ${FROM_US_SQL_CONDITION("msg2")}
-							AND msg2.sent_at > customer.firstCustomerMessageAt
-					)
+						AND ${OPERATION_MESSAGE_SQL_CONDITION("msg")}
+						AND msg.sent_at >= ?
+						AND msg.sent_at <= ?
+				) responseCandidate ON responseCandidate.chatId = ch.id
+				INNER JOIN messages customer ON customer.id = (
+					SELECT msg2.id
+					FROM messages msg2
+					WHERE msg2.instance = ch.instance
+						AND msg2.chat_id = ch.id
+						AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg2")}
+					ORDER BY msg2.sent_at ASC, msg2.id ASC
+					LIMIT 1
+				)
+				INNER JOIN messages response ON response.id = (
+					SELECT msg3.id
+					FROM messages msg3
+					WHERE msg3.instance = ch.instance
+						AND msg3.chat_id = ch.id
+						AND ${OPERATION_MESSAGE_SQL_CONDITION("msg3")}
+						AND msg3.sent_at > customer.sent_at
+					ORDER BY msg3.sent_at ASC, msg3.id ASC
+					LIMIT 1
+				)
 				WHERE ch.instance = ?
 					AND response.sent_at >= ?
 					AND response.sent_at <= ?
+					AND response.sent_at IS NOT NULL
 					AND COALESCE(response.user_id, ch.user_id) IS NOT NULL
+					AND NOT ${TRIVIAL_POST_CLOSE_FOLLOW_UP_SQL_CONDITION(
+						"ch.instance",
+						"ch.contact_id",
+						"ch.id",
+						"customer.sent_at",
+						"customer.body"
+					)}
 					${operatorResponseClause}
 					${sectorResponseClause}
 			) responseMetrics
@@ -801,27 +1021,52 @@ class OperatorPerformanceService {
 			FROM (
 				SELECT
 					ch.id AS chatId,
-					(
-						SELECT MAX(msg.sent_at)
-						FROM messages msg
-						WHERE msg.chat_id = ch.id
-							AND NOT ${FROM_US_SQL_CONDITION("msg")}
-					) AS lastCustomerMessageAt
+					ch.instance AS instance,
+					ch.contact_id AS contactId,
+					customerLast.sent_at AS lastCustomerMessageAt,
+					customerLast.body AS lastCustomerMessageBody
 				FROM chats ch
+				INNER JOIN (
+					SELECT
+						msg.instance AS instance,
+						msg.chat_id AS chatId,
+						msg.sent_at,
+						msg.body
+					FROM messages msg
+					WHERE msg.instance = ?
+						AND msg.chat_id IS NOT NULL
+						AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg")}
+						AND msg.sent_at >= ?
+						AND msg.sent_at <= ?
+						AND msg.id = (
+							SELECT msg2.id
+							FROM messages msg2
+							WHERE msg2.instance = msg.instance
+								AND msg2.chat_id = msg.chat_id
+								AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg2")}
+							ORDER BY msg2.sent_at DESC, msg2.id DESC
+							LIMIT 1
+						)
+				) customerLast ON customerLast.chatId = ch.id AND customerLast.instance = ch.instance
 				WHERE ch.instance = ?
 					AND ch.is_finished = 0
 					AND ch.user_id IS NOT NULL
 					${operatorPendingClause}
 					${sectorPendingClause}
 			) pending
-			WHERE pending.lastCustomerMessageAt IS NOT NULL
-				AND pending.lastCustomerMessageAt >= ?
-				AND pending.lastCustomerMessageAt <= ?
+			WHERE NOT ${TRIVIAL_POST_CLOSE_FOLLOW_UP_SQL_CONDITION(
+					"pending.instance",
+					"pending.contactId",
+					"pending.chatId",
+					"pending.lastCustomerMessageAt",
+					"pending.lastCustomerMessageBody"
+				)}
 				AND NOT EXISTS (
 					SELECT 1
 					FROM messages response
 					WHERE response.chat_id = pending.chatId
-						AND ${FROM_US_SQL_CONDITION("response")}
+						AND response.instance = pending.instance
+						AND ${OPERATION_MESSAGE_SQL_CONDITION("response")}
 						AND response.sent_at > pending.lastCustomerMessageAt
 				)
 			GROUP BY DATE(pending.lastCustomerMessageAt)
@@ -869,8 +1114,8 @@ class OperatorPerformanceService {
 		const [messageRows, finishedRows, responseRows, pendingRows, transferRows] = await Promise.all([
 			prismaService.$queryRawUnsafe<DailyMetricsAggregateRow[]>(messagesQuery, instance, startDate, endDate),
 			prismaService.$queryRawUnsafe<DailyMetricsAggregateRow[]>(finishedQuery, instance, startDate, endDate),
-			prismaService.$queryRawUnsafe<DailyMetricsAggregateRow[]>(firstResponseQuery, instance, instance, startDate, endDate),
-			prismaService.$queryRawUnsafe<DailyMetricsAggregateRow[]>(pendingQuery, instance, startDate, endDate),
+			prismaService.$queryRawUnsafe<DailyMetricsAggregateRow[]>(firstResponseQuery, instance, startDate, endDate, instance, startDate, endDate),
+			prismaService.$queryRawUnsafe<DailyMetricsAggregateRow[]>(pendingQuery, instance, startDate, endDate, instance),
 			prismaService.$queryRawUnsafe<DailyMetricsAggregateRow[]>(
 				transfersQuery,
 				instance,
@@ -895,9 +1140,9 @@ class OperatorPerformanceService {
 			const day = normalizeDayKey(row.day);
 			if (!day) continue;
 			const bucket = ensureBucket(day);
-			bucket.messagesCount = toNumber(row.messagesCount);
 			bucket.sentMessagesCount = toNumber(row.sentMessagesCount);
 			bucket.receivedMessagesCount = toNumber(row.receivedMessagesCount);
+			bucket.messagesCount = bucket.sentMessagesCount + bucket.receivedMessagesCount;
 		}
 
 		for (const row of finishedRows) {
@@ -994,6 +1239,215 @@ class OperatorPerformanceService {
 				previousAverageHandlingSeconds: previous.averageHandlingSeconds
 			};
 		});
+	}
+
+	public async getOperatorPerformanceDetails(
+		instance: string,
+		operatorId: number,
+		startDateRaw?: string | null,
+		endDateRaw?: string | null,
+		sectorsRaw?: string | null
+	): Promise<OperatorPerformanceDetailsResult> {
+		const startDate = parseBoundaryDate(startDateRaw, "start");
+		const endDate = parseBoundaryDate(endDateRaw, "end");
+		const sectorIds = parseIds(sectorsRaw);
+
+		const sectorFirstResponseClause = buildInClause("ch.sector_id", sectorIds);
+		const sectorPendingClause = buildInClause("pending.sectorId", sectorIds);
+
+		const firstResponseParams: Array<string | number | Date> = [instance];
+		let firstResponseCandidateDateClause = "";
+		if (startDate) {
+			firstResponseCandidateDateClause += " AND msg.sent_at >= ?";
+			firstResponseParams.push(startDate);
+		}
+		if (endDate) {
+			firstResponseCandidateDateClause += " AND msg.sent_at <= ?";
+			firstResponseParams.push(endDate);
+		}
+		firstResponseParams.push(instance, operatorId);
+		let firstResponseDateClause = "";
+		if (startDate) {
+			firstResponseDateClause += " AND response.sent_at >= ?";
+			firstResponseParams.push(startDate);
+		}
+		if (endDate) {
+			firstResponseDateClause += " AND response.sent_at <= ?";
+			firstResponseParams.push(endDate);
+		}
+
+		const pendingParams: Array<string | number | Date> = [instance];
+		let pendingCandidateDateClause = "";
+		if (startDate) {
+			pendingCandidateDateClause += " AND msg.sent_at >= ?";
+			pendingParams.push(startDate);
+		}
+		if (endDate) {
+			pendingCandidateDateClause += " AND msg.sent_at <= ?";
+			pendingParams.push(endDate);
+		}
+		pendingParams.push(instance, operatorId);
+
+		const firstResponsesQuery = `
+			SELECT
+				ch.id AS chatId,
+				ch.contact_id AS contactId,
+				contact.name AS contactName,
+				contact.phone AS contactPhone,
+				customer.sent_at AS firstCustomerMessageAt,
+				customer.body AS firstCustomerMessageBody,
+				response.sent_at AS firstResponseAt,
+				response.body AS firstResponseBody,
+				TIMESTAMPDIFF(SECOND, customer.sent_at, response.sent_at) AS firstResponseSeconds
+			FROM chats ch
+			LEFT JOIN contacts contact ON contact.id = ch.contact_id
+			INNER JOIN (
+				SELECT DISTINCT msg.chat_id AS chatId
+				FROM messages msg
+				WHERE msg.instance = ?
+					AND msg.chat_id IS NOT NULL
+					AND ${OPERATION_MESSAGE_SQL_CONDITION("msg")}
+					${firstResponseCandidateDateClause}
+			) responseCandidate ON responseCandidate.chatId = ch.id
+			INNER JOIN messages customer ON customer.id = (
+				SELECT msg2.id
+				FROM messages msg2
+				WHERE msg2.instance = ch.instance
+					AND msg2.chat_id = ch.id
+						AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg2")}
+				ORDER BY msg2.sent_at ASC, msg2.id ASC
+				LIMIT 1
+			)
+			INNER JOIN messages response ON response.id = (
+				SELECT msg3.id
+				FROM messages msg3
+				WHERE msg3.instance = ch.instance
+					AND msg3.chat_id = ch.id
+						AND ${OPERATION_MESSAGE_SQL_CONDITION("msg3")}
+					AND msg3.sent_at > customer.sent_at
+				ORDER BY msg3.sent_at ASC, msg3.id ASC
+				LIMIT 1
+			)
+			WHERE ch.instance = ?
+				AND COALESCE(response.user_id, ch.user_id) = ?
+				AND NOT ${TRIVIAL_POST_CLOSE_FOLLOW_UP_SQL_CONDITION(
+					"ch.instance",
+					"ch.contact_id",
+					"ch.id",
+					"customer.sent_at",
+					"customer.body"
+				)}
+				${firstResponseDateClause}
+				${sectorFirstResponseClause}
+			ORDER BY firstResponseSeconds DESC, response.sent_at DESC
+		`;
+
+		const pendingReturnsQuery = `
+			SELECT
+				pending.chatId,
+				pending.contactId,
+				contact.name AS contactName,
+				contact.phone AS contactPhone,
+				pending.startedAt,
+				pending.lastCustomerMessageAt,
+				pending.lastCustomerMessageBody,
+				TIMESTAMPDIFF(SECOND, pending.lastCustomerMessageAt, NOW()) AS waitingSeconds
+			FROM (
+				SELECT
+					ch.id AS chatId,
+					ch.instance AS instance,
+					ch.contact_id AS contactId,
+					ch.sector_id AS sectorId,
+					ch.started_at AS startedAt,
+					customerLast.sent_at AS lastCustomerMessageAt,
+					customerLast.body AS lastCustomerMessageBody
+				FROM chats ch
+				INNER JOIN (
+					SELECT
+						msg.instance AS instance,
+						msg.chat_id AS chatId,
+						msg.sent_at,
+						msg.body
+					FROM messages msg
+					WHERE msg.instance = ?
+						AND msg.chat_id IS NOT NULL
+						AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg")}
+						${pendingCandidateDateClause}
+						AND msg.id = (
+							SELECT msg2.id
+							FROM messages msg2
+							WHERE msg2.instance = msg.instance
+								AND msg2.chat_id = msg.chat_id
+								AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg2")}
+							ORDER BY msg2.sent_at DESC, msg2.id DESC
+							LIMIT 1
+						)
+				) customerLast ON customerLast.chatId = ch.id AND customerLast.instance = ch.instance
+				WHERE ch.instance = ?
+					AND ch.is_finished = 0
+					AND ch.user_id = ?
+			) pending
+			LEFT JOIN contacts contact ON contact.id = pending.contactId
+			WHERE ${sectorPendingClause.slice(5) || "1=1"}
+				AND NOT ${TRIVIAL_POST_CLOSE_FOLLOW_UP_SQL_CONDITION(
+					"pending.instance",
+					"pending.contactId",
+					"pending.chatId",
+					"pending.lastCustomerMessageAt",
+					"pending.lastCustomerMessageBody"
+				)}
+				AND NOT EXISTS (
+					SELECT 1
+					FROM messages response
+					WHERE response.chat_id = pending.chatId
+						AND response.instance = pending.instance
+						AND ${OPERATION_MESSAGE_SQL_CONDITION("response")}
+						AND response.sent_at > pending.lastCustomerMessageAt
+				)
+			ORDER BY pending.lastCustomerMessageAt DESC
+		`;
+
+		const [firstResponseRows, pendingReturnRows] = await Promise.all([
+			prismaService.$queryRawUnsafe<OperatorFirstResponseDetailRow[]>(firstResponsesQuery, ...firstResponseParams),
+			prismaService.$queryRawUnsafe<OperatorPendingReturnDetailRow[]>(pendingReturnsQuery, ...pendingParams)
+		]);
+
+		Logger.info(
+			`[OperatorPerformanceService] Drilldown request completed ${stringifyLogData({
+				instance,
+				operatorId,
+				startDateRaw,
+				endDateRaw,
+				sectorsRaw,
+				firstResponsesCount: firstResponseRows.length,
+				pendingReturnsCount: pendingReturnRows.length
+			})}`
+		);
+
+		return {
+			operatorId,
+			firstResponses: firstResponseRows.map((row) => ({
+				chatId: toNumber(row.chatId),
+				contactId: row.contactId == null ? null : toNumber(row.contactId),
+				contactName: row.contactName,
+				contactPhone: row.contactPhone,
+				firstCustomerMessageAt: normalizeDateTime(row.firstCustomerMessageAt),
+				firstCustomerMessageBody: row.firstCustomerMessageBody,
+				firstResponseAt: normalizeDateTime(row.firstResponseAt),
+				firstResponseBody: row.firstResponseBody,
+				firstResponseSeconds: toNumber(row.firstResponseSeconds)
+			})),
+			pendingReturns: pendingReturnRows.map((row) => ({
+				chatId: toNumber(row.chatId),
+				contactId: row.contactId == null ? null : toNumber(row.contactId),
+				contactName: row.contactName,
+				contactPhone: row.contactPhone,
+				startedAt: normalizeDateTime(row.startedAt),
+				lastCustomerMessageAt: normalizeDateTime(row.lastCustomerMessageAt),
+				lastCustomerMessageBody: row.lastCustomerMessageBody,
+				waitingSeconds: toNumber(row.waitingSeconds)
+			}))
+		};
 	}
 
 	public async getOperatorPerformance(
