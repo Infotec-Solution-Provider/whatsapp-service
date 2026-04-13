@@ -1,19 +1,29 @@
 import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import schedulesService from "../services/schedules.service";
+import unifiedSchedulesService from "../services/unified-schedules.service";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import { WppSchedule } from "@prisma/client";
 import { CreateScheduleDTO } from "@in.pulse-crm/sdk";
+import { UnifiedScheduleFilters } from "../types/unified-schedule.types";
 interface SchedulesFilters {
 	userId?: string;
 	sectorId?: string;
 }
 class SchedulesController {
 	constructor(public readonly router: Router) {
+		this.router.get("/api/whatsapp/schedules/unified", isAuthenticated, this.getUnifiedSchedulesBySession);
 		this.router.get("/api/whatsapp/schedules", isAuthenticated, this.getSchedulesBySession);
 		this.router.post("/api/whatsapp/schedules", isAuthenticated, this.createSchedule);
 		this.router.patch("/api/whatsapp/schedules/:id", isAuthenticated, this.editSchedule);
 		this.router.delete("/api/whatsapp/schedules/:id", isAuthenticated, this.deleteSchedule);
+	}
+
+	private async getUnifiedSchedulesBySession(req: Request, res: Response) {
+		const filters = req.query as UnifiedScheduleFilters;
+		const result = await unifiedSchedulesService.getUnifiedSchedules(req.session, filters);
+
+		res.status(200).send(result);
 	}
 
 	private async getSchedulesBySession(req: Request, res: Response) {
