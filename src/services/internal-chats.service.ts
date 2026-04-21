@@ -831,9 +831,11 @@ class InternalChatsService {
 					where: { id: +data.quotedId }
 				});
 
-				if (quotedmsg?.wwebjsId) {
-					process.log(`Mensagem citada encontrada. wwebjsId: ${quotedmsg.wwebjsId}`);
-					data.quotedId = quotedmsg.wwebjsId;
+				const quotedWppId = quotedmsg?.wwebjsIdStanza || quotedmsg?.wwebjsId;
+
+				if (quotedWppId) {
+					process.log(`Mensagem citada encontrada. wwebjsId: ${quotedWppId}`);
+					data.quotedId = quotedWppId;
 				} else {
 					process.log(`Aviso: Mensagem citada não possui wwebjsId. Enviando sem resposta.`);
 					data.quotedId = null;
