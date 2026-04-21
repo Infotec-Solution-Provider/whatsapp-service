@@ -562,12 +562,10 @@ class InternalChatsService {
 						await prismaService.internalMessage.update({
 							where: { id: savedMsg.id },
 							data: {
-								wwebjsIdStanza: sentMsg.wwebjsIdStanza ?? null,
-								wwebjsId: sentMsg.wwebjsId ?? null,
 								status: "RECEIVED"
 							}
 						});
-						process.log(`Mensagem interna atualizada com IDs do WhatsApp`);
+						process.log(`Mensagem interna atualizada com status RECEIVED`);
 
 						// Emitir status SENT após envio bem-sucedido ao WhatsApp
 						process.log(`Emitindo evento de status SENT após envio ao WhatsApp`);
@@ -694,6 +692,32 @@ class InternalChatsService {
 	): Promise<void> {
 		// Processa a mensagem normalmente usando o método receiveMessage
 		await this.receiveMessage(instance, groupId, messageData, authorName);
+	}
+
+	private async persistGeneratedWppIds(messageId: number, sentMsg: CreateMessageDto | undefined, process: ProcessingLogger) {
+		const dataToUpdate: Prisma.InternalMessageUpdateInput = {};
+
+		if (sentMsg?.wwebjsId) {
+			dataToUpdate.wwebjsId = sentMsg.wwebjsId;
+		}
+
+		if (sentMsg?.wwebjsIdStanza) {
+			dataToUpdate.wwebjsIdStanza = sentMsg.wwebjsIdStanza;
+		}
+
+		if (!Object.keys(dataToUpdate).length) {
+			process.log(`Nenhum ID do WhatsApp retornado para persistir na mensagem interna ${messageId}`);
+			return;
+		}
+
+		await prismaService.internalMessage.update({
+			where: { id: messageId },
+			data: dataToUpdate
+		});
+
+		process.log(
+			`IDs do WhatsApp persistidos na mensagem interna ${messageId}. wwebjsId: ${sentMsg?.wwebjsId || "N/A"}, wwebjsIdStanza: ${sentMsg?.wwebjsIdStanza || "N/A"}`
+		);
 	}
 
 	public async receiveMessageEdit(groupId: string, msgId: string, newText: string) {
@@ -866,6 +890,7 @@ class InternalChatsService {
 					},
 					true
 				);
+				await this.persistGeneratedWppIds(message.id, result, process);
 				process.log(
 					`Mensagem com arquivo enviada. Resultado completo:`,
 					result
@@ -886,6 +911,7 @@ class InternalChatsService {
 					},
 					true
 				);
+				await this.persistGeneratedWppIds(message.id, result, process);
 				process.log(
 					`Mensagem de texto enviada. Resultado completo:`,
 					result
@@ -907,6 +933,8 @@ class InternalChatsService {
 				},
 				true
 			);
+			await this.persistGeneratedWppIds(message.id, result, process);
+			
 			process.log(`Mensagem enviada com sucesso (fallback). wwebjsId: ${result?.wwebjsId || "N/A"}`);
 			process.success(`Mensagem enviada para grupo ${groupId}`);
 			return result;
