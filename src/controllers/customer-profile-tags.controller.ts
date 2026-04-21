@@ -1,6 +1,7 @@
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
+import onlyLocal from "../middlewares/only-local.middleware";
 import customerProfileTagsService from "../services/customer-profile-tags.service";
 import {
 	CustomerAgeLevel,
@@ -25,6 +26,12 @@ class CustomerProfileTagsController {
 			"/api/whatsapp/customers/profile-tags/customer-ids",
 			isAuthenticated,
 			this.findCustomerIdsByProfileFilters
+		);
+
+		this.router.post(
+			"/api/internal/whatsapp/customers/profile-tags/customer-ids",
+			onlyLocal,
+			this.findInternalCustomerIdsByProfileFilters
 		);
 
 		this.router.get(
@@ -125,30 +132,88 @@ class CustomerProfileTagsController {
 		return Array.from(new Set(parsedCustomerIds));
 	};
 
-	private parseSummaryFilters = (req: Request): CustomerProfileSummaryFilters => {
+	private parseSummaryFilters = (source: Record<string, unknown>): CustomerProfileSummaryFilters => {
 		const filters: CustomerProfileSummaryFilters = {};
+		const parseNumberList = (value: unknown) => {
+			if (typeof value !== "string") {
+				if (!Array.isArray(value)) {
+					return undefined;
+				}
 
-		if (typeof req.query["profileLevel"] === "string") {
-			filters.profileLevel = req.query["profileLevel"] as CustomerProfileSummaryLevel;
+				const parsedArray = value
+					.map((item) => Number(item))
+					.filter((item) => Number.isInteger(item) && item > 0);
+
+				return parsedArray.length ? Array.from(new Set(parsedArray)) : undefined;
+			}
+
+			const parsed = value
+				.split(",")
+				.map((item) => Number(item.trim()))
+				.filter((item) => Number.isInteger(item) && item > 0);
+
+			return parsed.length ? Array.from(new Set(parsed)) : undefined;
+		};
+
+		if (typeof source["profileLevel"] === "string") {
+			filters.profileLevel = source["profileLevel"] as CustomerProfileSummaryLevel;
 		}
 
-		if (typeof req.query["interactionLevel"] === "string") {
-			filters.interactionLevel = req.query["interactionLevel"] as CustomerInteractionLevel;
+		if (typeof source["interactionLevel"] === "string") {
+			filters.interactionLevel = source["interactionLevel"] as CustomerInteractionLevel;
 		}
 
-		if (typeof req.query["purchaseLevel"] === "string") {
-			filters.purchaseLevel = req.query["purchaseLevel"] as CustomerPurchaseLevel;
+		if (typeof source["purchaseLevel"] === "string") {
+			filters.purchaseLevel = source["purchaseLevel"] as CustomerPurchaseLevel;
 		}
 
-		if (typeof req.query["ageLevel"] === "string") {
-			filters.ageLevel = req.query["ageLevel"] as CustomerAgeLevel;
+		if (typeof source["ageLevel"] === "string") {
+			filters.ageLevel = source["ageLevel"] as CustomerAgeLevel;
 		}
 
-		if (typeof req.query["purchaseInterestLevel"] === "string") {
-			filters.purchaseInterestLevel = req.query["purchaseInterestLevel"] as CustomerPurchaseInterestLevel;
+		if (typeof source["purchaseInterestLevel"] === "string") {
+			filters.purchaseInterestLevel = source["purchaseInterestLevel"] as CustomerPurchaseInterestLevel;
 		}
+
+		if (typeof source["state"] === "string") {
+			filters.state = source["state"].trim().toUpperCase();
+		}
+
+		if (typeof source["city"] === "string") {
+			filters.city = source["city"];
+		}
+
+		if (typeof source["activeCustomer"] === "string") {
+			filters.activeCustomer = source["activeCustomer"] as "SIM" | "NAO";
+		}
+
+		if (typeof source["searchTerm"] === "string") {
+			filters.searchTerm = source["searchTerm"];
+		}
+
+		filters.segmentIds = parseNumberList(source["segmentIds"]);
+		filters.campaignIds = parseNumberList(source["campaignIds"]);
+		filters.operatorIds = parseNumberList(source["operatorIds"]);
 
 		return filters;
+	};
+
+	private parseSummaryFiltersFromRequest = (req: Request): CustomerProfileSummaryFilters => {
+		return this.parseSummaryFilters(req.query as Record<string, unknown>);
+	};
+
+	private parseSummaryFiltersFromBody = (req: Request): CustomerProfileSummaryFilters => {
+		return this.parseSummaryFilters((req.body ?? {}) as Record<string, unknown>);
+	};
+
+	private parseInternalInstance = (req: Request): string => {
+		const instance = typeof req.body?.instance === "string" ? req.body.instance.trim() : "";
+
+		if (!instance) {
+			throw new BadRequestError("instance is required!");
+		}
+
+		return instance;
 	};
 
 	private parseManualOverridesInput = (req: Request): UpdateCustomerProfileManualOverridesInput => {
@@ -194,8 +259,19 @@ class CustomerProfileTagsController {
 	};
 
 	private findCustomerIdsByProfileFilters = async (req: Request, res: Response) => {
-		const filters = this.parseSummaryFilters(req);
+		const filters = this.parseSummaryFiltersFromRequest(req);
 		const data = await customerProfileTagsService.findCustomerIdsByProfileFilters(req.session.instance, filters);
+
+		res.status(200).send({
+			message: "Customer ids retrieved successfully!",
+			data,
+		});
+	};
+
+	private findInternalCustomerIdsByProfileFilters = async (req: Request, res: Response) => {
+		const instance = this.parseInternalInstance(req);
+		const filters = this.parseSummaryFiltersFromBody(req);
+		const data = await customerProfileTagsService.findCustomerIdsByProfileFilters(instance, filters);
 
 		res.status(200).send({
 			message: "Customer ids retrieved successfully!",

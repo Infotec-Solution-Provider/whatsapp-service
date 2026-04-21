@@ -55,8 +55,18 @@ interface SystemStartNewChatProps {
 	instance: string;
 	contact: WppContact;
 	systemMessage?: string;
-	sectorId: number;
-	userId: number;
+	sectorId?: number | null;
+	userId?: number | null;
+	agentId?: number | null;
+}
+
+interface EnsureActiveChatForAgentProps {
+	instance: string;
+	contactId: number;
+	agentId: number;
+	systemMessage?: string;
+	sectorId?: number | null;
+	userId?: number | null;
 }
 
 export const FETCH_CUSTOMERS_QUERY = "SELECT * FROM clientes WHERE CODIGO IN (?)";
@@ -1017,7 +1027,7 @@ class ChatsService {
 		}
 	}
 
-	public async systemStartNewChat({ instance, sectorId, userId, contact, systemMessage }: SystemStartNewChatProps) {
+	public async systemStartNewChat({ instance, sectorId, userId, agentId, contact, systemMessage }: SystemStartNewChatProps) {
 		const process = new ProcessingLogger(instance, "system-start-chat", `system-${contact.id}-${Date.now()}`, {
 			instance,
 			contactId: contact.id
@@ -1035,9 +1045,10 @@ class ChatsService {
 					instance,
 					type: "ACTIVE",
 					avatarUrl: profilePicture,
-					userId,
+					userId: userId ?? null,
+					agentId: agentId ?? null,
 					contactId: contact.id,
-					sectorId,
+					sectorId: sectorId ?? null,
 					startedAt: new Date()
 				},
 				include: {
@@ -1063,6 +1074,56 @@ class ChatsService {
 			process.failed(err);
 			throw new Error("Erro ao iniciar o atendimento pelo sistema: " + err.message, { cause: err });
 		}
+	}
+
+	public async ensureActiveChatForAgent({
+		instance,
+		contactId,
+		agentId,
+		systemMessage,
+		sectorId,
+		userId,
+	}: EnsureActiveChatForAgentProps) {
+		const existingChat = await prismaService.wppChat.findFirst({
+			where: {
+				instance,
+				contactId,
+				isFinished: false,
+			},
+		});
+
+		if (existingChat) {
+			return { chat: existingChat, existed: true };
+		}
+
+		const contact = await prismaService.wppContact.findFirst({
+			where: {
+				id: contactId,
+				instance,
+				isDeleted: false,
+			},
+			include: { sectors: true } as any,
+		});
+
+		if (!contact) {
+			throw new BadRequestError("Contato não encontrado.");
+		}
+
+		const inferredSectorId =
+			typeof sectorId === "number"
+				? sectorId
+				: ((contact as any).sectors?.[0]?.sectorId as number | undefined) ?? null;
+
+		const newChat = await this.systemStartNewChat({
+			instance,
+			contact,
+			sectorId: inferredSectorId,
+			userId: userId ?? null,
+			agentId,
+			systemMessage,
+		});
+
+		return { chat: newChat, existed: false };
 	}
 
 	private async checkIfChatExistsOrThrow(instance: string, contactId: number) {

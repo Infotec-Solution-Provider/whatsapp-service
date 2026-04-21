@@ -682,7 +682,7 @@ class CustomerProfileTagsService {
 		return profileLevel === filters.profileLevel;
 	}
 
-	private hasActiveSummaryFilters(filters: CustomerProfileSummaryFilters): boolean {
+	private hasComputedSummaryFilters(filters: CustomerProfileSummaryFilters): boolean {
 		return Boolean(
 			filters.profileLevel ||
 				filters.interactionLevel ||
@@ -707,6 +707,67 @@ class CustomerProfileTagsService {
 			instance,
 			["SELECT CODIGO", "FROM clientes", "ORDER BY CODIGO ASC"].join(" "),
 			[]
+		);
+
+		return rows.map((row) => Number(row.CODIGO)).filter((customerId) => Number.isInteger(customerId) && customerId > 0);
+	}
+
+	private async listCustomerIdsByBaseFilters(
+		instance: string,
+		filters: CustomerProfileSummaryFilters
+	): Promise<number[] | null> {
+		const conditions: string[] = [];
+		const bindings: Array<string | number> = [];
+
+		if (filters.state?.trim()) {
+			conditions.push("UPPER(ESTADO) = ?");
+			bindings.push(filters.state.trim().toUpperCase());
+		}
+
+		if (filters.city?.trim()) {
+			conditions.push("CIDADE = ?");
+			bindings.push(filters.city.trim());
+		}
+
+		if (filters.activeCustomer) {
+			conditions.push("ATIVO = ?");
+			bindings.push(filters.activeCustomer);
+		}
+
+		const searchTerm = filters.searchTerm?.trim();
+		if (searchTerm) {
+			const likeTerm = `%${searchTerm}%`;
+			conditions.push("(RAZAO LIKE ? OR FANTASIA LIKE ? OR CPF_CNPJ LIKE ? OR COD_ERP LIKE ? OR CIDADE LIKE ?)");
+			bindings.push(likeTerm, likeTerm, likeTerm, likeTerm, likeTerm);
+		}
+
+		const pushNumericFilter = (column: string, values: number[] | undefined) => {
+			if (!values?.length) {
+				return;
+			}
+
+			const placeholders = values.map(() => "?").join(", ");
+			conditions.push(`${column} IN (${placeholders})`);
+			bindings.push(...values);
+		};
+
+		pushNumericFilter("SEGMENTO", filters.segmentIds);
+		pushNumericFilter("COD_CAMPANHA", filters.campaignIds);
+		pushNumericFilter("OPERADOR", filters.operatorIds);
+
+		if (!conditions.length) {
+			return null;
+		}
+
+		const rows = await instancesService.executeQuery<CustomerIdRow[]>(
+			instance,
+			[
+				"SELECT CODIGO",
+				"FROM clientes",
+				`WHERE ${conditions.join(" AND ")}`,
+				"ORDER BY CODIGO ASC",
+			].join(" "),
+			bindings,
 		);
 
 		return rows.map((row) => Number(row.CODIGO)).filter((customerId) => Number.isInteger(customerId) && customerId > 0);
@@ -1128,17 +1189,18 @@ class CustomerProfileTagsService {
 		instance: string,
 		filters: CustomerProfileSummaryFilters
 	): Promise<number[]> {
-		const hasComputedFilters = this.hasActiveSummaryFilters(filters);
+		const baseFilteredCustomerIds = await this.listCustomerIdsByBaseFilters(instance, filters);
+		const hasComputedFilters = this.hasComputedSummaryFilters(filters);
 
 		if (!hasComputedFilters && filters.purchaseInterestLevel === "nao_analisado") {
-			return this.listAllCustomerIds(instance);
+			return baseFilteredCustomerIds ?? this.listAllCustomerIds(instance);
 		}
 
 		if (!hasComputedFilters) {
-			return [];
+			return baseFilteredCustomerIds ?? [];
 		}
 
-		const allCustomerIds = await this.listAllCustomerIds(instance);
+		const allCustomerIds = baseFilteredCustomerIds ?? await this.listAllCustomerIds(instance);
 		if (!allCustomerIds.length) {
 			return [];
 		}

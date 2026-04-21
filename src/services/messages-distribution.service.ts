@@ -187,6 +187,56 @@ class MessagesDistributionService {
 	}
 
 	/**
+	 * Processa agente de IA em um chat existente
+	 */
+	private async processAiAgentMessage(chat: WppChat, contact: WppContact, clientId: number | null, logger: ProcessingLogger) {
+		const rawAgentId = chat.agentId ?? null;
+
+		if (chat.botId && rawAgentId === null) {
+			logger.log(`Chat ${chat.id} possui bot tradicional ativo (${chat.botId}); IA reativa não será acionada.`);
+			return;
+		}
+
+		const agentId = rawAgentId !== null && rawAgentId !== undefined ? Number(rawAgentId) : null;
+		if (agentId !== null && !Number.isFinite(agentId)) {
+			logger.log(`Agent ID inválido: ${rawAgentId}`);
+			return;
+		}
+
+		if (agentId !== null) {
+			logger.log(`Processando mensagem com agente de IA ID ${agentId}`);
+		} else {
+			logger.log(`Processando mensagem com seleção automática de agente de IA para o chat ${chat.id}`);
+		}
+		const AI_API_URL = process.env["AI_API_URL"] || "http://localhost:8008";
+		const requestPayload = {
+			chatId: chat.id,
+			instance: chat.instance,
+			contactId: contact.id,
+			customerId: contact.customerId ?? null,
+			phone: contact.phone,
+			clientId,
+			triggeredBy: "NEW_MESSAGE_NO_AGENT",
+			agentId,
+		};
+
+		logger.debug("Acionando ai-service para processamento do agente de IA", requestPayload);
+
+		try {
+			const axios = (await import("axios")).default;
+			const response = await axios.post(
+				`${AI_API_URL}/api/ai/agents/process-message`,
+				requestPayload,
+				{ timeout: 30000 }
+			);
+			logger.debug("Resposta recebida do ai-service para o agente de IA", response.data);
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			logger.log(`Erro ao acionar agente de IA: ${msg}`);
+		}
+	}
+
+	/**
 	 * Processa bot ativo em um chat existente
 	 */
 	private async processBotMessage(chat: WppChat, contact: WppContact, msg: WppMessage, logger: ProcessingLogger) {
@@ -379,6 +429,7 @@ class MessagesDistributionService {
 				logger.log("Chat anterior encontrado para o contato.", currChat);
 				await this.processBotMessage(currChat, contact, msg, logger);
 				const outputMessage = await this.insertAndNotify(logger, currChat, msg);
+				await this.processAiAgentMessage(currChat, contact, clientId, logger);
 				return outputMessage;
 			}
 
@@ -411,6 +462,7 @@ class MessagesDistributionService {
 			logger.log("Chat criado com sucesso!", newChat);
 
 			const outputMsg = await this.insertAndNotify(logger, newChat, msg, true);
+			await this.processAiAgentMessage(newChat, contact, clientId, logger);
 			return outputMsg;
 		} catch (err) {
 			const msg = sanitizeErrorMessage(err);

@@ -126,4 +126,11 @@ export interface CustomerProfileSummaryFilters {
 	purchaseLevel?: CustomerPurchaseLevel;
 	ageLevel?: CustomerAgeLevel;
 	purchaseInterestLevel?: CustomerPurchaseInterestLevel;
+	state?: string;
+	city?: string;
+	activeCustomer?: "SIM" | "NAO";
+	searchTerm?: string;
+	segmentIds?: number[];
+	campaignIds?: number[];
+	operatorIds?: number[];
 }

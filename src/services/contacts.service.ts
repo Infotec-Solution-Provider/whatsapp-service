@@ -11,9 +11,12 @@ import parametersService from "./parameters.service";
 import prismaService from "./prisma.service";
 
 export interface ContactsFilters {
+	ids?: number[] | null;
 	id?: number | null;
 	name: string | null;
 	phone: string | null;
+	phones?: string[] | null;
+	customerIds?: number[] | null;
 	customerId: number | null;
 	customerErp: string | null;
 	customerCnpj: string | null;

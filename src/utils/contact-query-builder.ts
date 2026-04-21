@@ -17,6 +17,15 @@ export class ContactQueryBuilder {
 		const whereConditions: string[] = ["ctt.is_deleted = false"];
 
 		// Contact filters
+		if (filters.ids && filters.ids.length > 0) {
+			const placeholders = filters.ids.map(() => "?").join(",");
+			whereConditions.push(`ctt.id IN (${placeholders})`);
+			queryParams.push(...filters.ids);
+		} else if (typeof filters.id === "number" && Number.isFinite(filters.id)) {
+			whereConditions.push("ctt.id = ?");
+			queryParams.push(filters.id);
+		}
+
 		if (filters.name) {
 			whereConditions.push("ctt.name LIKE ?");
 			queryParams.push(`%${filters.name}%`);
@@ -30,7 +39,23 @@ export class ContactQueryBuilder {
 			}
 		}
 
-		if (typeof filters.customerId === "number" && Number.isFinite(filters.customerId)) {
+		if (filters.phones && filters.phones.length > 0) {
+			const normalizedPhones = filters.phones
+				.map((phone) => phone.replace(/\D/g, ""))
+				.filter((phone) => phone.length > 0);
+
+			if (normalizedPhones.length > 0) {
+				const placeholders = normalizedPhones.map(() => "?").join(",");
+				whereConditions.push(`ctt.phone IN (${placeholders})`);
+				queryParams.push(...normalizedPhones);
+			}
+		}
+
+		if (filters.customerIds && filters.customerIds.length > 0) {
+			const placeholders = filters.customerIds.map(() => "?").join(",");
+			whereConditions.push(`ctt.customer_id IN (${placeholders})`);
+			queryParams.push(...filters.customerIds);
+		} else if (typeof filters.customerId === "number" && Number.isFinite(filters.customerId)) {
 			whereConditions.push("ctt.customer_id = ?");
 			queryParams.push(filters.customerId);
 		}

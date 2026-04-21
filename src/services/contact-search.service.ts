@@ -11,9 +11,11 @@ import getUsersClient from "./users.service";
 // ============================================================================
 
 export interface ContactSearchFilters {
+	ids?: number[] | null;
 	id?: number | null;
 	name?: string | null;
 	phone?: string | null;
+	customerIds?: number[] | null;
 	customerId?: number | null;
 	customerErp?: string | null;
 	customerCnpj?: string | null;
@@ -66,6 +68,13 @@ class ContactQueryBuilder {
 	withId(id: number | null | undefined): this {
 		if (typeof id === "number" && Number.isFinite(id)) {
 			this.conditions.push({ id });
+		}
+		return this;
+	}
+
+	withIds(ids: number[] | null | undefined): this {
+		if (ids && ids.length > 0) {
+			this.conditions.push({ id: { in: ids } });
 		}
 		return this;
 	}
@@ -389,13 +398,16 @@ class ContactSearchService {
 
 		// 2. Constrói query de contatos
 		const queryBuilder = new ContactQueryBuilder(instance)
+			.withIds(filters.ids)
 			.withId(filters.id)
 			.withName(filters.name)
 			.withPhone(filters.phone)
 			.withSectors(filters.sectorIds);
 
 		// Aplica filtros de cliente de forma combinada
-		if (matchedCustomerIds !== null) {
+		if (filters.customerIds && filters.customerIds.length > 0) {
+			queryBuilder.withCustomerIds(filters.customerIds);
+		} else if (matchedCustomerIds !== null) {
 			queryBuilder.withCustomerIds(matchedCustomerIds);
 		}
 		if (filters.customerId !== null && filters.customerId !== undefined) {

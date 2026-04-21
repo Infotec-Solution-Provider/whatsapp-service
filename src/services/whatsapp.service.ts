@@ -34,6 +34,7 @@ interface SendBotMessageData {
 	chat: WppChat;
 	text: string;
 	quotedId?: number | null;
+	agentId?: number | null;
 }
 interface WhatsappForwardTarget {
 	id: string;
@@ -327,11 +328,209 @@ class WhatsappService {
 		}
 	}
 
+	public async createSimulatedAgentMessage(chatId: number, text: string, agentId: number) {
+		const process = new ProcessingLogger("internal", "simulate-agent-message", `${chatId}-${Date.now()}`, {
+			chatId,
+			agentId,
+		});
+
+		const chat = await prismaService.wppChat.findUnique({
+			where: { id: chatId },
+			include: { contact: true },
+		});
+
+		if (!chat || !chat.contact) {
+			throw new BadRequestError("Chat ou contato não encontrado.");
+		}
+
+		const now = new Date();
+		const message = await messagesService.insertMessage({
+			instance: chat.instance,
+			status: "SENT",
+			timestamp: now.getTime().toString(),
+			sentAt: now,
+			from: `bot:ai-agent:${agentId}`,
+			to: chat.contact.phone,
+			type: "chat",
+			body: text,
+			chatId: chat.id,
+			contactId: chat.contact.id,
+			agentId,
+			clientId: null,
+		});
+
+		await messagesDistributionService.notifyMessage(process, message);
+		process.success(message);
+
+		return message;
+	}
+
+	public async sendAgentMessage(chatId: number, text: string, agentId: number, providedClientId: number | null = null) {
+		Logger.info(`[agent-send] Starting agent message send for chat ${chatId}`);
+		const chat = await prismaService.wppChat.findUnique({
+			where: { id: chatId },
+			include: {
+				contact: true,
+				sector: true,
+			},
+		});
+
+		if (!chat || !chat.contact) {
+			throw new BadRequestError("Chat ou contato não encontrado.");
+		}
+
+		let resolvedFrom: "provided" | "last-message" | "sector-default" | "none" = "none";
+		let resolvedClientId =
+			typeof providedClientId === "number" && Number.isInteger(providedClientId) && providedClientId > 0
+				? providedClientId
+				: null;
+
+		if (resolvedClientId !== null) {
+			resolvedFrom = "provided";
+		}
+
+		if (resolvedClientId === null) {
+			const latestChatMessage = await prismaService.wppMessage.findFirst({
+				where: {
+					chatId,
+					clientId: { not: null },
+				},
+				orderBy: [{ sentAt: "desc" }, { id: "desc" }],
+			});
+
+			resolvedClientId = latestChatMessage?.clientId ?? null;
+			if (resolvedClientId !== null) {
+				resolvedFrom = "last-message";
+			}
+		}
+
+		if (resolvedClientId === null) {
+			resolvedClientId = chat.sector?.defaultClientId ?? null;
+			if (resolvedClientId !== null) {
+				resolvedFrom = "sector-default";
+			}
+		}
+
+		Logger.debug(`[agent-send] Agent message resolution context for chat ${chatId}`, {
+			agentId,
+			providedClientId,
+			resolvedClientId,
+			resolvedFrom,
+			sectorDefaultClientId: chat.sector?.defaultClientId ?? null,
+			contactId: chat.contact.id,
+			textLength: text.length,
+		});
+
+		if (resolvedClientId === null) {
+			Logger.error(`[agent-send] No clientId available to send agent message for chat ${chatId}`);
+			throw new BadRequestError("Client do WhatsApp não encontrado para envio do agente.");
+		}
+
+		Logger.info(`[agent-send] Sending agent ${agentId} message on chat ${chatId} using client ${resolvedClientId} (${resolvedFrom})`);
+
+		return this.sendBotMessage(chat.contact.phone, resolvedClientId, {
+			chat,
+			text,
+			agentId,
+		});
+	}
+
+	public async createSimulatedAgentTemplateMessage(
+		chatId: number,
+		agentId: number,
+		templateName: string,
+		templateLanguage: string | null,
+	) {
+		const process = new ProcessingLogger("internal", "simulate-agent-template-message", `${chatId}-${Date.now()}`, {
+			chatId,
+			agentId,
+			templateName,
+			templateLanguage,
+		});
+
+		const chat = await prismaService.wppChat.findUnique({
+			where: { id: chatId },
+			include: {
+				contact: true,
+				sector: true,
+			},
+		});
+
+		if (!chat || !chat.contact) {
+			throw new BadRequestError("Chat ou contato não encontrado.");
+		}
+
+		const templateText = await this.resolveTemplatePreviewText(
+			chat.sector?.defaultClientId ?? null,
+			templateName,
+			templateLanguage,
+		);
+
+		const now = new Date();
+		const message = await messagesService.insertMessage({
+			instance: chat.instance,
+			status: "SENT",
+			timestamp: now.getTime().toString(),
+			sentAt: now,
+			from: `bot:ai-agent:${agentId}`,
+			to: chat.contact.phone,
+			type: "chat",
+			body: templateText,
+			chatId: chat.id,
+			contactId: chat.contact.id,
+			agentId,
+			clientId: null,
+		});
+
+		await messagesDistributionService.notifyMessage(process, message);
+		process.success(message);
+
+		return message;
+	}
+
+	private async resolveTemplatePreviewText(
+		clientId: number | null,
+		templateName: string,
+		templateLanguage: string | null,
+	): Promise<string> {
+		if (!clientId) {
+			return templateName;
+		}
+
+		try {
+			const templates = await this.getTemplates(clientId);
+			const template = templates.find((item) => {
+				if (item.name !== templateName) {
+					return false;
+				}
+
+				if (!templateLanguage) {
+					return true;
+				}
+
+				return item.language === templateLanguage;
+			});
+
+			return template?.text?.trim() || templateName;
+		} catch (error) {
+			Logger.debug(`[simulate-agent-template-message] Failed to resolve template text: ${sanitizeErrorMessage(error)}`);
+			return templateName;
+		}
+	}
+
 	public async sendBotMessage(to: string, clientId: number, data: SendBotMessageData) {
 		const process = new ProcessingLogger(data.chat.instance, "send-bot-message", `${to}-${Date.now()}`, data);
 		let pendingMsg: WppMessage | null = null;
 
 		process.log("Iniciando o envio da mensagem.");
+		Logger.info(`[send-bot-message] Starting outbound send for chat ${data.chat.id} using client ${clientId}`);
+		Logger.debug(`[send-bot-message] Outbound payload`, {
+			chatId: data.chat.id,
+			contactId: data.chat.contactId,
+			agentId: data.agentId ?? null,
+			quotedId: data.quotedId ?? null,
+			textLength: data.text.length,
+		});
 		try {
 			process.log("Obtendo client do whatsapp...");
 			const client = this.getClient(clientId);
@@ -347,11 +546,12 @@ class WhatsappService {
 				status: "PENDING",
 				timestamp: now.getTime().toString(),
 				sentAt: now,
-				from: `bot:${client._phone}`,
+				from: data.agentId ? `bot:ai-agent:${data.agentId}` : `bot:${client._phone}`,
 				to: `${to}`,
 				type: "chat",
 				body: data.text || "",
-				clientId: client.id
+				clientId: client.id,
+				...(data.agentId ? { agentId: data.agentId } : {}),
 			} as CreateMessageDto;
 
 			let options = { to, text: data.text } as SendMessageOptions;
@@ -393,6 +593,12 @@ class WhatsappService {
 
 			const savedMsg = await messagesService.updateMessage(pendingMsg.id, message);
 			process.log("Mensagem salva no banco de dados.", savedMsg);
+			Logger.info(`[send-bot-message] Outbound send completed for chat ${data.chat.id}`);
+			Logger.debug(`[send-bot-message] Outbound send summary`, {
+				messageId: savedMsg.id,
+				agentId: data.agentId ?? null,
+				clientId,
+			});
 
 			messagesDistributionService.notifyMessage(process, savedMsg);
 			process.success(savedMsg);
@@ -410,6 +616,10 @@ class WhatsappService {
 			}
 
 			process.failed("Erro ao enviar mensagem: " + sanitizeErrorMessage(err));
+			Logger.error(
+				`[send-bot-message] Outbound send failed for chat ${data.chat.id}`,
+				err instanceof Error ? err : new Error(String(err)),
+			);
 			throw new BadRequestError("Erro ao enviar mensagem.", err);
 		}
 	}

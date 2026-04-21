@@ -2,6 +2,7 @@ import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
+import onlyLocal from "../middlewares/only-local.middleware";
 import upload from "../middlewares/multer.middleware";
 import messagesService from "../services/messages.service";
 import whatsappService from "../services/whatsapp.service";
@@ -11,6 +12,9 @@ class MessagesController {
 		this.router.get("/api/whatsapp/messages/:id", this.getMessageById);
 		this.router.patch("/api/whatsapp/messages/mark-as-read", isAuthenticated, this.readContactMessages);
 		this.router.post("/api/whatsapp/:clientId/messages", upload.single("file"), isAuthenticated, this.sendMessage);
+		this.router.post("/api/internal/whatsapp/chats/:chatId/agent-message", onlyLocal, this.createAgentMessage);
+		this.router.post("/api/internal/whatsapp/chats/:chatId/agent-send-message", onlyLocal, this.sendAgentMessage);
+		this.router.post("/api/internal/whatsapp/chats/:chatId/agent-template-message", onlyLocal, this.createAgentTemplateMessage);
 		this.router.post("/api/whatsapp/:clientId/messages/forward", isAuthenticated, this.forwardMessages.bind(this));
 		this.router.get("/api/whatsapp/messages", isAuthenticated, this.fetchMessages);
 
@@ -84,6 +88,88 @@ class MessagesController {
 				error: (error as Error).message
 			});
 		}
+	}
+
+	private async createAgentMessage(req: Request, res: Response) {
+		const chatId = Number(req.params["chatId"]);
+		const { text, agentId } = req.body as Record<string, unknown>;
+
+		if (!Number.isInteger(chatId) || chatId <= 0) {
+			throw new BadRequestError("Chat ID is required!");
+		}
+
+		if (typeof text !== "string" || !text.trim()) {
+			throw new BadRequestError("Text is required!");
+		}
+
+		if (!Number.isInteger(agentId) || Number(agentId) <= 0) {
+			throw new BadRequestError("Agent ID is required!");
+		}
+
+		const message = await whatsappService.createSimulatedAgentMessage(chatId, text.trim(), Number(agentId));
+
+		res.status(201).send({
+			message: "Message created successfully!",
+			data: message,
+		});
+	}
+
+	private async sendAgentMessage(req: Request, res: Response) {
+		const chatId = Number(req.params["chatId"]);
+		const { text, agentId, clientId } = req.body as Record<string, unknown>;
+
+		if (!Number.isInteger(chatId) || chatId <= 0) {
+			throw new BadRequestError("Chat ID is required!");
+		}
+
+		if (typeof text !== "string" || !text.trim()) {
+			throw new BadRequestError("Text is required!");
+		}
+
+		if (!Number.isInteger(agentId) || Number(agentId) <= 0) {
+			throw new BadRequestError("Agent ID is required!");
+		}
+
+		const message = await whatsappService.sendAgentMessage(
+			chatId,
+			text.trim(),
+			Number(agentId),
+			typeof clientId === "number" && Number.isInteger(clientId) && clientId > 0 ? clientId : null,
+		);
+
+		res.status(201).send({
+			message: "Message sent successfully!",
+			data: message,
+		});
+	}
+
+	private async createAgentTemplateMessage(req: Request, res: Response) {
+		const chatId = Number(req.params["chatId"]);
+		const { agentId, templateName, templateLanguage } = req.body as Record<string, unknown>;
+
+		if (!Number.isInteger(chatId) || chatId <= 0) {
+			throw new BadRequestError("Chat ID is required!");
+		}
+
+		if (!Number.isInteger(agentId) || Number(agentId) <= 0) {
+			throw new BadRequestError("Agent ID is required!");
+		}
+
+		if (typeof templateName !== "string" || !templateName.trim()) {
+			throw new BadRequestError("Template name is required!");
+		}
+
+		const message = await whatsappService.createSimulatedAgentTemplateMessage(
+			chatId,
+			Number(agentId),
+			templateName.trim(),
+			typeof templateLanguage === "string" && templateLanguage.trim() ? templateLanguage.trim() : null,
+		);
+
+		res.status(201).send({
+			message: "Message created successfully!",
+			data: message,
+		});
 	}
 	private async forwardMessages(req: Request, res: Response) {
 		const clientId = Number(req.params["clientId"]);
