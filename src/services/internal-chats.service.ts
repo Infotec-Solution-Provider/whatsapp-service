@@ -608,6 +608,50 @@ class InternalChatsService {
 		}
 	}
 
+	private async resolveIncomingQuotedId(chatId: number, quotedId: unknown, process: ProcessingLogger) {
+		if (quotedId == null) {
+			return null;
+		}
+
+		if (typeof quotedId === "number" && Number.isInteger(quotedId)) {
+			return quotedId;
+		}
+
+		if (typeof quotedId !== "string") {
+			process.log(`quotedId recebido em formato inválido (${typeof quotedId}). Salvando mensagem sem referência.`);
+			return null;
+		}
+
+		const normalizedQuotedId = quotedId.trim();
+
+		if (!normalizedQuotedId) {
+			return null;
+		}
+
+		const quotedMessage = await prismaService.internalMessage.findFirst({
+			where: {
+				internalChatId: chatId,
+				OR: [{ wwebjsIdStanza: normalizedQuotedId }, { wwebjsId: normalizedQuotedId }]
+			},
+			select: {
+				id: true
+			}
+		});
+
+		if (!quotedMessage) {
+			process.log(
+				`Mensagem citada não encontrada para o identificador ${normalizedQuotedId}. Salvando mensagem sem quotedId.`
+			);
+			return null;
+		}
+
+		process.log(
+			`Mensagem citada resolvida com sucesso. quotedId externo: ${normalizedQuotedId}, quotedId interno: ${quotedMessage.id}`
+		);
+
+		return quotedMessage.id;
+	}
+
 	public async receiveMessage(instance: string, groupId: string, msg: CreateMessageDto, authorName: string | null = null) {
 		Logger.debug(`Recebendo mensagem de grupo WhatsApp. Grupo ID: ${groupId}, Autor: ${authorName || msg.from}`, msg);
 		const cleanGroupId = groupId.replace(/[/:]/g, "-");
@@ -617,7 +661,6 @@ class InternalChatsService {
 			`group_${cleanGroupId}_${Date.now()}`,
 			{ groupId, from: msg.from, authorName }
 		);
-
 		try {
 			process.log(`Recebendo mensagem de grupo WhatsApp. Grupo ID: ${groupId}, Autor: ${authorName || msg.from}`);
 
@@ -634,9 +677,12 @@ class InternalChatsService {
 			}
 			process.log(`Chat interno encontrado. Chat ID: ${chat.id}`);
 
-			const { to, clientId, sentAt, ...rest } = msg;
+			const resolvedQuotedId = await this.resolveIncomingQuotedId(chat.id, msg.quotedId, process);
+
+			const { to, clientId, sentAt, quotedId: _quotedId, ...rest } = msg;
 			process.log(`Salvando mensagem no banco de dados. Tipo: ${msg.type}, De: ${msg.from}`, {
 				...rest,
+				quotedId: resolvedQuotedId,
 				from: `external:${msg.from}` + (authorName ? `:${authorName}` : ""),
 				internalChatId: chat.id,
 				isForwarded: !!msg.isForwarded,
@@ -647,6 +693,7 @@ class InternalChatsService {
 			const savedMsg = await prismaService.internalMessage.create({
 				data: {
 					...rest,
+					quotedId: resolvedQuotedId,
 					from: `external:${msg.from}` + (authorName ? `:${authorName}` : ""),
 					isForwarded: !!msg.isForwarded,
 					isEdited: false,
