@@ -2,9 +2,12 @@ import { Request, Response, Router } from "express";
 import chatsService from "../services/chats.service";
 import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
+import onlyLocal from "../middlewares/only-local.middleware";
 
 class ChatsController {
 	constructor(public readonly router: Router) {
+		this.router.get("/api/internal/whatsapp/chats/:id", onlyLocal, this.getInternalChatById);
+		this.router.post("/api/internal/whatsapp/chats/:id/agent-send-message", onlyLocal, this.sendInternalAgentMessage);
 		this.router.get("/api/whatsapp/session/chats", isAuthenticated, this.getChatsBySession);
 		this.router.get("/api/whatsapp/chats/:id", isAuthenticated, this.getChatById);
 		this.router.post("/api/whatsapp/chats/:id/finish", isAuthenticated, this.finishChatById);
@@ -51,6 +54,53 @@ class ChatsController {
 			data: chat
 		});
 	}
+
+	private async getInternalChatById(req: Request, res: Response) {
+		const chatId = Number(req.params["id"]);
+
+		if (!chatId || Number.isNaN(chatId)) {
+			throw new BadRequestError("Chat ID is required!");
+		}
+
+		const chat = await chatsService.getChatById(chatId);
+
+		if (!chat) {
+			throw new NotFoundError("Chat not found!");
+		}
+
+		res.status(200).send({
+			message: "Internal chat retrieved successfully!",
+			data: chat
+		});
+	}
+
+	private async sendInternalAgentMessage(req: Request, res: Response) {
+		const chatId = Number(req.params["id"]);
+		const rawText = req.body.text;
+		const text = typeof rawText === "string" ? rawText : "";
+		const clientId = typeof req.body.clientId === "number" ? req.body.clientId : null;
+		const fileId = typeof req.body.fileId === "number" ? req.body.fileId : null;
+
+		if (!chatId || Number.isNaN(chatId)) {
+			throw new BadRequestError("Chat ID is required!");
+		}
+
+		if (!text.trim() && fileId === null) {
+			throw new BadRequestError("Text or fileId is required!");
+		}
+
+		const message = await chatsService.sendInternalAgentMessage(chatId, {
+			clientId,
+			text,
+			fileId,
+		});
+
+		res.status(201).send({
+			message: "Agent message sent successfully!",
+			data: message
+		});
+	}
+
 	private async transferAttendance(req: Request, res: Response) {
 		const { id } = req.params;
 		const userId = req.body.userId;

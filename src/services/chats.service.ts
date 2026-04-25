@@ -349,6 +349,49 @@ class ChatsService {
 		return { ...chat, messages };
 	}
 
+	public async sendInternalAgentMessage(
+		chatId: number,
+		data: {
+			clientId?: number | null;
+			text?: string | null;
+			fileId?: number | null;
+			quotedId?: number | null;
+		},
+	) {
+		const chat = await prismaService.wppChat.findUnique({
+			where: { id: chatId },
+			include: {
+				contact: true,
+				sector: true,
+			},
+		});
+
+		if (!chat) {
+			throw new BadRequestError("Chat não encontrado.");
+		}
+
+		if (!chat.contact?.phone) {
+			throw new BadRequestError("Chat não possui telefone de contato para envio.");
+		}
+
+		const resolvedClientId = data.clientId ?? chat.sector?.defaultClientId ?? null;
+
+		if (!resolvedClientId) {
+			throw new BadRequestError("Não foi possível determinar o client do WhatsApp para este chat.");
+		}
+
+		if ((!data.text || !data.text.trim()) && !data.fileId) {
+			throw new BadRequestError("É necessário informar texto ou fileId para enviar a mensagem do agente.");
+		}
+
+		return whatsappService.sendBotMessage(chat.contact.phone, resolvedClientId, {
+			chat,
+			text: data.text ?? "",
+			quotedId: data.quotedId ?? null,
+			fileId: data.fileId ?? null,
+		});
+	}
+
 	public async transferAttendance(token: string, session: SessionData, id: number, userId: number) {
 		const { instance } = session;
 
