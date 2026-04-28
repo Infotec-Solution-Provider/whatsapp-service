@@ -32,9 +32,10 @@ export interface SendTemplateData {
 
 interface SendBotMessageData {
 	chat: WppChat;
-	text: string;
+	text?: string | null;
 	quotedId?: number | null;
 	agentId?: number | null;
+	fileId?: number | null;
 }
 interface WhatsappForwardTarget {
 	id: string;
@@ -521,6 +522,7 @@ class WhatsappService {
 	public async sendBotMessage(to: string, clientId: number, data: SendBotMessageData) {
 		const process = new ProcessingLogger(data.chat.instance, "send-bot-message", `${to}-${Date.now()}`, data);
 		let pendingMsg: WppMessage | null = null;
+		const text = data.text ?? "";
 
 		process.log("Iniciando o envio da mensagem.");
 		Logger.info(`[send-bot-message] Starting outbound send for chat ${data.chat.id} using client ${clientId}`);
@@ -529,7 +531,7 @@ class WhatsappService {
 			contactId: data.chat.contactId,
 			agentId: data.agentId ?? null,
 			quotedId: data.quotedId ?? null,
-			textLength: data.text.length,
+			textLength: text.length,
 		});
 		try {
 			process.log("Obtendo client do whatsapp...");
@@ -549,12 +551,12 @@ class WhatsappService {
 				from: data.agentId ? `bot:ai-agent:${data.agentId}` : `bot:${client._phone}`,
 				to: `${to}`,
 				type: "chat",
-				body: data.text || "",
+				body: text,
 				clientId: client.id,
 				...(data.agentId ? { agentId: data.agentId } : {}),
 			} as CreateMessageDto;
 
-			let options = { to, text: data.text } as SendMessageOptions;
+			let options = { to, text } as SendMessageOptions;
 			message.chatId = data.chat.id;
 			data.chat.contactId && (message.contactId = data.chat.contactId);
 
@@ -568,6 +570,27 @@ class WhatsappService {
 
 				options.quotedId = (quotedMsg.wwebjsId || quotedMsg.wabaId)!;
 				message.quotedId = quotedMsg.id;
+			}
+
+			if (data.fileId) {
+				process.log(`Processando arquivo do agente com ID: ${data.fileId}`);
+				const fileData = await filesService.fetchFileMetadata(data.fileId);
+
+				options = {
+					...options,
+					file: fileData,
+					fileId: data.fileId,
+					localFileUrl: filesService.getFileDownloadUrl(data.fileId),
+					publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${data.chat.instance}/files/${fileData.public_id}`,
+					sendAsAudio: false,
+					sendAsDocument: ["image", "video"].every((type) => !fileData.mime_type.startsWith(type)),
+				};
+
+				message.type = getMessageType(fileData.mime_type, false, false);
+				message.fileId = fileData.id;
+				message.fileName = fileData.name;
+				message.fileType = fileData.mime_type;
+				message.fileSize = String(fileData.size);
 			}
 			process.log("Salvando mensagem no banco de dados.", message);
 			pendingMsg = await messagesService.insertMessage(message);

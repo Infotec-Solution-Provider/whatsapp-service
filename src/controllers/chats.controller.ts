@@ -9,6 +9,7 @@ class ChatsController {
 		this.router.get("/api/whatsapp/session/chats", isAuthenticated, this.getChatsBySession);
 		this.router.get("/api/whatsapp/chats/:id", isAuthenticated, this.getChatById.bind(this));
 		this.router.get("/api/internal/whatsapp/chats/:id", onlyLocal, this.getInternalChatById.bind(this));
+		this.router.post("/api/internal/whatsapp/chats/:id/agent-send-message", onlyLocal, this.sendInternalAgentMessage.bind(this));
 		this.router.post("/api/internal/whatsapp/chats/ensure-active", onlyLocal, this.ensureInternalActiveChat);
 		this.router.post("/api/whatsapp/chats/:id/finish", isAuthenticated, this.finishChatById);
 		this.router.post("/api/whatsapp/chats", isAuthenticated, this.startChatByContactId);
@@ -90,6 +91,33 @@ class ChatsController {
 		res.status(200).send({
 			message: data.existed ? "Chat already active." : "Chat started successfully!",
 			data,
+		});
+	}
+
+	private async sendInternalAgentMessage(req: Request, res: Response) {
+		const chatId = Number(req.params["id"]);
+		const rawText = req.body.text;
+		const text = typeof rawText === "string" ? rawText : "";
+		const clientId = typeof req.body.clientId === "number" ? req.body.clientId : null;
+		const fileId = typeof req.body.fileId === "number" ? req.body.fileId : null;
+
+		if (!chatId || Number.isNaN(chatId)) {
+			throw new BadRequestError("Chat ID is required!");
+		}
+
+		if (!text.trim() && fileId === null) {
+			throw new BadRequestError("Text or fileId is required!");
+		}
+
+		const message = await chatsService.sendInternalAgentMessage(chatId, {
+			clientId,
+			text,
+			fileId,
+		});
+
+		res.status(201).send({
+			message: "Agent message sent successfully!",
+			data: message
 		});
 	}
 	private async transferAttendance(req: Request, res: Response) {

@@ -438,11 +438,11 @@ class UnifiedSchedulesService {
 			let semaphoreStatus: UnifiedScheduleRepurchaseStatus = "neutral";
 			if (proximityRatio != null) {
 				if (proximityRatio < 0.75) {
-					semaphoreStatus = "green";
+					semaphoreStatus = "red";
 				} else if (proximityRatio <= 1) {
 					semaphoreStatus = "yellow";
 				} else {
-					semaphoreStatus = "red";
+					semaphoreStatus = "green";
 				}
 			}
 
