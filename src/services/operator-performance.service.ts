@@ -698,6 +698,7 @@ class OperatorPerformanceService {
 						"customer.sent_at",
 						"customer.body"
 					)}
+					AND DATE(customer.sent_at) = DATE(response.sent_at)
 					${responseDateClause}
 					${operatorResponseClause}
 					${sectorResponseClause}
@@ -1008,6 +1009,7 @@ class OperatorPerformanceService {
 						"customer.sent_at",
 						"customer.body"
 					)}
+					AND DATE(customer.sent_at) = DATE(response.sent_at)
 					${operatorResponseClause}
 					${sectorResponseClause}
 			) responseMetrics
