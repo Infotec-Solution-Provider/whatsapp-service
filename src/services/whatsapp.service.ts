@@ -305,7 +305,15 @@ class WhatsappService {
 							: false
 			} as CreateMessageDto;
 
-			const savedMsg = await messagesService.updateMessage(pendingMsg.id, message);
+			const savedMsg = await messagesService.updateMessage(pendingMsg.id, {
+				...message,
+				quotedId:
+					typeof message.quotedId === "number"
+						? message.quotedId
+						: typeof message.quotedId === "string" && /^\d+$/.test(message.quotedId)
+							? Number(message.quotedId)
+							: null
+			});
 
 			messagesDistributionService.notifyMessage(process, savedMsg);
 			process.log("Mensagem salva no banco de dados.", savedMsg);
@@ -414,7 +422,15 @@ class WhatsappService {
 							: false // <- garante que nunca será null
 			} as CreateMessageDto;
 
-			const savedMsg = await messagesService.updateMessage(pendingMsg.id, message);
+			const savedMsg = await messagesService.updateMessage(pendingMsg.id, {
+				...message,
+				quotedId:
+					typeof message.quotedId === "number"
+						? message.quotedId
+						: typeof message.quotedId === "string" && /^\d+$/.test(message.quotedId)
+							? Number(message.quotedId)
+							: null
+			});
 			process.log("Mensagem salva no banco de dados.", savedMsg);
 
 			messagesDistributionService.notifyMessage(process, savedMsg);

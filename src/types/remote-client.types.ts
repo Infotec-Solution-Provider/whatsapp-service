@@ -9,7 +9,7 @@ export default interface MessageDto {
 	timestamp: string;
 	sentAt: Date;
 	status: MessageStatus;
-	quotedId?: null | number;
+	quotedId?: null | number | string;
 	chatId?: null | number;
 	contactId?: null | number;
 	userId?: number;
