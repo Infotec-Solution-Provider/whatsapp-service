@@ -4,6 +4,7 @@ import cors from "cors";
 import "dotenv/config";
 import express, { NextFunction, Request, Response } from "express";
 import "express-async-errors";
+import cron from "node-cron";
 import autoResponseController from "./controllers/auto-response.controller";
 import chatsController from "./controllers/chats.controller";
 import contactsController from "./controllers/contacts.controller";
@@ -32,6 +33,7 @@ import internalMessageQueueService from "./services/internal-message-queue.servi
 import messageQueueService from "./services/message-queue.service";
 import wabaWebhookQueueService from "./services/waba-webhook-queue.service";
 import whatsappService from "./services/whatsapp.service";
+import wwwebjsHealthCheckService from "./services/wwebjs-health-check.service";
 
 whatsappService.buildClients();
 const app = express();
@@ -97,4 +99,17 @@ app.listen(serverPort, () => {
 	messageQueueService.startWorker();
 	internalMessageQueueService.startWorker();
 	Logger.info("Server listening on port " + serverPort);
+
+	// Wwebjs session health check
+	const healthCheckEnabled = process.env["WWEBJS_HEALTH_CHECK_ENABLED"] === "true";
+	const healthCheckCron = process.env["WWEBJS_HEALTH_CHECK_CRON"] || "*/30 * * * *";
+
+	if (healthCheckEnabled) {
+		cron.schedule(healthCheckCron, () => {
+			wwwebjsHealthCheckService.runHealthCheck().catch((err) => {
+				Logger.error(`[WwebjsHealthCheck] Unhandled error in health check: ${err?.message}`);
+			});
+		});
+		Logger.info(`[WwebjsHealthCheck] Scheduled with cron="${healthCheckCron}"`);
+	}
 });
