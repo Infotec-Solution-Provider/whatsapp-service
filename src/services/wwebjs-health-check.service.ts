@@ -25,12 +25,12 @@ async function runHealthCheck(): Promise<void> {
   Logger.info(`[WwebjsHealthCheck] Session info | phone=${phone} status=${status}`);
 
   if (status !== "open") {
-    Logger.warn(`[WwebjsHealthCheck] Session not open (status=${status}), skipping probe`);
+    Logger.warning(`[WwebjsHealthCheck] Session not open (status=${status}), skipping probe`);
     return;
   }
 
   if (!phone) {
-    Logger.warn(`[WwebjsHealthCheck] No phone number available, skipping probe`);
+    Logger.warning(`[WwebjsHealthCheck] No phone number available, skipping probe`);
     return;
   }
 
@@ -71,7 +71,7 @@ async function runHealthCheck(): Promise<void> {
         break;
       }
     } catch (err: any) {
-      Logger.warn(`[WwebjsHealthCheck] Error polling probe status: ${err?.message}`);
+      Logger.warning(`[WwebjsHealthCheck] Error polling probe status: ${err?.message}`);
     }
   }
 

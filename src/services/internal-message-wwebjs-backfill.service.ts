@@ -390,8 +390,8 @@ class InternalMessageWwebjsBackfillService {
 		);
 
 		return rows
-			.map((row) => this.parseLogRow(row))
-			.filter((row): row is ParsedSendLog => row !== null);
+			.map((row: WwebjsSendLogRow) => this.parseLogRow(row))
+			.filter((row: ParsedSendLog | null): row is ParsedSendLog => row !== null);
 	}
 
 	private parseLogRow(row: WwebjsSendLogRow): ParsedSendLog | null {
