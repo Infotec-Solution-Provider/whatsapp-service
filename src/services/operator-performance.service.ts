@@ -49,12 +49,37 @@ interface OperatorSalesAggregateRow {
 	crmSalesCount: bigint | number;
 	crmRevenue: bigint | number | string | null;
 	crmAverageTicket: number | string | null;
+}
+
+interface OperatorProposalsAggregateRow {
+	operatorId: bigint | number | string | null;
 	crmConvertedProposals: bigint | number;
 }
 
 interface OperatorUpcomingSchedulesAggregateRow {
 	operatorId: bigint | number | string | null;
 	crmUpcomingSchedulesCount: bigint | number;
+}
+
+interface OperatorOrdersAggregateRow {
+	operatorId: bigint | number | string | null;
+	ordersCount: bigint | number;
+}
+
+interface OperatorCallsAggregateRow {
+	operatorId: bigint | number | string | null;
+	callsCount: bigint | number;
+}
+
+interface OperatorContactsResultAggregateRow {
+	operatorId: bigint | number | string | null;
+	contactsResultCount: bigint | number;
+}
+
+interface OperatorTelephonyStatusRow {
+	operatorId: bigint | number | string | null;
+	statusCode: string | null;
+	statusSince: string | Date | null;
 }
 
 interface OperatorOnlineSessionRow {
@@ -126,6 +151,11 @@ export interface OperatorPerformanceRow {
 	isWhatsappOnline: boolean;
 	whatsappStatus: "online" | "offline";
 	telephonyStatus: "offline" | "available" | "paused";
+	telephonyStatusCode: string | null;
+	telephonyStatusSince: string | null;
+	ordersCount: number;
+	callsCount: number;
+	contactsResultCount: number;
 	crmStatus: "mocked";
 	crmStatusLabel: string;
 	crmRevenue: number;
@@ -166,6 +196,9 @@ export interface OperatorPerformanceSummary {
 	busyOperatorsCount: number;
 	availableOperatorsCount: number;
 	currentOpenChatsCount: number;
+	ordersCount: number;
+	callsCount: number;
+	contactsResultCount: number;
 	crmStatusSource: "mocked";
 	crmActiveOperatorsCount: number;
 	crmInactiveOperatorsCount: number;
@@ -613,6 +646,11 @@ class OperatorPerformanceService {
 				isWhatsappOnline: false,
 				whatsappStatus: "offline",
 				telephonyStatus: "offline",
+				telephonyStatusCode: null,
+				telephonyStatusSince: null,
+				ordersCount: 0,
+				callsCount: 0,
+				contactsResultCount: 0,
 				crmStatus: "mocked",
 				crmStatusLabel: "Mockado",
 				crmRevenue: 0,
@@ -653,6 +691,11 @@ class OperatorPerformanceService {
 			isWhatsappOnline: false,
 			whatsappStatus: "offline",
 			telephonyStatus: "offline",
+			telephonyStatusCode: null,
+			telephonyStatusSince: null,
+			ordersCount: 0,
+			callsCount: 0,
+			contactsResultCount: 0,
 			crmStatus: "mocked",
 			crmStatusLabel: "Mockado",
 			crmRevenue: 0,
@@ -711,6 +754,9 @@ class OperatorPerformanceService {
 			busyOperatorsCount,
 			availableOperatorsCount,
 			currentOpenChatsCount: visibleHumanRows.reduce((sum, row) => sum + row.currentOpenChatsCount, 0),
+			ordersCount: visibleHumanRows.reduce((sum, row) => sum + row.ordersCount, 0),
+			callsCount: visibleHumanRows.reduce((sum, row) => sum + row.callsCount, 0),
+			contactsResultCount: visibleHumanRows.reduce((sum, row) => sum + row.contactsResultCount, 0),
 			crmStatusSource: "mocked",
 			crmActiveOperatorsCount: 0,
 			crmInactiveOperatorsCount: 0,
@@ -985,14 +1031,38 @@ class OperatorPerformanceService {
 			"  c.OPERADOR AS operatorId,",
 			"  COUNT(*) AS crmSalesCount,",
 			"  COALESCE(SUM(c.VALOR), 0) AS crmRevenue,",
-			"  CASE WHEN COUNT(*) > 0 THEN COALESCE(SUM(c.VALOR), 0) / COUNT(*) ELSE 0 END AS crmAverageTicket,",
-			"  COALESCE(SUM(CASE WHEN pc.compra IS NOT NULL THEN 1 ELSE 0 END), 0) AS crmConvertedProposals",
+			"  CASE WHEN COUNT(*) > 0 THEN COALESCE(SUM(c.VALOR), 0) / COUNT(*) ELSE 0 END AS crmAverageTicket",
 			"FROM compras c",
 			"LEFT JOIN operadores o ON o.CODIGO = c.OPERADOR",
-			"LEFT JOIN (SELECT DISTINCT compra FROM propostas_compras) pc ON pc.compra = c.CODIGO",
 			`WHERE ${salesWhereClauses.join(" AND ")}${salesOperatorClause}${salesSectorClause}`,
 			"GROUP BY c.OPERADOR",
 		].join(" ");
+
+		const proposalsBindings: Date[] = [];
+		let proposalsDateClause = "";
+		if (startDate) {
+			proposalsDateClause += " AND h.DATAHORA_FIM >= ?";
+			proposalsBindings.push(startDate);
+		}
+		if (endDate) {
+			proposalsDateClause += " AND h.DATAHORA_FIM <= ?";
+			proposalsBindings.push(endDate);
+		}
+		const proposalsQuery = `
+			SELECT
+				o.CODIGO AS operatorId,
+				COUNT(*) AS crmConvertedProposals
+			FROM propostas p
+			INNER JOIN historico_cli h ON h.CODIGO = p.LIGACAO
+			INNER JOIN operadores o
+				ON CAST(o.CODIGO AS CHAR) = h.OPERADOR OR o.LOGIN = h.OPERADOR OR o.NOME = h.OPERADOR
+			WHERE p.SITUACAO = 'ATIVA'
+				AND h.DATAHORA_FIM IS NOT NULL
+				${proposalsDateClause}
+				${operatorFinishedClause}
+				${sectorFinishedClause}
+			GROUP BY o.CODIGO
+		`;
 
 		const upcomingSchedulesQuery = [
 			"SELECT",
@@ -1009,6 +1079,85 @@ class OperatorPerformanceService {
 			"GROUP BY cc.OPERADOR",
 		].join(" ");
 
+		const ordersBindings: Date[] = [];
+		const ordersWhereClauses = ["c.TIPO = 'PD'", "c.OPERADOR IS NOT NULL"];
+		if (startDate) {
+			ordersWhereClauses.push("c.DATA >= ?");
+			ordersBindings.push(startDate);
+		}
+		if (endDate) {
+			ordersWhereClauses.push("c.DATA <= ?");
+			ordersBindings.push(endDate);
+		}
+		const ordersQuery = [
+			"SELECT",
+			"  c.OPERADOR AS operatorId,",
+			"  COUNT(*) AS ordersCount",
+			"FROM compras c",
+			"LEFT JOIN operadores o ON o.CODIGO = c.OPERADOR",
+			`WHERE ${ordersWhereClauses.join(" AND ")}${salesOperatorClause}${salesSectorClause}`,
+			"GROUP BY c.OPERADOR",
+		].join(" ");
+
+		const callsBindings: Date[] = [];
+		const callsWhereClauses = [
+			"cc.OPERADOR IS NOT NULL",
+			"cc.TELEFONE_LIGADO IS NOT NULL",
+			"cc.TELEFONE_LIGADO <> ''",
+		];
+		if (startDate) {
+			callsWhereClauses.push("cc.DT_AGENDAMENTO >= ?");
+			callsBindings.push(startDate);
+		}
+		if (endDate) {
+			callsWhereClauses.push("cc.DT_AGENDAMENTO <= ?");
+			callsBindings.push(endDate);
+		}
+		const callsQuery = [
+			"SELECT",
+			"  cc.OPERADOR AS operatorId,",
+			"  COUNT(*) AS callsCount",
+			"FROM campanhas_clientes cc",
+			"LEFT JOIN operadores o ON o.CODIGO = cc.OPERADOR",
+			`WHERE ${callsWhereClauses.join(" AND ")}${schedulesOperatorClause}${schedulesSectorClause}`,
+			"GROUP BY cc.OPERADOR",
+		].join(" ");
+
+		const contactsResultBindings: Date[] = [];
+		let contactsResultDateClause = "";
+		if (startDate) {
+			contactsResultDateClause += " AND h.DATAHORA_FIM >= ?";
+			contactsResultBindings.push(startDate);
+		}
+		if (endDate) {
+			contactsResultDateClause += " AND h.DATAHORA_FIM <= ?";
+			contactsResultBindings.push(endDate);
+		}
+		const contactsResultQuery = `
+			SELECT
+				o.CODIGO AS operatorId,
+				COUNT(*) AS contactsResultCount
+			FROM historico_cli h
+			INNER JOIN resultados r ON r.CODIGO = h.RESULTADO
+			INNER JOIN operadores o
+				ON CAST(o.CODIGO AS CHAR) = h.OPERADOR OR o.LOGIN = h.OPERADOR OR o.NOME = h.OPERADOR
+			WHERE r.ECONTATO = 'SIM'
+				AND h.DATAHORA_FIM IS NOT NULL
+				${contactsResultDateClause}
+				${operatorFinishedClause}
+				${sectorFinishedClause}
+			GROUP BY o.CODIGO
+		`;
+
+		const telephonyStatusQuery = `
+			SELECT
+				os.OPERADOR AS operatorId,
+				os.STATUS_ATUAL AS statusCode,
+				os.DATA AS statusSince
+			FROM operadores_status os
+			WHERE os.OPERADOR IS NOT NULL
+		`;
+
 		const [
 			messageRows,
 			finishedRows,
@@ -1018,7 +1167,12 @@ class OperatorPerformanceService {
 			openChatsMap,
 			operatorSessionStatuses,
 			salesRows,
+			proposalsRows,
 			upcomingSchedulesRows,
+			ordersRows,
+			callsRows,
+			contactsResultRows,
+			telephonyStatusRows,
 		] = await Promise.all([
 			prismaService.$queryRawUnsafe<OperatorMessagesAggregateRow[]>(messagesQuery, ...messageParams),
 			instancesService.executeQuery<OperatorFinishedChatsAggregateRow[]>(instance, finishedChatsQuery, finishedParams),
@@ -1028,7 +1182,18 @@ class OperatorPerformanceService {
 			this.fetchCurrentOpenChats(instance, operatorIds, sectorIds),
 			this.fetchOperatorSessionStatuses(instance),
 			instancesService.executeQuery<OperatorSalesAggregateRow[]>(instance, salesQuery, salesBindings),
-			instancesService.executeQuery<OperatorUpcomingSchedulesAggregateRow[]>(instance, upcomingSchedulesQuery, [])
+			instancesService.executeQuery<OperatorProposalsAggregateRow[]>(instance, proposalsQuery, proposalsBindings),
+			instancesService.executeQuery<OperatorUpcomingSchedulesAggregateRow[]>(instance, upcomingSchedulesQuery, []),
+			instancesService.executeQuery<OperatorOrdersAggregateRow[]>(instance, ordersQuery, ordersBindings),
+			instancesService.executeQuery<OperatorCallsAggregateRow[]>(instance, callsQuery, callsBindings),
+			instancesService.executeQuery<OperatorContactsResultAggregateRow[]>(instance, contactsResultQuery, contactsResultBindings),
+			instancesService.executeQuery<OperatorTelephonyStatusRow[]>(instance, telephonyStatusQuery, []).catch((error) => {
+				Logger.error(
+					`[OperatorPerformanceService] Failed to fetch operadores_status ${stringifyLogData({ instance })}`,
+					toError(error)
+				);
+				return [] as OperatorTelephonyStatusRow[];
+			}),
 		]);
 
 		const operatorIdSet = new Set<number>();
@@ -1056,7 +1221,27 @@ class OperatorPerformanceService {
 			const operatorId = toOperatorId(row.operatorId);
 			if (operatorId != null) operatorIdSet.add(operatorId);
 		}
+		for (const row of proposalsRows) {
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId != null) operatorIdSet.add(operatorId);
+		}
 		for (const row of upcomingSchedulesRows) {
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId != null) operatorIdSet.add(operatorId);
+		}
+		for (const row of ordersRows) {
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId != null) operatorIdSet.add(operatorId);
+		}
+		for (const row of callsRows) {
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId != null) operatorIdSet.add(operatorId);
+		}
+		for (const row of contactsResultRows) {
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId != null) operatorIdSet.add(operatorId);
+		}
+		for (const row of telephonyStatusRows) {
 			const operatorId = toOperatorId(row.operatorId);
 			if (operatorId != null) operatorIdSet.add(operatorId);
 		}
@@ -1139,6 +1324,17 @@ class OperatorPerformanceService {
 			target.crmSalesCount = toNumber(row.crmSalesCount);
 			target.crmRevenue = toNumber(row.crmRevenue);
 			target.crmAverageTicket = toAverageNumber(row.crmAverageTicket);
+		}
+
+		for (const row of proposalsRows) {
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId == null) continue;
+			const operator = operatorsMap.get(operatorId);
+			if (!this.isOperatorAllowedByFilters(operatorId, operator, operatorIds, sectorIds)) {
+				continue;
+			}
+
+			const target = ensureRow(operatorId);
 			target.crmConvertedProposals = toNumber(row.crmConvertedProposals);
 		}
 
@@ -1152,6 +1348,55 @@ class OperatorPerformanceService {
 
 			const target = ensureRow(operatorId);
 			target.crmUpcomingSchedulesCount = toNumber(row.crmUpcomingSchedulesCount);
+		}
+
+		for (const row of ordersRows) {
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId == null) continue;
+			const operator = operatorsMap.get(operatorId);
+			if (!this.isOperatorAllowedByFilters(operatorId, operator, operatorIds, sectorIds)) {
+				continue;
+			}
+
+			const target = ensureRow(operatorId);
+			target.ordersCount = toNumber(row.ordersCount);
+		}
+
+		for (const row of callsRows) {
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId == null) continue;
+			const operator = operatorsMap.get(operatorId);
+			if (!this.isOperatorAllowedByFilters(operatorId, operator, operatorIds, sectorIds)) {
+				continue;
+			}
+
+			const target = ensureRow(operatorId);
+			target.callsCount = toNumber(row.callsCount);
+		}
+
+		for (const row of contactsResultRows) {
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId == null) continue;
+			const operator = operatorsMap.get(operatorId);
+			if (!this.isOperatorAllowedByFilters(operatorId, operator, operatorIds, sectorIds)) {
+				continue;
+			}
+
+			const target = ensureRow(operatorId);
+			target.contactsResultCount = toNumber(row.contactsResultCount);
+		}
+
+		for (const row of telephonyStatusRows) {
+			const operatorId = toOperatorId(row.operatorId);
+			if (operatorId == null) continue;
+			const operator = operatorsMap.get(operatorId);
+			if (!this.isOperatorAllowedByFilters(operatorId, operator, operatorIds, sectorIds)) {
+				continue;
+			}
+
+			const target = ensureRow(operatorId);
+			target.telephonyStatusCode = row.statusCode ? String(row.statusCode).trim() || null : null;
+			target.telephonyStatusSince = normalizeDateTime(row.statusSince);
 		}
 
 		for (const [operatorId, currentOpenChatsCount] of openChatsMap.entries()) {
