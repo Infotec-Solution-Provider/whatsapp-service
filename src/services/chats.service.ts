@@ -1163,7 +1163,7 @@ class ChatsService {
 			sectorId: inferredSectorId,
 			userId: userId ?? null,
 			agentId,
-			systemMessage,
+			...(systemMessage !== undefined ? { systemMessage } : {}),
 		});
 
 		return { chat: newChat, existed: false };

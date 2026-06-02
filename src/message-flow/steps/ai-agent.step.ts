@@ -40,7 +40,7 @@ export default class AiAgentStep extends BaseStep {
 		// AI_AGENT step is terminal — does not assign chatData; returns current context
 		return {
 			isFinal: false,
-			nextStepNumber: this.nextStepNumber,
+			...(this.nextStepNumber !== undefined ? { nextStepNumber: this.nextStepNumber } : {}),
 			context: ctx
 		};
 	}

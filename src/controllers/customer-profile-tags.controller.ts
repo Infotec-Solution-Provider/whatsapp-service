@@ -6,7 +6,6 @@ import customerProfileTagsService from "../services/customer-profile-tags.servic
 import {
 	CustomerAgeLevel,
 	CustomerInteractionLevel,
-	CustomerProfileManualOverrides,
 	CustomerPurchaseInterestLevel,
 	CustomerProfileSummaryFilters,
 	CustomerProfileSummaryLevel,
@@ -126,23 +125,23 @@ class CustomerProfileTagsController {
 		}
 
 		const parsedCustomerIds = customerIds
-			.map((customerId) => Number(customerId))
-			.filter((customerId) => Number.isInteger(customerId) && customerId > 0);
+			.map((customerId: unknown) => Number(customerId))
+			.filter((customerId: number) => Number.isInteger(customerId) && customerId > 0);
 
 		return Array.from(new Set(parsedCustomerIds));
 	};
 
 	private parseSummaryFilters = (source: Record<string, unknown>): CustomerProfileSummaryFilters => {
 		const filters: CustomerProfileSummaryFilters = {};
-		const parseNumberList = (value: unknown) => {
+		const parseNumberList = (value: unknown): number[] | undefined => {
 			if (typeof value !== "string") {
 				if (!Array.isArray(value)) {
 					return undefined;
 				}
 
 				const parsedArray = value
-					.map((item) => Number(item))
-					.filter((item) => Number.isInteger(item) && item > 0);
+					.map((customerId: unknown) => Number(customerId))
+					.filter((customerId: number) => Number.isInteger(customerId) && customerId > 0);
 
 				return parsedArray.length ? Array.from(new Set(parsedArray)) : undefined;
 			}
@@ -191,9 +190,20 @@ class CustomerProfileTagsController {
 			filters.searchTerm = source["searchTerm"];
 		}
 
-		filters.segmentIds = parseNumberList(source["segmentIds"]);
-		filters.campaignIds = parseNumberList(source["campaignIds"]);
-		filters.operatorIds = parseNumberList(source["operatorIds"]);
+		const segmentIds = parseNumberList(source["segmentIds"]);
+		if (segmentIds !== undefined) {
+			filters.segmentIds = segmentIds;
+		}
+
+		const campaignIds = parseNumberList(source["campaignIds"]);
+		if (campaignIds !== undefined) {
+			filters.campaignIds = campaignIds;
+		}
+
+		const operatorIds = parseNumberList(source["operatorIds"]);
+		if (operatorIds !== undefined) {
+			filters.operatorIds = operatorIds;
+		}
 
 		return filters;
 	};
@@ -219,21 +229,23 @@ class CustomerProfileTagsController {
 	private parseManualOverridesInput = (req: Request): UpdateCustomerProfileManualOverridesInput => {
 		const body = (req.body ?? {}) as Record<string, unknown>;
 		const input: UpdateCustomerProfileManualOverridesInput = {};
+		const profileLevel = body["profileLevel"];
+		const purchaseInterestLevel = body["purchaseInterestLevel"];
 
 		if ("profileLevel" in body) {
-			if (body.profileLevel !== null && typeof body.profileLevel !== "string") {
+			if (profileLevel !== null && typeof profileLevel !== "string") {
 				throw new BadRequestError("profileLevel must be a string or null!");
 			}
 
-			input.profileLevel = (body.profileLevel as CustomerProfileSummaryLevel | null) ?? null;
+			input.profileLevel = (profileLevel as CustomerProfileSummaryLevel | null) ?? null;
 		}
 
 		if ("purchaseInterestLevel" in body) {
-			if (body.purchaseInterestLevel !== null && typeof body.purchaseInterestLevel !== "string") {
+			if (purchaseInterestLevel !== null && typeof purchaseInterestLevel !== "string") {
 				throw new BadRequestError("purchaseInterestLevel must be a string or null!");
 			}
 
-			input.purchaseInterestLevel = (body.purchaseInterestLevel as CustomerPurchaseInterestLevel | null) ?? null;
+			input.purchaseInterestLevel = (purchaseInterestLevel as CustomerPurchaseInterestLevel | null) ?? null;
 		}
 
 		return input;

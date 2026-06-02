@@ -118,12 +118,12 @@ class UnifiedSchedulesService {
 			this.calculateRepurchaseMetrics(session.instance, customerIds),
 		]);
 
+		const campaignMetadataFilters: UnifiedScheduleFilters = { ...filters };
+		delete campaignMetadataFilters.customerCampaignIds;
+
 		const campaignMetadataEligibleCustomerIds = await this.resolveEligibleCustomerIds(
 			session,
-			{
-				...filters,
-				customerCampaignIds: undefined,
-			},
+			campaignMetadataFilters,
 			customerIds,
 			customerMap,
 			repurchaseMap,
@@ -185,9 +185,9 @@ class UnifiedSchedulesService {
 					profileSummary,
 					repurchase,
 					meta: {
-						wppContactId: schedule.wppContactId,
-						wppChatId: schedule.wppChatId,
-						telephonyRecordId: schedule.telephonyRecordId,
+						...(schedule.wppContactId !== undefined ? { wppContactId: schedule.wppContactId } : {}),
+						...(schedule.wppChatId !== undefined ? { wppChatId: schedule.wppChatId } : {}),
+						...(schedule.telephonyRecordId !== undefined ? { telephonyRecordId: schedule.telephonyRecordId } : {}),
 					},
 				};
 			})
@@ -359,11 +359,13 @@ class UnifiedSchedulesService {
 		filters: UnifiedScheduleFilters,
 	): Promise<Set<number> | null> {
 		const profileFilters = {
-			profileLevel: filters.profileLevel,
-			interactionLevel: filters.interactionLevel,
-			purchaseLevel: filters.purchaseLevel,
-			ageLevel: filters.ageLevel,
-			purchaseInterestLevel: filters.purchaseInterestLevel,
+			...(filters.profileLevel !== undefined ? { profileLevel: filters.profileLevel } : {}),
+			...(filters.interactionLevel !== undefined ? { interactionLevel: filters.interactionLevel } : {}),
+			...(filters.purchaseLevel !== undefined ? { purchaseLevel: filters.purchaseLevel } : {}),
+			...(filters.ageLevel !== undefined ? { ageLevel: filters.ageLevel } : {}),
+			...(filters.purchaseInterestLevel !== undefined
+				? { purchaseInterestLevel: filters.purchaseInterestLevel }
+				: {}),
 		};
 		const hasActiveFilters = Object.values(profileFilters).some((value) => value != null);
 		if (!hasActiveFilters) {

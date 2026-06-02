@@ -385,10 +385,12 @@ class CustomerProfileTagsService {
 			return metrics as unknown as Prisma.InputJsonValue;
 		}
 
-		return {
+		const metadata: Prisma.InputJsonObject = {
 			...metrics,
-			manualOverrides,
-		} as Prisma.InputJsonValue;
+			manualOverrides: manualOverrides as unknown as Prisma.InputJsonValue,
+		};
+
+		return metadata;
 	}
 
 	private buildManualProfileSummaryReasons(

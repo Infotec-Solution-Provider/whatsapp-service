@@ -1,5 +1,20 @@
 import prismaService from "./prisma.service";
 
+const DEFAULT_FEATURE_PARAMETERS: Record<string, string> = {
+	feature_ai_enabled: "false",
+	feature_ai_agents_enabled: "false",
+	feature_ai_supervisor_enabled: "false",
+	feature_ai_settings_enabled: "false",
+	feature_customer_profile_tags_enabled: "false",
+	feature_funnels_enabled: "false",
+	feature_mass_messages_enabled: "false",
+	feature_reports_advanced_enabled: "false",
+	feature_reports_dashboards_enabled: "false",
+	feature_sales_reports_enabled: "false",
+	feature_sip_config_enabled: "false",
+	feature_telephony_dialer_enabled: "false"
+};
+
 class ParametersService {
 	public async getUserParams(instance: string, userId: number) {
 		const userParams = await prismaService.parameter.findMany({
@@ -53,6 +68,7 @@ class ParametersService {
 
 		// prioridade: instancia < setor < usuario
 		const mergedParams = {
+			...DEFAULT_FEATURE_PARAMETERS,
 			...toParamMap(instanceParams),
 			...toParamMap(sectorParams),
 			...toParamMap(userParams)
