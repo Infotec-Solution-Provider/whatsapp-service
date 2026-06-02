@@ -10,7 +10,7 @@ class ChatsController {
 		this.router.get("/api/whatsapp/chats/:id", isAuthenticated, this.getChatById.bind(this));
 		this.router.get("/api/internal/whatsapp/chats/:id", onlyLocal, this.getInternalChatById.bind(this));
 		this.router.post("/api/internal/whatsapp/chats/:id/agent-send-message", onlyLocal, this.sendInternalAgentMessage.bind(this));
-		this.router.post("/api/internal/whatsapp/chats/ensure-active", onlyLocal, this.ensureInternalActiveChat);
+		this.router.post("/api/internal/whatsapp/chats/ensure-active", onlyLocal, this.ensureInternalActiveChat.bind(this));
 		this.router.post("/api/whatsapp/chats/:id/finish", isAuthenticated, this.finishChatById);
 		this.router.post("/api/whatsapp/chats", isAuthenticated, this.startChatByContactId);
 		this.router.get("/api/whatsapp/session/monitor", isAuthenticated, this.getChatsMonitor);
@@ -58,10 +58,10 @@ class ChatsController {
 			throw new NotFoundError("Chat not found!");
 		}
 
-		res.status(200).send({
-			message: "Chat retrieved successfully!",
-			data: chat
-		});
+			res.status(200).send({
+				message: "Chat retrieved successfully!",
+				data: chat
+			});
 	}
 
 	private async ensureInternalActiveChat(req: Request, res: Response) {
@@ -120,6 +120,7 @@ class ChatsController {
 			data: message
 		});
 	}
+
 	private async transferAttendance(req: Request, res: Response) {
 		const { id } = req.params;
 		const userId = req.body.userId;

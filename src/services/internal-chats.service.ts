@@ -562,12 +562,10 @@ class InternalChatsService {
 						await prismaService.internalMessage.update({
 							where: { id: savedMsg.id },
 							data: {
-								wwebjsIdStanza: sentMsg.wwebjsIdStanza ?? null,
-								wwebjsId: sentMsg.wwebjsId ?? null,
 								status: "RECEIVED"
 							}
 						});
-						process.log(`Mensagem interna atualizada com IDs do WhatsApp`);
+						process.log(`Mensagem interna atualizada com status RECEIVED`);
 
 						// Emitir status SENT após envio bem-sucedido ao WhatsApp
 						process.log(`Emitindo evento de status SENT após envio ao WhatsApp`);
@@ -610,6 +608,50 @@ class InternalChatsService {
 		}
 	}
 
+	private async resolveIncomingQuotedId(chatId: number, quotedId: unknown, process: ProcessingLogger) {
+		if (quotedId == null) {
+			return null;
+		}
+
+		if (typeof quotedId === "number" && Number.isInteger(quotedId)) {
+			return quotedId;
+		}
+
+		if (typeof quotedId !== "string") {
+			process.log(`quotedId recebido em formato inválido (${typeof quotedId}). Salvando mensagem sem referência.`);
+			return null;
+		}
+
+		const normalizedQuotedId = quotedId.trim();
+
+		if (!normalizedQuotedId) {
+			return null;
+		}
+
+		const quotedMessage = await prismaService.internalMessage.findFirst({
+			where: {
+				internalChatId: chatId,
+				OR: [{ wwebjsIdStanza: normalizedQuotedId }, { wwebjsId: normalizedQuotedId }]
+			},
+			select: {
+				id: true
+			}
+		});
+
+		if (!quotedMessage) {
+			process.log(
+				`Mensagem citada não encontrada para o identificador ${normalizedQuotedId}. Salvando mensagem sem quotedId.`
+			);
+			return null;
+		}
+
+		process.log(
+			`Mensagem citada resolvida com sucesso. quotedId externo: ${normalizedQuotedId}, quotedId interno: ${quotedMessage.id}`
+		);
+
+		return quotedMessage.id;
+	}
+
 	public async receiveMessage(instance: string, groupId: string, msg: CreateMessageDto, authorName: string | null = null) {
 		Logger.debug(`Recebendo mensagem de grupo WhatsApp. Grupo ID: ${groupId}, Autor: ${authorName || msg.from}`, msg);
 		const cleanGroupId = groupId.replace(/[/:]/g, "-");
@@ -619,7 +661,6 @@ class InternalChatsService {
 			`group_${cleanGroupId}_${Date.now()}`,
 			{ groupId, from: msg.from, authorName }
 		);
-
 		try {
 			process.log(`Recebendo mensagem de grupo WhatsApp. Grupo ID: ${groupId}, Autor: ${authorName || msg.from}`);
 
@@ -636,9 +677,12 @@ class InternalChatsService {
 			}
 			process.log(`Chat interno encontrado. Chat ID: ${chat.id}`);
 
-			const { to, clientId, sentAt, ...rest } = msg;
+			const resolvedQuotedId = await this.resolveIncomingQuotedId(chat.id, msg.quotedId, process);
+
+			const { to, clientId, sentAt, quotedId: _quotedId, ...rest } = msg;
 			process.log(`Salvando mensagem no banco de dados. Tipo: ${msg.type}, De: ${msg.from}`, {
 				...rest,
+				quotedId: resolvedQuotedId,
 				from: `external:${msg.from}` + (authorName ? `:${authorName}` : ""),
 				internalChatId: chat.id,
 				isForwarded: !!msg.isForwarded,
@@ -649,6 +693,7 @@ class InternalChatsService {
 			const savedMsg = await prismaService.internalMessage.create({
 				data: {
 					...rest,
+					quotedId: resolvedQuotedId,
 					from: `external:${msg.from}` + (authorName ? `:${authorName}` : ""),
 					isForwarded: !!msg.isForwarded,
 					isEdited: false,
@@ -694,6 +739,32 @@ class InternalChatsService {
 	): Promise<void> {
 		// Processa a mensagem normalmente usando o método receiveMessage
 		await this.receiveMessage(instance, groupId, messageData, authorName);
+	}
+
+	private async persistGeneratedWppIds(messageId: number, sentMsg: CreateMessageDto | undefined, process: ProcessingLogger) {
+		const dataToUpdate: Prisma.InternalMessageUpdateInput = {};
+
+		if (sentMsg?.wwebjsId) {
+			dataToUpdate.wwebjsId = sentMsg.wwebjsId;
+		}
+
+		if (sentMsg?.wwebjsIdStanza) {
+			dataToUpdate.wwebjsIdStanza = sentMsg.wwebjsIdStanza;
+		}
+
+		if (!Object.keys(dataToUpdate).length) {
+			process.log(`Nenhum ID do WhatsApp retornado para persistir na mensagem interna ${messageId}`);
+			return;
+		}
+
+		await prismaService.internalMessage.update({
+			where: { id: messageId },
+			data: dataToUpdate
+		});
+
+		process.log(
+			`IDs do WhatsApp persistidos na mensagem interna ${messageId}. wwebjsId: ${sentMsg?.wwebjsId || "N/A"}, wwebjsIdStanza: ${sentMsg?.wwebjsIdStanza || "N/A"}`
+		);
 	}
 
 	public async receiveMessageEdit(groupId: string, msgId: string, newText: string) {
@@ -831,9 +902,11 @@ class InternalChatsService {
 					where: { id: +data.quotedId }
 				});
 
-				if (quotedmsg?.wwebjsId) {
-					process.log(`Mensagem citada encontrada. wwebjsId: ${quotedmsg.wwebjsId}`);
-					data.quotedId = quotedmsg.wwebjsId;
+				const quotedWppId = quotedmsg?.wwebjsIdStanza || quotedmsg?.wwebjsId;
+
+				if (quotedWppId) {
+					process.log(`Mensagem citada encontrada. wwebjsId: ${quotedWppId}`);
+					data.quotedId = quotedWppId;
 				} else {
 					process.log(`Aviso: Mensagem citada não possui wwebjsId. Enviando sem resposta.`);
 					data.quotedId = null;
@@ -864,6 +937,7 @@ class InternalChatsService {
 					},
 					true
 				);
+				await this.persistGeneratedWppIds(message.id, result, process);
 				process.log(
 					`Mensagem com arquivo enviada. Resultado completo:`,
 					result
@@ -884,6 +958,7 @@ class InternalChatsService {
 					},
 					true
 				);
+				await this.persistGeneratedWppIds(message.id, result, process);
 				process.log(
 					`Mensagem de texto enviada. Resultado completo:`,
 					result
@@ -905,6 +980,8 @@ class InternalChatsService {
 				},
 				true
 			);
+			await this.persistGeneratedWppIds(message.id, result, process);
+			
 			process.log(`Mensagem enviada com sucesso (fallback). wwebjsId: ${result?.wwebjsId || "N/A"}`);
 			process.success(`Mensagem enviada para grupo ${groupId}`);
 			return result;

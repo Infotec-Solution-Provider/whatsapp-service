@@ -22,6 +22,7 @@
 		"sync:local:instance": "ts-node src/scripts/sync-local.ts",
 		"fix:messages:chat-contact": "ts-node src/routines/fix-messages-chat-contact.routine.ts",
 		"fix:messages:chat-contact:apply": "ts-node src/routines/fix-messages-chat-contact.routine.ts --apply",
+		"backfill:internal-message-wwebjs-ids": "ts-node src/routines/backfill-internal-message-wwebjs-ids.routine.ts",
 		"redis:start": "bash scripts/redis.sh start",
 		"redis:stop": "bash scripts/redis.sh stop",
 		"redis:restart": "bash scripts/redis.sh restart",
@@ -54,6 +55,7 @@
 		"ioredis": "^5.8.1",
 		"mime-types": "^3.0.1",
 		"multer": "^1.4.5-lts.1",
+		"mysql2": "^3.22.2",
 		"node-cron": "^3.0.3",
 		"react": "^19.2.0",
 		"react-dom": "^19.2.0",
@@ -72,6 +74,7 @@
 		"esbuild": "^0.25.11",
 		"prettier": "3.5.2",
 		"prisma": "^6.10.1",
+		"ts-node": "^10.9.2",
 		"ts-node-dev": "^2.0.0"
 	}
 }

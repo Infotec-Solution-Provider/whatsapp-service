@@ -26,13 +26,69 @@ interface EditMessageOptions {
 }
 
 class MessagesService {
+	private async resolveIncomingQuotedId(instance: string, quotedId: unknown) {
+		if (quotedId == null) {
+			return null;
+		}
+
+		if (typeof quotedId === "number" && Number.isInteger(quotedId)) {
+			return quotedId;
+		}
+
+		if (typeof quotedId !== "string") {
+			return null;
+		}
+
+		const normalizedQuotedId = quotedId.trim();
+
+		if (!normalizedQuotedId) {
+			return null;
+		}
+
+		const quotedMessage = await prismaService.wppMessage.findFirst({
+			where: {
+				instance,
+				OR: [
+					{ wwebjsIdStanza: normalizedQuotedId },
+					{ wwebjsId: normalizedQuotedId },
+					{ wabaId: normalizedQuotedId },
+					{ gupshupId: normalizedQuotedId }
+				]
+			},
+			select: {
+				id: true
+			}
+		});
+
+		if (quotedMessage) {
+			return quotedMessage.id;
+		}
+
+		if (!/^\d+$/.test(normalizedQuotedId)) {
+			return null;
+		}
+
+		const quotedMessageById = await prismaService.wppMessage.findFirst({
+			where: {
+				instance,
+				id: Number(normalizedQuotedId)
+			},
+			select: {
+				id: true
+			}
+		});
+
+		return quotedMessageById?.id ?? null;
+	}
+
 	public async insertMessage(data: CreateMessageDto) {
 		delete (data as any)["isGroup"];
 		delete (data as any)["authorName"];
 		delete (data as any)["groupId"];
 
-		const { clientId, contactId, chatId, ...rest } = data;
+		const { clientId, contactId, chatId, quotedId, ...rest } = data;
 		const createData: any = { ...rest };
+		createData.quotedId = await this.resolveIncomingQuotedId(data.instance, quotedId);
 
 		if (typeof contactId === "number" && contactId > 0) {
 			createData.WppContact = { connect: { id: contactId } };
