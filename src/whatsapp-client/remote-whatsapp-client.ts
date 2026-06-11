@@ -313,8 +313,51 @@ class RemoteWhatsappClient implements WhatsappClient {
 	}
 
 	public async forwardMessage(to: string, messageId: string, isGroup: boolean): Promise<void> {
-		Logger.debug("RemoteWhatsappClient.forwardMessage not implemented", { to, messageId, isGroup });
-		throw new Error("Method not implemented.");
+		const process = new ProcessingLogger(this.instance, "rc-forward-message", messageId, {
+			to,
+			messageId,
+			isGroup
+		});
+
+		try {
+			process.log("Buscando mensagem original para encaminhamento");
+
+			const originalMessage = await prismaService.wppMessage.findFirst({
+				where: {
+					OR: [
+						{ wwebjsIdStanza: messageId },
+						{ wwebjsId: messageId },
+						{ wabaId: messageId },
+						{ gupshupId: messageId }
+					]
+				}
+			});
+
+			if (!originalMessage) {
+				throw new Error(`Mensagem não encontrada para forward: ${messageId}`);
+			}
+
+			process.log("Mensagem original encontrada", {
+				id: originalMessage.id,
+				type: originalMessage.type,
+				hasFile: !!originalMessage.fileId
+			});
+
+			const options: RemoteSendMessageOptions = {
+				to,
+				text: originalMessage.body || "",
+				quotedId: null,
+				isGroup,
+			};
+
+			process.log("Enviando mensagem encaminhada para o endpoint remoto", options);
+			await axios.post(`${this.clientUrl}/api/send-message`, options);
+			process.success("Mensagem encaminhada com sucesso");
+		} catch (err: any) {
+			process.log(`Failed to forward message: ${err?.message}`);
+			process.failed(err);
+			throw err;
+		}
 	}
 }
 
