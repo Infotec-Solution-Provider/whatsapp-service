@@ -337,22 +337,39 @@ class RemoteWhatsappClient implements WhatsappClient {
 				throw new Error(`Mensagem não encontrada para forward: ${messageId}`);
 			}
 
+			try {
+				process.log("Tentando encaminhamento nativo no wwebjs-api");
+				await axios.post(`${this.clientUrl}/api/send-forwarded-message`, {
+					to,
+					sourceMessageId: messageId,
+					isGroup
+				});
+				process.success("Mensagem encaminhada com marcador nativo");
+				return;
+			} catch (nativeForwardErr: any) {
+				process.log(`Falha no encaminhamento nativo, aplicando fallback: ${nativeForwardErr?.message}`);
+			}
+
 			process.log("Mensagem original encontrada", {
 				id: originalMessage.id,
 				type: originalMessage.type,
 				hasFile: !!originalMessage.fileId
 			});
 
+			const forwardedText = originalMessage.body?.trim()
+				? `${originalMessage.body} (encaminhada)`
+				: "(encaminhada)";
+
 			const options: RemoteSendMessageOptions = {
 				to,
-				text: originalMessage.body || "",
+				text: forwardedText,
 				quotedId: null,
 				isGroup,
 			};
 
 			process.log("Enviando mensagem encaminhada para o endpoint remoto", options);
 			await axios.post(`${this.clientUrl}/api/send-message`, options);
-			process.success("Mensagem encaminhada com sucesso");
+			process.success("Mensagem encaminhada com fallback de envio normal");
 		} catch (err: any) {
 			process.log(`Failed to forward message: ${err?.message}`);
 			process.failed(err);
