@@ -679,7 +679,29 @@ class InternalChatsService {
 
 			const resolvedQuotedId = await this.resolveIncomingQuotedId(chat.id, msg.quotedId, process);
 
-			const { to, clientId, sentAt, quotedId: _quotedId, ...rest } = msg;
+			const {
+				to,
+				clientId,
+				sentAt,
+				quotedId: _quotedId,
+				// Campos de envelope/identidade que podem vir do wwebjs-api e não existem no model InternalMessage
+				isGroup: _isGroup,
+				groupId: _groupId,
+				authorName: _authorName,
+				contactName: _contactName,
+				sender: _sender,
+				recipient: _recipient,
+				participant: _participant,
+				...rest
+			} = msg as CreateMessageDto & {
+				isGroup?: boolean;
+				groupId?: string | null;
+				authorName?: string | null;
+				contactName?: string | null;
+				sender?: unknown;
+				recipient?: unknown;
+				participant?: unknown;
+			};
 			process.log(`Salvando mensagem no banco de dados. Tipo: ${msg.type}, De: ${msg.from}`, {
 				...rest,
 				quotedId: resolvedQuotedId,
