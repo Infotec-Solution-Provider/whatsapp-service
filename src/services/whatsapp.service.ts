@@ -906,7 +906,7 @@ class WhatsappService {
 									(options as SendFileOptions).sendAsDocument = originalMsg.type === "document";
 								}
 
-								await client.sendMessage(options);
+								await client.sendMessage(options, target.isGroup);
 							} else {
 								await client.forwardMessage(target.id, originalMsg.wwebjsId!, target.isGroup);
 							}
