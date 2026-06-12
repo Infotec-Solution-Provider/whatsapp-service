@@ -841,9 +841,9 @@ class WhatsappService {
 			try {
 				const client = await this.getClient(clientId);
 
-				if (!(client instanceof WWEBJSWhatsappClient)) {
+				if (!(client instanceof WWEBJSWhatsappClient) && !(client instanceof RemoteWhatsappClient)) {
 					throw new BadRequestError(
-						"O encaminhamento nativo só é suportado por conexões do tipo QR Code (WWEBJS)."
+						"O encaminhamento nativo só é suportado por conexões do tipo QR Code (WWEBJS) ou Remote	."
 					);
 				}
 
