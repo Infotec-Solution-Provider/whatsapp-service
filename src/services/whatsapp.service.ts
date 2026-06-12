@@ -248,7 +248,7 @@ class WhatsappService {
 					}
 				});
 
-				options.quotedId = (quotedMsg.wwebjsId || quotedMsg.wabaId)!;
+				options.quotedId = (quotedMsg.wwebjsIdStanza || quotedMsg.wwebjsId || quotedMsg.wabaId || quotedMsg.gupshupId)!;
 				message.quotedId = quotedMsg.id;
 				process.log(`ID enviado: ${options.quotedId}`);
 			}
@@ -576,7 +576,7 @@ class WhatsappService {
 					}
 				});
 
-				options.quotedId = (quotedMsg.wwebjsId || quotedMsg.wabaId)!;
+				options.quotedId = (quotedMsg.wwebjsIdStanza || quotedMsg.wwebjsId || quotedMsg.wabaId || quotedMsg.gupshupId)!;
 				message.quotedId = quotedMsg.id;
 			}
 
