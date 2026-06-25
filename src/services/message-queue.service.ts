@@ -15,6 +15,12 @@ export interface MessageQueueProcessHandler {
   processMessage(instance: string, clientId: number, messageId: number, contactName?: string | null): Promise<any>;
 }
 
+type QueueItemWithMessage = Awaited<ReturnType<typeof prismaService.wppMessageProcessingQueue.findMany>>[number] & {
+  message?: {
+    id: number;
+  } | null;
+};
+
 class MessageQueueService {
   private isProcessing = false;
   private processingInterval: NodeJS.Timeout | null = null;
@@ -114,8 +120,15 @@ class MessageQueueService {
         orderBy: {
           createdAt: "asc"
         },
+        include: {
+          message: {
+            select: {
+              id: true
+            }
+          }
+        },
         take: this.MAX_CONCURRENT_CONTACTS * 3 // Pega mais para filtrar por contato
-      });
+      }) as QueueItemWithMessage[];
 
       if (pendingItems.length === 0) {
         return;
@@ -133,9 +146,7 @@ class MessageQueueService {
       const itemsToProcess = Array.from(contactMap.values()).slice(0, this.MAX_CONCURRENT_CONTACTS);
 
       // Processa cada item em paralelo (mas apenas um por contato)
-      await Promise.allSettled(
-        itemsToProcess.map((item) => this.processQueueItem(item.id))
-      );
+      await Promise.allSettled(itemsToProcess.map((item) => this.processQueueItem(item)));
     } finally {
       this.isProcessing = false;
     }
@@ -170,7 +181,8 @@ class MessageQueueService {
   /**
    * Processa um item individual da fila
    */
-  private async processQueueItem(queueId: string) {
+  private async processQueueItem(queueItem: QueueItemWithMessage) {
+    const queueId = queueItem.id;
     const logger = new ProcessingLogger("", "message-queue-worker", queueId, { queueId, workerId: this.workerId });
 
     try {
@@ -187,18 +199,7 @@ class MessageQueueService {
 
       logger.log("Lock adquirido. Iniciando processamento");
 
-      // Busca o item completo
-      const queueItem = await prismaService.wppMessageProcessingQueue.findUnique({
-        where: { id: queueId }
-      });
-
-      if (!queueItem) {
-        logger.log("Item da fila não encontrado");
-        return;
-      }
-
-      // Busca a mensagem
-      const message = await prismaService.wppMessage.findUnique({
+      const message = queueItem.message ?? await prismaService.wppMessage.findUnique({
         where: { id: queueItem.messageId }
       });
 
