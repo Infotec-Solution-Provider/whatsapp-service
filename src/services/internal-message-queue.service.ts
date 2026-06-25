@@ -19,9 +19,9 @@ export interface InternalMessageQueueProcessHandler {
 class InternalMessageQueueService {
 	private isProcessing = false;
 	private processingInterval: NodeJS.Timeout | null = null;
-	private readonly PROCESSING_INTERVAL_MS = 100; // Processa a cada 100ms
+	private readonly PROCESSING_INTERVAL_MS = 250; // Processa com menos pressão no banco
 	private readonly LOCK_DURATION_MS = 30000; // Lock expira em 30 segundos
-	private readonly MAX_CONCURRENT_CHATS = 10; // Máximo de chats diferentes processando ao mesmo tempo
+	private readonly MAX_CONCURRENT_CHATS = 5; // Reduz concorrência para aliviar o pool do Prisma
 	private readonly workerId = `worker-${process.pid}-${Date.now()}`;
 	private processHandler: InternalMessageQueueProcessHandler | null = null;
 
