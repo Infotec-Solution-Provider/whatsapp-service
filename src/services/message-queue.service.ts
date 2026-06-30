@@ -145,11 +145,40 @@ class MessageQueueService {
       // Limita ao número máximo de contatos simultâneos
       const itemsToProcess = Array.from(contactMap.values()).slice(0, this.MAX_CONCURRENT_CONTACTS);
 
+      await this.claimQueueItems(itemsToProcess.map((item) => item.id));
+
       // Processa cada item em paralelo (mas apenas um por contato)
       await Promise.allSettled(itemsToProcess.map((item) => this.processQueueItem(item)));
     } finally {
       this.isProcessing = false;
     }
+  }
+
+  /**
+   * Claima em lote os itens que já vamos processar neste ciclo.
+   */
+  private async claimQueueItems(queueIds: string[]) {
+    if (queueIds.length === 0) {
+      return;
+    }
+
+    const lockUntil = new Date(Date.now() + this.LOCK_DURATION_MS);
+
+    await prismaService.wppMessageProcessingQueue.updateMany({
+      where: {
+        id: {
+          in: queueIds
+        },
+        status: "PENDING",
+        OR: [{ lockedUntil: null }, { lockedUntil: { lt: new Date() } }]
+      },
+      data: {
+        status: "PROCESSING",
+        lockedUntil: lockUntil,
+        lockedBy: this.workerId,
+        processingStartedAt: new Date()
+      }
+    });
   }
 
   /**
@@ -186,13 +215,7 @@ class MessageQueueService {
     const logger = new ProcessingLogger("", "message-queue-worker", queueId, { queueId, workerId: this.workerId });
 
     try {
-      logger.log("Tentando adquirir lock para processar item da fila");
-
-      // Tenta adquirir lock
-      const lockUntil = new Date(Date.now() + this.LOCK_DURATION_MS);
-      const locked = await this.acquireLock(queueId, lockUntil);
-
-      if (!locked) {
+      if (queueItem.status !== "PROCESSING") {
         logger.log("Não foi possível adquirir lock (já está sendo processado)");
         return;
       }
