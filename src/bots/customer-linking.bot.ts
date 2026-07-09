@@ -7,6 +7,7 @@ import messagesDistributionService from "../services/messages-distribution.servi
 import parametersService from "../services/parameters.service";
 import prismaService from "../services/prisma.service";
 import whatsappService from "../services/whatsapp.service";
+import contactsService from "../services/contacts.service";
 import JsonSessionStore from "../utils/json-session-store";
 import ProcessingLogger from "../utils/processing-logger";
 
@@ -275,7 +276,10 @@ class CustomerLinkingBot {
 				logger,
 				true
 			);
-			const avatarUrl = await whatsappService.getProfilePictureUrl(newChat.instance, contact.phone);
+			const contactAddress = contactsService.resolveContactAddress(contact);
+			const avatarUrl = contactAddress
+				? await whatsappService.getProfilePictureUrl(newChat.instance, contactAddress)
+				: null;
 			if (avatarUrl) {
 				const updatedChat = await prismaService.wppChat.update({
 					data: { avatarUrl },

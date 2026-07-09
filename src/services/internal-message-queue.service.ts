@@ -263,34 +263,6 @@ class InternalMessageQueueService {
 	}
 
 	/**
-	 * Tenta adquirir lock para processar um item
-	 */
-	private async acquireLock(queueId: string, lockUntil: Date): Promise<boolean> {
-		try {
-			const result = await prismaService.internalMessageProcessingQueue.updateMany({
-				where: {
-					id: queueId,
-					status: "PENDING",
-					OR: [
-						{ lockedUntil: null },
-						{ lockedUntil: { lt: new Date() } }
-					]
-				},
-				data: {
-					status: "PROCESSING",
-					lockedUntil: lockUntil,
-					lockedBy: this.workerId,
-					processingStartedAt: new Date()
-				}
-			});
-
-			return result.count > 0;
-		} catch (error) {
-			return false;
-		}
-	}
-
-	/**
 	 * Marca item como concluído
 	 */
 	private async markAsCompleted(queueId: string) {

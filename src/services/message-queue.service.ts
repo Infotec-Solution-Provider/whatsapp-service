@@ -15,11 +15,7 @@ export interface MessageQueueProcessHandler {
   processMessage(instance: string, clientId: number, messageId: number, contactName?: string | null): Promise<any>;
 }
 
-type QueueItemWithMessage = Awaited<ReturnType<typeof prismaService.wppMessageProcessingQueue.findMany>>[number] & {
-  message?: {
-    id: number;
-  } | null;
-};
+type QueueItem = Awaited<ReturnType<typeof prismaService.wppMessageProcessingQueue.findMany>>[number];
 
 class MessageQueueService {
   private isProcessing = false;
@@ -120,15 +116,8 @@ class MessageQueueService {
         orderBy: {
           createdAt: "asc"
         },
-        include: {
-          message: {
-            select: {
-              id: true
-            }
-          }
-        },
         take: this.MAX_CONCURRENT_CONTACTS * 3 // Pega mais para filtrar por contato
-      }) as QueueItemWithMessage[];
+      }) as QueueItem[];
 
       if (pendingItems.length === 0) {
         return;
@@ -210,7 +199,7 @@ class MessageQueueService {
   /**
    * Processa um item individual da fila
    */
-  private async processQueueItem(queueItem: QueueItemWithMessage) {
+  private async processQueueItem(queueItem: QueueItem) {
     const queueId = queueItem.id;
     const logger = new ProcessingLogger("", "message-queue-worker", queueId, { queueId, workerId: this.workerId });
 
@@ -222,7 +211,7 @@ class MessageQueueService {
 
       logger.log("Lock adquirido. Iniciando processamento");
 
-      const message = queueItem.message ?? await prismaService.wppMessage.findUnique({
+      const message = await prismaService.wppMessage.findUnique({
         where: { id: queueItem.messageId }
       });
 
@@ -277,34 +266,6 @@ class MessageQueueService {
         await this.markAsFailed(queueId, error.message);
         logger.log("Item marcado como falha após exceder tentativas");
       }
-    }
-  }
-
-  /**
-   * Tenta adquirir lock para processar um item
-   */
-  private async acquireLock(queueId: string, lockUntil: Date): Promise<boolean> {
-    try {
-      const result = await prismaService.wppMessageProcessingQueue.updateMany({
-        where: {
-          id: queueId,
-          status: "PENDING",
-          OR: [
-            { lockedUntil: null },
-            { lockedUntil: { lt: new Date() } }
-          ]
-        },
-        data: {
-          status: "PROCESSING",
-          lockedUntil: lockUntil,
-          lockedBy: this.workerId,
-          processingStartedAt: new Date()
-        }
-      });
-
-      return result.count > 0;
-    } catch (error) {
-      return false;
     }
   }
 

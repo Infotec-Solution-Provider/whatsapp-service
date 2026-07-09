@@ -19,6 +19,7 @@ import transferHistoryService from "./transfer-history.service";
 import getUsersClient from "./users.service";
 import whatsappService, { SendTemplateData } from "./whatsapp.service";
 import parametersService from "./parameters.service";
+import contactsService from "./contacts.service";
 
 interface InpulseResult {
 	CODIGO: number;
@@ -332,14 +333,18 @@ class ChatsService {
 			}
 		});
 
-		const messages = chat?.contactId
+		if (!chat) {
+			return null;
+		}
+
+		const messages = chat.contactId
 			? await prismaService.wppMessage.findMany({
-				where: { contactId: chat?.contactId },
+				where: { contactId: chat.contactId },
 				orderBy: { timestamp: "asc" }
 			})
 			: [];
 
-		if (chat?.contact?.customerId) {
+		if (chat.contact?.customerId) {
 
 			try {
 				const customerRes = await instancesService.executeQuery<Customer[]>(
@@ -547,7 +552,11 @@ class ChatsService {
 				);
 
 				logger.log(`Iniciando bot de satisfação. WHATS_ACAO: ${result?.WHATS_ACAO}`);
-				await exatronSatisfactionBot.startBot(surveyChat, chat.contact, chat.contact.phone);
+				const contactAddress = contactsService.resolveContactAddress(chat.contact);
+				if (!contactAddress) {
+					throw new Error(`Chat ${id} sem identificador de contato para disparo da pesquisa`);
+				}
+				await exatronSatisfactionBot.startBot(surveyChat, chat.contact, contactAddress);
 				logger.success(`Pesquisa de satisfação disparada sem finalizar o chat. Chat ID: ${chat.id}`);
 				return;
 			}
@@ -998,7 +1007,10 @@ class ChatsService {
 
 			await this.checkIfChatExistsOrThrow(session.instance, contact.id);
 
-			const profilePicture = await whatsappService.getProfilePictureUrl(session.instance, contact.phone);
+			const contactAddress = contactsService.resolveContactAddress(contact);
+			const profilePicture = contactAddress
+				? await whatsappService.getProfilePictureUrl(session.instance, contactAddress)
+				: null;
 
 			let userId = session.userId;
 			const params = await parametersService.getSessionParams(session);
@@ -1047,10 +1059,14 @@ class ChatsService {
 			}
 
 			if (template && newChat.contact) {
+				const templateTarget = contactsService.resolveContactAddress(newChat.contact);
+				if (!templateTarget) {
+					throw new BadRequestError("Contato sem identificador WhatsApp para envio do template.");
+				}
 				await whatsappService.sendTemplate(
 					session,
 					client.id,
-					newChat.contact.phone,
+					templateTarget,
 					template,
 					newChat.id,
 					newChat.contact.id
@@ -1082,7 +1098,10 @@ class ChatsService {
 			await this.checkIfChatExistsOrThrow(instance, contact.id);
 			process.log("No existing chat found, proceeding to create a new chat...");
 
-			const profilePicture = await whatsappService.getProfilePictureUrl(instance, contact.phone);
+			const contactAddress = contactsService.resolveContactAddress(contact);
+			const profilePicture = contactAddress
+				? await whatsappService.getProfilePictureUrl(instance, contactAddress)
+				: null;
 			const newChat = await prismaService.wppChat.create({
 				data: {
 					instance,

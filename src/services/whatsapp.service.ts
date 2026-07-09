@@ -23,6 +23,7 @@ import internalChatsService from "./internal-chats.service";
 import messagesDistributionService from "./messages-distribution.service";
 import messagesService from "./messages.service";
 import prismaService from "./prisma.service";
+import contactsService from "./contacts.service";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -352,6 +353,11 @@ class WhatsappService {
 			throw new BadRequestError("Chat ou contato não encontrado.");
 		}
 
+		const contactAddress = contactsService.resolveContactAddress(chat.contact);
+		if (!contactAddress) {
+			throw new BadRequestError("Contato sem identificador WhatsApp para envio.");
+		}
+
 		const now = new Date();
 		const message = await messagesService.insertMessage({
 			instance: chat.instance,
@@ -359,7 +365,7 @@ class WhatsappService {
 			timestamp: now.getTime().toString(),
 			sentAt: now,
 			from: `bot:ai-agent:${agentId}`,
-			to: chat.contact.phone,
+			to: contactAddress,
 			type: "chat",
 			body: text,
 			chatId: chat.id,
@@ -386,6 +392,11 @@ class WhatsappService {
 
 		if (!chat || !chat.contact) {
 			throw new BadRequestError("Chat ou contato não encontrado.");
+		}
+
+		const contactAddress = contactsService.resolveContactAddress(chat.contact);
+		if (!contactAddress) {
+			throw new BadRequestError("Contato sem identificador WhatsApp para envio.");
 		}
 
 		let resolvedFrom: "provided" | "last-message" | "sector-default" | "none" = "none";
@@ -437,7 +448,7 @@ class WhatsappService {
 
 		Logger.info(`[agent-send] Sending agent ${agentId} message on chat ${chatId} using client ${resolvedClientId} (${resolvedFrom})`);
 
-		return this.sendBotMessage(chat.contact.phone, resolvedClientId, {
+		return this.sendBotMessage(contactAddress, resolvedClientId, {
 			chat,
 			text,
 			agentId,
@@ -469,6 +480,11 @@ class WhatsappService {
 			throw new BadRequestError("Chat ou contato não encontrado.");
 		}
 
+		const contactAddress = contactsService.resolveContactAddress(chat.contact);
+		if (!contactAddress) {
+			throw new BadRequestError("Contato sem identificador WhatsApp para envio.");
+		}
+
 		const templateText = await this.resolveTemplatePreviewText(
 			chat.sector?.defaultClientId ?? null,
 			templateName,
@@ -482,7 +498,7 @@ class WhatsappService {
 			timestamp: now.getTime().toString(),
 			sentAt: now,
 			from: `bot:ai-agent:${agentId}`,
-			to: chat.contact.phone,
+			to: contactAddress,
 			type: "chat",
 			body: templateText,
 			chatId: chat.id,
@@ -849,14 +865,7 @@ class WhatsappService {
 
 				for (const target of whatsappTargets) {
 					try {
-						const contact = await prismaService.wppContact.findUnique({
-							where: {
-								instance_phone: {
-									instance: session.instance,
-									phone: target.id
-								}
-							}
-						});
+						const contact = await contactsService.findContactByAddress(session.instance, target.id);
 						const chat = contact
 							? await prismaService.wppChat.findFirst({
 								where: {
@@ -960,9 +969,7 @@ class WhatsappService {
 			if (!client) {
 				throw new InternalServerError("Client do WhatsApp não encontrado.");
 			}
-			const contact = await prismaService.wppContact.findUnique({
-				where: { instance_phone: { instance, phone: to } }
-			});
+			const contact = await contactsService.findContactByAddress(instance, to);
 			const chat = contact
 				? await prismaService.wppChat.findFirst({
 					where: { contactId: contact.id, isFinished: false }
@@ -1042,14 +1049,7 @@ class WhatsappService {
 		try {
 			process.log("Verificando janela de conversa...");
 
-			const contact = await prismaService.wppContact.findUnique({
-				where: {
-					instance_phone: {
-						instance,
-						phone
-					}
-				}
-			});
+			const contact = await contactsService.findContactByAddress(instance, phone);
 
 			if (!contact) {
 				process.log("Contato não encontrado - janela considerada fechada");

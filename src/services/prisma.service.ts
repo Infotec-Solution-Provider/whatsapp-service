@@ -1,12 +1,16 @@
 import { PrismaClient } from "@prisma/client";
 
-const prismaService = new PrismaClient({
-	datasources: {
-		db: {
-			url: process.env["WHATSAPP_DATABASE_URL"]
+const databaseUrl = process.env["WHATSAPP_DATABASE_URL"];
+
+const prismaService = databaseUrl
+	? new PrismaClient({
+		datasources: {
+			db: {
+				url: databaseUrl
+			}
 		}
-	}
-});
+	})
+	: new PrismaClient();
 
 export default prismaService;
 

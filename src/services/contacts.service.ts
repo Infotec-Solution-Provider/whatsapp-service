@@ -28,24 +28,119 @@ export interface ContactsFilters {
 }
 
 class ContactsService {
-	public async getOrCreateContact(instance: string, name: string, phone: string) {
-		const hasDDI = phone.startsWith("55");
-		if (!hasDDI) phone = "55" + phone;
+	private normalizeDigits(value: string) {
+		return value.replace(/\D/g, "");
+	}
 
+	private normalizePhone(phone?: string | null): string | null {
+		if (!phone) {
+			return null;
+		}
+
+		let normalized = this.normalizeDigits(phone);
+		if (!normalized) {
+			return null;
+		}
+
+		if (!normalized.startsWith("55")) {
+			normalized = "55" + normalized;
+		}
+
+		return normalized;
+	}
+
+	private normalizeWhatsappId(whatsappId?: string | null): string | null {
+		if (!whatsappId) {
+			return null;
+		}
+
+		const normalized = whatsappId.trim().replace(/^me:/, "").split("@")[0] || "";
+		return normalized || null;
+	}
+
+	private getPhoneAlternatives(phone: string): string[] {
 		const hasExtraDigit = phone.length === 13;
-		const phoneAlt = hasExtraDigit ? phone.slice(0, 4) + phone.slice(5) : phone.slice(0, 4) + "9" + phone.slice(4);
+		const alt = hasExtraDigit ? phone.slice(0, 4) + phone.slice(5) : phone.slice(0, 4) + "9" + phone.slice(4);
+		return [...new Set([phone, alt])];
+	}
+
+	public resolveContactAddress(contact: Pick<WppContact, "phone" | "whatsappId">): string | null {
+		return this.normalizeWhatsappId(contact.whatsappId) || this.normalizePhone(contact.phone);
+	}
+
+	private buildContactLookupWhere(instance: string, identifier: string): Prisma.WppContactWhereInput {
+		const normalizedId = this.normalizeWhatsappId(identifier);
+		const normalizedPhone = this.normalizePhone(identifier);
+		const orFilters: Prisma.WppContactWhereInput[] = [];
+
+		if (normalizedId) {
+			orFilters.push({ whatsappId: normalizedId });
+		}
+
+		if (normalizedPhone) {
+			for (const phone of this.getPhoneAlternatives(normalizedPhone)) {
+				orFilters.push({ phone });
+			}
+		}
+
+		if (orFilters.length === 0) {
+			return { instance, id: -1 };
+		}
+
+		return { instance, OR: orFilters };
+	}
+
+	public async findContactByAddress(instance: string, identifier: string) {
+		return prismaService.wppContact.findFirst({
+			where: this.buildContactLookupWhere(instance, identifier)
+		});
+	}
+
+	public async getOrCreateContact(instance: string, name: string, phone?: string | null, whatsappId?: string | null) {
+		const normalizedPhone = this.normalizePhone(phone);
+		const normalizedWhatsappId = this.normalizeWhatsappId(whatsappId ?? phone) ?? normalizedPhone;
+
+		if (!normalizedPhone && !normalizedWhatsappId) {
+			throw new BadRequestError("Não foi possível identificar o contato sem telefone ou whatsappId.");
+		}
+
+		const whereFilters: Prisma.WppContactWhereInput[] = [];
+		if (normalizedWhatsappId) {
+			whereFilters.push({ whatsappId: normalizedWhatsappId });
+		}
+		if (normalizedPhone) {
+			for (const altPhone of this.getPhoneAlternatives(normalizedPhone)) {
+				whereFilters.push({ phone: altPhone });
+			}
+		}
 
 		const contact = await prismaService.wppContact.findFirst({
 			where: {
 				instance,
-				OR: [
-					{ phone },
-					{ phone: phoneAlt }
-				]
+				OR: whereFilters
 			}
 		});
 
 		if (contact) {
+			const updateData: Prisma.WppContactUpdateInput = {};
+
+			if (!contact.whatsappId && normalizedWhatsappId) {
+				updateData.whatsappId = normalizedWhatsappId;
+			}
+
+			if (!contact.phone && normalizedPhone) {
+				updateData.phone = normalizedPhone;
+			}
+
+			if (Object.keys(updateData).length > 0) {
+				const updated = await prismaService.wppContact.update({
+					where: { id: contact.id },
+					data: updateData
+				});
+				await this.syncContactToLocal(updated);
+				return updated;
+			}
+
 			return contact;
 		}
 
@@ -53,7 +148,8 @@ class ContactsService {
 			data: {
 				instance,
 				name,
-				phone
+				phone: normalizedPhone,
+				whatsappId: normalizedWhatsappId!
 			}
 		});
 
@@ -226,6 +322,7 @@ class ContactsService {
 			instance,
 			name,
 			phone: validPhone,
+			whatsappId: validPhone,
 			customerId: customerId || null
 		};
 

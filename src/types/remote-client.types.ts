@@ -1,5 +1,12 @@
 export type MessageStatus = "PENDING" | "SENT" | "RECEIVED" | "READ" | "DOWNLOADED" | "ERROR" | "REVOKED";
 
+export interface MessageIdentity {
+	addressingMode: "pn" | "lid";
+	phone: string | null;
+	lid: string | null;
+	phoneResolved: boolean;
+}
+
 export default interface MessageDto {
 	instance: string;
 	from: string;
@@ -26,6 +33,9 @@ export default interface MessageDto {
 	authorName?: null | string;
 	contactName?: null | string;
 	groupId?: null | string;
+	sender?: MessageIdentity | null;
+	recipient?: MessageIdentity | null;
+	participant?: MessageIdentity | null;
 	clientId: number | null;
 }
 

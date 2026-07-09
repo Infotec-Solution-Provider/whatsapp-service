@@ -410,12 +410,15 @@ class MessagesDistributionService {
 		const logger = new ProcessingLogger(instance, "message-distribution", `WppMessage-${msg.id}`, msg);
 
 		try {
+			const contactIdentifier = msg.from.startsWith("me:") ? msg.to : msg.from;
+
 			// 1. Busca ou cria contato
 			logger.log("Buscando contato para a mensagem.");
 			const contact = await contactsService.getOrCreateContact(
 				instance,
-				contactName || Formatter.phone(msg.from),
-				msg.from
+				contactName || Formatter.phone(contactIdentifier),
+				contactIdentifier,
+				contactIdentifier
 			);
 			logger.log("Contato encontrado!", contact);
 
@@ -448,7 +451,8 @@ class MessagesDistributionService {
 			// 6. Finaliza criação do chat
 			logger.log("Novo chat criado!", newChat);
 
-			const avatarUrl = await whatsappService.getProfilePictureUrl(instance, msg.from);
+			const contactAddress = contactsService.resolveContactAddress(contact);
+			const avatarUrl = contactAddress ? await whatsappService.getProfilePictureUrl(instance, contactAddress) : null;
 			if (avatarUrl) {
 				const updatedChat = await prismaService.wppChat.update({
 					data: { avatarUrl },
@@ -1170,11 +1174,20 @@ class MessagesDistributionService {
 				hasFile: !!ruleToApply.fileId
 			});
 
+			const contactAddress = contactsService.resolveContactAddress(contact);
+			if (!contactAddress) {
+				logger.log("[AutoResponse] Contato sem identificador WhatsApp para envio. Pulando resposta automática.", {
+					ruleId: ruleToApply.id,
+					contactId: contact.id
+				});
+				return;
+			}
+
 			// 7) Envia e atualiza "último envio"
 			const sentAutoReply = await whatsappService.sendAutoReplyMessage(
 				instance,
 				sector,
-				contact.phone,
+				contactAddress,
 				ruleToApply.message,
 				ruleToApply.fileId
 			);

@@ -5,6 +5,7 @@ import internalMessageQueueService from "../services/internal-message-queue.serv
 import messageQueueService from "../services/message-queue.service";
 import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
+import contactsService from "../services/contacts.service";
 import MessageDto from "../types/remote-client.types";
 import { EditMessageOptions, Mentions, SendFileType, SendMessageOptions, SendTemplateOptions, WhatsappGroup } from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
@@ -118,7 +119,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 				process.log("Message is from a group, enqueuing for internal chat processing");
 
 				// Converter para CreateMessageDto removendo campos extras
-				const { isGroup, groupId, authorName, contactName, ...cleanMessage } = message;
+				const { isGroup, groupId, authorName, contactName, sender, recipient, participant, ...cleanMessage } = message;
 				const createMessageDto: CreateMessageDto = cleanMessage;
 
 				// Enfileira a mensagem interna para processamento
@@ -141,14 +142,33 @@ class RemoteWhatsappClient implements WhatsappClient {
 					process.success({ ignored: true });
 				}
 			} else {
-				const savedMsg = await messagesService.insertMessage(message);
+				const identity = message.sender ?? null;
+				const normalizedWhatsappId = identity?.lid || message.from;
+				const normalizedPhone = identity?.phone || null;
+
+				let resolvedContactId: number | null = null;
+				if (!message.from.startsWith("me:")) {
+					const contact = await contactsService.getOrCreateContact(
+						this.instance,
+						message.contactName || message.authorName || normalizedPhone || normalizedWhatsappId,
+						normalizedPhone,
+						normalizedWhatsappId
+					);
+					resolvedContactId = contact.id;
+				}
+
+				const { isGroup, groupId, authorName, contactName, sender, recipient, participant, ...cleanMessage } = message;
+				const savedMsg = await messagesService.insertMessage({
+					...cleanMessage,
+					contactId: resolvedContactId
+				});
 
 				// Enfileira a mensagem para processamento
 				await messageQueueService.enqueue({
 					instance: this.instance,
 					clientId: this.id,
 					messageId: savedMsg.id,
-					contactPhone: savedMsg.from,
+					contactPhone: normalizedWhatsappId,
 					contactName: message.contactName
 				});
 

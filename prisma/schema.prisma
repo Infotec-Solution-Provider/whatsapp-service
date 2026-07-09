@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "mysql"
-    url      = env("WHATSAPP_DATABASE_URL")
+  url      = env("WHATSAPP_DATABASE_URL")
 }
 
 model WppClient {
@@ -34,7 +34,8 @@ model WppClient {
 model WppContact {
   id                        Int       @id @default(autoincrement())
   name                      String
-  phone                     String
+  phone                     String?
+  whatsappId                String?   @map("whatsapp_id")
   customerId                Int?      @map("customer_id")
   instance                  String    @map("instance")
   isDeleted                 Boolean   @default(false) @map("is_deleted")
@@ -51,6 +52,7 @@ model WppContact {
   WppSchedule WppSchedule[]
   sectors     WppContactSector[]
 
+  @@unique([instance, whatsappId])
   @@unique([instance, phone])
   @@index([customerId, instance])
   @@map("contacts")
@@ -674,22 +676,22 @@ enum WABAWebhookQueueStatus {
 }
 
 model WppMessageProcessingQueue {
-  id                  String                           @id @default(uuid())
-  instance            String                           @map("instance")
-  clientId            Int                              @map("client_id")
-  messageId           Int                              @map("message_id")
-  contactPhone        String                           @map("contact_phone")
-  contactName         String?                          @map("contact_name")
-  status              WppMessageProcessingQueueStatus  @default(PENDING)
-  retryCount          Int                              @default(0) @map("retry_count")
-  maxRetries          Int                              @default(3) @map("max_retries")
-  error               String?                          @map("error") @db.Text
-  createdAt           DateTime                         @default(now()) @map("created_at")
-  updatedAt           DateTime                         @updatedAt @map("updated_at")
-  processingStartedAt DateTime?                        @map("processing_started_at")
-  processedAt         DateTime?                        @map("processed_at")
-  lockedUntil         DateTime?                        @map("locked_until")
-  lockedBy            String?                          @map("locked_by")
+  id                  String                          @id @default(uuid())
+  instance            String                          @map("instance")
+  clientId            Int                             @map("client_id")
+  messageId           Int                             @map("message_id")
+  contactPhone        String                          @map("contact_phone")
+  contactName         String?                         @map("contact_name")
+  status              WppMessageProcessingQueueStatus @default(PENDING)
+  retryCount          Int                             @default(0) @map("retry_count")
+  maxRetries          Int                             @default(3) @map("max_retries")
+  error               String?                         @map("error") @db.Text
+  createdAt           DateTime                        @default(now()) @map("created_at")
+  updatedAt           DateTime                        @updatedAt @map("updated_at")
+  processingStartedAt DateTime?                       @map("processing_started_at")
+  processedAt         DateTime?                       @map("processed_at")
+  lockedUntil         DateTime?                       @map("locked_until")
+  lockedBy            String?                         @map("locked_by")
 
   @@index([instance, status, contactPhone])
   @@index([status, createdAt])
@@ -708,23 +710,23 @@ enum WppMessageProcessingQueueStatus {
 }
 
 model InternalMessageProcessingQueue {
-  id                  String                              @id @default(uuid())
-  instance            String                              @map("instance")
-  internalChatId      Int                                 @map("internal_chat_id")
-  internalMessageId   Int?                                @map("internal_message_id")
-  groupId             String                              @map("group_id")
-  messageData         String                              @map("message_data") @db.LongText  // JSON serializado da mensagem
-  authorName          String?                             @map("author_name")
+  id                  String                               @id @default(uuid())
+  instance            String                               @map("instance")
+  internalChatId      Int                                  @map("internal_chat_id")
+  internalMessageId   Int?                                 @map("internal_message_id")
+  groupId             String                               @map("group_id")
+  messageData         String                               @map("message_data") @db.LongText // JSON serializado da mensagem
+  authorName          String?                              @map("author_name")
   status              InternalMessageProcessingQueueStatus @default(PENDING)
-  retryCount          Int                                 @default(0) @map("retry_count")
-  maxRetries          Int                                 @default(3) @map("max_retries")
-  error               String?                             @map("error") @db.Text
-  createdAt           DateTime                            @default(now()) @map("created_at")
-  updatedAt           DateTime                            @updatedAt @map("updated_at")
-  processingStartedAt DateTime?                           @map("processing_started_at")
-  processedAt         DateTime?                           @map("processed_at")
-  lockedUntil         DateTime?                           @map("locked_until")
-  lockedBy            String?                             @map("locked_by")
+  retryCount          Int                                  @default(0) @map("retry_count")
+  maxRetries          Int                                  @default(3) @map("max_retries")
+  error               String?                              @map("error") @db.Text
+  createdAt           DateTime                             @default(now()) @map("created_at")
+  updatedAt           DateTime                             @updatedAt @map("updated_at")
+  processingStartedAt DateTime?                            @map("processing_started_at")
+  processedAt         DateTime?                            @map("processed_at")
+  lockedUntil         DateTime?                            @map("locked_until")
+  lockedBy            String?                              @map("locked_by")
 
   @@index([instance, status, groupId])
   @@index([status, createdAt])
@@ -743,24 +745,23 @@ enum InternalMessageProcessingQueueStatus {
 }
 
 model ProcessLog {
-  id               Int       @id @default(autoincrement())
-  instance         String    @map("instance")
-  processName      String    @map("process_name")
-  processId        String    @map("process_id")
-  status           String    @map("status") // SUCCESS or FAILED
-  startTime        DateTime  @map("start_time")
-  endTime          DateTime  @map("end_time")
-  duration         Int       @map("duration") // em ms
-  input            String?   @map("input") @db.LongText
-  output           String?   @map("output") @db.LongText
-  error            String?   @map("error") @db.LongText
-  errorMessage     String?   @map("error_message") @db.Text
-  logEntries       String?   @map("log_entries") @db.LongText
-  createdAt        DateTime  @default(now()) @map("created_at")
+  id           Int      @id @default(autoincrement())
+  instance     String   @map("instance")
+  processName  String   @map("process_name")
+  processId    String   @map("process_id")
+  status       String   @map("status") // SUCCESS or FAILED
+  startTime    DateTime @map("start_time")
+  endTime      DateTime @map("end_time")
+  duration     Int      @map("duration") // em ms
+  input        String?  @map("input") @db.LongText
+  output       String?  @map("output") @db.LongText
+  error        String?  @map("error") @db.LongText
+  errorMessage String?  @map("error_message") @db.Text
+  logEntries   String?  @map("log_entries") @db.LongText
+  createdAt    DateTime @default(now()) @map("created_at")
 
   @@index([instance, processName])
   @@index([status, createdAt])
   @@index([instance, status])
   @@map("process_logs")
 }
-
