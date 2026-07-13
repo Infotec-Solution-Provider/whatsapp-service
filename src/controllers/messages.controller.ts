@@ -6,6 +6,7 @@ import onlyLocal from "../middlewares/only-local.middleware";
 import upload from "../middlewares/multer.middleware";
 import messagesService from "../services/messages.service";
 import whatsappService from "../services/whatsapp.service";
+import { createUploadTraceLogger, resolveUploadTraceId } from "../utils/file-upload-trace";
 
 class MessagesController {
 	constructor(public readonly router: Router) {
@@ -56,14 +57,26 @@ class MessagesController {
 	}
 
 	private async sendMessage(req: Request, res: Response) {
+		const traceId = resolveUploadTraceId(req.body.traceId, req.headers["x-upload-trace-id"]);
+		const trace = createUploadTraceLogger("whatsapp-service.controller.messages", traceId);
 		try {
 			const clientId = Number(req.params["clientId"]);
 			const { to, ...data } = req.body;
 			const file = req.file;
+			trace.info("request.received", {
+				clientId,
+				to,
+				hasFile: !!file,
+				fileId: data.fileId,
+				fileName: file?.originalname,
+				fileSize: file?.size,
+				fileType: file?.mimetype,
+			});
 
 			if (file) {
 				data.file = file;
 			}
+			data.traceId = traceId;
 
 			// Convert string boolean values to actual booleans
 			if (typeof data.sendAsDocument === 'string') {
@@ -77,12 +90,22 @@ class MessagesController {
 			}
 
 			const message = await whatsappService.sendMessage(req.session, clientId, to, data);
+			trace.info("request.completed", {
+				messageId: message.id,
+				status: message.status,
+				fileId: message.fileId,
+			});
 
 			res.status(201).send({
 				message: "Message sent successfully!",
 				data: message
 			});
 		} catch (error) {
+			trace.error("request.failed", error, {
+				clientId: req.params["clientId"],
+				to: req.body.to,
+				hasFile: !!req.file,
+			});
 			res.status(500).send({
 				message: sanitizeErrorMessage(error),
 				error: (error as Error).message

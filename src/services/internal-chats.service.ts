@@ -22,6 +22,7 @@ import internalMessageQueueService from "./internal-message-queue.service";
 import prismaService from "./prisma.service";
 import socketService from "./socket.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
+import { createUploadTraceLogger } from "../utils/file-upload-trace";
 
 interface ChatsFilters {
 	userId?: string;
@@ -37,6 +38,7 @@ interface InternalSendMessageData {
 	file?: Express.Multer.File | null;
 	fileId?: string;
 	mentions?: Mention[];
+	traceId?: string;
 }
 
 interface UpdateInternalGroupData {
@@ -365,11 +367,13 @@ class InternalChatsService {
 		const { file, ...logData } = data;
 		const sendAsAudio = data.sendAsAudio === true || data.sendAsAudio === "true";
 		const sendAsDocument = data.sendAsDocument === true || data.sendAsDocument === "true";
+		const traceId = data.traceId || `${data.chatId}-${Date.now()}`;
+		const trace = createUploadTraceLogger("whatsapp-service.service.internal-chats", traceId);
 
 		const process = new ProcessingLogger(
 			session.instance,
 			"internal-message",
-			`${data.chatId}-${Date.now()}`,
+			traceId,
 			logData
 		);
 
@@ -379,6 +383,16 @@ class InternalChatsService {
 		process.log(
 			`Dados da requisição - Tipo de mensagem: ${sendAsAudio ? "áudio" : sendAsDocument ? "documento" : "texto"}, Com arquivo: ${!!file}, Com citação: ${!!data.quotedId}, Menções: ${data.mentions?.length || 0}`
 		);
+		trace.info("internal-message.start", {
+			chatId: data.chatId,
+			hasFile: !!file,
+			fileId: data.fileId,
+			fileName: file?.originalname,
+			fileSize: file?.size,
+			fileType: file?.mimetype,
+			sendAsAudio,
+			sendAsDocument,
+		});
 
 		try {
 			let mentionsText = "";
@@ -446,6 +460,11 @@ class InternalChatsService {
 				process.log(
 					`Processando arquivo anexado: ${data.file.originalname} (${data.file.size} bytes, mime: ${data.file.mimetype})`
 				);
+				trace.info("internal-message.file.process.start", {
+					fileName: data.file.originalname,
+					fileSize: data.file.size,
+					fileType: data.file.mimetype,
+				});
 
 				if (sendAsAudio) {
 					process.log(
@@ -475,7 +494,14 @@ class InternalChatsService {
 					fileName: data.file!.originalname,
 					buffer: data.file!.buffer,
 					mimeType: data.file!.mimetype,
-					dirType: FileDirType.PUBLIC
+					dirType: FileDirType.PUBLIC,
+					traceId,
+				});
+				trace.info("internal-message.file.upload.success", {
+					fileId: file.id,
+					fileName: file.name,
+					fileSize: file.size,
+					fileType: file.mime_type,
 				});
 
 				process.log(
@@ -493,6 +519,7 @@ class InternalChatsService {
 			const savedMsg = await prismaService.internalMessage.create({
 				data: message
 			});
+			trace.info("internal-message.persist.success", { messageId: savedMsg.id, fileId: savedMsg.fileId });
 			process.log(
 				`Mensagem salva com sucesso. ID da mensagem: ${savedMsg.id}, Tipo: ${savedMsg.type}, Status: ${savedMsg.status}`
 			);
@@ -548,7 +575,16 @@ class InternalChatsService {
 
 
 				try {
+					trace.info("internal-message.forward-whatsapp.start", {
+						wppGroupId: chat.wppGroupId,
+						messageId: savedMsg.id,
+					});
 					const sentMsg = await this.sendMessageToWppGroup(session, chat.wppGroupId, data, savedMsg);
+					trace.info("internal-message.forward-whatsapp.success", {
+						messageId: savedMsg.id,
+						wwebjsId: sentMsg?.wwebjsId,
+						wwebjsIdStanza: sentMsg?.wwebjsIdStanza,
+					});
 
 					process.log(
 						`Resultado do envio - wwebjsId: ${sentMsg?.wwebjsId || "null"}, wwebjsIdStanza: ${sentMsg?.wwebjsIdStanza || "null"}, sentMsg completo:`,
@@ -600,6 +636,11 @@ class InternalChatsService {
 
 			process.success("Mensagem enviada com sucesso.");
 		} catch (err) {
+			trace.error("internal-message.failed", err, {
+				chatId: data.chatId,
+				fileId: data.fileId,
+				hasFile: !!data.file,
+			});
 			const msg = sanitizeErrorMessage(err) || "null";
 			process.log(`Erro durante envio de mensagem: ${msg}`);
 			process.log(`Stack trace: ${(err as Error).stack}`);

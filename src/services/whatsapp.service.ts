@@ -24,6 +24,7 @@ import messagesDistributionService from "./messages-distribution.service";
 import messagesService from "./messages.service";
 import prismaService from "./prisma.service";
 import contactsService from "./contacts.service";
+import { createUploadTraceLogger } from "../utils/file-upload-trace";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -56,6 +57,7 @@ interface SendMessageData {
 	text?: string | null;
 	fileId?: number;
 	isForwarded?: boolean;
+	traceId?: string;
 }
 
 interface EditMessageData {
@@ -207,10 +209,21 @@ class WhatsappService {
 		data.sendAsDocument = parseBoolean(data.sendAsDocument);
 		data.sendAsAudio = parseBoolean(data.sendAsAudio);
 
-		const process = new ProcessingLogger(session.instance, "send-message", `${to}-${Date.now()}`, data);
+		const traceId = data.traceId || `${to}-${Date.now()}`;
+		const trace = createUploadTraceLogger("whatsapp-service.service.send-message", traceId);
+		const process = new ProcessingLogger(session.instance, "send-message", traceId, data);
 		let pendingMsg: WppMessage | null = null;
 
 		process.log("Iniciando o envio da mensagem.");
+		trace.info("send-message.start", {
+			clientId,
+			to,
+			contactId: data.contactId,
+			chatId: data.chatId,
+			fileId: data.fileId,
+			sendAsAudio: data.sendAsAudio,
+			sendAsDocument: data.sendAsDocument,
+		});
 		try {
 			process.log("Obtendo client do whatsapp...");
 			const client = this.getClient(clientId);
@@ -256,8 +269,15 @@ class WhatsappService {
 
 			if ("fileId" in data && !!data.fileId) {
 				process.log(`Processando arquivo com ID: ${data.fileId}`);
+				trace.info("file.metadata.fetch.start", { fileId: data.fileId });
 
 				const fileData = await filesService.fetchFileMetadata(data.fileId);
+				trace.info("file.metadata.fetch.success", {
+					fileId: fileData.id,
+					fileName: fileData.name,
+					fileSize: fileData.size,
+					fileType: fileData.mime_type,
+				});
 
 				process.log(`Arquivo encontrado: ${fileData.name}`);
 				const publicFileUrl = `https://inpulse.infotecrs.inf.br/public/${session.instance}/files/${fileData.public_id}`;
@@ -285,14 +305,29 @@ class WhatsappService {
 			}
 
 			process.log("Salvando mensagem no banco de dados.", message);
+			trace.info("message.pending.persist.start", {
+				type: message.type,
+				fileId: message.fileId,
+			});
 			pendingMsg = await messagesService.insertMessage(message);
+			trace.info("message.pending.persist.success", { messageId: pendingMsg.id });
 			process.log("Enviando mensagem para o cliente.");
 
 			messagesDistributionService.notifyMessage(process, pendingMsg);
 			process.log("Mensagem pendente notificada via socket.", pendingMsg);
 
 			process.log("Enviando mensagem para o WhatsApp.", options);
+			trace.info("client.send.start", {
+				clientId: client.id,
+				to: options.to,
+				hasFile: "fileId" in data && !!data.fileId,
+			});
 			const sentMsg = await client.sendMessage(options);
+			trace.info("client.send.success", {
+				wwebjsId: sentMsg.wwebjsId,
+				wabaId: sentMsg.wabaId,
+				gupshupId: sentMsg.gupshupId,
+			});
 			process.log("Atualizando mensagem no banco de dados.", sentMsg);
 
 			message = {
@@ -319,10 +354,21 @@ class WhatsappService {
 
 			messagesDistributionService.notifyMessage(process, savedMsg);
 			process.log("Mensagem salva no banco de dados.", savedMsg);
+			trace.info("send-message.success", {
+				messageId: savedMsg.id,
+				status: savedMsg.status,
+				fileId: savedMsg.fileId,
+			});
 			process.success(savedMsg);
 
 			return savedMsg;
 		} catch (err) {
+			trace.error("send-message.failed", err, {
+				pendingMessageId: pendingMsg?.id,
+				clientId,
+				to,
+				fileId: data.fileId,
+			});
 			if (pendingMsg) {
 				try {
 					const errorMessage = await messagesService.updateMessage(pendingMsg.id, { status: "ERROR" });

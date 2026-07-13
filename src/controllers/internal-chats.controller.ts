@@ -3,6 +3,7 @@ import internalChatsService from "../services/internal-chats.service";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import upload from "../middlewares/multer.middleware";
+import { createUploadTraceLogger, resolveUploadTraceId } from "../utils/file-upload-trace";
 
 class InternalChatsController {
 	constructor(public readonly router: Router) {
@@ -164,8 +165,22 @@ class InternalChatsController {
 	}
 
 	private async sendMessageToChat(req: Request, res: Response) {
+		const traceId = resolveUploadTraceId(req.body.traceId, req.headers["x-upload-trace-id"]);
+		const trace = createUploadTraceLogger("whatsapp-service.controller.internal-chats", traceId);
 		const data = { ...req.body, file: req.file || null };
+		data.traceId = traceId;
+		trace.info("request.received", {
+			chatId: data.chatId,
+			hasFile: !!req.file,
+			fileName: req.file?.originalname,
+			fileSize: req.file?.size,
+			fileType: req.file?.mimetype,
+		});
 		await internalChatsService.sendMessage(req.session, data);
+		trace.info("request.completed", {
+			chatId: data.chatId,
+			hasFile: !!req.file,
+		});
 
 		res.status(201).send({ message: "Message sent successfully!" });
 	}
