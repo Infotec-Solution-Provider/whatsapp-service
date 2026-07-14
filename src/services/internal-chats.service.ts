@@ -19,6 +19,7 @@ import socketService from "./socket.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
 import { createUploadTraceLogger } from "../utils/file-upload-trace";
 import getUsersClient from "./users.service";
+import CreateMessageDto from "../dtos/create-message.dto";
 
 interface ChatsFilters {
 	userId?: string;
@@ -968,6 +969,29 @@ class InternalChatsService {
 			process.failed(`Erro ao encaminhar mensagens para chats internos: ${msg}`);
 			throw new BadRequestError(`Erro ao encaminhar para chat interno: ${msg}`);
 		}
+	}
+
+	public async receiveMessage(
+		instance: string,
+		wppGroupId: string,
+		_message: CreateMessageDto,
+		contactName: string
+	): Promise<void> {
+		// Compatibilidade legada: sincronizacao de grupos do WhatsApp para chat interno foi descontinuada.
+		const process = new ProcessingLogger(instance, "legacy-internal-group-receive", `${wppGroupId}-${Date.now()}`, {
+			wppGroupId,
+			contactName
+		});
+		process.log("Evento de mensagem de grupo recebido em modo legacy; nenhuma acao aplicada.");
+	}
+
+	public async receiveMessageEdit(wppGroupId: string, messageId: string, _newText: string): Promise<void> {
+		// Compatibilidade legada: mantido apenas para evitar quebra em chamadas antigas do cliente.
+		const process = new ProcessingLogger("unknown", "legacy-internal-group-edit", `${wppGroupId}-${messageId}`, {
+			wppGroupId,
+			messageId
+		});
+		process.log("Evento de edicao de mensagem de grupo recebido em modo legacy; nenhuma acao aplicada.");
 	}
 
 }
