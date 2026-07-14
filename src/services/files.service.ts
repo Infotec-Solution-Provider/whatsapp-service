@@ -2,8 +2,9 @@ import { File, FilesClient, FileDirType } from "@in.pulse-crm/sdk";
 import "dotenv/config";
 import FormData from "form-data";
 
-const FILES_API_URL = process.env["FILES_API_URL"] || "http://localhost:8003/api";
-const FILES_PUBLIC_BASE_URL = process.env["FILES_PUBLIC_BASE_URL"] || FILES_API_URL.replace(/\/api\/?$/, "");
+const DEFAULT_FILES_BASE_URL = "https://inpulse.infotecrs.inf.br";
+const FILES_API_URL = process.env["FILES_API_URL"] || `${DEFAULT_FILES_BASE_URL}/api`;
+const FILES_PUBLIC_BASE_URL = process.env["FILES_PUBLIC_BASE_URL"] || DEFAULT_FILES_BASE_URL;
 
 interface ExtendedUploadFileOptions {
 	instance: string;
