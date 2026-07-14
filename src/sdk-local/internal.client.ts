@@ -54,13 +54,12 @@ export default class InternalChatClient extends ApiClient {
 	public async getInternalChatsBySession(token: string | null = null) {
 		const url = `/api/internal/session/chats`;
 
-		const headers = token
-			? { Authorization: `Bearer ${token}` }
-			: undefined;
-
-		const { data: res } = await this.ax.get<GetChatsResponse>(url, {
-			headers,
-		});
+		const { data: res } = await this.ax.get<GetChatsResponse>(
+			url,
+			token
+				? { headers: { Authorization: `Bearer ${token}` } }
+				: {},
+		);
 
 		return res.data;
 	}

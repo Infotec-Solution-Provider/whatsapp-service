@@ -1,4 +1,3 @@
-import { AxiosInstance } from "axios";
 import { QueryResponse } from "./types/response.types";
 import ApiClient from "./api-client";
 

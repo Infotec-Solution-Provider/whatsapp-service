@@ -16,7 +16,6 @@ import {
 	PaginatedNotificationsResponse,
 	SendFileMessageData,
 	SendMessageData,
-	UnifiedSchedule,
 	UnifiedScheduleFilters,
 	UnifiedSchedulesResponse,
 	WppChatsAndMessages,
@@ -45,13 +44,13 @@ export default class WhatsappClient extends ApiClient {
 		contact = false,
 		token: string | null = null,
 	) {
-		const headers = token
-			? { Authorization: `Bearer ${token}` }
-			: undefined;
 		const url = `/api/whatsapp/session/chats?messages=${messages}&contact=${contact}`;
-		const { data: res } = await this.ax.get<GetChatsResponse>(url, {
-			headers,
-		});
+		const { data: res } = await this.ax.get<GetChatsResponse>(
+			url,
+			token
+				? { headers: { Authorization: `Bearer ${token}` } }
+				: {},
+		);
 		return res.data;
 	}
 

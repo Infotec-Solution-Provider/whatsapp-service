@@ -1,5 +1,5 @@
 import ApiClient from "./api-client";
-import type { DataResponse, FlexiblePaginatedResponse, PaginatedResponse } from "./types/response.types";
+import type { DataResponse, FlexiblePaginatedResponse } from "./types/response.types";
 import type {
 	AiAgentConfig,
 	AiTenantConfig,
@@ -14,7 +14,6 @@ import type {
 	SummarizeChatResponse,
 	AiAgent,
 	AiAgentChatSession,
-	AiAgentActionLog,
 	CreateAiAgentInput,
 	UpdateAiAgentInput,
 	AiAgentAudienceInput,
