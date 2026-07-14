@@ -45,7 +45,8 @@ export interface WhatsappInstanceProps {
 export type Mention = {
 	userId: number;
 	name: string;
-	phone: string;
+	// Legacy field kept for payload compatibility; notification target is resolved by userId -> operator WHATSAPP.
+	phone?: string;
 };
 
 export type Mentions = Mention[];

@@ -18,6 +18,7 @@ import prismaService from "./prisma.service";
 import socketService from "./socket.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
 import { createUploadTraceLogger } from "../utils/file-upload-trace";
+import getUsersClient from "./users.service";
 
 interface ChatsFilters {
 	userId?: string;
@@ -34,6 +35,7 @@ interface InternalSendMessageData {
 	fileId?: string;
 	mentions?: Mention[] | string;
 	traceId?: string;
+	authToken?: string;
 }
 
 interface UpdateInternalGroupData {
@@ -382,18 +384,76 @@ class InternalChatsService {
 		return mentions;
 	}
 
+	private async resolveMentionsWithTodos(
+		session: SessionData,
+		chatId: number,
+		text: string,
+		mentions: Mention[],
+		process: ProcessingLogger
+	): Promise<Mention[]> {
+		const mentionByUserId = new Map<number, Mention>();
+
+		for (const mention of mentions) {
+			if (Number.isInteger(mention.userId) && mention.userId > 0) {
+				mentionByUserId.set(mention.userId, mention);
+			}
+		}
+
+		const hasTodosMention = /(^|\s)@todos\b/i.test(text || "");
+
+		if (!hasTodosMention) {
+			return Array.from(mentionByUserId.values());
+		}
+
+		process.log(`Menção especial @todos detectada. Expandindo para participantes do chat ${chatId}`);
+
+		const participants = await prismaService.internalChatMember.findMany({
+			where: {
+				internalChatId: chatId,
+				userId: { not: session.userId },
+				chat: {
+					instance: session.instance
+				}
+			},
+			select: {
+				userId: true
+			}
+		});
+
+		for (const participant of participants) {
+			if (!mentionByUserId.has(participant.userId)) {
+				mentionByUserId.set(participant.userId, {
+					userId: participant.userId,
+					name: `user:${participant.userId}`
+				});
+			}
+		}
+
+		process.log(
+			`@todos expandido para ${participants.length} participante(s); total de destinatários únicos: ${mentionByUserId.size}`
+		);
+
+		return Array.from(mentionByUserId.values());
+	}
+
 	private async notifyMentionsViaWhatsapp(
 		session: SessionData,
 		chatId: number,
 		message: InternalMessage,
 		mentions: Mention[],
-		process: ProcessingLogger
+		process: ProcessingLogger,
+		authToken?: string
 	): Promise<void> {
 		if (!mentions.length) {
 			return;
 		}
 
 		process.log(`Iniciando notificação WhatsApp para ${mentions.length} menção(ões)`);
+
+		if (!authToken) {
+			process.log(`Notificação de menções ignorada: token de autenticação ausente para resolver WHATSAPP dos operadores`);
+			return;
+		}
 
 		const sector = await prismaService.wppSector.findUnique({ where: { id: session.sectorId } });
 
@@ -410,16 +470,69 @@ class InternalChatsService {
 		}
 
 		const notificationText = `*${session.name}* mencionou você no chat interno #${chatId}:\n${message.body || "(sem texto)"}`;
+		const usersClient = getUsersClient();
+		usersClient.setAuth(authToken);
 
-		const targets = mentions
-			.map((mention) => ({
-				mention,
-				phone: mention.phone?.replace(/\D/g, "")
-			}))
-			.filter((target): target is { mention: Mention; phone: string } => Boolean(target.phone));
+		const mentionByUserId = new Map<number, Mention>();
+		for (const mention of mentions) {
+			if (Number.isInteger(mention.userId) && mention.userId > 0 && !mentionByUserId.has(mention.userId)) {
+				mentionByUserId.set(mention.userId, mention);
+			}
+		}
+
+		const mentionedUserIds = Array.from(mentionByUserId.keys());
+
+		if (!mentionedUserIds.length) {
+			process.log(`Notificação de menções ignorada: nenhuma menção com userId válido`);
+			return;
+		}
+
+		const usersResults = await Promise.allSettled(
+			mentionedUserIds.map((userId) => usersClient.getUserById(userId))
+		);
+
+		const targets: Array<{ mention: Mention; phone: string }> = [];
+		let skippedWithoutWhatsapp = 0;
+		let skippedLookupError = 0;
+
+		usersResults.forEach((result, index) => {
+			const userId = mentionedUserIds[index];
+
+			if (typeof userId !== "number") {
+				return;
+			}
+
+			const mention = mentionByUserId.get(userId);
+
+			if (!mention) {
+				return;
+			}
+
+			if (result.status === "rejected") {
+				skippedLookupError++;
+				process.log(
+					`Menção ignorada para userId ${userId}: falha ao buscar operador (${sanitizeErrorMessage(result.reason)})`
+				);
+				return;
+			}
+
+			const phone = result.value?.WHATSAPP?.replace(/\D/g, "") || "";
+
+			if (!phone) {
+				skippedWithoutWhatsapp++;
+				process.log(`Menção ignorada para userId ${userId}: operador sem WHATSAPP válido`);
+				return;
+			}
+
+			targets.push({ mention, phone });
+		});
+
+		process.log(
+			`Menções elegíveis para WhatsApp: ${targets.length}/${mentionedUserIds.length} (sem WHATSAPP: ${skippedWithoutWhatsapp}, erro lookup: ${skippedLookupError})`
+		);
 
 		if (!targets.length) {
-			process.log(`Notificação de menções ignorada: nenhuma menção com telefone válido`);
+			process.log(`Notificação de menções ignorada: nenhum operador elegível para envio via WhatsApp`);
 			return;
 		}
 
@@ -446,9 +559,10 @@ class InternalChatsService {
 
 	// Envia uma mensagem no chat interno
 	public async sendMessage(session: SessionData, data: InternalSendMessageData) {
-		const { file, ...logData } = data;
+		const { file, authToken, ...logData } = data;
 		const sendAsAudio = data.sendAsAudio === true || data.sendAsAudio === "true";
 		const sendAsDocument = data.sendAsDocument === true || data.sendAsDocument === "true";
+		const chatId = +data.chatId;
 		const traceId = data.traceId || `${data.chatId}-${Date.now()}`;
 		const trace = createUploadTraceLogger("whatsapp-service.service.internal-chats", traceId);
 
@@ -478,13 +592,20 @@ class InternalChatsService {
 
 		try {
 			const parsedMentions = this.parseMentions(data.mentions, process);
+			const resolvedMentions = await this.resolveMentionsWithTodos(
+				session,
+				chatId,
+				data.text || "",
+				parsedMentions,
+				process
+			);
 			let mentionsText = "";
 
-			if (parsedMentions.length) {
-				process.log(`Processando ${parsedMentions.length} menção(ões)`);
+			if (resolvedMentions.length) {
+				process.log(`Processando ${resolvedMentions.length} menção(ões) resolvida(s)`);
 
 				process.log(`Validando telefones nas menções`);
-				parsedMentions
+				resolvedMentions
 					.map((user) => {
 						const phone = user.phone?.replace(/\D/g, "");
 						if (!phone) {
@@ -495,7 +616,7 @@ class InternalChatsService {
 					})
 					.filter((id): id is string => id !== null);
 
-				mentionsText = parsedMentions.map((user) => `@${user.name || user.phone}`).join(" ");
+				mentionsText = resolvedMentions.map((user) => `@${user.name || user.phone || user.userId}`).join(" ");
 				process.log(`Texto de menções formatado: "${mentionsText}"`);
 			}
 
@@ -591,9 +712,9 @@ class InternalChatsService {
 				`Mensagem salva com sucesso. ID da mensagem: ${savedMsg.id}, Tipo: ${savedMsg.type}, Status: ${savedMsg.status}`
 			);
 
-			if (parsedMentions.length) {
-				process.log(`Persistindo ${parsedMentions.length} menção(ões)`);
-				const mentionData = parsedMentions.map((mention) => ({
+			if (resolvedMentions.length) {
+				process.log(`Persistindo ${resolvedMentions.length} menção(ões)`);
+				const mentionData = resolvedMentions.map((mention) => ({
 					userId: mention.userId,
 					messageId: savedMsg.id
 				}));
@@ -616,7 +737,6 @@ class InternalChatsService {
 			});
 			process.log(`Evento de socket emitido com sucesso`);
 
-			const chatId = +data.chatId;
 			process.log(`Emitindo status inicial SENT para mensagem interna`);
 			await socketService.emit(SocketEventType.InternalMessageStatus, room, {
 				chatId,
@@ -636,15 +756,15 @@ class InternalChatsService {
 				status: "RECEIVED"
 			});
 
-			if (parsedMentions.length) {
+			if (resolvedMentions.length) {
 				trace.info("internal-message.mentions-notification.start", {
 					chatId,
 					messageId: savedMsg.id,
-					mentions: parsedMentions.length
+					mentions: resolvedMentions.length
 				});
 
 				try {
-					await this.notifyMentionsViaWhatsapp(session, chatId, savedMsg, parsedMentions, process);
+					await this.notifyMentionsViaWhatsapp(session, chatId, savedMsg, resolvedMentions, process, authToken);
 					trace.info("internal-message.mentions-notification.success", {
 						chatId,
 						messageId: savedMsg.id

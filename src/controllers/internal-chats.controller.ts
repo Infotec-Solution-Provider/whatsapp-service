@@ -168,6 +168,7 @@ class InternalChatsController {
 		const traceId = resolveUploadTraceId(req.body.traceId, req.headers["x-upload-trace-id"]);
 		const trace = createUploadTraceLogger("whatsapp-service.controller.internal-chats", traceId);
 		const data = { ...req.body, file: req.file || null };
+		data.authToken = (req.headers["authorization"] as string | undefined) || "";
 		data.traceId = traceId;
 		trace.info("request.received", {
 			chatId: data.chatId,
