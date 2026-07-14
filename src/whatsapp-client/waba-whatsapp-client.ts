@@ -191,7 +191,7 @@ class WABAWhatsappClient implements WhatsappClient {
 					text: originalMessage.body,
 					fileId: originalMessage.fileId,
 					localFileUrl: filesService.getFileDownloadUrl(originalMessage.fileId),
-					publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${this.instance}/files/${fileMetadata.public_id}`,
+					publicFileUrl: filesService.getPublicFileUrl(this.instance, fileMetadata.public_id),
 					sendAsAudio: originalMessage.type === "ptt",
 					sendAsDocument: originalMessage.type === "document",
 					file: fileMetadata

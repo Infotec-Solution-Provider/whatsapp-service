@@ -302,7 +302,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 					file: fileMetadata,
 					fileId: originalMessage.fileId,
 					localFileUrl: filesService.getFileDownloadUrl(originalMessage.fileId),
-					publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${this.instance}/files/${fileMetadata.public_id}`,
+					publicFileUrl: filesService.getPublicFileUrl(this.instance, fileMetadata.public_id),
 				};
 			} else {
 				// Mensagem de texto

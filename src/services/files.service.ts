@@ -3,6 +3,7 @@ import "dotenv/config";
 import FormData from "form-data";
 
 const FILES_API_URL = process.env["FILES_API_URL"] || "http://localhost:8003/api";
+const FILES_PUBLIC_BASE_URL = process.env["FILES_PUBLIC_BASE_URL"] || FILES_API_URL.replace(/\/api\/?$/, "");
 
 interface ExtendedUploadFileOptions {
 	instance: string;
@@ -15,6 +16,13 @@ interface ExtendedUploadFileOptions {
 }
 
 class ExtendedFilesClient extends FilesClient {
+	public getPublicFileUrl(instance: string, publicId: string, baseUrl?: string): string {
+		const origin = baseUrl || FILES_PUBLIC_BASE_URL;
+		const normalizedOrigin = origin.endsWith("/") ? origin : `${origin}/`;
+
+		return new URL(`public/${instance}/files/${publicId}`, normalizedOrigin).toString();
+	}
+
 	public override async uploadFile(props: ExtendedUploadFileOptions): Promise<File> {
 		const form = new FormData();
 		form.append("instance", props.instance);

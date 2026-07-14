@@ -8,7 +8,6 @@ import MessageParser from "../parsers/wwebjs-message.parser";
 import { scheduleMessageQueueCleanup } from "../routines/clean-message-queue.routine";
 import runFixLidMessagesRoutine from "../routines/fix-lid-messages.routine";
 import humanBehaviorConfigService from "../services/human-behavior-config.service";
-import internalChatsService from "../services/internal-chats.service";
 import messagesDistributionService from "../services/messages-distribution.service";
 import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
@@ -328,7 +327,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				process.success(savedMsg);
 			}
 			if (chat.isGroup) {
-				await internalChatsService.receiveMessage(this.instance, chat.id.user, parsedMsg, contactName);
+				process.log("Group message ignored: internal chats are now native and no longer synced from WhatsApp groups.");
 			}
 		} catch (err) {
 			process.log(`Error while processing message: ${sanitizeErrorMessage(err)}`);
@@ -345,8 +344,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			process.log("Chat info:", { id: chat.id._serialized, isGroup: chat.isGroup });
 			if (message && chat) {
 				if (chat.isGroup) {
-					process.log("Message is in a group chat. Processing message edit...");
-					await internalChatsService.receiveMessageEdit(chat.id.user, message.id.id, message.body);
+					process.log("Group message edit ignored: internal chats are now native and no longer synced from WhatsApp groups.");
 					return;
 				} else {
 					process.log("Message is in a private chat. Processing message edit...");

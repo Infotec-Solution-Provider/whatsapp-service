@@ -2,7 +2,6 @@ import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import * as fs from "fs/promises";
 import * as path from "path";
 import CreateMessageDto from "../dtos/create-message.dto";
-import internalChatsService from "../services/internal-chats.service";
 import messagesService from "../services/messages.service";
 import messagesDistributionService from "../services/messages-distribution.service";
 
@@ -122,9 +121,7 @@ async function processLogFile(
 		let contactName = logData.input._data?.notifyName || parsedMsg.from;
 
 		if (isGroup) {
-			const groupId = logData.input.from.replace("@g.us", "");
-			await internalChatsService.receiveMessage(instance, groupId, parsedMsg, contactName);
-			Logger.info(`✓ Mensagem de grupo recuperada: ${logData.input.id._serialized}`);
+			Logger.info(`Mensagem de grupo ignorada (sync legado removido): ${logData.input.id._serialized}`);
 		} else {
 			const savedMsg = await messagesService.insertMessage(parsedMsg);
 			await messagesDistributionService.processMessage(instance, clientId, savedMsg, contactName);

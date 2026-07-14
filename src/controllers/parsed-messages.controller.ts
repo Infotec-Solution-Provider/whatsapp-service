@@ -3,7 +3,6 @@ import { BadRequestError } from "@rgranatodutra/http-errors";
 import { Request, Response, Router } from "express";
 import CreateMessageDto from "../dtos/create-message.dto";
 import contactsService from "../services/contacts.service";
-import internalChatsService from "../services/internal-chats.service";
 import messageQueueService from "../services/message-queue.service";
 import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
@@ -117,22 +116,15 @@ class ParsedMessagesController {
 				);
 			}
 
-			// Mensagens de grupo devem ir para o handler interno
+			// Mensagens de grupo são ignoradas no fluxo nativo de chat interno.
 			if (messageDto.isGroup && messageDto.groupId) {
-				logger.log("Mensagem de grupo detectada, processando em internalChatsService");
-				const savedMsg = await internalChatsService.receiveMessage(
-					client.instance,
-					messageDto.groupId,
-					messageDto,
-					contactName
-				);
-				logger.success("Mensagem de grupo processada com sucesso");
+				logger.log("Mensagem de grupo detectada, ignorando por descontinuação da sincronização com chat interno");
 
 				const response: ProcessMessageResponse = {
 					success: true,
-					message: "Group message processed successfully",
+					message: "Group message ignored",
 					data: {
-						messageId: savedMsg?.id || 0,
+						messageId: 0,
 						chatId: null,
 						contactId: null
 					}
@@ -264,9 +256,9 @@ class ParsedMessagesController {
 						);
 					}
 
-					// Mensagens de grupo devem ir para o handler interno
+					// Mensagens de grupo são ignoradas no fluxo nativo de chat interno.
 					if (messageDto.isGroup && messageDto.groupId) {
-						await internalChatsService.receiveMessage(client.instance, messageDto.groupId, messageDto, contactName);
+						logger.log(`Mensagem de grupo no batch ignorada (index ${i})`);
 						results.push({
 							index: i,
 							success: true

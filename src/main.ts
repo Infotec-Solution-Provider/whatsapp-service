@@ -30,7 +30,6 @@ import walletsController from "./controllers/wallets.controller";
 import whatsappController from "./controllers/whatsapp.controller";
 import { registerAllSteps } from "./message-flow/register-steps";
 import gupshupWebhookQueueService from "./services/gupshup-webhook-queue.service";
-import internalMessageQueueService from "./services/internal-message-queue.service";
 import messageQueueService from "./services/message-queue.service";
 import wabaWebhookQueueService from "./services/waba-webhook-queue.service";
 import whatsappService from "./services/whatsapp.service";
@@ -99,7 +98,6 @@ app.listen(serverPort, () => {
 	gupshupWebhookQueueService.startProcessor();
 	wabaWebhookQueueService.startProcessor();
 	messageQueueService.startWorker();
-	internalMessageQueueService.startWorker();
 	Logger.info("Server listening on port " + serverPort);
 
 	// Wwebjs session health check

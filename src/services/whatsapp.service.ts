@@ -280,7 +280,7 @@ class WhatsappService {
 				});
 
 				process.log(`Arquivo encontrado: ${fileData.name}`);
-				const publicFileUrl = `https://inpulse.infotecrs.inf.br/public/${session.instance}/files/${fileData.public_id}`;
+				const publicFileUrl = filesService.getPublicFileUrl(session.instance, fileData.public_id);
 
 				options = {
 					...options,
@@ -651,7 +651,7 @@ class WhatsappService {
 					file: fileData,
 					fileId: data.fileId,
 					localFileUrl: filesService.getFileDownloadUrl(data.fileId),
-					publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${data.chat.instance}/files/${fileData.public_id}`,
+					publicFileUrl: filesService.getPublicFileUrl(data.chat.instance, fileData.public_id),
 					sendAsAudio: false,
 					sendAsDocument: ["image", "video"].every((type) => !fileData.mime_type.startsWith(type)),
 				};
@@ -1034,7 +1034,7 @@ class WhatsappService {
 					file: fileData,
 					fileId: fileId,
 					localFileUrl: filesService.getFileDownloadUrl(fileId),
-					publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${instance}/files/${fileId}`,
+					publicFileUrl: filesService.getPublicFileUrl(instance, fileData.public_id),
 					sendAsAudio: false,
 					sendAsDocument: ["image", "video"].every((type) => !fileData.mime_type.startsWith(type)),
 				}

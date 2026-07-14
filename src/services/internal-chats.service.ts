@@ -5,20 +5,15 @@ import {
 	SessionData,
 	SocketEventType,
 	SocketServerInternalChatRoom,
-	SocketServerUserRoom,
-	User
+	SocketServerUserRoom
 } from "@in.pulse-crm/sdk";
-import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { InternalChat, Prisma } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
-import CreateMessageDto from "../dtos/create-message.dto";
-import { Mention, SendMessageOptions } from "../types/whatsapp-instance.types";
+import { Mention } from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappAudioConverter from "../utils/whatsapp-audio-converter";
-import WWEBJSWhatsappClient from "../whatsapp-client/wwebjs-whatsapp-client";
 import filesService from "./files.service";
-import instancesService from "./instances.service";
-import internalMessageQueueService from "./internal-message-queue.service";
 import prismaService from "./prisma.service";
 import socketService from "./socket.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
@@ -37,7 +32,7 @@ interface InternalSendMessageData {
 	text: string;
 	file?: Express.Multer.File | null;
 	fileId?: string;
-	mentions?: Mention[];
+	mentions?: Mention[] | string;
 	traceId?: string;
 }
 
@@ -58,7 +53,7 @@ class InternalChatsService {
 		participantIds: number[],
 		isGroup: boolean = false,
 		groupName: string | null = null,
-		groupId: string | null = null,
+		_groupId: string | null = null,
 		groupImage: Express.Multer.File | null = null
 	) {
 		const uniqueIds = new Set(participantIds);
@@ -80,7 +75,7 @@ class InternalChatsService {
 			data: {
 				isGroup,
 				groupName,
-				wppGroupId: groupId,
+				wppGroupId: null,
 				creatorId: session.userId,
 				instance: session.instance,
 				groupImageFileId: fileId
@@ -132,7 +127,7 @@ class InternalChatsService {
 			where: { id: groupId },
 			data: {
 				groupName: data.name,
-				wppGroupId: data.wppGroupId,
+				wppGroupId: null,
 				participants: {
 					createMany: {
 						data: idsToAdd.map((id) => ({
@@ -362,6 +357,93 @@ class InternalChatsService {
 		return chats;
 	}
 
+	private parseMentions(rawMentions: InternalSendMessageData["mentions"], process: ProcessingLogger): Mention[] {
+		if (!rawMentions) {
+			return [];
+		}
+
+		let mentions = rawMentions;
+
+		if (typeof mentions === "string") {
+			process.log(`Menções em formato string, parseando JSON`);
+			try {
+				mentions = JSON.parse(mentions) as Mention[];
+			} catch (err) {
+				process.log(`Erro ao fazer parse de menções: ${sanitizeErrorMessage(err)}`);
+				throw new BadRequestError("mentions não é um JSON válido");
+			}
+		}
+
+		if (!Array.isArray(mentions)) {
+			process.log(`Menções não é um array`);
+			throw new BadRequestError("mentions precisa ser um array");
+		}
+
+		return mentions;
+	}
+
+	private async notifyMentionsViaWhatsapp(
+		session: SessionData,
+		chatId: number,
+		message: InternalMessage,
+		mentions: Mention[],
+		process: ProcessingLogger
+	): Promise<void> {
+		if (!mentions.length) {
+			return;
+		}
+
+		process.log(`Iniciando notificação WhatsApp para ${mentions.length} menção(ões)`);
+
+		const sector = await prismaService.wppSector.findUnique({ where: { id: session.sectorId } });
+
+		if (!sector?.defaultClientId) {
+			process.log(`Notificação de menções ignorada: setor sem cliente WhatsApp padrão`);
+			return;
+		}
+
+		const client = whatsappService.getClient(sector.defaultClientId);
+
+		if (!client) {
+			process.log(`Notificação de menções ignorada: cliente WhatsApp não disponível`);
+			return;
+		}
+
+		const notificationText = `*${session.name}* mencionou você no chat interno #${chatId}:\n${message.body || "(sem texto)"}`;
+
+		const targets = mentions
+			.map((mention) => ({
+				mention,
+				phone: mention.phone?.replace(/\D/g, "")
+			}))
+			.filter((target): target is { mention: Mention; phone: string } => Boolean(target.phone));
+
+		if (!targets.length) {
+			process.log(`Notificação de menções ignorada: nenhuma menção com telefone válido`);
+			return;
+		}
+
+		const notificationResults = await Promise.allSettled(
+			targets.map(({ phone }) =>
+				client.sendMessage({
+					to: `${phone}@c.us`,
+					text: notificationText
+				})
+			)
+		);
+
+		notificationResults.forEach((result, index) => {
+			if (result.status === "fulfilled") {
+				return;
+			}
+
+			const target = targets[index];
+			process.log(
+				`Falha ao notificar menção via WhatsApp para ${target?.mention.name || target?.phone}: ${sanitizeErrorMessage(result.reason)}`
+			);
+		});
+	}
+
 	// Envia uma mensagem no chat interno
 	public async sendMessage(session: SessionData, data: InternalSendMessageData) {
 		const { file, ...logData } = data;
@@ -395,29 +477,14 @@ class InternalChatsService {
 		});
 
 		try {
+			const parsedMentions = this.parseMentions(data.mentions, process);
 			let mentionsText = "";
 
-			if (data.mentions?.length) {
-				process.log(`Processando ${data.mentions.length} menção(ões)`);
-				let mentions = data.mentions;
-
-				if (typeof mentions === "string") {
-					try {
-						process.log(`Menções em formato string, parseando JSON`);
-						mentions = JSON.parse(mentions);
-					} catch (err) {
-						process.log(`Erro ao fazer parse de menções: ${sanitizeErrorMessage(err)}`);
-						throw new BadRequestError("mentions não é um JSON válido");
-					}
-				}
-
-				if (!Array.isArray(mentions)) {
-					process.log(`Menções não é um array`);
-					throw new BadRequestError("mentions precisa ser um array");
-				}
+			if (parsedMentions.length) {
+				process.log(`Processando ${parsedMentions.length} menção(ões)`);
 
 				process.log(`Validando telefones nas menções`);
-				mentions
+				parsedMentions
 					.map((user) => {
 						const phone = user.phone?.replace(/\D/g, "");
 						if (!phone) {
@@ -428,7 +495,7 @@ class InternalChatsService {
 					})
 					.filter((id): id is string => id !== null);
 
-				mentionsText = mentions.map((user) => `@${user.name || user.phone}`).join(" ");
+				mentionsText = parsedMentions.map((user) => `@${user.name || user.phone}`).join(" ");
 				process.log(`Texto de menções formatado: "${mentionsText}"`);
 			}
 
@@ -524,13 +591,10 @@ class InternalChatsService {
 				`Mensagem salva com sucesso. ID da mensagem: ${savedMsg.id}, Tipo: ${savedMsg.type}, Status: ${savedMsg.status}`
 			);
 
-			if (data.mentions?.length) {
-				process.log(`Processando ${data.mentions.length} menção(ões)`);
-				const mentionsParsed =
-					typeof data.mentions === "string" ? JSON.parse(data.mentions) : data.mentions || [];
-
-				const mentionData = mentionsParsed.map((mention: any) => ({
-					userId: typeof mention === "object" ? (mention.userId ?? mention.id) : mention,
+			if (parsedMentions.length) {
+				process.log(`Persistindo ${parsedMentions.length} menção(ões)`);
+				const mentionData = parsedMentions.map((mention) => ({
+					userId: mention.userId,
 					messageId: savedMsg.id
 				}));
 
@@ -552,86 +616,48 @@ class InternalChatsService {
 			});
 			process.log(`Evento de socket emitido com sucesso`);
 
-			process.log(`Buscando informações do chat interno ID: ${data.chatId}`);
-			const chat = await prismaService.internalChat.findUnique({
-				where: { id: +data.chatId }
-			});
-
-			// Emitir status inicial baseado no tipo de chat
-			const initialStatus = chat?.wppGroupId ? "PENDING" : "SENT";
-			process.log(
-				`Emitindo evento de status inicial: ${initialStatus} para chat ${chat?.wppGroupId ? 'com' : 'sem'} vínculo WhatsApp`
-			);
+			const chatId = +data.chatId;
+			process.log(`Emitindo status inicial SENT para mensagem interna`);
 			await socketService.emit(SocketEventType.InternalMessageStatus, room, {
-				chatId: +data.chatId,
+				chatId,
 				internalMessageId: savedMsg.id,
-				status: initialStatus
+				status: "SENT"
 			});
 
-			if (chat?.wppGroupId) {
-				process.log(
-					`Chat está associado a um grupo WhatsApp. Tentando enviar para grupo ID: ${chat.wppGroupId}`
-				);
+			await prismaService.internalMessage.update({
+				where: { id: savedMsg.id },
+				data: { status: "RECEIVED" }
+			});
+			process.log(`Mensagem interna marcada como RECEIVED`);
 
+			await socketService.emit(SocketEventType.InternalMessageStatus, room, {
+				chatId,
+				internalMessageId: savedMsg.id,
+				status: "RECEIVED"
+			});
+
+			if (parsedMentions.length) {
+				trace.info("internal-message.mentions-notification.start", {
+					chatId,
+					messageId: savedMsg.id,
+					mentions: parsedMentions.length
+				});
 
 				try {
-					trace.info("internal-message.forward-whatsapp.start", {
-						wppGroupId: chat.wppGroupId,
-						messageId: savedMsg.id,
+					await this.notifyMentionsViaWhatsapp(session, chatId, savedMsg, parsedMentions, process);
+					trace.info("internal-message.mentions-notification.success", {
+						chatId,
+						messageId: savedMsg.id
 					});
-					const sentMsg = await this.sendMessageToWppGroup(session, chat.wppGroupId, data, savedMsg);
-					trace.info("internal-message.forward-whatsapp.success", {
-						messageId: savedMsg.id,
-						wwebjsId: sentMsg?.wwebjsId,
-						wwebjsIdStanza: sentMsg?.wwebjsIdStanza,
-					});
-
-					process.log(
-						`Resultado do envio - wwebjsId: ${sentMsg?.wwebjsId || "null"}, wwebjsIdStanza: ${sentMsg?.wwebjsIdStanza || "null"}, sentMsg completo:`,
-						sentMsg
-					);
-
-					if (sentMsg?.wwebjsId || sentMsg?.wwebjsIdStanza) {
-						process.log(
-							`Mensagem enviada para WhatsApp com sucesso. wwebjsId: ${sentMsg.wwebjsId || "N/A"}, wwebjsIdStanza: ${sentMsg.wwebjsIdStanza || "N/A"}`
-						);
-						await prismaService.internalMessage.update({
-							where: { id: savedMsg.id },
-							data: {
-								status: "RECEIVED"
-							}
-						});
-						process.log(`Mensagem interna atualizada com status RECEIVED`);
-
-						// Emitir status SENT após envio bem-sucedido ao WhatsApp
-						process.log(`Emitindo evento de status SENT após envio ao WhatsApp`);
-						await socketService.emit(SocketEventType.InternalMessageStatus, room, {
-							chatId: +data.chatId,
-							internalMessageId: savedMsg.id,
-							status: "SENT"
-						});
-					} else {
-						process.log(`Aviso: Mensagem não foi enviada para o WhatsApp ou não retornou nenhum ID`);
-						await prismaService.internalMessage.update({
-							where: { id: savedMsg.id },
-							data: { status: "ERROR" }
-						});
-					}
 				} catch (err) {
-					const errorMsg = sanitizeErrorMessage(err) || "Erro desconhecido";
-					process.log(`Falha ao enviar mensagem ao WhatsApp. Marcando como ERROR. Erro: ${errorMsg}`);
-					await prismaService.internalMessage.update({
-						where: { id: savedMsg.id },
-						data: { status: "ERROR" }
+					process.log(
+						`Falha ao notificar menções via WhatsApp: ${sanitizeErrorMessage(err)}. Fluxo interno permanece concluído.`
+					);
+					trace.error("internal-message.mentions-notification.failed", err, {
+						chatId,
+						messageId: savedMsg.id
 					});
-					throw err;
 				}
-			} else {
-				await prismaService.internalMessage.update({
-					where: { id: savedMsg.id },
-					data: { status: "RECEIVED" }
-				});
-				process.log(`Chat é apenas interno, não há grupo WhatsApp associado`);
 			}
 
 			process.success("Mensagem enviada com sucesso.");
@@ -646,413 +672,6 @@ class InternalChatsService {
 			process.log(`Stack trace: ${(err as Error).stack}`);
 			process.failed(err);
 			throw new BadRequestError("Erro ao enviar mensagem " + msg);
-		}
-	}
-
-	private async resolveIncomingQuotedId(chatId: number, quotedId: unknown, process: ProcessingLogger) {
-		if (quotedId == null) {
-			return null;
-		}
-
-		if (typeof quotedId === "number" && Number.isInteger(quotedId)) {
-			return quotedId;
-		}
-
-		if (typeof quotedId !== "string") {
-			process.log(`quotedId recebido em formato inválido (${typeof quotedId}). Salvando mensagem sem referência.`);
-			return null;
-		}
-
-		const normalizedQuotedId = quotedId.trim();
-
-		if (!normalizedQuotedId) {
-			return null;
-		}
-
-		const quotedMessage = await prismaService.internalMessage.findFirst({
-			where: {
-				internalChatId: chatId,
-				OR: [{ wwebjsIdStanza: normalizedQuotedId }, { wwebjsId: normalizedQuotedId }]
-			},
-			select: {
-				id: true
-			}
-		});
-
-		if (!quotedMessage) {
-			process.log(
-				`Mensagem citada não encontrada para o identificador ${normalizedQuotedId}. Salvando mensagem sem quotedId.`
-			);
-			return null;
-		}
-
-		process.log(
-			`Mensagem citada resolvida com sucesso. quotedId externo: ${normalizedQuotedId}, quotedId interno: ${quotedMessage.id}`
-		);
-
-		return quotedMessage.id;
-	}
-
-	public async receiveMessage(instance: string, groupId: string, msg: CreateMessageDto, authorName: string | null = null) {
-		Logger.debug(`Recebendo mensagem de grupo WhatsApp. Grupo ID: ${groupId}, Autor: ${authorName || msg.from}`, msg);
-		const cleanGroupId = groupId.replace(/[/:]/g, "-");
-		const process = new ProcessingLogger(
-			msg.instance,
-			"receive-internal-message",
-			`group_${cleanGroupId}_${Date.now()}`,
-			{ groupId, from: msg.from, authorName }
-		);
-		try {
-			process.log(`Recebendo mensagem de grupo WhatsApp. Grupo ID: ${groupId}, Autor: ${authorName || msg.from}`);
-
-			const chat = await prismaService.internalChat.findUnique({
-				where: {
-					instance: instance,
-					wppGroupId: groupId
-				}
-			});
-			/*  */
-			if (!chat) {
-				process.log(`Chat interno não encontrado para grupo ${groupId}. Ignorando mensagem.`);
-				return;
-			}
-			process.log(`Chat interno encontrado. Chat ID: ${chat.id}`);
-
-			const resolvedQuotedId = await this.resolveIncomingQuotedId(chat.id, msg.quotedId, process);
-
-			const {
-				to,
-				clientId,
-				sentAt,
-				quotedId: _quotedId,
-				// Campos de envelope/identidade que podem vir do wwebjs-api e não existem no model InternalMessage
-				isGroup: _isGroup,
-				groupId: _groupId,
-				authorName: _authorName,
-				contactName: _contactName,
-				sender: _sender,
-				recipient: _recipient,
-				participant: _participant,
-				...rest
-			} = msg as CreateMessageDto & {
-				isGroup?: boolean;
-				groupId?: string | null;
-				authorName?: string | null;
-				contactName?: string | null;
-				sender?: unknown;
-				recipient?: unknown;
-				participant?: unknown;
-			};
-			process.log(`Salvando mensagem no banco de dados. Tipo: ${msg.type}, De: ${msg.from}`, {
-				...rest,
-				quotedId: resolvedQuotedId,
-				from: `external:${msg.from}` + (authorName ? `:${authorName}` : ""),
-				internalChatId: chat.id,
-				isForwarded: !!msg.isForwarded,
-				isEdited: false
-			});
-
-
-			const savedMsg = await prismaService.internalMessage.create({
-				data: {
-					...rest,
-					quotedId: resolvedQuotedId,
-					from: `external:${msg.from}` + (authorName ? `:${authorName}` : ""),
-					isForwarded: !!msg.isForwarded,
-					isEdited: false,
-					chat: {
-						connect: {
-							id: chat.id
-						}
-					},
-					...(clientId ? { client: { connect: { id: clientId } } } : {})
-				},
-
-			});
-
-			process.log(`Mensagem salva com sucesso. Mensagem ID: ${savedMsg.id}`);
-
-			const room = `${msg.instance}:internal-chat:${chat.id}` as SocketServerInternalChatRoom;
-			process.log(`Emitindo evento de mensagem via socket para sala: ${room}`);
-			await socketService.emit(SocketEventType.InternalMessage, room, {
-				message: savedMsg
-			});
-			process.success(`Mensagem recebida e processada com sucesso`);
-
-			return savedMsg;
-		} catch (err) {
-			const errorMsg = sanitizeErrorMessage(err) || "Erro desconhecido";
-			process.log(`Erro ao receber mensagem: ${errorMsg}`);
-			process.failed(err);
-			throw err;
-		}
-	}
-
-	/**
-	 * Método chamado pela fila de processamento para processar uma mensagem interna
-	 * Este método é injetado no internalMessageQueueService através do setProcessHandler
-	 */
-	public async processInternalMessageFromQueue(
-		instance: string,
-		_internalChatId: number,
-		_queueId: string,
-		groupId: string,
-		messageData: CreateMessageDto,
-		authorName?: string | null
-	): Promise<void> {
-		// Processa a mensagem normalmente usando o método receiveMessage
-		await this.receiveMessage(instance, groupId, messageData, authorName);
-	}
-
-	private async persistGeneratedWppIds(messageId: number, sentMsg: CreateMessageDto | undefined, process: ProcessingLogger) {
-		const dataToUpdate: Prisma.InternalMessageUpdateInput = {};
-
-		if (sentMsg?.wwebjsId) {
-			dataToUpdate.wwebjsId = sentMsg.wwebjsId;
-		}
-
-		if (sentMsg?.wwebjsIdStanza) {
-			dataToUpdate.wwebjsIdStanza = sentMsg.wwebjsIdStanza;
-		}
-
-		if (!Object.keys(dataToUpdate).length) {
-			process.log(`Nenhum ID do WhatsApp retornado para persistir na mensagem interna ${messageId}`);
-			return;
-		}
-
-		await prismaService.internalMessage.update({
-			where: { id: messageId },
-			data: dataToUpdate
-		});
-
-		process.log(
-			`IDs do WhatsApp persistidos na mensagem interna ${messageId}. wwebjsId: ${sentMsg?.wwebjsId || "N/A"}, wwebjsIdStanza: ${sentMsg?.wwebjsIdStanza || "N/A"}`
-		);
-	}
-
-	public async receiveMessageEdit(groupId: string, msgId: string, newText: string) {
-		const cleanGroupId = groupId.replace(/[/:]/g, "-");
-		const cleanMsgId = msgId.replace(/[/:]/g, "-");
-		const process = new ProcessingLogger(
-			"internal-service",
-			"receive-message-edit",
-			`group_${cleanGroupId}_msg_${cleanMsgId}`,
-			{ groupId, messageId: msgId, textLength: newText.length }
-		);
-
-		try {
-			process.log(
-				`Recebendo edição de mensagem de grupo WhatsApp. Grupo ID: ${groupId}, Mensagem Stanza ID: ${msgId}`
-			);
-
-			const chat = await prismaService.internalChat.findUnique({
-				where: {
-					wppGroupId: groupId
-				}
-			});
-
-			if (!chat) {
-				process.log(`Chat interno não encontrado para grupo ${groupId}. Ignorando edição.`);
-				return;
-			}
-			process.log(`Chat interno encontrado. Chat ID: ${chat.id}`);
-
-			process.log(`Buscando mensagem interna com stanza ID: ${msgId}`);
-			const message = await prismaService.internalMessage.findFirst({
-				where: {
-					internalChatId: chat.id,
-					wwebjsIdStanza: msgId
-				}
-			});
-
-			if (!message) {
-				process.log(`Mensagem não encontrada. Ignorando edição.`);
-				return;
-			}
-			process.log(
-				`Mensagem encontrada. Mensagem ID: ${message.id}, Texto anterior: "${message.body.substring(0, 50)}${message.body.length > 50 ? "..." : ""}"`
-			);
-
-			process.log(`Atualizando mensagem com novo texto`);
-			const updatedMsg = await this.updateMessage(message.id, {
-				body: newText,
-				isEdited: true
-			});
-
-			process.log(
-				`Mensagem atualizada com sucesso. Novo texto: "${newText.substring(0, 50)}${newText.length > 50 ? "..." : ""}"`
-			);
-
-			const room: SocketServerInternalChatRoom = `${chat.instance}:internal-chat:${chat.id}`;
-			process.log(`Emitindo evento de edição via socket para sala: ${room}`);
-			await socketService.emit(SocketEventType.InternalMessageEdit, room, {
-				chatId: chat.id,
-				internalMessageId: updatedMsg.id,
-				newText: updatedMsg.body
-			});
-
-			process.success(`Edição de mensagem recebida e processada com sucesso`);
-		} catch (err) {
-			const errorMsg = sanitizeErrorMessage(err) || "Erro desconhecido";
-			process.log(`Erro ao processar edição de mensagem: ${errorMsg}`);
-			process.failed(err);
-		}
-	}
-
-	public async sendMessageToWppGroup(
-		session: SessionData,
-		groupId: string,
-		data: InternalSendMessageData,
-		message: InternalMessage
-	) {
-		const cleanGroupId = groupId.replace(/[/:]/g, "-");
-		const process = new ProcessingLogger(
-			session.instance,
-			"wpp-group-message",
-			`group_${cleanGroupId}_${Date.now()}`,
-			{ groupId, userId: session.userId, messageId: message.id }
-		);
-
-		try {
-			process.log(
-				`Iniciando envio de mensagem para grupo WhatsApp. Grupo ID: ${groupId}, Mensagem Interna ID: ${message.id}`
-			);
-
-			process.log(`Buscando setor padrão do usuário. Setor ID: ${session.sectorId}`);
-			const sector = await prismaService.wppSector.findUnique({ where: { id: session.sectorId } });
-
-			if (!sector || !sector.defaultClientId) {
-				const errorMsg = "Nenhum cliente WhatsApp padrão configurado para o setor do usuário.";
-				process.log(`Erro: ${errorMsg}`);
-				throw new BadRequestError(errorMsg);
-			}
-			process.log(`Setor encontrado. Cliente padrão ID: ${sector.defaultClientId}`);
-
-			process.log(`Obtendo instância do cliente WhatsApp`);
-			const client = whatsappService.getClient(sector.defaultClientId);
-
-			if (!client) {
-				process.log(`Aviso: Cliente WhatsApp não disponível. Encerrando sem erro.`);
-				return;
-			}
-			process.log(`Cliente WhatsApp obtido com sucesso`);
-
-			let waMentions: Mention[] = [];
-			if (data.mentions) {
-				process.log(`Processando menções para o grupo WhatsApp`);
-				let mentions: Mention[] = [];
-
-				if (typeof data.mentions === "string") {
-					mentions = JSON.parse(data.mentions);
-				} else if (Array.isArray(data.mentions)) {
-					mentions = data.mentions;
-				}
-
-				waMentions = mentions.map((m) => ({
-					userId: m.userId ?? "",
-					phone: m.phone ?? "",
-					name: m.name || m.phone || ""
-				}));
-				process.log(`${waMentions.length} menção(ões) processada(s)`);
-			}
-
-			const text = `*${session.name}*: ${message.body}`;
-			process.log(`Texto da mensagem formatado: "${text.substring(0, 50)}${text.length > 50 ? "..." : ""}"`);
-
-			if (data.quotedId) {
-				process.log(`Processando resposta para mensagem ID: ${data.quotedId}`);
-				const quotedmsg = await prismaService.internalMessage.findUnique({
-					where: { id: +data.quotedId }
-				});
-
-				const quotedWppId = quotedmsg?.wwebjsIdStanza || quotedmsg?.wwebjsId;
-
-				if (quotedWppId) {
-					process.log(`Mensagem citada encontrada. wwebjsId: ${quotedWppId}`);
-					data.quotedId = quotedWppId;
-				} else {
-					process.log(`Aviso: Mensagem citada não possui wwebjsId. Enviando sem resposta.`);
-					data.quotedId = null;
-				}
-			}
-
-			if (groupId && client && message.fileId && message.fileName) {
-				process.log(`Enviando mensagem com arquivo. Arquivo ID: ${message.fileId}, Nome: ${message.fileName}`);
-				const fileData = await filesService.fetchFileMetadata(message.fileId);
-				const fileUrl = filesService.getFileDownloadUrl(message.fileId);
-				process.log(`URL do arquivo gerada: ${fileUrl}`);
-				const sendAsAudio = data.sendAsAudio === true || data.sendAsAudio === "true";
-				const sendAsDocument = data.sendAsDocument === true || data.sendAsDocument === "true";
-
-				process.log(`Enviando mensagem com arquivo para grupo ${groupId}`);
-				const result = await client.sendMessage(
-					{
-						file: fileData,
-						fileId: message.fileId,
-						localFileUrl: fileUrl,
-						publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${session.instance}/files/${fileData.public_id}`,
-						to: groupId,
-						quotedId: data.quotedId || null,
-						sendAsAudio,
-						sendAsDocument,
-						text,
-						mentions: waMentions
-					},
-					true
-				);
-				await this.persistGeneratedWppIds(message.id, result, process);
-				process.log(
-					`Mensagem com arquivo enviada. Resultado completo:`,
-					result
-				);
-				process.log(
-					`wwebjsId: ${result?.wwebjsId || "N/A"}, wwebjsIdStanza: ${result?.wwebjsIdStanza || "N/A"}`
-				);
-				process.success(`Mensagem com arquivo enviada para grupo ${groupId}`);
-				return result;
-			} else if (groupId && client) {
-				process.log(`Enviando mensagem de texto para grupo ${groupId} (sem arquivo)`);
-				const result = await client.sendMessage(
-					{
-						to: groupId,
-						quotedId: data.quotedId || null,
-						text,
-						mentions: waMentions
-					},
-					true
-				);
-				await this.persistGeneratedWppIds(message.id, result, process);
-				process.log(
-					`Mensagem de texto enviada. Resultado completo:`,
-					result
-				);
-				process.log(
-					`wwebjsId: ${result?.wwebjsId || "N/A"}, wwebjsIdStanza: ${result?.wwebjsIdStanza || "N/A"}`
-				);
-				process.success(`Mensagem de texto enviada para grupo ${groupId}`);
-				return result;
-			}
-
-			process.log(`Cenário não esperado. Enviando mensagem com fallback`);
-			const result = await client.sendMessage(
-				{
-					to: groupId,
-					quotedId: data.quotedId || null,
-					text: data.text,
-					mentions: waMentions
-				},
-				true
-			);
-			await this.persistGeneratedWppIds(message.id, result, process);
-			
-			process.log(`Mensagem enviada com sucesso (fallback). wwebjsId: ${result?.wwebjsId || "N/A"}`);
-			process.success(`Mensagem enviada para grupo ${groupId}`);
-			return result;
-		} catch (err) {
-			const errorMsg = sanitizeErrorMessage(err) || "Erro desconhecido";
-			process.log(`Erro ao enviar mensagem para grupo: ${errorMsg}`);
-			process.failed(err);
-			throw err;
 		}
 	}
 
@@ -1107,34 +726,6 @@ class InternalChatsService {
 			const authorId = originalMsg.from.startsWith("user:") ? originalMsg.from.replace("user:", "") : null;
 			if (authorId !== session.userId.toString()) {
 				throw new Error("You can only edit your own messages!");
-			}
-
-			// Se a mensagem pertence a um grupo do WhatsApp, edita lá também
-			if (originalMsg.chat && originalMsg.chat?.wppGroupId && session.sectorId) {
-				process.log("Mensagem pertence a um grupo do WhatsApp, tentando editar lá também.");
-				const sector = await prismaService.wppSector.findUnique({ where: { id: session.sectorId } });
-
-				if (!sector || !sector.defaultClientId) {
-					throw new BadRequestError("Nenhum cliente WhatsApp padrão configurado para o setor do usuário.");
-				}
-				const client = await whatsappService.getClient(sector.defaultClientId);
-
-				if (!client) {
-					throw new BadRequestError("Nenhum cliente WhatsApp encontrado para o setor especificado.");
-				}
-
-				if (client && originalMsg.wwebjsId) {
-					process.log("Editando mensagem no grupo do WhatsApp.");
-					await client.editMessage({
-						messageId: originalMsg.wwebjsId,
-						text: options.text
-					});
-					process.log("Mensagem editada com sucesso no WhatsApp.");
-				} else {
-					process.log(
-						"Cliente WhatsApp não disponível ou mensagem não possui wwebjsId, pulando edição no WhatsApp."
-					);
-				}
 			}
 
 			// Atualiza a mensagem no banco
@@ -1194,7 +785,7 @@ class InternalChatsService {
 	public async forwardWppMessagesToInternal(
 		session: SessionData,
 		originalMessages: any[],
-		sourceType: "whatsapp" | "internal",
+		_sourceType: "whatsapp" | "internal",
 		internalTargetChatIds: number[]
 	): Promise<void> {
 		const process = new ProcessingLogger(
@@ -1215,53 +806,9 @@ class InternalChatsService {
 				return;
 			}
 
-			const sector = await prismaService.wppSector.findUnique({ where: { id: session.sectorId } });
-
-			if (!sector || !sector.defaultClientId) {
-				throw new BadRequestError("Nenhum cliente WhatsApp padrão configurado para o setor do usuário.");
-			}
-			const client = await whatsappService.getClient(sector.defaultClientId);
-
-			if (!client) {
-				throw new BadRequestError("Nenhum cliente WhatsApp encontrado para o setor especificado.");
-			}
-
 			for (const chatId of internalTargetChatIds) {
-				const internalChat = await prismaService.internalChat.findUnique({
-					where: { id: chatId },
-					select: { isGroup: true, wppGroupId: true }
-				});
-
 				for (const originalMsg of originalMessages) {
-					const phoneOrUserId = this.extractPhone(originalMsg.from);
-					let userOrContact: any;
-
-					if (originalMsg.from.startsWith("user:")) {
-						const result = await instancesService.executeQuery<User>(
-							session.instance,
-							"SELECT * FROM operadores WHERE CODIGO = ?",
-							[Number(phoneOrUserId)]
-						);
-						if (Array.isArray(result) && result.length > 0) {
-							userOrContact = result[0];
-						} else if (result && typeof result === "object") {
-							userOrContact = result;
-						} else {
-							userOrContact = null;
-						}
-					} else if (originalMsg.from.startsWith("external:")) {
-						if (phoneOrUserId) {
-							userOrContact = await prismaService.wppContact.findFirst({
-								where: { phone: phoneOrUserId }
-							});
-						} else {
-							userOrContact = null;
-						}
-					}
-
-					const messageBody = internalChat?.isGroup
-						? `${userOrContact?.NOME || userOrContact?.name ? `*${userOrContact.NOME || userOrContact.name}*:` : ""} ${originalMsg.body}`
-						: originalMsg.body;
+					const messageBody = originalMsg.body;
 
 					const messageData: Prisma.InternalMessageCreateInput = {
 						instance: session.instance,
@@ -1293,49 +840,6 @@ class InternalChatsService {
 					await socketService.emit(SocketEventType.InternalMessage, room, {
 						message: savedInternalMsg
 					});
-
-					if (internalChat?.isGroup && internalChat.wppGroupId) {
-						try {
-							if (!(client instanceof WWEBJSWhatsappClient)) {
-								process.log(
-									`Cliente não suporta encaminhamento nativo para o grupo wppId:${internalChat.wppGroupId}`
-								);
-								continue;
-							}
-
-							if (sourceType === "internal") {
-								let options: SendMessageOptions = {
-									to: internalChat.wppGroupId,
-									text: `_→ Encaminhada_\n${messageBody}`
-								};
-
-								if (originalMsg.fileId) {
-									const fileData = await filesService.fetchFileMetadata(originalMsg.fileId);
-
-									options = {
-										...options,
-										file: fileData,
-										fileId: originalMsg.fileId,
-										localFileUrl: filesService.getFileDownloadUrl(originalMsg.fileId),
-										publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${session.instance}/files/${fileData.public_id}`,
-										sendAsAudio: false,
-										sendAsDocument: false
-									}
-								}
-
-								await client.sendMessage(options, true);
-							} else {
-								await client.forwardMessage(internalChat.wppGroupId, originalMsg.wwebjsId!, true);
-							}
-							process.log(
-								`Mensagem ID:${originalMsg.id} também encaminhada para o grupo de WhatsApp ID:${internalChat.wppGroupId}`
-							);
-						} catch (err) {
-							process.failed(
-								`Falha ao encaminhar msg ID:${originalMsg.id} para o grupo de WhatsApp ${internalChat.wppGroupId}: ${sanitizeErrorMessage(err)}`
-							);
-						}
-					}
 				}
 			}
 			process.success("Todas as mensagens foram processadas para os chats internos.");
@@ -1346,24 +850,8 @@ class InternalChatsService {
 		}
 	}
 
-	extractPhone(from: string): string | null {
-		if (from.startsWith("user:")) {
-			return from.replace("user:", "");
-		}
-
-		if (from.startsWith("external:")) {
-			return from.match(/:(\d+)@c\.us$/)?.[1] ?? null;
-		}
-
-		return null;
-	}
 }
 
 const internalChatsServiceInstance = new InternalChatsService();
-
-// Configura o handler de processamento da fila após a instância ser criada
-internalMessageQueueService.setProcessHandler({
-	processInternalMessage: internalChatsServiceInstance.processInternalMessageFromQueue.bind(internalChatsServiceInstance)
-});
 
 export default internalChatsServiceInstance;

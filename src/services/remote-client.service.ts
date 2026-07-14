@@ -1,10 +1,13 @@
 import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
+import { Logger } from "@in.pulse-crm/utils";
 import { RemoteClientEvent } from "../types/remote-client.types";
 import whatsappService from "./whatsapp.service";
 import RemoteWhatsappClient from "../whatsapp-client/remote-whatsapp-client";
 
 class RemoteClientService {
 	public async handleEventReceived(clientId: number, event: RemoteClientEvent): Promise<void> {
+		Logger.info(`[RemoteClientService] Handling remote event | clientId=${clientId} | type=${event.type}`);
+
 		const client = whatsappService.getClient(clientId);
 
 		if (!client) {
@@ -15,20 +18,22 @@ class RemoteClientService {
 		}
 		switch (event.type) {
 			case "qr-received":
-				client.handleQr(event.qr);
+				await client.handleQr(event.qr);
 				break;
 			case "auth-success":
-				client.handleAuthSuccess(event.phoneNumber);
+				await client.handleAuthSuccess(event.phoneNumber);
 				break;
 			case "message-received":
-				client.handleMessageReceived(event.message);
+				await client.handleMessageReceived(event.message);
 				break;
 			case "message-status-received":
-				client.handleMessageStatus(event.messageId, event.status);
+				await client.handleMessageStatus(event.messageId, event.status);
 				break;
 			default:
 				throw new BadRequestError(`Unknown event type: ${(event as any).type}`);
 		}
+
+		Logger.info(`[RemoteClientService] Remote event handled | clientId=${clientId} | type=${event.type}`);
 	}
 }
 

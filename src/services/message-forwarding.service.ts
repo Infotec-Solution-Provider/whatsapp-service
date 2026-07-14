@@ -315,7 +315,7 @@ class MessageForwardingService {
 				file: fileData,
 				fileId: originalMessage.fileId,
 				localFileUrl: filesService.getFileDownloadUrl(originalMessage.fileId),
-				publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${client.instance}/files/${fileData.public_id}`,
+				publicFileUrl: filesService.getPublicFileUrl(client.instance, fileData.public_id),
 			}
 		}
 

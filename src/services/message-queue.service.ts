@@ -66,6 +66,10 @@ class MessageQueueService {
 
     Logger.info(`[MessageQueueService] 🚀 Iniciando worker de processamento da fila (intervalo: ${this.PROCESSING_INTERVAL_MS}ms)`);
 
+    this.recoverOrphanProcessingItems().catch((err) => {
+      Logger.info(`[MessageQueueService] Error recovering orphan processing items: ${err.message}`);
+    });
+
     this.processingInterval = setInterval(() => {
       this.processQueue().catch((err) => {
         // Erros ignorados intencionalmente para não bloquear o worker loop
@@ -134,10 +138,22 @@ class MessageQueueService {
       // Limita ao número máximo de contatos simultâneos
       const itemsToProcess = Array.from(contactMap.values()).slice(0, this.MAX_CONCURRENT_CONTACTS);
 
-      await this.claimQueueItems(itemsToProcess.map((item) => item.id));
+      const claimedIds = await this.claimQueueItems(itemsToProcess.map((item) => item.id));
+
+      if (claimedIds.length === 0) {
+        return;
+      }
+
+      const claimedItems = await prismaService.wppMessageProcessingQueue.findMany({
+        where: {
+          id: { in: claimedIds },
+          status: "PROCESSING",
+          lockedBy: this.workerId
+        }
+      }) as QueueItem[];
 
       // Processa cada item em paralelo (mas apenas um por contato)
-      await Promise.allSettled(itemsToProcess.map((item) => this.processQueueItem(item)));
+      await Promise.allSettled(claimedItems.map((item) => this.processQueueItem(item)));
     } finally {
       this.isProcessing = false;
     }
@@ -146,9 +162,9 @@ class MessageQueueService {
   /**
    * Claima em lote os itens que já vamos processar neste ciclo.
    */
-  private async claimQueueItems(queueIds: string[]) {
+  private async claimQueueItems(queueIds: string[]): Promise<string[]> {
     if (queueIds.length === 0) {
-      return;
+      return [];
     }
 
     const lockUntil = new Date(Date.now() + this.LOCK_DURATION_MS);
@@ -168,6 +184,21 @@ class MessageQueueService {
         processingStartedAt: new Date()
       }
     });
+
+    const claimedItems = await prismaService.wppMessageProcessingQueue.findMany({
+      where: {
+        id: {
+          in: queueIds
+        },
+        status: "PROCESSING",
+        lockedBy: this.workerId
+      },
+      select: {
+        id: true
+      }
+    });
+
+    return claimedItems.map((item) => item.id);
   }
 
   /**
@@ -197,6 +228,36 @@ class MessageQueueService {
   }
 
   /**
+   * Recupera itens PROCESSING órfãos (sem lock válido) para evitar mensagens travadas.
+   */
+  private async recoverOrphanProcessingItems(): Promise<number> {
+    const staleStart = new Date(Date.now() - this.LOCK_DURATION_MS * 3);
+
+    const result = await prismaService.wppMessageProcessingQueue.updateMany({
+      where: {
+        status: "PROCESSING",
+        OR: [
+          { lockedUntil: null },
+          { lockedUntil: { lt: new Date() } },
+          { processingStartedAt: { lt: staleStart } }
+        ]
+      },
+      data: {
+        status: "PENDING",
+        lockedUntil: null,
+        lockedBy: null,
+        processingStartedAt: null
+      }
+    });
+
+    if (result.count > 0) {
+      Logger.info(`[MessageQueueService] Recovered ${result.count} orphan processing items`);
+    }
+
+    return result.count;
+  }
+
+  /**
    * Processa um item individual da fila
    */
   private async processQueueItem(queueItem: QueueItem) {
@@ -204,8 +265,15 @@ class MessageQueueService {
     const logger = new ProcessingLogger("", "message-queue-worker", queueId, { queueId, workerId: this.workerId });
 
     try {
-      if (queueItem.status !== "PROCESSING") {
-        logger.log("Não foi possível adquirir lock (já está sendo processado)");
+      const freshQueueItem = await prismaService.wppMessageProcessingQueue.findUnique({
+        where: { id: queueId }
+      });
+
+      if (!freshQueueItem || freshQueueItem.status !== "PROCESSING" || freshQueueItem.lockedBy !== this.workerId) {
+        logger.log("Item não está lockado por este worker. Ignorando processamento", {
+          status: freshQueueItem?.status,
+          lockedBy: freshQueueItem?.lockedBy || null
+        });
         return;
       }
 
@@ -330,6 +398,13 @@ class MessageQueueService {
     });
 
     return result.count;
+  }
+
+  /**
+   * Recupera itens travados em PROCESSING para PENDING.
+   */
+  public async recoverStuckProcessingItems(): Promise<number> {
+    return this.recoverOrphanProcessingItems();
   }
 }
 
