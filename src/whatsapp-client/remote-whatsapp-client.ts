@@ -5,6 +5,7 @@ import messageQueueService from "../services/message-queue.service";
 import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
 import contactsService from "../services/contacts.service";
+import internalChatsService from "../services/internal-chats.service";
 import MessageDto from "../types/remote-client.types";
 import { EditMessageOptions, Mentions, SendFileType, SendMessageOptions, SendTemplateOptions, WhatsappGroup } from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
@@ -13,6 +14,8 @@ import socketService from "../services/socket.service";
 import { WppMessageStatus } from "@prisma/client";
 import { Logger } from "@in.pulse-crm/utils";
 import axios from "axios";
+
+const ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] !== "false";
 
 interface BaseSendMessageOptions {
 	to: string;
@@ -115,8 +118,20 @@ class RemoteWhatsappClient implements WhatsappClient {
 			process.log("Handling message received");
 
 			if (message.isGroup && message.groupId) {
-				process.log("Group message ignored: internal chats are now native and no longer synced from WhatsApp groups.");
-				process.success({ ignored: true, reason: "native-internal-chat" });
+				if (!ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+					process.log("Group message ignored: WhatsApp group synchronization is disabled.");
+					process.success({ ignored: true, reason: "group-sync-disabled" });
+					return;
+				}
+
+				const { isGroup, groupId, authorName, contactName, sender, recipient, participant, ...cleanMessage } = message;
+				await internalChatsService.receiveMessage(
+					this.instance,
+					groupId,
+					cleanMessage,
+					contactName || authorName || message.from
+				);
+				process.success({ groupId, synced: true });
 			} else {
 				const identity = message.sender ?? null;
 				const normalizedWhatsappId = identity?.lid || message.from;

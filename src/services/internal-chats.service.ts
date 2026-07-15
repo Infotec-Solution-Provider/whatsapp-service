@@ -974,24 +974,128 @@ class InternalChatsService {
 	public async receiveMessage(
 		instance: string,
 		wppGroupId: string,
-		_message: CreateMessageDto,
+		message: CreateMessageDto,
 		contactName: string
 	): Promise<void> {
-		// Compatibilidade legada: sincronizacao de grupos do WhatsApp para chat interno foi descontinuada.
-		const process = new ProcessingLogger(instance, "legacy-internal-group-receive", `${wppGroupId}-${Date.now()}`, {
+		const process = new ProcessingLogger(instance, "receive-internal-group-message", `${wppGroupId}-${Date.now()}`, {
 			wppGroupId,
-			contactName
+			contactName,
+			messageId: message.wwebjsIdStanza || message.wwebjsId
 		});
-		process.log("Evento de mensagem de grupo recebido em modo legacy; nenhuma acao aplicada.");
+
+		try {
+			const chat = await prismaService.internalChat.findFirst({
+				where: { instance, wppGroupId }
+			});
+
+			if (!chat) {
+				process.log("Internal chat not found for WhatsApp group; message ignored.");
+				return;
+			}
+
+			const messageId = message.wwebjsIdStanza || message.wwebjsId;
+			if (messageId) {
+				const existingMessage = await prismaService.internalMessage.findFirst({
+					where: {
+						internalChatId: chat.id,
+						OR: [{ wwebjsIdStanza: messageId }, { wwebjsId: messageId }]
+					},
+					select: { id: true }
+				});
+
+				if (existingMessage) {
+					process.log("WhatsApp group message was already synchronized.");
+					return;
+				}
+			}
+
+			const quotedMessageId = await this.resolveIncomingQuotedId(chat.id, message.quotedId);
+			const savedMessage = await prismaService.internalMessage.create({
+				data: {
+					instance,
+					from: `external:${message.from}${contactName ? `:${contactName}` : ""}`,
+					type: message.type,
+					body: message.body,
+					timestamp: message.timestamp,
+					status: message.status,
+					quotedId: quotedMessageId,
+					isForwarded: Boolean(message.isForwarded),
+					isEdited: false,
+					wwebjsId: message.wwebjsId ?? null,
+					wwebjsIdStanza: message.wwebjsIdStanza ?? null,
+					fileId: message.fileId ?? null,
+					fileName: message.fileName ?? null,
+					fileType: message.fileType ?? null,
+					fileSize: message.fileSize ?? null,
+					chat: { connect: { id: chat.id } },
+					...(message.clientId ? { client: { connect: { id: message.clientId } } } : {})
+				}
+			});
+
+			const room: SocketServerInternalChatRoom = `${instance}:internal-chat:${chat.id}`;
+			await socketService.emit(SocketEventType.InternalMessage, room, { message: savedMessage });
+			process.success({ internalChatId: chat.id, internalMessageId: savedMessage.id });
+		} catch (err) {
+			process.failed(err);
+			throw err;
+		}
 	}
 
-	public async receiveMessageEdit(wppGroupId: string, messageId: string, _newText: string): Promise<void> {
-		// Compatibilidade legada: mantido apenas para evitar quebra em chamadas antigas do cliente.
-		const process = new ProcessingLogger("unknown", "legacy-internal-group-edit", `${wppGroupId}-${messageId}`, {
+	private async resolveIncomingQuotedId(chatId: number, quotedId: CreateMessageDto["quotedId"]): Promise<number | null> {
+		if (typeof quotedId === "number") {
+			return quotedId;
+		}
+		if (!quotedId) {
+			return null;
+		}
+
+		const quotedMessage = await prismaService.internalMessage.findFirst({
+			where: {
+				internalChatId: chatId,
+				OR: [{ wwebjsIdStanza: quotedId }, { wwebjsId: quotedId }]
+			},
+			select: { id: true }
+		});
+
+		return quotedMessage?.id ?? null;
+	}
+
+	public async receiveMessageEdit(wppGroupId: string, messageId: string, newText: string): Promise<void> {
+		const process = new ProcessingLogger("internal-service", "receive-internal-group-message-edit", `${wppGroupId}-${messageId}`, {
 			wppGroupId,
 			messageId
 		});
-		process.log("Evento de edicao de mensagem de grupo recebido em modo legacy; nenhuma acao aplicada.");
+
+		try {
+			const chat = await prismaService.internalChat.findFirst({ where: { wppGroupId } });
+			if (!chat) {
+				process.log("Internal chat not found for WhatsApp group edit; event ignored.");
+				return;
+			}
+
+			const existingMessage = await prismaService.internalMessage.findFirst({
+				where: {
+					internalChatId: chat.id,
+					OR: [{ wwebjsIdStanza: messageId }, { wwebjsId: messageId }]
+				}
+			});
+			if (!existingMessage) {
+				process.log("Internal message not found for WhatsApp group edit; event ignored.");
+				return;
+			}
+
+			const updatedMessage = await this.updateMessage(existingMessage.id, { body: newText, isEdited: true });
+			const room: SocketServerInternalChatRoom = `${chat.instance}:internal-chat:${chat.id}`;
+			await socketService.emit(SocketEventType.InternalMessageEdit, room, {
+				chatId: chat.id,
+				internalMessageId: updatedMessage.id,
+				newText: updatedMessage.body
+			});
+			process.success({ internalChatId: chat.id, internalMessageId: updatedMessage.id });
+		} catch (err) {
+			process.failed(err);
+			throw err;
+		}
 	}
 
 }
