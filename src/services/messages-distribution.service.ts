@@ -59,6 +59,38 @@ class MessageStatusTargetNotFoundError extends Error {
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
 
+	private async sendPushNotification(
+		userId: number,
+		instance: string,
+		payload: {
+			event: "new_message" | "new_conversation";
+			title: string;
+			body: string;
+			url: string;
+			tag: string;
+		},
+	): Promise<void> {
+		const secret = process.env["PUSH_NOTIFICATIONS_SECRET"];
+		if (!secret) {
+			return;
+		}
+
+		const usersApiUrl = process.env["USERS_API_RL"] || "http://localhost:8001";
+		const axios = (await import("axios")).default;
+		await axios.post(
+			`${usersApiUrl}/api/_internal/push-notifications`,
+			{ userId, instance, payload },
+			{
+				headers: { "x-inpulse-push-secret": secret },
+				timeout: 10_000,
+			},
+		);
+	}
+
+	private isIncomingCustomerMessage(message: WppMessage): boolean {
+		return !["me:", "system", "bot:", "thirdparty:"].some((prefix) => message.from.startsWith(prefix));
+	}
+
 	private getStatusPriority(status: WppMessageStatus): number {
 		switch (status) {
 			case "PENDING":
@@ -613,6 +645,15 @@ class MessagesDistributionService {
 				const userRoom: SocketServerUserRoom = `${chat.instance}:user:${chat.userId}`;
 				await socketService.emit(SocketEventType.WppChatStarted, userRoom, data);
 				process.log(`Chat enviado para o socket: /${userRoom}/ room!`);
+				void this.sendPushNotification(chat.userId, chat.instance, {
+					event: "new_conversation",
+					title: "Nova conversa",
+					body: "Uma conversa foi atribuída a você.",
+					url: `/${chat.instance}`,
+					tag: `chat-${chat.id}`,
+				}).catch((error: unknown) => {
+					process.log(`Falha ao enviar push de nova conversa: ${sanitizeErrorMessage(error)}`);
+				});
 			}
 		} catch (err) {
 			const msg = sanitizeErrorMessage(err);
@@ -635,6 +676,21 @@ class MessagesDistributionService {
 			const data: WppMessageEventData = { message };
 			await socketService.emit(SocketEventType.WppMessage, room, data);
 			process?.log(`Mensagem transmitida para a sala: /${room}/ room!`);
+
+			if (this.isIncomingCustomerMessage(message)) {
+				const chat = await prismaService.wppChat.findUnique({ where: { id: message.chatId } });
+				if (chat?.userId !== null && chat?.userId !== undefined) {
+					void this.sendPushNotification(chat.userId, message.instance, {
+						event: "new_message",
+						title: "Nova mensagem",
+						body: message.body.slice(0, 180) || "Você recebeu uma nova mensagem.",
+						url: `/${message.instance}`,
+						tag: `chat-${chat.id}`,
+					}).catch((error: unknown) => {
+						process?.log(`Falha ao enviar push de nova mensagem: ${sanitizeErrorMessage(error)}`);
+					});
+				}
+			}
 		} catch (err) {
 			const msg = sanitizeErrorMessage(err);
 			process?.log(`Falha ao transmitir mensagem: ${msg}`);
