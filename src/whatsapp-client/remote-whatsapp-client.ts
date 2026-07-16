@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { File, SocketEventType, SocketServerAdminRoom, SocketServerChatRoom } from "@in.pulse-crm/sdk";
 import { TemplateMessage } from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
