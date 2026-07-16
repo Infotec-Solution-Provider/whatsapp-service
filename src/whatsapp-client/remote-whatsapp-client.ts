@@ -42,6 +42,21 @@ export interface SendTextOptions extends BaseSendMessageOptions {
 export type RemoteSendMessageOptions = SendTextOptions | SendFileOptions;
 
 class RemoteWhatsappClient implements WhatsappClient {
+	private resolveGroupId(message: MessageDto): string | null {
+		if (message.groupId) {
+			return message.groupId;
+		}
+
+		const candidates = [message.from, message.to];
+		for (const candidate of candidates) {
+			if (typeof candidate === "string" && candidate.endsWith("@g.us")) {
+				return candidate.replace(/@g\.us$/, "");
+			}
+		}
+
+		return null;
+	}
+
 	constructor(
 		public readonly id: number,
 		public readonly instance: string,
@@ -118,14 +133,21 @@ class RemoteWhatsappClient implements WhatsappClient {
 		try {
 			process.log("Handling message received");
 
-			if (message.isGroup && message.groupId) {
+			if (message.isGroup) {
+				const groupId = this.resolveGroupId(message);
+				if (!groupId) {
+					process.log("Group message ignored: groupId is missing from payload.");
+					process.success({ ignored: true, reason: "missing-group-id" });
+					return;
+				}
+
 				if (!ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
 					process.log("Group message ignored: WhatsApp group synchronization is disabled.");
 					process.success({ ignored: true, reason: "group-sync-disabled" });
 					return;
 				}
 
-				const { isGroup, groupId, authorName, contactName, sender, recipient, participant, ...cleanMessage } = message;
+				const { isGroup, authorName, contactName, sender, recipient, participant, ...cleanMessage } = message;
 				await internalChatsService.receiveMessage(
 					this.instance,
 					groupId,
