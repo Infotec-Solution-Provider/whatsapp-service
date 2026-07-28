@@ -1,4 +1,4 @@
-import { SessionData } from "@in.pulse-crm/sdk";
+import { SessionData } from "../sdk-local";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { InternalMessage, WppMessage } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";

@@ -1,4 +1,4 @@
-import { SessionData } from "@in.pulse-crm/sdk";
+import { SessionData } from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { InternalMessage, WppChat, WppClientType, WppMessage, WppSector } from "@prisma/client";
 import { BadRequestError, InternalServerError } from "@rgranatodutra/http-errors";
@@ -903,9 +903,16 @@ class WhatsappService {
 			try {
 				const client = await this.getClient(clientId);
 
-				if (!(client instanceof WWEBJSWhatsappClient) && !(client instanceof RemoteWhatsappClient)) {
-					throw new BadRequestError(
-						"O encaminhamento nativo só é suportado por conexões do tipo QR Code (WWEBJS) ou Remote	."
+				if (!client) {
+					throw new BadRequestError("Client do WhatsApp não encontrado.");
+				}
+
+				if (
+					!(client instanceof WWEBJSWhatsappClient) &&
+					!(client instanceof RemoteWhatsappClient)
+				) {
+					process.log(
+						"Cliente sem encaminhamento nativo detectado. Aplicando fallback de encaminhamento para o provedor atual."
 					);
 				}
 
@@ -963,7 +970,18 @@ class WhatsappService {
 
 								await client.sendMessage(options, target.isGroup);
 							} else {
-								await client.forwardMessage(target.id, originalMsg.wwebjsId!, target.isGroup);
+								const messageId = this.resolveForwardSourceMessageId(
+									client,
+									originalMsg as WppMessage
+								);
+
+								if (!messageId) {
+									throw new BadRequestError(
+										`A mensagem original ID:${originalMsg.id} não possui identificador compatível para encaminhamento no cliente atual.`
+									);
+								}
+
+								await client.forwardMessage(target.id, messageId, target.isGroup);
 							}
 
 							process.log(
@@ -997,6 +1015,26 @@ class WhatsappService {
 		}
 
 		process.success("Processo de encaminhamento concluído.");
+	}
+
+	private resolveForwardSourceMessageId(client: WhatsappClient, message: WppMessage): string | null {
+		if (client instanceof WWEBJSWhatsappClient) {
+			return message.wwebjsId;
+		}
+
+		if (client instanceof RemoteWhatsappClient) {
+			return message.wwebjsIdStanza || message.wwebjsId || message.wabaId || message.gupshupId || null;
+		}
+
+		if (client instanceof WABAWhatsappClient) {
+			return message.wabaId || message.gupshupId || message.wwebjsId || message.wwebjsIdStanza || null;
+		}
+
+		if (client instanceof GupshupWhatsappClient) {
+			return message.gupshupId || message.wabaId || message.wwebjsId || message.wwebjsIdStanza || null;
+		}
+
+		return message.wwebjsId || message.wwebjsIdStanza || message.wabaId || message.gupshupId || null;
 	}
 
 	public async sendAutoReplyMessage(

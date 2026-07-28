@@ -2,7 +2,7 @@ import {
 	Customer,
 	CustomerProfileSummaryPayload,
 	SessionData,
-} from "@in.pulse-crm/sdk";
+} from "../sdk-local";
 import { WppContact, WppSchedule } from "@prisma/client";
 import customerProfileTagsService from "./customer-profile-tags.service";
 import instancesService from "./instances.service";

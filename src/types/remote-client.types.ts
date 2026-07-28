@@ -37,6 +37,11 @@ export default interface MessageDto {
 	recipient?: MessageIdentity | null;
 	participant?: MessageIdentity | null;
 	clientId: number | null;
+	isEdit?: boolean;
+	editedTargetMessageId?: string | null;
+	editContentAvailable?: boolean;
+	isEphemeral?: boolean;
+	isViewOnce?: boolean;
 }
 
 export interface QRReceivedEvent {
@@ -51,10 +56,85 @@ export interface AuthSuccessEvent {
 	phoneNumber: string;
 }
 
+export interface AuthLogoutEvent {
+	type: "auth-logout";
+	clientId: number;
+	reason?: string;
+}
+
+export type RemoteSessionOperationalState =
+	| "STARTING"
+	| "QR_PENDING"
+	| "CONNECTING"
+	| "CONNECTED"
+	| "RECONNECTING"
+	| "DISCONNECTED"
+	| "LOGGED_OUT"
+	| "ERROR";
+
+export interface RemoteSessionOperation {
+	id: string;
+	type: "RESTART" | "RESET_AUTH";
+	startedAt: string;
+}
+
+export interface RemoteSessionInfo {
+	contractVersion: 1;
+	sessionId: string;
+	phone: string;
+	status: "open" | "close" | "connecting";
+	state: RemoteSessionOperationalState;
+	processStartedAt: string;
+	stateChangedAt: string;
+	observedAt: string;
+	lastActivityAt: string | null;
+	connectedSince: string | null;
+	lastConnectedAt: string | null;
+	lastDisconnectedAt: string | null;
+	lastDisconnectReason: string | null;
+	reconnectAttempts: number;
+	lastReconnectAt: string | null;
+	qrGeneratedAt: string | null;
+	currentOperation: RemoteSessionOperation | null;
+}
+
+export interface SessionStatusChangedEvent {
+	type: "session-status-changed";
+	clientId: number;
+	sessionId: string;
+	traceId: string;
+	occurredAt: string;
+	session: RemoteSessionInfo;
+}
+
 export interface MessageReceivedEvent {
 	type: "message-received";
 	clientId: number;
 	message: MessageDto;
+}
+
+export interface MessageEditedEvent {
+	type: "message-edited";
+	clientId: number;
+	message: MessageDto;
+}
+
+export interface MessageReactionEvent {
+	type: "message-reaction";
+	clientId: number;
+	targetMessageId: string;
+	reaction: string;
+	removed: boolean;
+	isGroup: boolean;
+	groupId: string | null;
+}
+
+export interface MessageRevokedEvent {
+	type: "message-revoked";
+	clientId: number;
+	targetMessageId: string;
+	isGroup: boolean;
+	groupId: string | null;
 }
 
 export interface MessageStatusReceivedEvent {
@@ -65,4 +145,4 @@ export interface MessageStatusReceivedEvent {
 	timestamp: number;
 }
 
-export type RemoteClientEvent = QRReceivedEvent | AuthSuccessEvent | MessageReceivedEvent | MessageStatusReceivedEvent;
+export type RemoteClientEvent = QRReceivedEvent | AuthSuccessEvent | AuthLogoutEvent | SessionStatusChangedEvent | MessageReceivedEvent | MessageEditedEvent | MessageReactionEvent | MessageRevokedEvent | MessageStatusReceivedEvent;

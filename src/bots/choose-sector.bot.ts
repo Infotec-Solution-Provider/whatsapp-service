@@ -3,7 +3,7 @@ import whatsappService from "../services/whatsapp.service";
 import sectorsService from "../services/sectors.service";
 import messagesDistributionService from "../services/messages-distribution.service";
 import instancesService from "../services/instances.service";
-import { SocketEventType, User } from "@in.pulse-crm/sdk";
+import { SocketEventType, User } from "../sdk-local";
 import socketService from "../services/socket.service";
 import prismaService from "../services/prisma.service";
 import chatsService from "../services/chats.service";

@@ -1,6 +1,6 @@
 import { Prisma, WppContact, WppSchedule } from "@prisma/client";
 import prismaService from "./prisma.service";
-import { CreateScheduleDTO, Customer, SessionData } from "@in.pulse-crm/sdk";
+import { CreateScheduleDTO, Customer, SessionData } from "../sdk-local";
 import chatsService, { FETCH_CUSTOMERS_QUERY } from "./chats.service";
 import cron from "node-cron";
 import instancesService from "./instances.service";

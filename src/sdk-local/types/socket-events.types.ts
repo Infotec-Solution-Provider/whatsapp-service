@@ -26,6 +26,7 @@ export enum SocketEventType {
 	WppContactMessagesRead = "wpp_contact_messages_read",
 	WwebjsQr = "wwebjs_qr",
 	WwebjsAuth = "wwebjs_auth",
+	WwebjsSessionStatus = "wwebjs_session_status",
 	ReportStatus = "report_status",
 	InternalChatStarted = "internal_chat_started",
 	InternalChatFinished = "internal_chat_finished",
@@ -46,6 +47,11 @@ export interface EmitSocketEventFn {
 		type: SocketEventType.WwebjsAuth,
 		room: SocketServerAdminRoom,
 		data: WWEBJSAuthEventData,
+	): Promise<MessageResponse>;
+	(
+		type: SocketEventType.WwebjsSessionStatus,
+		room: SocketServerAdminRoom,
+		data: WWEBJSSessionStatusEventData,
 	): Promise<MessageResponse>;
 	(
 		type: SocketEventType.WppChatStarted,
@@ -144,6 +150,10 @@ export interface ListenSocketEventFn {
 		callback: (data: WWEBJSAuthEventData) => void,
 	): void;
 	(
+		type: SocketEventType.WwebjsSessionStatus,
+		callback: (data: WWEBJSSessionStatusEventData) => void,
+	): void;
+	(
 		type: SocketEventType.WppChatStarted,
 		callback: (data: WppChatStartedEventData) => void,
 	): void;
@@ -226,6 +236,16 @@ export interface WWEBJSAuthEventData {
 	phone: string;
 	success: boolean;
 	message?: string;
+}
+export interface WWEBJSSessionStatusEventData {
+	clientId: number;
+	name: string;
+	phone: string | null;
+	state: string;
+	stateChangedAt: string;
+	lastObservedAt: string;
+	reconnectAttempts: number;
+	currentOperation: { id: string; type: "RESTART" | "RESET_AUTH"; startedAt: string } | null;
 }
 export interface WppChatStartedEventData {
 	chatId: number;

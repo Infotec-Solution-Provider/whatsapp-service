@@ -5,9 +5,10 @@ import {
 	InternalMessage,
 	SessionData,
 	SocketEventType,
+	SocketServerChatRoom,
 	SocketServerInternalChatRoom,
 	SocketServerUserRoom
-} from "@in.pulse-crm/sdk";
+} from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { InternalChat, Prisma } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
@@ -549,18 +550,18 @@ class InternalChatsService {
 				process.log(`Processando ${parsedMentions.length} menção(ões)`);
 
 				process.log(`Validando telefones nas menções`);
-				parsedMentions
+				const validMentionPhones = parsedMentions
 					.map((user) => {
 						const phone = user.phone?.replace(/\D/g, "");
 						if (!phone) {
 							process.log(`Aviso: Telefone inválido em menção de usuário: ${user.name}`);
 							return null;
 						}
-						return `${phone}@c.us`;
+						return phone;
 					})
-					.filter((id): id is string => id !== null);
+					.filter((phone): phone is string => phone !== null);
 
-				mentionsText = parsedMentions.map((user) => `@${user.name || user.phone}`).join(" ");
+				mentionsText = validMentionPhones.map((phone) => `@${phone}`).join(" ");
 				process.log(`Texto de menções formatado: "${mentionsText}"`);
 			}
 
@@ -1231,6 +1232,58 @@ class InternalChatsService {
 			process.log(`Erro ao processar edição de mensagem: ${errorMsg}`);
 			process.failed(err);
 		}
+	}
+
+	public async receiveMessageReaction(groupId: string, msgId: string, reaction: string) {
+		const chat = await prismaService.internalChat.findUnique({ where: { wppGroupId: groupId } });
+		if (!chat) {
+			return;
+		}
+
+		const message = await prismaService.internalMessage.findFirst({
+			where: { internalChatId: chat.id, OR: [{ wwebjsIdStanza: msgId }, { wwebjsId: msgId }] }
+		});
+		if (!message) {
+			return;
+		}
+
+		const room = `${chat.instance}:internal-chat:${chat.id}` as SocketServerInternalChatRoom;
+		await socketService.emit(SocketEventType.WppMessageReaction, room as unknown as SocketServerChatRoom, {
+			messageId: message.id,
+			reaction
+		});
+	}
+
+	public async receiveMessageRevoked(groupId: string, msgId: string) {
+		const chat = await prismaService.internalChat.findUnique({ where: { wppGroupId: groupId } });
+		if (!chat) {
+			return;
+		}
+
+		const message = await prismaService.internalMessage.findFirst({
+			where: { internalChatId: chat.id, OR: [{ wwebjsIdStanza: msgId }, { wwebjsId: msgId }] }
+		});
+		if (!message) {
+			return;
+		}
+
+		await prismaService.internalMessage.update({
+			where: { id: message.id },
+			data: {
+				body: "Mensagem apagada",
+				status: "REVOKED",
+				fileId: null,
+				fileName: null,
+				fileType: null,
+				fileSize: null
+			}
+		});
+
+		const room = `${chat.instance}:internal-chat:${chat.id}` as SocketServerInternalChatRoom;
+		await socketService.emit(SocketEventType.InternalMessageDelete, room, {
+			chatId: chat.id,
+			internalMessageId: message.id
+		});
 	}
 
 	private async persistGeneratedWppIds(

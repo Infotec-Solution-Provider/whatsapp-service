@@ -2,7 +2,7 @@ import axios from "axios";
 import CreateMessageDto from "../dtos/create-message.dto";
 import { GSMessageData, GSMessageStatusData } from "../types/gupshup-api.types";
 import filesService from "../services/files.service";
-import { FileDirType } from "@in.pulse-crm/sdk";
+import { FileDirType } from "../sdk-local";
 import { extension } from "mime-types";
 import { WppMessageStatus } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";

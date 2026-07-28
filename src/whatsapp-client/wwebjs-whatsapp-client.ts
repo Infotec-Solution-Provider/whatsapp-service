@@ -1,4 +1,4 @@
-import { SocketEventType, SocketServerAdminRoom } from "@in.pulse-crm/sdk";
+import { SocketEventType, SocketServerAdminRoom } from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import "dotenv/config";
 import { randomUUID } from "node:crypto";

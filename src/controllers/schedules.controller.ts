@@ -4,7 +4,7 @@ import schedulesService from "../services/schedules.service";
 import unifiedSchedulesService from "../services/unified-schedules.service";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import { WppSchedule } from "@prisma/client";
-import { CreateScheduleDTO } from "@in.pulse-crm/sdk";
+import { CreateScheduleDTO } from "../sdk-local";
 import { UnifiedScheduleFilters } from "../types/unified-schedule.types";
 interface SchedulesFilters {
 	userId?: string;

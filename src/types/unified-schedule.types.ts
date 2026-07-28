@@ -1,7 +1,7 @@
 import {
 	CustomerProfileSummaryFilters,
 	CustomerProfileSummaryPayload,
-} from "@in.pulse-crm/sdk";
+} from "../sdk-local";
 
 export type UnifiedScheduleChannel = "WHATSAPP" | "TELEFONIA";
 

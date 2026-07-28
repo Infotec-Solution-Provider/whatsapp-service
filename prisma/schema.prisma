@@ -8,27 +8,74 @@ datasource db {
 }
 
 model WppClient {
-  id                Int               @id @default(autoincrement())
+  id                Int                       @id @default(autoincrement())
   name              String
   phone             String?
-  instance          String            @map("instance")
+  instance          String                    @map("instance")
   type              WppClientType
-  isActive          Boolean           @map("is_active")
-  WABAPhoneId       String?           @map("waba_phone_id")
-  WABAAccountId     String?           @map("waba_account_id")
-  WABAToken         String?           @map("waba_token")
-  gupshupToken      String?           @map("gupshup_token")
-  gupshupAppName    String?           @map("gupshup_app_name")
-  gupshupAppId      String?           @map("gupshup_app_id")
-  remoteClientUrl   String?           @map("remote_client_url")
-  sectors           WppSector[]       @relation("sector_clients")
-  defaultForSectors WppSector[]       @relation("sector_default_client")
+  isActive          Boolean                   @map("is_active")
+  WABAPhoneId       String?                   @map("waba_phone_id")
+  WABAAccountId     String?                   @map("waba_account_id")
+  WABAToken         String?                   @map("waba_token")
+  gupshupToken      String?                   @map("gupshup_token")
+  gupshupAppName    String?                   @map("gupshup_app_name")
+  gupshupAppId      String?                   @map("gupshup_app_id")
+  remoteClientUrl   String?                   @map("remote_client_url")
+  sectors           WppSector[]               @relation("sector_clients")
+  defaultForSectors WppSector[]               @relation("sector_default_client")
   messages          WppMessage[]
   internalMessages  InternalMessage[]
+  sessionSnapshot   WppClientSessionSnapshot?
+  sessionEvents     WppClientSessionEvent[]
 
   @@unique([name])
   @@index([isActive])
   @@map("clients")
+}
+
+model WppClientSessionSnapshot {
+  clientId                Int       @id @map("client_id")
+  contractVersion         Int       @map("contract_version")
+  state                   String
+  phone                   String?
+  processStartedAt        DateTime  @map("process_started_at")
+  stateChangedAt          DateTime  @map("state_changed_at")
+  lastActivityAt          DateTime? @map("last_activity_at")
+  connectedSince          DateTime? @map("connected_since")
+  lastConnectedAt         DateTime? @map("last_connected_at")
+  lastDisconnectedAt      DateTime? @map("last_disconnected_at")
+  lastDisconnectReason    String?   @map("last_disconnect_reason") @db.VarChar(255)
+  reconnectAttempts       Int       @default(0) @map("reconnect_attempts")
+  lastReconnectAt         DateTime? @map("last_reconnect_at")
+  lastObservedAt          DateTime  @map("last_observed_at")
+  currentOperationId      String?   @map("current_operation_id") @db.VarChar(36)
+  currentOperationType    String?   @map("current_operation_type") @db.VarChar(32)
+  currentOperationStarted DateTime? @map("current_operation_started_at")
+  consecutivePollFailures Int       @default(0) @map("consecutive_poll_failures")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+  client                  WppClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([state])
+  @@index([lastObservedAt])
+  @@map("client_session_snapshots")
+}
+
+model WppClientSessionEvent {
+  id            Int       @id @default(autoincrement())
+  clientId      Int       @map("client_id")
+  previousState String?   @map("previous_state") @db.VarChar(32)
+  state         String    @db.VarChar(32)
+  reason        String?   @db.VarChar(255)
+  occurredAt    DateTime  @map("occurred_at")
+  traceId       String    @unique @map("trace_id") @db.VarChar(64)
+  transitionKey String    @unique @map("transition_key") @db.VarChar(128)
+  source        String    @db.VarChar(16)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  client        WppClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, occurredAt])
+  @@map("client_session_events")
 }
 
 model WppContact {
@@ -74,7 +121,7 @@ model WppMessage {
   contactId        Int?             @map("contact_id")
   isForwarded      Boolean          @default(false) @map("is_forwarded")
   isEdited         Boolean          @default(false) @map("is_edited")
-  body             String
+  body             String           @db.Text
   timestamp        String
   statusTimestamp  String?          @map("status_timestamp")
   sentAt           DateTime         @map("sent_at")
@@ -146,7 +193,7 @@ model InternalMessage {
   wwebjsId       String?           @unique @map("wwebjs_id")
   wwebjsIdStanza String?           @unique @map("wwebjs_id_stanza")
   internalChatId Int               @map("internalchat_id")
-  body           String
+  body           String            @db.Text
   timestamp      String            @map("timestamp")
   status         WppMessageStatus
   fileId         Int?              @map("file_id")

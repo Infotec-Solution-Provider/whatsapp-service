@@ -7,7 +7,7 @@ import {
 	SocketServerWalletRoom,
 	User,
 	WppMessageEventData
-} from "@in.pulse-crm/sdk";
+} from "../sdk-local";
 import { Formatter, Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import {
 	AutomaticResponseRule,
@@ -887,10 +887,10 @@ class MessagesDistributionService {
 			logger.log("Processando edição de mensagem.");
 
 			// Busca a mensagem original
-			const originalMessage = await prismaService.wppMessage.findUnique({
-				where: {
-					[(type + "Id") as "wwebjsId"]: id
-				},
+			const originalMessage = await prismaService.wppMessage.findFirst({
+				where: type === "wwebjs"
+					? { OR: [{ wwebjsId: id }, { wwebjsIdStanza: id }] }
+					: { wabaId: id },
 				include: {
 					WppChat: true,
 					WppContact: true

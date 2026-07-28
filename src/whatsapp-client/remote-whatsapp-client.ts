@@ -1,13 +1,14 @@
 import "dotenv/config";
-import { File, SocketEventType, SocketServerAdminRoom, SocketServerChatRoom } from "@in.pulse-crm/sdk";
+import { File, SocketEventType, SocketServerAdminRoom, SocketServerChatRoom } from "../sdk-local";
 import { TemplateMessage } from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
 import messageQueueService from "../services/message-queue.service";
+import messagesDistributionService from "../services/messages-distribution.service";
 import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
 import contactsService from "../services/contacts.service";
 import internalChatsService from "../services/internal-chats.service";
-import MessageDto from "../types/remote-client.types";
+import MessageDto, { MessageReactionEvent, MessageRevokedEvent } from "../types/remote-client.types";
 import { EditMessageOptions, Mentions, SendFileType, SendMessageOptions, SendTemplateOptions, WhatsappGroup } from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
@@ -195,6 +196,108 @@ class RemoteWhatsappClient implements WhatsappClient {
 		}
 	}
 
+	public async handleMessageEdited(message: MessageDto) {
+		const targetMessageId = message.editedTargetMessageId;
+		const process = new ProcessingLogger(
+			this.instance,
+			"rc-message-edit-receive",
+			targetMessageId || message.wwebjsIdStanza || Date.now().toString(),
+			message
+		);
+
+		if (!targetMessageId) {
+			process.log("Message edit ignored: target message ID is missing from payload.");
+			process.success({ ignored: true, reason: "missing-target-message-id" });
+			return;
+		}
+
+		if (message.editContentAvailable === false) {
+			process.log("Message edit observed without available content; original message was preserved.");
+			process.success({ ignored: true, reason: "edit-content-unavailable", targetMessageId });
+			return;
+		}
+
+		if (message.isGroup) {
+			const groupId = this.resolveGroupId(message);
+			if (!groupId) {
+				process.log("Group message edit ignored: groupId is missing from payload.");
+				process.success({ ignored: true, reason: "missing-group-id" });
+				return;
+			}
+
+			if (!ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+				process.log("Group message edit ignored: WhatsApp group synchronization is disabled.");
+				process.success({ ignored: true, reason: "group-sync-disabled" });
+				return;
+			}
+
+			await internalChatsService.receiveMessageEdit(groupId, targetMessageId, message.body);
+			process.success({ groupId, targetMessageId, synced: true });
+			return;
+		}
+
+		await messagesDistributionService.processMessageEdit("wwebjs", targetMessageId, message.body);
+		process.success({ targetMessageId, synced: true });
+	}
+
+	public async handleMessageReaction(event: MessageReactionEvent) {
+		if (event.isGroup) {
+			if (!event.groupId || !ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+				return;
+			}
+			await internalChatsService.receiveMessageReaction(event.groupId, event.targetMessageId, event.reaction);
+			return;
+		}
+
+		const message = await prismaService.wppMessage.findFirst({
+			where: { OR: [{ wwebjsIdStanza: event.targetMessageId }, { wwebjsId: event.targetMessageId }] }
+		});
+		if (!message?.chatId) {
+			return;
+		}
+
+		const room: SocketServerChatRoom = `${message.instance}:chat:${message.chatId}`;
+		await socketService.emit(SocketEventType.WppMessageReaction, room, {
+			messageId: message.id,
+			reaction: event.reaction
+		});
+	}
+
+	public async handleMessageRevoked(event: MessageRevokedEvent) {
+		if (event.isGroup) {
+			if (!event.groupId || !ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+				return;
+			}
+			await internalChatsService.receiveMessageRevoked(event.groupId, event.targetMessageId);
+			return;
+		}
+
+		const currentMessage = await prismaService.wppMessage.findFirst({
+			where: { OR: [{ wwebjsIdStanza: event.targetMessageId }, { wwebjsId: event.targetMessageId }] }
+		});
+		if (!currentMessage) {
+			return;
+		}
+
+		const message = await messagesService.updateMessage(currentMessage.id, {
+			body: "Mensagem apagada",
+			status: "REVOKED" as WppMessageStatus,
+			fileId: null,
+			fileName: null,
+			fileType: null,
+			fileSize: null
+		});
+		if (!message.chatId) {
+			return;
+		}
+
+		const room: SocketServerChatRoom = `${message.instance}:chat:${message.chatId}`;
+		await socketService.emit(SocketEventType.WppMessageDelete, room, {
+			messageId: message.id,
+			contactId: message.contactId || 0
+		});
+	}
+
 	public async handleMessageStatus(messageId: string, status: string) {
 		try {
 			const currentMessage = await prismaService.wppMessage.findUniqueOrThrow({
@@ -308,14 +411,15 @@ class RemoteWhatsappClient implements WhatsappClient {
 
 			process.log("Message edited successfully from wwebjs-api");
 
-			const currentMessage = await prismaService.wppMessage.findUniqueOrThrow({
+			const currentMessage = await prismaService.wppMessage.findFirstOrThrow({
 				where: {
-					wwebjsIdStanza: props.messageId
+					OR: [{ wwebjsIdStanza: props.messageId }, { wwebjsId: props.messageId }]
 				}
 			});
 
 			await messagesService.updateMessage(currentMessage.id, {
 				body: props.text || response.data.body,
+				isEdited: true,
 				status: "SENT" as WppMessageStatus
 			});
 

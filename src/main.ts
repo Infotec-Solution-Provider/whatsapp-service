@@ -22,6 +22,7 @@ import parametersController from "./controllers/parameters.controller";
 import parsedMessagesController from "./controllers/parsed-messages.controller";
 import readyMessagesController from "./controllers/ready-messages.controller";
 import remoteClientController from "./controllers/remote-client.controller";
+import remoteSessionMonitorController from "./controllers/remote-session-monitor.controller";
 import resultsController from "./controllers/results.controller";
 import schedulesController from "./controllers/schedules.controller";
 import sectorsController from "./controllers/sectors.controller";
@@ -34,6 +35,7 @@ import messageQueueService from "./services/message-queue.service";
 import wabaWebhookQueueService from "./services/waba-webhook-queue.service";
 import whatsappService from "./services/whatsapp.service";
 import wwwebjsHealthCheckService from "./services/wwebjs-health-check.service";
+import remoteSessionMonitorRoutine from "./routines/remote-session-monitor.routine";
 
 whatsappService.buildClients();
 const app = express();
@@ -73,6 +75,7 @@ app.use(logRoute(wabaController.router));
 app.use(logRoute(messageFlowsController.router));
 app.use(logRoute(flowExecutionController.router));
 app.use(logRoute(remoteClientController.router));
+app.use(logRoute(remoteSessionMonitorController.router));
 app.use(logRoute(parsedMessagesController.router));
 app.use(logRoute(messageQueueController.router));
 
@@ -98,6 +101,7 @@ app.listen(serverPort, () => {
 	gupshupWebhookQueueService.startProcessor();
 	wabaWebhookQueueService.startProcessor();
 	messageQueueService.startWorker();
+	remoteSessionMonitorRoutine.start();
 	Logger.info("Server listening on port " + serverPort);
 
 	// Wwebjs session health check

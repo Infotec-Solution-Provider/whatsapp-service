@@ -1,4 +1,4 @@
-import { File, FilesClient, FileDirType } from "@in.pulse-crm/sdk";
+import { File, FilesClient, FileDirType } from "../sdk-local";
 import "dotenv/config";
 import FormData from "form-data";
 

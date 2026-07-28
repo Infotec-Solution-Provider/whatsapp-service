@@ -1,4 +1,4 @@
-import { SessionData, SocketEventType, SocketServerChatRoom } from "@in.pulse-crm/sdk";
+import { SessionData, SocketEventType, SocketServerChatRoom } from "../sdk-local";
 import { WppMessage } from "@prisma/client";
 import { NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
 import CreateMessageDto from "../dtos/create-message.dto";
@@ -354,12 +354,13 @@ class MessagesService {
 				include: { WppChat: true }
 			});
 			process.log("Mensagem encontrada:", originalMessage);
-			if (!originalMessage.wwebjsId) {
-				throw new Error("Original message does not have a wwebjsId.");
+			const externalMessageId = originalMessage.wwebjsIdStanza || originalMessage.wwebjsId;
+			if (!externalMessageId) {
+				throw new Error("Original message does not have a WhatsApp message ID.");
 			}
 			await whatsappService.editMessage({
 				options: {
-					messageId: originalMessage.wwebjsId,
+					messageId: externalMessageId,
 					text: options.text,
 					mentions: options.mentions || null
 				},

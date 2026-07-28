@@ -3,6 +3,7 @@ import { Logger } from "@in.pulse-crm/utils";
 import { RemoteClientEvent } from "../types/remote-client.types";
 import whatsappService from "./whatsapp.service";
 import RemoteWhatsappClient from "../whatsapp-client/remote-whatsapp-client";
+import remoteSessionMonitorService from "./remote-session-monitor.service";
 
 class RemoteClientService {
 	public async handleEventReceived(clientId: number, event: RemoteClientEvent): Promise<void> {
@@ -23,8 +24,27 @@ class RemoteClientService {
 			case "auth-success":
 				await client.handleAuthSuccess(event.phoneNumber);
 				break;
+			case "auth-logout":
+				await remoteSessionMonitorService.recordLogout(clientId);
+				break;
+			case "session-status-changed":
+				await remoteSessionMonitorService.recordSnapshot(clientId, event.session, {
+					source: "WEBHOOK",
+					traceId: event.traceId,
+					occurredAt: event.occurredAt
+				});
+				break;
 			case "message-received":
 				await client.handleMessageReceived(event.message);
+				break;
+			case "message-edited":
+				await client.handleMessageEdited(event.message);
+				break;
+			case "message-reaction":
+				await client.handleMessageReaction(event);
+				break;
+			case "message-revoked":
+				await client.handleMessageRevoked(event);
 				break;
 			case "message-status-received":
 				await client.handleMessageStatus(event.messageId, event.status);

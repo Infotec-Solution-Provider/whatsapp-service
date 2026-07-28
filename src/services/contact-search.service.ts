@@ -1,4 +1,4 @@
-import { Customer, CustomersClient, UsersClient } from "@in.pulse-crm/sdk";
+import { Customer, CustomersClient, UsersClient } from "../sdk-local";
 import { Logger } from "@in.pulse-crm/utils";
 import { Prisma } from "@prisma/client";
 import chatsService from "./chats.service";

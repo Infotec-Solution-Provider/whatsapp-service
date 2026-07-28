@@ -1,4 +1,4 @@
-import { SessionData } from "@in.pulse-crm/sdk";
+import { SessionData } from "../sdk-local";
 import { Prisma, WppContact } from "@prisma/client";
 import { BadRequestError, ConflictError } from "@rgranatodutra/http-errors";
 import { ContactMapper } from "../mappers/contact.mapper";

@@ -1,4 +1,4 @@
-import { FileDirType, SessionData } from "@in.pulse-crm/sdk";
+import { FileDirType, SessionData } from "../sdk-local";
 import { ReadyMessage } from "@prisma/client";
 import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
 import filesService from "./files.service";

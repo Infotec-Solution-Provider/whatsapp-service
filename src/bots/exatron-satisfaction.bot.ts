@@ -1,4 +1,4 @@
-import { SocketEventType } from "@in.pulse-crm/sdk";
+import { SocketEventType } from "../sdk-local";
 import { WppChat, WppContact, WppMessage } from "@prisma/client";
 import "dotenv/config";
 import chatsService from "../services/chats.service";

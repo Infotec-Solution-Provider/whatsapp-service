@@ -1,4 +1,4 @@
-import { User } from "@in.pulse-crm/sdk";
+import { User } from "../sdk-local";
 import instancesService from "../services/instances.service";
 import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";

@@ -1,5 +1,5 @@
 import WAWebJS from "whatsapp-web.js";
-import { FileDirType } from "@in.pulse-crm/sdk";
+import { FileDirType } from "../sdk-local";
 import { WppMessageStatus } from "@prisma/client";
 import mime from "mime-types";
 import ProcessingLogger from "../utils/processing-logger";

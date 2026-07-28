@@ -1,4 +1,4 @@
-import { File } from "@in.pulse-crm/sdk";
+import { File } from "../sdk-local";
 import { TemplateMessage } from "../adapters/template.adapter";
 import { TemplateVariables } from "./whatsapp-api.types";
 

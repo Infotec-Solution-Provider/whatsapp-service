@@ -4,7 +4,7 @@ import {
 	SocketEventType,
 	SocketServerMonitorRoom,
 	SocketServerUserRoom
-} from "@in.pulse-crm/sdk";
+} from "../sdk-local";
 import { Logger } from "@in.pulse-crm/utils";
 import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
