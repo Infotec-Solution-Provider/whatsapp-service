@@ -263,6 +263,7 @@ class InternalChatsService {
 			where: {
 				instance: session.instance,
 				isFinished: false,
+				...(session.instance === "nunes" && session.sectorId !== 3 ? { sectorId: session.sectorId } : {}),
 				participants: {
 					some: { userId: session.userId }
 				}
