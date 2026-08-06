@@ -104,6 +104,14 @@ class ContactsService {
 			throw new BadRequestError("Não foi possível identificar o contato sem telefone ou whatsappId.");
 		}
 
+		// The whatsappId is the strongest identity. Resolve it first so a contact
+		// found by phone cannot accidentally claim an id owned by another row.
+		const contactByWhatsappId = normalizedWhatsappId
+			? await prismaService.wppContact.findFirst({
+					where: { instance, whatsappId: normalizedWhatsappId }
+			  })
+			: null;
+
 		const whereFilters: Prisma.WppContactWhereInput[] = [];
 		if (normalizedWhatsappId) {
 			whereFilters.push({ whatsappId: normalizedWhatsappId });
@@ -114,7 +122,7 @@ class ContactsService {
 			}
 		}
 
-		const contact = await prismaService.wppContact.findFirst({
+		const contact = contactByWhatsappId ?? await prismaService.wppContact.findFirst({
 			where: {
 				instance,
 				OR: whereFilters
@@ -129,29 +137,69 @@ class ContactsService {
 			}
 
 			if (!contact.phone && normalizedPhone) {
-				updateData.phone = normalizedPhone;
+				const contactWithPhone = await prismaService.wppContact.findFirst({
+					where: {
+						instance,
+						phone: { in: this.getPhoneAlternatives(normalizedPhone) },
+						NOT: { id: contact.id }
+					}
+				});
+				if (!contactWithPhone) {
+					updateData.phone = normalizedPhone;
+				}
+			}
+
+			if (contact.whatsappId === normalizedWhatsappId) {
+				delete updateData.whatsappId;
 			}
 
 			if (Object.keys(updateData).length > 0) {
-				const updated = await prismaService.wppContact.update({
-					where: { id: contact.id },
-					data: updateData
-				});
-				await this.syncContactToLocal(updated);
-				return updated;
+				try {
+					const updated = await prismaService.wppContact.update({
+						where: { id: contact.id },
+						data: updateData
+					});
+					await this.syncContactToLocal(updated);
+					return updated;
+				} catch (error) {
+					if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002" && normalizedWhatsappId) {
+						const owner = await prismaService.wppContact.findFirst({
+							where: { instance, whatsappId: normalizedWhatsappId }
+						});
+						if (owner) {
+							return owner;
+						}
+					}
+					throw error;
+				}
 			}
 
 			return contact;
 		}
 
-		const newContact = await prismaService.wppContact.create({
-			data: {
-				instance,
-				name,
-				phone: normalizedPhone,
-				whatsappId: normalizedWhatsappId!
+		let newContact: WppContact;
+		try {
+			newContact = await prismaService.wppContact.create({
+				data: {
+					instance,
+					name,
+					phone: normalizedPhone,
+					whatsappId: normalizedWhatsappId!
+				}
+			});
+		} catch (error) {
+			// Another request may have created the same contact between the lookup
+			// and create. Re-read the unique owner and continue idempotently.
+			if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002" && normalizedWhatsappId) {
+				const concurrentContact = await prismaService.wppContact.findFirst({
+					where: { instance, whatsappId: normalizedWhatsappId }
+				});
+				if (concurrentContact) {
+					return concurrentContact;
+				}
 			}
-		});
+			throw error;
+		}
 
 		await this.syncContactToLocal(newContact);
 
