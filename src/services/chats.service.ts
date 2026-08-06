@@ -1,10 +1,4 @@
-import {
-	Customer,
-	SessionData,
-	SocketEventType,
-	SocketServerMonitorRoom,
-	SocketServerUserRoom
-} from "../sdk-local";
+import { Customer, SessionData, SocketEventType, SocketServerMonitorRoom, SocketServerUserRoom } from "../sdk-local";
 import { Logger } from "@in.pulse-crm/utils";
 import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
@@ -98,7 +92,7 @@ class ChatsService {
 			return null;
 		}
 
-		const sectorIds = client.sectors.map(s => s.id);
+		const sectorIds = client.sectors.map((s) => s.id);
 
 		return await prismaService.wppChat.findFirst({
 			where: {
@@ -131,14 +125,7 @@ class ChatsService {
 					}
 				]
 			},
-			include: {
-				contact: {
-					include: {
-						WppMessage: true
-					}
-				},
-				schedule: true
-			}
+			include: { contact: true, schedule: true }
 		});
 
 		if (session.role === "ADMIN") {
@@ -149,33 +136,81 @@ class ChatsService {
 					instance: session.instance,
 					userId: -1
 				},
-				include: {
-					contact: {
-						include: {
-							WppMessage: true
-						}
-					},
-					schedule: true
-				}
+				include: { contact: true, schedule: true }
 			});
 
 			foundChats.push(...foundAdminChats);
 		}
 
-		const chats: Array<WppChat & { customer: Customer | null; contact: WppContact | null }> = [];
-		const messages: Array<WppMessage> = [];
+		const chats: Array<
+			WppChat & {
+				customer: Customer | null;
+				contact: WppContact | null;
+				lastMessage?: WppMessage | null;
+				isUnread?: boolean;
+			}
+		> = [];
+		const contactIds = foundChats
+			.map((chat) => chat.contactId)
+			.filter((contactId): contactId is number => typeof contactId === "number");
+		const messages: Array<WppMessage> =
+			includeMessages && contactIds.length
+				? await prismaService.wppMessage.findMany({
+						where: { instance: session.instance, contactId: { in: contactIds } }
+					})
+				: [];
+		const lastMessageByContact = new Map<number, WppMessage>();
+		const unreadContactIds = new Set<number>();
+
+		if (!includeMessages && contactIds.length) {
+			const [lastMessageGroups, unreadMessages] = await Promise.all([
+				prismaService.wppMessage.groupBy({
+					by: ["contactId"],
+					where: { instance: session.instance, contactId: { in: contactIds } },
+					_max: { id: true }
+				}),
+				prismaService.wppMessage.findMany({
+					where: {
+						instance: session.instance,
+						contactId: { in: contactIds },
+						status: { not: "READ" },
+						AND: [
+							{ from: { not: { startsWith: "me" } } },
+							{ from: { not: { startsWith: "system" } } },
+							{ from: { not: { startsWith: "bot" } } },
+							{ from: { not: { startsWith: "thirdparty" } } }
+						]
+					},
+					select: { contactId: true },
+					distinct: ["contactId"]
+				})
+			]);
+			const lastMessageIds = lastMessageGroups
+				.map((group) => group._max.id)
+				.filter((id): id is number => typeof id === "number");
+			const lastMessages = lastMessageIds.length
+				? await prismaService.wppMessage.findMany({ where: { id: { in: lastMessageIds } } })
+				: [];
+
+			for (const message of lastMessages) {
+				if (message.contactId !== null) lastMessageByContact.set(message.contactId, message);
+			}
+			for (const message of unreadMessages) {
+				if (message.contactId !== null) unreadContactIds.add(message.contactId);
+			}
+		}
 		const customerIds = includeContact
 			? foundChats
-				.filter((chat) => typeof chat.contact?.customerId === "number")
-				.map((c) => c.contact!.customerId!)
+					.filter((chat) => typeof chat.contact?.customerId === "number")
+					.map((c) => c.contact!.customerId!)
 			: [];
 
 		const customers = customerIds.length
 			? await instancesService.executeQuery<Array<Customer>>(session.instance, FETCH_CUSTOMERS_QUERY, [
-				foundChats
-					.filter((chat) => typeof chat.contact?.customerId === "number")
-					.map((c) => c.contact!.customerId!)
-			])
+					foundChats
+						.filter((chat) => typeof chat.contact?.customerId === "number")
+						.map((c) => c.contact!.customerId!)
+				])
 			: [];
 
 		for (const foundChat of foundChats) {
@@ -187,27 +222,84 @@ class ChatsService {
 				customer = customers.find((c) => c.CODIGO === contact.customerId) || null;
 			}
 
-			chats.push({ ...chat, customer, contact: contact || null });
-			if (includeMessages && contact) {
-				const decodedMessages = contact.WppMessage.map((msg) => {
-					if (session.instance === "vollo" && typeof msg.body === "string") {
-						try {
-							return {
-								...msg,
-								body: decodeURIComponent(msg.body)
-							};
-						} catch (e) {
-							return msg;
-						}
-					}
-					return msg;
-				});
+			const contactId = contact?.id;
+			const lastMessage = contactId ? lastMessageByContact.get(contactId) || null : null;
+			chats.push({
+				...chat,
+				customer,
+				contact: contact || null,
+				...(!includeMessages ? { lastMessage, isUnread: !!contactId && unreadContactIds.has(contactId) } : {})
+			});
+		}
 
-				messages.push(...decodedMessages);
+		if (session.instance === "vollo") {
+			for (const message of messages) {
+				try {
+					message.body = decodeURIComponent(message.body);
+				} catch {
+					// Keep the original body when it is not URI encoded.
+				}
 			}
 		}
 
 		return { chats, messages };
+	}
+
+	public async getChatMessagesPage(session: SessionData, chatId: number, limit: number, beforeId: number | null) {
+		const chat = await prismaService.wppChat.findFirst({
+			where: {
+				id: chatId,
+				instance: session.instance,
+				...(session.instance === "nunes" && session.sectorId !== 3 ? { sectorId: session.sectorId } : {})
+			},
+			select: { id: true }
+		});
+
+		if (!chat) throw new BadRequestError("Chat not found!");
+
+		const page = await prismaService.wppMessage.findMany({
+			where: {
+				instance: session.instance,
+				chatId,
+				...(beforeId ? { id: { lt: beforeId } } : {})
+			},
+			orderBy: { id: "desc" },
+			take: limit + 1
+		});
+		const hasMore = page.length > limit;
+		const messages = page.slice(0, limit).reverse();
+		if (session.instance === "vollo") {
+			for (const message of messages) {
+				try {
+					message.body = decodeURIComponent(message.body);
+				} catch {
+					// Keep the original body when it is not URI encoded.
+				}
+			}
+		}
+		const quotedIds = messages
+			.map((message) => message.quotedId)
+			.filter((id): id is number => typeof id === "number");
+		const quotedMessages = quotedIds.length
+			? await prismaService.wppMessage.findMany({
+					where: { id: { in: quotedIds }, instance: session.instance }
+				})
+			: [];
+		if (session.instance === "vollo") {
+			for (const message of quotedMessages) {
+				try {
+					message.body = decodeURIComponent(message.body);
+				} catch {
+					// Keep the original body when it is not URI encoded.
+				}
+			}
+		}
+
+		return {
+			messages,
+			quotedMessages,
+			nextCursor: hasMore && messages.length ? messages[0]!.id : null
+		};
 	}
 
 	public async getChatsMonitor(session: SessionData, includeMessages = true, includeCustomer = true) {
@@ -245,16 +337,16 @@ class ChatsService {
 		const messages: Array<WppMessage> = [];
 		const customerIds = includeCustomer
 			? ongoingChats
-				.filter((chat) => typeof chat.contact?.customerId === "number")
-				.map((c) => c.contact!.customerId!)
+					.filter((chat) => typeof chat.contact?.customerId === "number")
+					.map((c) => c.contact!.customerId!)
 			: [];
 
 		const customers = customerIds.length
 			? await instancesService.executeQuery<Array<Customer>>(session.instance, FETCH_CUSTOMERS_QUERY, [
-				ongoingChats
-					.filter((chat) => typeof chat.contact?.customerId === "number")
-					.map((c) => c.contact!.customerId!)
-			])
+					ongoingChats
+						.filter((chat) => typeof chat.contact?.customerId === "number")
+						.map((c) => c.contact!.customerId!)
+				])
 			: [];
 
 		for (const foundChat of ongoingChats) {
@@ -339,13 +431,12 @@ class ChatsService {
 
 		const messages = chat.contactId
 			? await prismaService.wppMessage.findMany({
-				where: { contactId: chat.contactId },
-				orderBy: { timestamp: "asc" }
-			})
+					where: { contactId: chat.contactId },
+					orderBy: { timestamp: "asc" }
+				})
 			: [];
 
 		if (chat.contact?.customerId) {
-
 			try {
 				const customerRes = await instancesService.executeQuery<Customer[]>(
 					chat.instance,
@@ -371,14 +462,14 @@ class ChatsService {
 			text?: string | null;
 			fileId?: number | null;
 			quotedId?: number | null;
-		},
+		}
 	) {
 		const chat = await prismaService.wppChat.findUnique({
 			where: { id: chatId },
 			include: {
 				contact: true,
-				sector: true,
-			},
+				sector: true
+			}
 		});
 
 		if (!chat) {
@@ -403,7 +494,7 @@ class ChatsService {
 			chat,
 			text: data.text ?? "",
 			quotedId: data.quotedId ?? null,
-			fileId: data.fileId ?? null,
+			fileId: data.fileId ?? null
 		});
 	}
 
@@ -502,8 +593,7 @@ class ChatsService {
 				logger.log(`Aviso: Resultado não encontrado para resultId ${resultId}`);
 			}
 
-			const shouldTriggerSurvey =
-				session.instance === "exatron" && result?.WHATS_ACAO === "trigger-survey";
+			const shouldTriggerSurvey = session.instance === "exatron" && result?.WHATS_ACAO === "trigger-survey";
 
 			const { instance, userId } = session;
 			const usersService = getUsersClient();
@@ -603,8 +693,6 @@ class ChatsService {
 			logger.log(
 				`Chat atualizado com sucesso. Chat ID: ${chat.id}, Status: finalizado, Resultado ID: ${chat.resultId}`
 			);
-
-
 
 			let finishMsg: string = "";
 
@@ -723,7 +811,9 @@ class ChatsService {
 				let updateQuery = `UPDATE campanhas_clientes SET OPERADOR = ?, FIDELIZA = 'S'`;
 
 				if (newScheduleDate instanceof Date) {
-					logger.log(`Nova data de agendamento calculada: ${newScheduleDate.toISOString()}. Atualizando campanha com nova data.`);
+					logger.log(
+						`Nova data de agendamento calculada: ${newScheduleDate.toISOString()}. Atualizando campanha com nova data.`
+					);
 					updateQuery = updateQuery + `, DT_AGENDAMENTO = ?`;
 					params.push(formatDateForMySQL(newScheduleDate));
 				}
@@ -734,7 +824,6 @@ class ChatsService {
 				await instancesService.executeQuery(chat.instance, updateQuery, params);
 				logger.log(`Campanha atualizada com sucesso`);
 			} else {
-
 				const thirtyDaysLater = new Date();
 				thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
 
@@ -748,7 +837,7 @@ class ChatsService {
 					FONE2: lastCampaign.FONE2,
 					FONE3: lastCampaign.FONE3,
 					ORDEM: lastCampaign.ORDEM,
-					FIDELIZA: 'S',
+					FIDELIZA: "S",
 					OPERADOR: chat.userId
 				};
 
@@ -852,7 +941,9 @@ class ChatsService {
 			);
 
 			if (!campanha || !campanha[0]) {
-				logger.log(`Aviso: Campanha não encontrada para código ${lastIS.CAMPANHA}. Pulando criação de histórico.`);
+				logger.log(
+					`Aviso: Campanha não encontrada para código ${lastIS.CAMPANHA}. Pulando criação de histórico.`
+				);
 				return null;
 			}
 
@@ -1038,7 +1129,6 @@ class ChatsService {
 					}
 				}
 			});
-			;
 			await this.syncChatToLocal(newChat);
 
 			const usersService = getUsersClient();
@@ -1086,7 +1176,14 @@ class ChatsService {
 		}
 	}
 
-	public async systemStartNewChat({ instance, sectorId, userId, agentId, contact, systemMessage }: SystemStartNewChatProps) {
+	public async systemStartNewChat({
+		instance,
+		sectorId,
+		userId,
+		agentId,
+		contact,
+		systemMessage
+	}: SystemStartNewChatProps) {
 		const process = new ProcessingLogger(instance, "system-start-chat", `system-${contact.id}-${Date.now()}`, {
 			instance,
 			contactId: contact.id
@@ -1144,14 +1241,14 @@ class ChatsService {
 		agentId,
 		systemMessage,
 		sectorId,
-		userId,
+		userId
 	}: EnsureActiveChatForAgentProps) {
 		const existingChat = await prismaService.wppChat.findFirst({
 			where: {
 				instance,
 				contactId,
-				isFinished: false,
-			},
+				isFinished: false
+			}
 		});
 
 		if (existingChat) {
@@ -1162,9 +1259,9 @@ class ChatsService {
 			where: {
 				id: contactId,
 				instance,
-				isDeleted: false,
+				isDeleted: false
 			},
-			include: { sectors: true } as any,
+			include: { sectors: true } as any
 		});
 
 		if (!contact) {
@@ -1174,7 +1271,7 @@ class ChatsService {
 		const inferredSectorId =
 			typeof sectorId === "number"
 				? sectorId
-				: ((contact as any).sectors?.[0]?.sectorId as number | undefined) ?? null;
+				: (((contact as any).sectors?.[0]?.sectorId as number | undefined) ?? null);
 
 		const newChat = await this.systemStartNewChat({
 			instance,
@@ -1182,7 +1279,7 @@ class ChatsService {
 			sectorId: inferredSectorId,
 			userId: userId ?? null,
 			agentId,
-			...(systemMessage !== undefined ? { systemMessage } : {}),
+			...(systemMessage !== undefined ? { systemMessage } : {})
 		});
 
 		return { chat: newChat, existed: false };

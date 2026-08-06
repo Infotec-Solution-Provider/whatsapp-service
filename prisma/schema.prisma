@@ -208,6 +208,7 @@ model InternalMessage {
   client WppClient?    @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@index([from, internalChatId])
+  @@index([internalChatId, id], map: "internalmessages_chat_id_id_idx")
   @@map("internalmessages")
 }
 

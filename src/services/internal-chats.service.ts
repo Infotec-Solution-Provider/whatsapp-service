@@ -257,7 +257,7 @@ class InternalChatsService {
 	}
 
 	// Obtém todos os chats internos do usuário
-	public async getInternalChatsBySession(session: SessionData) {
+	public async getInternalChatsBySession(session: SessionData, includeMessages = true) {
 		const result = await prismaService.internalChat.findMany({
 			where: {
 				instance: session.instance,
@@ -267,25 +267,117 @@ class InternalChatsService {
 				}
 			},
 			include: {
-				messages: true,
 				participants: true
 			}
 		});
 
-		const chats: (InternalChat & { participants: InternalChatMember[] })[] = [];
-		const messages: InternalMessage[] = [];
+		const chatIds = result.map((chat) => chat.id);
+		const messages: InternalMessage[] =
+			includeMessages && chatIds.length
+				? await prismaService.internalMessage.findMany({
+						where: { instance: session.instance, internalChatId: { in: chatIds } }
+					})
+				: [];
+		const lastMessageByChat = new Map<number, InternalMessage>();
+		const latestInboundByChat = new Map<number, InternalMessage>();
 
-		result.forEach((c) => {
-			const { messages: msgs, ...chat } = c;
-			messages.push(...msgs);
-			chats.push(
-				chat as unknown as InternalChat & {
-					participants: InternalChatMember[];
-				}
-			);
-		});
+		if (!includeMessages && chatIds.length) {
+			const [lastGroups, latestInboundGroups] = await Promise.all([
+				prismaService.internalMessage.groupBy({
+					by: ["internalChatId"],
+					where: { instance: session.instance, internalChatId: { in: chatIds } },
+					_max: { id: true }
+				}),
+				prismaService.internalMessage.groupBy({
+					by: ["internalChatId"],
+					where: {
+						instance: session.instance,
+						internalChatId: { in: chatIds },
+						from: { not: `user:${session.userId}` }
+					},
+					_max: { id: true }
+				})
+			]);
+			const ids = new Set<number>();
+			for (const group of [...lastGroups, ...latestInboundGroups]) {
+				if (typeof group._max.id === "number") ids.add(group._max.id);
+			}
+			const summaryMessages = ids.size
+				? await prismaService.internalMessage.findMany({ where: { id: { in: [...ids] } } })
+				: [];
+			const lastIds = new Set(lastGroups.map((group) => group._max.id));
+			const inboundIds = new Set(latestInboundGroups.map((group) => group._max.id));
+			for (const message of summaryMessages) {
+				if (lastIds.has(message.id)) lastMessageByChat.set(message.internalChatId, message);
+				if (inboundIds.has(message.id)) latestInboundByChat.set(message.internalChatId, message);
+			}
+		}
+
+		const chats = result.map((chat) => {
+			if (includeMessages) return chat;
+			const participant = chat.participants.find((item) => item.userId === session.userId);
+			const latestInbound = latestInboundByChat.get(chat.id);
+			const lastReadAt = participant?.lastReadAt?.getTime() ?? 0;
+			const isUnread = !!latestInbound && Number(latestInbound.timestamp) > lastReadAt;
+
+			return {
+				...chat,
+				lastMessage: lastMessageByChat.get(chat.id) || null,
+				isUnread
+			};
+		}) as unknown as Array<
+			InternalChat & {
+				participants: InternalChatMember[];
+				lastMessage?: InternalMessage | null;
+				isUnread?: boolean;
+			}
+		>;
 
 		return { chats, messages };
+	}
+
+	public async getInternalChatMessagesPage(
+		session: SessionData,
+		chatId: number,
+		limit: number,
+		beforeId: number | null
+	) {
+		const chat = await prismaService.internalChat.findFirst({
+			where: {
+				id: chatId,
+				instance: session.instance,
+				...(session.instance === "nunes" && session.sectorId !== 3 ? { sectorId: session.sectorId } : {})
+			},
+			select: { id: true }
+		});
+
+		if (!chat) throw new BadRequestError("Internal chat not found!");
+
+		const page = await prismaService.internalMessage.findMany({
+			where: {
+				instance: session.instance,
+				internalChatId: chatId,
+				...(beforeId ? { id: { lt: beforeId } } : {})
+			},
+			orderBy: { id: "desc" },
+			take: limit + 1
+		});
+		const hasMore = page.length > limit;
+		const messages = page.slice(0, limit).reverse();
+		const quotedIds = messages
+			.map((message) => message.quotedId)
+			.filter((id): id is number => typeof id === "number");
+		const quotedMessages = quotedIds.length
+			? await prismaService.internalMessage.findMany({
+					where: { id: { in: quotedIds }, instance: session.instance }
+				})
+			: [];
+
+		return {
+			messages,
+			quotedMessages,
+			nextCursor: hasMore && messages.length ? messages[0]!.id : null
+		};
 	}
 
 	public async getInternalChatsMonitor(session: SessionData) {
@@ -404,7 +496,9 @@ class InternalChatsService {
 		process.log(`Iniciando notificação WhatsApp para ${mentions.length} menção(ões)`);
 
 		if (!authToken) {
-			process.log(`Notificação de menções ignorada: token de autenticação ausente para resolver WHATSAPP dos operadores`);
+			process.log(
+				`Notificação de menções ignorada: token de autenticação ausente para resolver WHATSAPP dos operadores`
+			);
 			return;
 		}
 
@@ -518,12 +612,7 @@ class InternalChatsService {
 		const traceId = data.traceId || `${data.chatId}-${Date.now()}`;
 		const trace = createUploadTraceLogger("whatsapp-service.service.internal-chats", traceId);
 
-		const process = new ProcessingLogger(
-			session.instance,
-			"internal-message",
-			traceId,
-			logData
-		);
+		const process = new ProcessingLogger(session.instance, "internal-message", traceId, logData);
 
 		process.log(
 			`Iniciando envio de mensagem interna. Usuário: ${session.userId} (${session.name}), Chat ID: ${data.chatId}`
@@ -539,7 +628,7 @@ class InternalChatsService {
 			fileSize: file?.size,
 			fileType: file?.mimetype,
 			sendAsAudio,
-			sendAsDocument,
+			sendAsDocument
 		});
 
 		try {
@@ -596,7 +685,7 @@ class InternalChatsService {
 				trace.info("internal-message.file.process.start", {
 					fileName: data.file.originalname,
 					fileSize: data.file.size,
-					fileType: data.file.mimetype,
+					fileType: data.file.mimetype
 				});
 
 				if (sendAsAudio) {
@@ -628,13 +717,13 @@ class InternalChatsService {
 					buffer: data.file!.buffer,
 					mimeType: data.file!.mimetype,
 					dirType: FileDirType.PUBLIC,
-					traceId,
+					traceId
 				});
 				trace.info("internal-message.file.upload.success", {
 					fileId: file.id,
 					fileName: file.name,
 					fileSize: file.size,
-					fileType: file.mime_type,
+					fileType: file.mime_type
 				});
 
 				process.log(
@@ -805,7 +894,7 @@ class InternalChatsService {
 			trace.error("internal-message.failed", err, {
 				chatId: data.chatId,
 				fileId: data.fileId,
-				hasFile: !!data.file,
+				hasFile: !!data.file
 			});
 			const msg = sanitizeErrorMessage(err) || "null";
 			process.log(`Erro durante envio de mensagem: ${msg}`);
@@ -869,7 +958,12 @@ class InternalChatsService {
 			}
 
 			// Se habilitado e a mensagem pertence a um grupo do WhatsApp, edita lá também
-			if (ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC && originalMsg.chat && originalMsg.chat?.wppGroupId && session.sectorId) {
+			if (
+				ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC &&
+				originalMsg.chat &&
+				originalMsg.chat?.wppGroupId &&
+				session.sectorId
+			) {
 				process.log("Mensagem pertence a um grupo do WhatsApp, tentando editar lá também.");
 				const sector = await prismaService.wppSector.findUnique({ where: { id: session.sectorId } });
 
@@ -985,9 +1079,9 @@ class InternalChatsService {
 			for (const chatId of internalTargetChatIds) {
 				const internalChat = ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC
 					? await prismaService.internalChat.findUnique({
-						where: { id: chatId },
-						select: { isGroup: true, wppGroupId: true }
-					})
+							where: { id: chatId },
+							select: { isGroup: true, wppGroupId: true }
+						})
 					: null;
 
 				for (const originalMsg of originalMessages) {
@@ -1024,7 +1118,12 @@ class InternalChatsService {
 						message: savedInternalMsg
 					});
 
-					if (ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC && internalChat?.isGroup && internalChat.wppGroupId && client) {
+					if (
+						ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC &&
+						internalChat?.isGroup &&
+						internalChat.wppGroupId &&
+						client
+					) {
 						try {
 							if (sourceType === "internal") {
 								let options: SendMessageOptions = {
@@ -1039,7 +1138,10 @@ class InternalChatsService {
 										file: fileData,
 										fileId: originalMsg.fileId,
 										localFileUrl: filesService.getFileDownloadUrl(originalMsg.fileId),
-										publicFileUrl: filesService.getPublicFileUrl(session.instance, fileData.public_id),
+										publicFileUrl: filesService.getPublicFileUrl(
+											session.instance,
+											fileData.public_id
+										),
 										sendAsAudio: false,
 										sendAsDocument: false
 									};
@@ -1068,7 +1170,6 @@ class InternalChatsService {
 		}
 	}
 
-
 	// ─── WhatsApp group sync ───────────────────────────────────────────────────
 
 	private async resolveIncomingQuotedId(chatId: number, quotedId: unknown, process: ProcessingLogger) {
@@ -1081,7 +1182,9 @@ class InternalChatsService {
 		}
 
 		if (typeof quotedId !== "string") {
-			process.log(`quotedId recebido em formato inválido (${typeof quotedId}). Salvando mensagem sem referência.`);
+			process.log(
+				`quotedId recebido em formato inválido (${typeof quotedId}). Salvando mensagem sem referência.`
+			);
 			return null;
 		}
 
