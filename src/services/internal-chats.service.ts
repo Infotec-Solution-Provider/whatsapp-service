@@ -22,6 +22,7 @@ import socketService from "./socket.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
 import { createUploadTraceLogger } from "../utils/file-upload-trace";
 import getUsersClient from "./users.service";
+import internalWhatsappSendersService from "./internal-whatsapp-senders.service";
 
 const ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] === "true";
 
@@ -1248,13 +1249,14 @@ class InternalChatsService {
 			process.log(`Chat interno encontrado. Chat ID: ${chat.id}`);
 
 			const resolvedQuotedId = await this.resolveIncomingQuotedId(chat.id, msg.quotedId, process);
+			const whatsappSender = await internalWhatsappSendersService.register(instance, msg.from, authorName);
 
 			process.log(`Salvando mensagem no banco de dados. Tipo: ${msg.type}, De: ${msg.from}`);
 
 			const savedMsg = await prismaService.internalMessage.create({
 				data: {
 					instance: msg.instance,
-					from: `external:${msg.from}` + (authorName ? `:${authorName}` : ""),
+					from: `external:${msg.from}` + (whatsappSender.displayName ? `:${whatsappSender.displayName}` : ""),
 					type: msg.type,
 					body: msg.body,
 					timestamp: msg.timestamp,
@@ -1269,6 +1271,7 @@ class InternalChatsService {
 					fileType: msg.fileType ?? null,
 					fileSize: msg.fileSize ?? null,
 					chat: { connect: { id: chat.id } },
+					whatsappSender: { connect: { id: whatsappSender.id } },
 					...(msg.clientId ? { client: { connect: { id: msg.clientId } } } : {})
 				}
 			});

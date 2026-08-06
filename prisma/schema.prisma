@@ -190,26 +190,45 @@ model InternalMessage {
   isForwarded Boolean @map("is_forwarded")
   isEdited    Boolean @map("is_edited")
 
-  wwebjsId       String?           @unique @map("wwebjs_id")
-  wwebjsIdStanza String?           @unique @map("wwebjs_id_stanza")
-  internalChatId Int               @map("internalchat_id")
-  body           String            @db.Text
-  timestamp      String            @map("timestamp")
-  status         WppMessageStatus
-  fileId         Int?              @map("file_id")
-  fileName       String?           @map("file_name")
-  fileType       String?           @map("file_type")
-  fileSize       String?           @map("file_size")
-  mentions       InternalMention[]
-  clientId       Int?              @map("client_id")
+  wwebjsId         String?           @unique @map("wwebjs_id")
+  wwebjsIdStanza   String?           @unique @map("wwebjs_id_stanza")
+  internalChatId   Int               @map("internalchat_id")
+  body             String            @db.Text
+  timestamp        String            @map("timestamp")
+  status           WppMessageStatus
+  fileId           Int?              @map("file_id")
+  fileName         String?           @map("file_name")
+  fileType         String?           @map("file_type")
+  fileSize         String?           @map("file_size")
+  mentions         InternalMention[]
+  clientId         Int?              @map("client_id")
+  whatsappSenderId Int?              @map("whatsapp_sender_id")
 
   // Relações
-  chat   InternalChat? @relation(fields: [internalChatId], references: [id])
-  client WppClient?    @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  chat           InternalChat?           @relation(fields: [internalChatId], references: [id])
+  client         WppClient?              @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  whatsappSender InternalWhatsappSender? @relation(fields: [whatsappSenderId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   @@index([from, internalChatId])
   @@index([internalChatId, id], map: "internalmessages_chat_id_id_idx")
+  @@index([whatsappSenderId, id], map: "internalmessages_whatsapp_sender_id_id_idx")
   @@map("internalmessages")
+}
+
+model InternalWhatsappSender {
+  id              Int               @id @default(autoincrement())
+  instance        String
+  senderId        String            @map("sender_id")
+  displayName     String?           @map("display_name")
+  isManuallyNamed Boolean           @default(false) @map("is_manually_named")
+  assignedBy      Int?              @map("assigned_by")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  messages        InternalMessage[]
+
+  @@unique([instance, senderId])
+  @@index([instance, displayName], map: "internal_whatsapp_senders_instance_display_name_idx")
+  @@map("internal_whatsapp_senders")
 }
 
 model InternalChat {
