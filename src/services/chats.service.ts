@@ -106,6 +106,15 @@ class ChatsService {
 	}
 
 	public async getUserChatsBySession(session: SessionData, includeMessages = true, includeContact = true) {
+		Logger.debug("[Chats] Loading chats for session", {
+			instance: session.instance,
+			userId: session.userId,
+			sectorId: session.sectorId,
+			role: session.role,
+			includeMessages,
+			includeContact
+		});
+
 		const foundChats = await prismaService.wppChat.findMany({
 			where: {
 				isFinished: false,
@@ -140,6 +149,27 @@ class ChatsService {
 			});
 
 			foundChats.push(...foundAdminChats);
+		}
+
+		if (foundChats.length === 0) {
+			const accessWhere: Prisma.WppChatWhereInput = {
+				instance: session.instance,
+				OR: [
+					{ userId: session.userId },
+					{ wallet: { WppWalletUser: { some: { userId: session.userId } } } }
+				]
+			};
+			const [activeChats, finishedChats] = await Promise.all([
+				prismaService.wppChat.count({ where: { ...accessWhere, isFinished: false } }),
+				prismaService.wppChat.count({ where: { ...accessWhere, isFinished: true } })
+			]);
+
+			Logger.debug("[Chats] No visible chats for session", {
+				instance: session.instance,
+				userId: session.userId,
+				activeChats,
+				finishedChats
+			});
 		}
 
 		const chats: Array<
@@ -390,6 +420,13 @@ class ChatsService {
 
 			chats.push({ ...chat, customer, contact: contact || null });
 		}
+
+		Logger.debug("[Chats] Chats loaded for session", {
+			instance: session.instance,
+			userId: session.userId,
+			chatCount: chats.length,
+			messageCount: messages.length
+		});
 
 		return { chats, messages };
 	}
