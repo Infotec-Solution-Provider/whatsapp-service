@@ -263,7 +263,6 @@ class InternalChatsService {
 			where: {
 				instance: session.instance,
 				isFinished: false,
-				...(session.instance === "nunes" && session.sectorId !== 3 ? { sectorId: session.sectorId } : {}),
 				participants: {
 					some: { userId: session.userId }
 				}
@@ -335,6 +334,14 @@ class InternalChatsService {
 			}
 		>;
 
+		Logger.debug("[InternalChats] Chats loaded for member", {
+			instance: session.instance,
+			userId: session.userId,
+			sectorId: session.sectorId,
+			chatCount: chats.length,
+			messageCount: messages.length
+		});
+
 		return { chats, messages };
 	}
 
@@ -348,7 +355,9 @@ class InternalChatsService {
 			where: {
 				id: chatId,
 				instance: session.instance,
-				...(session.instance === "nunes" && session.sectorId !== 3 ? { sectorId: session.sectorId } : {})
+				participants: {
+					some: { userId: session.userId }
+				}
 			},
 			select: { id: true }
 		});
