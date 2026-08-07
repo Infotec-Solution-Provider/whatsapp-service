@@ -1,4 +1,4 @@
-import { UserOnlineSession } from "@in.pulse-crm/sdk";
+import { UserOnlineSession } from "../../sdk-local";
 import authService from "../../services/auth.service";
 import prismaService from "../../services/prisma.service";
 import { BaseStep, StepConfig, StepContext, StepResult } from "../base/base.step";

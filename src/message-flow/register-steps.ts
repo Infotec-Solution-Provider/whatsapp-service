@@ -13,6 +13,7 @@ import CheckOnlyAdminStep from "./steps/check-only-admin.step";
 import CheckUserOnlineStep from "./steps/check-user-online.step";
 import SendToAdminStep from "./steps/send-to-admin.step";
 import SendToSectorUserStep from "./steps/send-to-sector-user.step";
+import AiAgentStep from "./steps/ai-agent.step";
 
 /**
  * Registra todos os steps disponíveis no sistema.
@@ -81,5 +82,11 @@ export function registerAllSteps(): void {
 		description: "Envia chat para usuário específico do setor (prioriza admin)",
 		requiredConfig: [],
 		optionalConfig: ["preferAdmin", "systemMessage"]
+	});
+
+	StepRegistry.register("AI_AGENT", AiAgentStep, {
+		description: "Aciona agente de IA para processar a mensagem",
+		requiredConfig: [],
+		optionalConfig: ["agentId"]
 	});
 }

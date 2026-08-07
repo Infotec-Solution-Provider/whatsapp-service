@@ -1,6 +1,6 @@
 import instances from "../../services/instances.service";
 import instancesService from "../../services/instances.service";
-import { User } from "@in.pulse-crm/sdk";
+import { User } from "../../sdk-local";
 import { BaseStep, StepConfig, StepContext, StepResult, CustomerSchedule } from "../base/base.step";
 
 const CHECK_LOALTY_QUERY = `SELECT * FROM campanhas_clientes cc

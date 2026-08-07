@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { AuthClient } from "@in.pulse-crm/sdk";
+import { AuthClient } from "../sdk-local";
 
 const AUTH_API_URL = process.env["AUTH_API_URL"] || "http://localhost:8001";
 

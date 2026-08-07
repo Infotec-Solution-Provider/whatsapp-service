@@ -15,12 +15,14 @@ export interface MessageQueueProcessHandler {
   processMessage(instance: string, clientId: number, messageId: number, contactName?: string | null): Promise<any>;
 }
 
+type QueueItem = Awaited<ReturnType<typeof prismaService.wppMessageProcessingQueue.findMany>>[number];
+
 class MessageQueueService {
   private isProcessing = false;
   private processingInterval: NodeJS.Timeout | null = null;
-  private readonly PROCESSING_INTERVAL_MS = 100; // Processa a cada 100ms
+  private readonly PROCESSING_INTERVAL_MS = 250; // Processa com menos pressão no banco
   private readonly LOCK_DURATION_MS = 30000; // Lock expira em 30 segundos
-  private readonly MAX_CONCURRENT_CONTACTS = 10; // Máximo de contatos diferentes processando ao mesmo tempo
+  private readonly MAX_CONCURRENT_CONTACTS = 5; // Reduz concorrência para aliviar o pool do Prisma
   private readonly workerId = `worker-${process.pid}-${Date.now()}`;
   private processHandler: MessageQueueProcessHandler | null = null;
 
@@ -63,6 +65,10 @@ class MessageQueueService {
     }
 
     Logger.info(`[MessageQueueService] 🚀 Iniciando worker de processamento da fila (intervalo: ${this.PROCESSING_INTERVAL_MS}ms)`);
+
+    this.recoverOrphanProcessingItems().catch((err) => {
+      Logger.info(`[MessageQueueService] Error recovering orphan processing items: ${err.message}`);
+    });
 
     this.processingInterval = setInterval(() => {
       this.processQueue().catch((err) => {
@@ -115,7 +121,7 @@ class MessageQueueService {
           createdAt: "asc"
         },
         take: this.MAX_CONCURRENT_CONTACTS * 3 // Pega mais para filtrar por contato
-      });
+      }) as QueueItem[];
 
       if (pendingItems.length === 0) {
         return;
@@ -132,13 +138,67 @@ class MessageQueueService {
       // Limita ao número máximo de contatos simultâneos
       const itemsToProcess = Array.from(contactMap.values()).slice(0, this.MAX_CONCURRENT_CONTACTS);
 
+      const claimedIds = await this.claimQueueItems(itemsToProcess.map((item) => item.id));
+
+      if (claimedIds.length === 0) {
+        return;
+      }
+
+      const claimedItems = await prismaService.wppMessageProcessingQueue.findMany({
+        where: {
+          id: { in: claimedIds },
+          status: "PROCESSING",
+          lockedBy: this.workerId
+        }
+      }) as QueueItem[];
+
       // Processa cada item em paralelo (mas apenas um por contato)
-      await Promise.allSettled(
-        itemsToProcess.map((item) => this.processQueueItem(item.id))
-      );
+      await Promise.allSettled(claimedItems.map((item) => this.processQueueItem(item)));
     } finally {
       this.isProcessing = false;
     }
+  }
+
+  /**
+   * Claima em lote os itens que já vamos processar neste ciclo.
+   */
+  private async claimQueueItems(queueIds: string[]): Promise<string[]> {
+    if (queueIds.length === 0) {
+      return [];
+    }
+
+    const lockUntil = new Date(Date.now() + this.LOCK_DURATION_MS);
+
+    await prismaService.wppMessageProcessingQueue.updateMany({
+      where: {
+        id: {
+          in: queueIds
+        },
+        status: "PENDING",
+        OR: [{ lockedUntil: null }, { lockedUntil: { lt: new Date() } }]
+      },
+      data: {
+        status: "PROCESSING",
+        lockedUntil: lockUntil,
+        lockedBy: this.workerId,
+        processingStartedAt: new Date()
+      }
+    });
+
+    const claimedItems = await prismaService.wppMessageProcessingQueue.findMany({
+      where: {
+        id: {
+          in: queueIds
+        },
+        status: "PROCESSING",
+        lockedBy: this.workerId
+      },
+      select: {
+        id: true
+      }
+    });
+
+    return claimedItems.map((item) => item.id);
   }
 
   /**
@@ -168,36 +228,57 @@ class MessageQueueService {
   }
 
   /**
+   * Recupera itens PROCESSING órfãos (sem lock válido) para evitar mensagens travadas.
+   */
+  private async recoverOrphanProcessingItems(): Promise<number> {
+    const staleStart = new Date(Date.now() - this.LOCK_DURATION_MS * 3);
+
+    const result = await prismaService.wppMessageProcessingQueue.updateMany({
+      where: {
+        status: "PROCESSING",
+        OR: [
+          { lockedUntil: null },
+          { lockedUntil: { lt: new Date() } },
+          { processingStartedAt: { lt: staleStart } }
+        ]
+      },
+      data: {
+        status: "PENDING",
+        lockedUntil: null,
+        lockedBy: null,
+        processingStartedAt: null
+      }
+    });
+
+    if (result.count > 0) {
+      Logger.info(`[MessageQueueService] Recovered ${result.count} orphan processing items`);
+    }
+
+    return result.count;
+  }
+
+  /**
    * Processa um item individual da fila
    */
-  private async processQueueItem(queueId: string) {
+  private async processQueueItem(queueItem: QueueItem) {
+    const queueId = queueItem.id;
     const logger = new ProcessingLogger("", "message-queue-worker", queueId, { queueId, workerId: this.workerId });
 
     try {
-      logger.log("Tentando adquirir lock para processar item da fila");
+      const freshQueueItem = await prismaService.wppMessageProcessingQueue.findUnique({
+        where: { id: queueId }
+      });
 
-      // Tenta adquirir lock
-      const lockUntil = new Date(Date.now() + this.LOCK_DURATION_MS);
-      const locked = await this.acquireLock(queueId, lockUntil);
-
-      if (!locked) {
-        logger.log("Não foi possível adquirir lock (já está sendo processado)");
+      if (!freshQueueItem || freshQueueItem.status !== "PROCESSING" || freshQueueItem.lockedBy !== this.workerId) {
+        logger.log("Item não está lockado por este worker. Ignorando processamento", {
+          status: freshQueueItem?.status,
+          lockedBy: freshQueueItem?.lockedBy || null
+        });
         return;
       }
 
       logger.log("Lock adquirido. Iniciando processamento");
 
-      // Busca o item completo
-      const queueItem = await prismaService.wppMessageProcessingQueue.findUnique({
-        where: { id: queueId }
-      });
-
-      if (!queueItem) {
-        logger.log("Item da fila não encontrado");
-        return;
-      }
-
-      // Busca a mensagem
       const message = await prismaService.wppMessage.findUnique({
         where: { id: queueItem.messageId }
       });
@@ -253,34 +334,6 @@ class MessageQueueService {
         await this.markAsFailed(queueId, error.message);
         logger.log("Item marcado como falha após exceder tentativas");
       }
-    }
-  }
-
-  /**
-   * Tenta adquirir lock para processar um item
-   */
-  private async acquireLock(queueId: string, lockUntil: Date): Promise<boolean> {
-    try {
-      const result = await prismaService.wppMessageProcessingQueue.updateMany({
-        where: {
-          id: queueId,
-          status: "PENDING",
-          OR: [
-            { lockedUntil: null },
-            { lockedUntil: { lt: new Date() } }
-          ]
-        },
-        data: {
-          status: "PROCESSING",
-          lockedUntil: lockUntil,
-          lockedBy: this.workerId,
-          processingStartedAt: new Date()
-        }
-      });
-
-      return result.count > 0;
-    } catch (error) {
-      return false;
     }
   }
 
@@ -345,6 +398,13 @@ class MessageQueueService {
     });
 
     return result.count;
+  }
+
+  /**
+   * Recupera itens travados em PROCESSING para PENDING.
+   */
+  public async recoverStuckProcessingItems(): Promise<number> {
+    return this.recoverOrphanProcessingItems();
   }
 }
 

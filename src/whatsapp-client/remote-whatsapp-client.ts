@@ -1,11 +1,14 @@
-import { File, SocketEventType, SocketServerAdminRoom, SocketServerChatRoom } from "@in.pulse-crm/sdk";
+import "dotenv/config";
+import { File, SocketEventType, SocketServerAdminRoom, SocketServerChatRoom } from "../sdk-local";
 import { TemplateMessage } from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
-import internalMessageQueueService from "../services/internal-message-queue.service";
 import messageQueueService from "../services/message-queue.service";
+import messagesDistributionService from "../services/messages-distribution.service";
 import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
-import MessageDto from "../types/remote-client.types";
+import contactsService from "../services/contacts.service";
+import internalChatsService from "../services/internal-chats.service";
+import MessageDto, { MessageReactionEvent, MessageRevokedEvent } from "../types/remote-client.types";
 import { EditMessageOptions, Mentions, SendFileType, SendMessageOptions, SendTemplateOptions, WhatsappGroup } from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
@@ -13,6 +16,8 @@ import socketService from "../services/socket.service";
 import { WppMessageStatus } from "@prisma/client";
 import { Logger } from "@in.pulse-crm/utils";
 import axios from "axios";
+
+const ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] !== "false";
 
 interface BaseSendMessageOptions {
 	to: string;
@@ -38,6 +43,21 @@ export interface SendTextOptions extends BaseSendMessageOptions {
 export type RemoteSendMessageOptions = SendTextOptions | SendFileOptions;
 
 class RemoteWhatsappClient implements WhatsappClient {
+	private resolveGroupId(message: MessageDto): string | null {
+		if (message.groupId) {
+			return message.groupId;
+		}
+
+		const candidates = [message.from, message.to];
+		for (const candidate of candidates) {
+			if (typeof candidate === "string" && candidate.endsWith("@g.us")) {
+				return candidate.replace(/@g\.us$/, "");
+			}
+		}
+
+		return null;
+	}
+
 	constructor(
 		public readonly id: number,
 		public readonly instance: string,
@@ -114,41 +134,56 @@ class RemoteWhatsappClient implements WhatsappClient {
 		try {
 			process.log("Handling message received");
 
-			if (message.isGroup && message.groupId) {
-				process.log("Message is from a group, enqueuing for internal chat processing");
-
-				// Converter para CreateMessageDto removendo campos extras
-				const { isGroup, groupId, authorName, contactName, ...cleanMessage } = message;
-				const createMessageDto: CreateMessageDto = cleanMessage;
-
-				// Enfileira a mensagem interna para processamento
-				const internalChat = await prismaService.internalChat.findUnique({
-					where: { wppGroupId: groupId }
-				});
-
-				if (internalChat) {
-					await internalMessageQueueService.enqueue({
-						instance: this.instance,
-						internalChatId: internalChat.id,
-						groupId: groupId,
-						messageData: createMessageDto,
-						authorName: contactName || authorName
-					});
-					process.log("Internal message enqueued successfully");
-					process.success({ queueId: `enqueued-${internalChat.id}` });
-				} else {
-					process.log("Internal chat not found for group ID, ignoring message");
-					process.success({ ignored: true });
+			if (message.isGroup) {
+				const groupId = this.resolveGroupId(message);
+				if (!groupId) {
+					process.log("Group message ignored: groupId is missing from payload.");
+					process.success({ ignored: true, reason: "missing-group-id" });
+					return;
 				}
+
+				if (!ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+					process.log("Group message ignored: WhatsApp group synchronization is disabled.");
+					process.success({ ignored: true, reason: "group-sync-disabled" });
+					return;
+				}
+
+				const { isGroup, authorName, contactName, sender, recipient, participant, ...cleanMessage } = message;
+				await internalChatsService.receiveMessage(
+					this.instance,
+					groupId,
+					cleanMessage,
+					contactName || authorName || message.from
+				);
+				process.success({ groupId, synced: true });
 			} else {
-				const savedMsg = await messagesService.insertMessage(message);
+				const identity = message.sender ?? null;
+				const normalizedWhatsappId = identity?.lid || message.from;
+				const normalizedPhone = identity?.phone || null;
+
+				let resolvedContactId: number | null = null;
+				if (!message.from.startsWith("me:")) {
+					const contact = await contactsService.getOrCreateContact(
+						this.instance,
+						message.contactName || message.authorName || normalizedPhone || normalizedWhatsappId,
+						normalizedPhone,
+						normalizedWhatsappId
+					);
+					resolvedContactId = contact.id;
+				}
+
+				const { isGroup, groupId, authorName, contactName, sender, recipient, participant, ...cleanMessage } = message;
+				const savedMsg = await messagesService.insertMessage({
+					...cleanMessage,
+					contactId: resolvedContactId
+				});
 
 				// Enfileira a mensagem para processamento
 				await messageQueueService.enqueue({
 					instance: this.instance,
 					clientId: this.id,
 					messageId: savedMsg.id,
-					contactPhone: savedMsg.from,
+					contactPhone: normalizedWhatsappId,
 					contactName: message.contactName
 				});
 
@@ -159,6 +194,108 @@ class RemoteWhatsappClient implements WhatsappClient {
 			process.log(`Failed to handle message received: ${err?.message}`);
 			process.failed(err);
 		}
+	}
+
+	public async handleMessageEdited(message: MessageDto) {
+		const targetMessageId = message.editedTargetMessageId;
+		const process = new ProcessingLogger(
+			this.instance,
+			"rc-message-edit-receive",
+			targetMessageId || message.wwebjsIdStanza || Date.now().toString(),
+			message
+		);
+
+		if (!targetMessageId) {
+			process.log("Message edit ignored: target message ID is missing from payload.");
+			process.success({ ignored: true, reason: "missing-target-message-id" });
+			return;
+		}
+
+		if (message.editContentAvailable === false) {
+			process.log("Message edit observed without available content; original message was preserved.");
+			process.success({ ignored: true, reason: "edit-content-unavailable", targetMessageId });
+			return;
+		}
+
+		if (message.isGroup) {
+			const groupId = this.resolveGroupId(message);
+			if (!groupId) {
+				process.log("Group message edit ignored: groupId is missing from payload.");
+				process.success({ ignored: true, reason: "missing-group-id" });
+				return;
+			}
+
+			if (!ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+				process.log("Group message edit ignored: WhatsApp group synchronization is disabled.");
+				process.success({ ignored: true, reason: "group-sync-disabled" });
+				return;
+			}
+
+			await internalChatsService.receiveMessageEdit(groupId, targetMessageId, message.body);
+			process.success({ groupId, targetMessageId, synced: true });
+			return;
+		}
+
+		await messagesDistributionService.processMessageEdit("wwebjs", targetMessageId, message.body);
+		process.success({ targetMessageId, synced: true });
+	}
+
+	public async handleMessageReaction(event: MessageReactionEvent) {
+		if (event.isGroup) {
+			if (!event.groupId || !ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+				return;
+			}
+			await internalChatsService.receiveMessageReaction(event.groupId, event.targetMessageId, event.reaction);
+			return;
+		}
+
+		const message = await prismaService.wppMessage.findFirst({
+			where: { OR: [{ wwebjsIdStanza: event.targetMessageId }, { wwebjsId: event.targetMessageId }] }
+		});
+		if (!message?.chatId) {
+			return;
+		}
+
+		const room: SocketServerChatRoom = `${message.instance}:chat:${message.chatId}`;
+		await socketService.emit(SocketEventType.WppMessageReaction, room, {
+			messageId: message.id,
+			reaction: event.reaction
+		});
+	}
+
+	public async handleMessageRevoked(event: MessageRevokedEvent) {
+		if (event.isGroup) {
+			if (!event.groupId || !ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+				return;
+			}
+			await internalChatsService.receiveMessageRevoked(event.groupId, event.targetMessageId);
+			return;
+		}
+
+		const currentMessage = await prismaService.wppMessage.findFirst({
+			where: { OR: [{ wwebjsIdStanza: event.targetMessageId }, { wwebjsId: event.targetMessageId }] }
+		});
+		if (!currentMessage) {
+			return;
+		}
+
+		const message = await messagesService.updateMessage(currentMessage.id, {
+			body: "Mensagem apagada",
+			status: "REVOKED" as WppMessageStatus,
+			fileId: null,
+			fileName: null,
+			fileType: null,
+			fileSize: null
+		});
+		if (!message.chatId) {
+			return;
+		}
+
+		const room: SocketServerChatRoom = `${message.instance}:chat:${message.chatId}`;
+		await socketService.emit(SocketEventType.WppMessageDelete, room, {
+			messageId: message.id,
+			contactId: message.contactId || 0
+		});
 	}
 
 	public async handleMessageStatus(messageId: string, status: string) {
@@ -274,14 +411,15 @@ class RemoteWhatsappClient implements WhatsappClient {
 
 			process.log("Message edited successfully from wwebjs-api");
 
-			const currentMessage = await prismaService.wppMessage.findUniqueOrThrow({
+			const currentMessage = await prismaService.wppMessage.findFirstOrThrow({
 				where: {
-					wwebjsIdStanza: props.messageId
+					OR: [{ wwebjsIdStanza: props.messageId }, { wwebjsId: props.messageId }]
 				}
 			});
 
 			await messagesService.updateMessage(currentMessage.id, {
 				body: props.text || response.data.body,
+				isEdited: true,
 				status: "SENT" as WppMessageStatus
 			});
 
@@ -313,8 +451,68 @@ class RemoteWhatsappClient implements WhatsappClient {
 	}
 
 	public async forwardMessage(to: string, messageId: string, isGroup: boolean): Promise<void> {
-		Logger.debug("RemoteWhatsappClient.forwardMessage not implemented", { to, messageId, isGroup });
-		throw new Error("Method not implemented.");
+		const process = new ProcessingLogger(this.instance, "rc-forward-message", messageId, {
+			to,
+			messageId,
+			isGroup
+		});
+
+		try {
+			process.log("Buscando mensagem original para encaminhamento");
+
+			const originalMessage = await prismaService.wppMessage.findFirst({
+				where: {
+					OR: [
+						{ wwebjsIdStanza: messageId },
+						{ wwebjsId: messageId },
+						{ wabaId: messageId },
+						{ gupshupId: messageId }
+					]
+				}
+			});
+
+			if (!originalMessage) {
+				throw new Error(`Mensagem não encontrada para forward: ${messageId}`);
+			}
+
+			try {
+				process.log("Tentando encaminhamento nativo no wwebjs-api");
+				await axios.post(`${this.clientUrl}/api/send-forwarded-message`, {
+					to,
+					sourceMessageId: messageId,
+					isGroup
+				});
+				process.success("Mensagem encaminhada com marcador nativo");
+				return;
+			} catch (nativeForwardErr: any) {
+				process.log(`Falha no encaminhamento nativo, aplicando fallback: ${nativeForwardErr?.message}`);
+			}
+
+			process.log("Mensagem original encontrada", {
+				id: originalMessage.id,
+				type: originalMessage.type,
+				hasFile: !!originalMessage.fileId
+			});
+
+			const forwardedText = originalMessage.body?.trim()
+				? `${originalMessage.body} (encaminhada)`
+				: "(encaminhada)";
+
+			const options: RemoteSendMessageOptions = {
+				to,
+				text: forwardedText,
+				quotedId: null,
+				isGroup,
+			};
+
+			process.log("Enviando mensagem encaminhada para o endpoint remoto", options);
+			await axios.post(`${this.clientUrl}/api/send-message`, options);
+			process.success("Mensagem encaminhada com fallback de envio normal");
+		} catch (err: any) {
+			process.log(`Failed to forward message: ${err?.message}`);
+			process.failed(err);
+			throw err;
+		}
 	}
 }
 

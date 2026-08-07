@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { Formatter } from "@in.pulse-crm/utils";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import { Request, Response, Router } from "express";
@@ -10,6 +11,7 @@ import prismaService from "../services/prisma.service";
 import ProcessingLogger from "../utils/processing-logger";
 
 const ENDPOINT = "/api/whatsapp/parsed-messages";
+const ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] !== "false";
 
 interface ProcessMessageBody extends CreateMessageDto {
 	/** Indica se a mensagem veio de grupo */
@@ -117,22 +119,25 @@ class ParsedMessagesController {
 				);
 			}
 
-			// Mensagens de grupo devem ir para o handler interno
+			// Mensagens de grupo podem ser sincronizadas para chat interno quando habilitado.
 			if (messageDto.isGroup && messageDto.groupId) {
-				logger.log("Mensagem de grupo detectada, processando em internalChatsService");
-				const savedMsg = await internalChatsService.receiveMessage(
-					client.instance,
-					messageDto.groupId,
-					messageDto,
-					contactName
-				);
-				logger.success("Mensagem de grupo processada com sucesso");
+				if (ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+					await internalChatsService.receiveMessage(
+						messageDto.instance,
+						messageDto.groupId,
+						messageDto,
+						contactName || messageDto.from
+					);
+					logger.log("Mensagem de grupo sincronizada para chat interno");
+				} else {
+					logger.log("Mensagem de grupo ignorada: sincronização com chat interno desabilitada");
+				}
 
 				const response: ProcessMessageResponse = {
 					success: true,
-					message: "Group message processed successfully",
+					message: ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC ? "Group message synced" : "Group message ignored",
 					data: {
-						messageId: savedMsg?.id || 0,
+						messageId: 0,
 						chatId: null,
 						contactId: null
 					}
@@ -264,9 +269,19 @@ class ParsedMessagesController {
 						);
 					}
 
-					// Mensagens de grupo devem ir para o handler interno
+					// Mensagens de grupo podem ser sincronizadas para chat interno quando habilitado.
 					if (messageDto.isGroup && messageDto.groupId) {
-						await internalChatsService.receiveMessage(client.instance, messageDto.groupId, messageDto, contactName);
+						if (ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+							await internalChatsService.receiveMessage(
+								messageDto.instance,
+								messageDto.groupId,
+								messageDto,
+								contactName || messageDto.from
+							);
+							logger.log(`Mensagem de grupo no batch sincronizada (index ${i})`);
+						} else {
+							logger.log(`Mensagem de grupo no batch ignorada por configuração (index ${i})`);
+						}
 						results.push({
 							index: i,
 							success: true

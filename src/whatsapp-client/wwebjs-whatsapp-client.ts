@@ -1,4 +1,4 @@
-import { SocketEventType, SocketServerAdminRoom } from "@in.pulse-crm/sdk";
+import { SocketEventType, SocketServerAdminRoom } from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
@@ -23,6 +23,8 @@ import HumanBehaviorSimulator, { HumanBehaviorConfig } from "../utils/human-beha
 import MessageQueue from "../utils/message-queue";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
+
+const ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] === "true";
 
 const PUPPETEER_ARGS = {
 	headless: true,
@@ -328,7 +330,11 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				process.success(savedMsg);
 			}
 			if (chat.isGroup) {
-				await internalChatsService.receiveMessage(this.instance, chat.id.user, parsedMsg, contactName);
+				if (ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+					await internalChatsService.receiveMessage(this.instance, chat.id.user, parsedMsg, contactName);
+				} else {
+					process.log("Group message ignored: internal chats are now native and no longer synced from WhatsApp groups.");
+				}
 			}
 		} catch (err) {
 			process.log(`Error while processing message: ${sanitizeErrorMessage(err)}`);
@@ -345,8 +351,11 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			process.log("Chat info:", { id: chat.id._serialized, isGroup: chat.isGroup });
 			if (message && chat) {
 				if (chat.isGroup) {
-					process.log("Message is in a group chat. Processing message edit...");
-					await internalChatsService.receiveMessageEdit(chat.id.user, message.id.id, message.body);
+					if (ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+						await internalChatsService.receiveMessageEdit(chat.id.user, message.id.id, message.body);
+					} else {
+						process.log("Group message edit ignored: internal chats are now native and no longer synced from WhatsApp groups.");
+					}
 					return;
 				} else {
 					process.log("Message is in a private chat. Processing message edit...");

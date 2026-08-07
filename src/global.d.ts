@@ -1,4 +1,4 @@
-import { SessionData } from "@in.pulse-crm/sdk";
+import { SessionData } from "./sdk-local";
 
 declare global {
 	namespace Express {

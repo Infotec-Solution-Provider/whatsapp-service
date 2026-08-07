@@ -3,11 +3,12 @@ import whatsappService from "../services/whatsapp.service";
 import sectorsService from "../services/sectors.service";
 import messagesDistributionService from "../services/messages-distribution.service";
 import instancesService from "../services/instances.service";
-import { SocketEventType, User } from "@in.pulse-crm/sdk";
+import { SocketEventType, User } from "../sdk-local";
 import socketService from "../services/socket.service";
 import prismaService from "../services/prisma.service";
 import chatsService from "../services/chats.service";
 import transferHistoryService from "../services/transfer-history.service";
+import contactsService from "../services/contacts.service";
 
 class ChooseSectorBot {
 	private readonly running: { step: number; chatId: number }[] = [];
@@ -260,7 +261,12 @@ class ChooseSectorBot {
 	}
 
 	public async askIfWantsToBackToMenu(clientId: number, chat: WppChat, contact: WppContact) {
-		await whatsappService.sendBotMessage(contact.phone, clientId, {
+		const contactAddress = contactsService.resolveContactAddress(contact);
+		if (!contactAddress) {
+			return;
+		}
+
+		await whatsappService.sendBotMessage(contactAddress, clientId, {
 			chat,
 			text: [
 				"Deseja voltar ao menu de setores, finalizar conversa ou aguardar resposta do contato?",

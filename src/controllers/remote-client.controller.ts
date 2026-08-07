@@ -1,4 +1,5 @@
 import { Request, Response, Router } from "express";
+import { Logger } from "@in.pulse-crm/utils";
 import remoteClientService from "../services/remote-client.service";
 import { RemoteClientEvent } from "../types/remote-client.types";
 
@@ -12,9 +13,13 @@ class RemoteClientController {
 	private eventReceived = async (req: Request, res: Response) => {
 		try {
 			const clientId = req.params["clientId"] as string;
-			await remoteClientService.handleEventReceived(+clientId, req.body as RemoteClientEvent);
+			const event = req.body as RemoteClientEvent;
+			Logger.info(`[RemoteClientController] Event received | clientId=${clientId} | type=${(event as any)?.type || "unknown"}`);
+			await remoteClientService.handleEventReceived(+clientId, event);
+			Logger.info(`[RemoteClientController] Event processed successfully | clientId=${clientId} | type=${(event as any)?.type || "unknown"}`);
 			res.status(200).send();
 		} catch (err: any) {
+			Logger.error("[RemoteClientController] Failed to process event", err as Error);
 			res.status(500).send({ message: err?.message });
 		}
 	};

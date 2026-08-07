@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { InstancesClient } from "@in.pulse-crm/sdk";
+import { InstancesClient } from "../sdk-local";
 
 const INSTANCES_API_URL = process.env["INSTANCES_API_URL"] || "http://localhost:8000";
 

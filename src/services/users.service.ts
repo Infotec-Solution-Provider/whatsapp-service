@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { UsersClient } from "@in.pulse-crm/sdk";
+import { UsersClient } from "../sdk-local";
 
 const USERS_API_RL = process.env["USERS_API_RL"] || "http://localhost:8001";
 

@@ -1,4 +1,4 @@
-import { SessionData } from "@in.pulse-crm/sdk";
+import { SessionData } from "../sdk-local";
 import { WppMessage } from "@prisma/client";
 import chatsService from "./chats.service";
 import internalChatsService from "./internal-chats.service";

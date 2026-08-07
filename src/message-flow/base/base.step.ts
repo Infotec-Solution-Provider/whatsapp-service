@@ -1,6 +1,6 @@
 import { WppChatPriority, WppChatType, WppContact, WppMessage } from "@prisma/client";
 import ProcessingLogger from "../../utils/processing-logger";
-import { Customer } from "@in.pulse-crm/sdk";
+import { Customer } from "../../sdk-local";
 
 export interface CustomerSchedule {
 	CODIGO: number;

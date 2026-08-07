@@ -1,4 +1,4 @@
-import { SessionData, SocketEventType, SocketServerChatRoom } from "@in.pulse-crm/sdk";
+import { SessionData, SocketEventType, SocketServerChatRoom } from "../sdk-local";
 import { WppMessage } from "@prisma/client";
 import { NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
 import CreateMessageDto from "../dtos/create-message.dto";
@@ -25,7 +25,49 @@ interface EditMessageOptions {
 	mentions?: Mentions;
 }
 
+const PERSISTABLE_WPP_MESSAGE_FIELDS = new Set([
+	"instance",
+	"wwebjsId",
+	"wwebjsIdStanza",
+	"wabaId",
+	"gupshupId",
+	"gupshupRequestId",
+	"from",
+	"to",
+	"type",
+	"quotedId",
+	"chatId",
+	"contactId",
+	"isForwarded",
+	"isEdited",
+	"body",
+	"timestamp",
+	"statusTimestamp",
+	"sentAt",
+	"status",
+	"fileId",
+	"fileName",
+	"fileType",
+	"fileSize",
+	"userId",
+	"agentId",
+	"billingCategory",
+	"clientId"
+]);
+
 class MessagesService {
+	private getPersistableMessageFields(data: Record<string, unknown>): Partial<WppMessage> {
+		const persistableData: Partial<WppMessage> = {};
+
+		for (const [key, value] of Object.entries(data)) {
+			if (PERSISTABLE_WPP_MESSAGE_FIELDS.has(key)) {
+				(persistableData as Record<string, unknown>)[key] = value;
+			}
+		}
+
+		return persistableData;
+	}
+
 	private async resolveIncomingQuotedId(instance: string, quotedId: unknown) {
 		if (quotedId == null) {
 			return null;
@@ -86,7 +128,9 @@ class MessagesService {
 		delete (data as any)["authorName"];
 		delete (data as any)["groupId"];
 
-		const { clientId, contactId, chatId, quotedId, ...rest } = data;
+		const { clientId, contactId, chatId, quotedId, ...rest } = this.getPersistableMessageFields(
+			data as unknown as Record<string, unknown>
+		);
 		const createData: any = { ...rest };
 		createData.quotedId = await this.resolveIncomingQuotedId(data.instance, quotedId);
 
@@ -105,7 +149,9 @@ class MessagesService {
 	}
 
 	public async updateMessage(id: number, data: Partial<WppMessage>) {
-		const { id: _id, contactId, chatId, clientId, ...rest } = data as Partial<WppMessage>;
+		const { contactId, chatId, clientId, ...rest } = this.getPersistableMessageFields(
+			data as Record<string, unknown>
+		) as Partial<WppMessage>;
 		const updateData: any = { ...rest };
 
 		if (typeof contactId === "number" && contactId > 0) {
@@ -308,12 +354,13 @@ class MessagesService {
 				include: { WppChat: true }
 			});
 			process.log("Mensagem encontrada:", originalMessage);
-			if (!originalMessage.wwebjsId) {
-				throw new Error("Original message does not have a wwebjsId.");
+			const externalMessageId = originalMessage.wwebjsIdStanza || originalMessage.wwebjsId;
+			if (!externalMessageId) {
+				throw new Error("Original message does not have a WhatsApp message ID.");
 			}
 			await whatsappService.editMessage({
 				options: {
-					messageId: originalMessage.wwebjsId,
+					messageId: externalMessageId,
 					text: options.text,
 					mentions: options.mentions || null
 				},

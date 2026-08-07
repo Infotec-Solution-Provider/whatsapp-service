@@ -1,4 +1,4 @@
-import { User } from "@in.pulse-crm/sdk";
+import { User } from "../../sdk-local";
 import instancesService from "../../services/instances.service";
 import { BaseStep, StepConfig, StepContext, StepResult } from "../base/base.step";
 

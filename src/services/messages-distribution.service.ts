@@ -7,7 +7,7 @@ import {
 	SocketServerWalletRoom,
 	User,
 	WppMessageEventData
-} from "@in.pulse-crm/sdk";
+} from "../sdk-local";
 import { Formatter, Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import {
 	AutomaticResponseRule,
@@ -58,6 +58,38 @@ class MessageStatusTargetNotFoundError extends Error {
 
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
+
+	private async sendPushNotification(
+		userId: number,
+		instance: string,
+		payload: {
+			event: "new_message" | "new_conversation";
+			title: string;
+			body: string;
+			url: string;
+			tag: string;
+		},
+	): Promise<void> {
+		const secret = process.env["PUSH_NOTIFICATIONS_SECRET"];
+		if (!secret) {
+			return;
+		}
+
+		const usersApiUrl = process.env["USERS_API_RL"] || "http://localhost:8001";
+		const axios = (await import("axios")).default;
+		await axios.post(
+			`${usersApiUrl}/api/_internal/push-notifications`,
+			{ userId, instance, payload },
+			{
+				headers: { "x-inpulse-push-secret": secret },
+				timeout: 10_000,
+			},
+		);
+	}
+
+	private isIncomingCustomerMessage(message: WppMessage): boolean {
+		return !["me:", "system", "bot:", "thirdparty:"].some((prefix) => message.from.startsWith(prefix));
+	}
 
 	private getStatusPriority(status: WppMessageStatus): number {
 		switch (status) {
@@ -184,6 +216,56 @@ class MessagesDistributionService {
 		}
 
 		return client.sectors;
+	}
+
+	/**
+	 * Processa agente de IA em um chat existente
+	 */
+	private async processAiAgentMessage(chat: WppChat, contact: WppContact, clientId: number | null, logger: ProcessingLogger) {
+		const rawAgentId = chat.agentId ?? null;
+
+		if (chat.botId && rawAgentId === null) {
+			logger.log(`Chat ${chat.id} possui bot tradicional ativo (${chat.botId}); IA reativa não será acionada.`);
+			return;
+		}
+
+		const agentId = rawAgentId !== null && rawAgentId !== undefined ? Number(rawAgentId) : null;
+		if (agentId !== null && !Number.isFinite(agentId)) {
+			logger.log(`Agent ID inválido: ${rawAgentId}`);
+			return;
+		}
+
+		if (agentId !== null) {
+			logger.log(`Processando mensagem com agente de IA ID ${agentId}`);
+		} else {
+			logger.log(`Processando mensagem com seleção automática de agente de IA para o chat ${chat.id}`);
+		}
+		const AI_API_URL = process.env["AI_API_URL"] || "http://localhost:8008";
+		const requestPayload = {
+			chatId: chat.id,
+			instance: chat.instance,
+			contactId: contact.id,
+			customerId: contact.customerId ?? null,
+			phone: contact.phone,
+			clientId,
+			triggeredBy: "NEW_MESSAGE_NO_AGENT",
+			agentId,
+		};
+
+		logger.debug("Acionando ai-service para processamento do agente de IA", requestPayload);
+
+		try {
+			const axios = (await import("axios")).default;
+			const response = await axios.post(
+				`${AI_API_URL}/api/ai/agents/process-message`,
+				requestPayload,
+				{ timeout: 30000 }
+			);
+			logger.debug("Resposta recebida do ai-service para o agente de IA", response.data);
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			logger.log(`Erro ao acionar agente de IA: ${msg}`);
+		}
 	}
 
 	/**
@@ -360,12 +442,15 @@ class MessagesDistributionService {
 		const logger = new ProcessingLogger(instance, "message-distribution", `WppMessage-${msg.id}`, msg);
 
 		try {
+			const contactIdentifier = msg.from.startsWith("me:") ? msg.to : msg.from;
+
 			// 1. Busca ou cria contato
 			logger.log("Buscando contato para a mensagem.");
 			const contact = await contactsService.getOrCreateContact(
 				instance,
-				contactName || Formatter.phone(msg.from),
-				msg.from
+				contactName || Formatter.phone(contactIdentifier),
+				contactIdentifier,
+				contactIdentifier
 			);
 			logger.log("Contato encontrado!", contact);
 
@@ -379,6 +464,7 @@ class MessagesDistributionService {
 				logger.log("Chat anterior encontrado para o contato.", currChat);
 				await this.processBotMessage(currChat, contact, msg, logger);
 				const outputMessage = await this.insertAndNotify(logger, currChat, msg);
+				await this.processAiAgentMessage(currChat, contact, clientId, logger);
 				return outputMessage;
 			}
 
@@ -397,7 +483,8 @@ class MessagesDistributionService {
 			// 6. Finaliza criação do chat
 			logger.log("Novo chat criado!", newChat);
 
-			const avatarUrl = await whatsappService.getProfilePictureUrl(instance, msg.from);
+			const contactAddress = contactsService.resolveContactAddress(contact);
+			const avatarUrl = contactAddress ? await whatsappService.getProfilePictureUrl(instance, contactAddress) : null;
 			if (avatarUrl) {
 				const updatedChat = await prismaService.wppChat.update({
 					data: { avatarUrl },
@@ -411,6 +498,7 @@ class MessagesDistributionService {
 			logger.log("Chat criado com sucesso!", newChat);
 
 			const outputMsg = await this.insertAndNotify(logger, newChat, msg, true);
+			await this.processAiAgentMessage(newChat, contact, clientId, logger);
 			return outputMsg;
 		} catch (err) {
 			const msg = sanitizeErrorMessage(err);
@@ -557,6 +645,15 @@ class MessagesDistributionService {
 				const userRoom: SocketServerUserRoom = `${chat.instance}:user:${chat.userId}`;
 				await socketService.emit(SocketEventType.WppChatStarted, userRoom, data);
 				process.log(`Chat enviado para o socket: /${userRoom}/ room!`);
+				void this.sendPushNotification(chat.userId, chat.instance, {
+					event: "new_conversation",
+					title: "Nova conversa",
+					body: "Uma conversa foi atribuída a você.",
+					url: `/${chat.instance}`,
+					tag: `chat-${chat.id}`,
+				}).catch((error: unknown) => {
+					process.log(`Falha ao enviar push de nova conversa: ${sanitizeErrorMessage(error)}`);
+				});
 			}
 		} catch (err) {
 			const msg = sanitizeErrorMessage(err);
@@ -579,6 +676,21 @@ class MessagesDistributionService {
 			const data: WppMessageEventData = { message };
 			await socketService.emit(SocketEventType.WppMessage, room, data);
 			process?.log(`Mensagem transmitida para a sala: /${room}/ room!`);
+
+			if (this.isIncomingCustomerMessage(message)) {
+				const chat = await prismaService.wppChat.findUnique({ where: { id: message.chatId } });
+				if (chat?.userId !== null && chat?.userId !== undefined) {
+					void this.sendPushNotification(chat.userId, message.instance, {
+						event: "new_message",
+						title: "Nova mensagem",
+						body: message.body.slice(0, 180) || "Você recebeu uma nova mensagem.",
+						url: `/${message.instance}`,
+						tag: `chat-${chat.id}`,
+					}).catch((error: unknown) => {
+						process?.log(`Falha ao enviar push de nova mensagem: ${sanitizeErrorMessage(error)}`);
+					});
+				}
+			}
 		} catch (err) {
 			const msg = sanitizeErrorMessage(err);
 			process?.log(`Falha ao transmitir mensagem: ${msg}`);
@@ -775,10 +887,10 @@ class MessagesDistributionService {
 			logger.log("Processando edição de mensagem.");
 
 			// Busca a mensagem original
-			const originalMessage = await prismaService.wppMessage.findUnique({
-				where: {
-					[(type + "Id") as "wwebjsId"]: id
-				},
+			const originalMessage = await prismaService.wppMessage.findFirst({
+				where: type === "wwebjs"
+					? { OR: [{ wwebjsId: id }, { wwebjsIdStanza: id }] }
+					: { wabaId: id },
 				include: {
 					WppChat: true,
 					WppContact: true
@@ -1118,11 +1230,20 @@ class MessagesDistributionService {
 				hasFile: !!ruleToApply.fileId
 			});
 
+			const contactAddress = contactsService.resolveContactAddress(contact);
+			if (!contactAddress) {
+				logger.log("[AutoResponse] Contato sem identificador WhatsApp para envio. Pulando resposta automática.", {
+					ruleId: ruleToApply.id,
+					contactId: contact.id
+				});
+				return;
+			}
+
 			// 7) Envia e atualiza "último envio"
 			const sentAutoReply = await whatsappService.sendAutoReplyMessage(
 				instance,
 				sector,
-				contact.phone,
+				contactAddress,
 				ruleToApply.message,
 				ruleToApply.fileId
 			);

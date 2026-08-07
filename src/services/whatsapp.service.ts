@@ -1,4 +1,4 @@
-import { SessionData } from "@in.pulse-crm/sdk";
+import { SessionData } from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { InternalMessage, WppChat, WppClientType, WppMessage, WppSector } from "@prisma/client";
 import { BadRequestError, InternalServerError } from "@rgranatodutra/http-errors";
@@ -23,6 +23,8 @@ import internalChatsService from "./internal-chats.service";
 import messagesDistributionService from "./messages-distribution.service";
 import messagesService from "./messages.service";
 import prismaService from "./prisma.service";
+import contactsService from "./contacts.service";
+import { createUploadTraceLogger } from "../utils/file-upload-trace";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -34,6 +36,7 @@ interface SendBotMessageData {
 	chat: WppChat;
 	text?: string | null;
 	quotedId?: number | null;
+	agentId?: number | null;
 	fileId?: number | null;
 }
 interface WhatsappForwardTarget {
@@ -54,6 +57,7 @@ interface SendMessageData {
 	text?: string | null;
 	fileId?: number;
 	isForwarded?: boolean;
+	traceId?: string;
 }
 
 interface EditMessageData {
@@ -205,10 +209,21 @@ class WhatsappService {
 		data.sendAsDocument = parseBoolean(data.sendAsDocument);
 		data.sendAsAudio = parseBoolean(data.sendAsAudio);
 
-		const process = new ProcessingLogger(session.instance, "send-message", `${to}-${Date.now()}`, data);
+		const traceId = data.traceId || `${to}-${Date.now()}`;
+		const trace = createUploadTraceLogger("whatsapp-service.service.send-message", traceId);
+		const process = new ProcessingLogger(session.instance, "send-message", traceId, data);
 		let pendingMsg: WppMessage | null = null;
 
 		process.log("Iniciando o envio da mensagem.");
+		trace.info("send-message.start", {
+			clientId,
+			to,
+			contactId: data.contactId,
+			chatId: data.chatId,
+			fileId: data.fileId,
+			sendAsAudio: data.sendAsAudio,
+			sendAsDocument: data.sendAsDocument,
+		});
 		try {
 			process.log("Obtendo client do whatsapp...");
 			const client = this.getClient(clientId);
@@ -247,18 +262,25 @@ class WhatsappService {
 					}
 				});
 
-				options.quotedId = (quotedMsg.wwebjsId || quotedMsg.wabaId)!;
+				options.quotedId = (quotedMsg.wwebjsIdStanza || quotedMsg.wwebjsId || quotedMsg.wabaId || quotedMsg.gupshupId)!;
 				message.quotedId = quotedMsg.id;
 				process.log(`ID enviado: ${options.quotedId}`);
 			}
 
 			if ("fileId" in data && !!data.fileId) {
 				process.log(`Processando arquivo com ID: ${data.fileId}`);
+				trace.info("file.metadata.fetch.start", { fileId: data.fileId });
 
 				const fileData = await filesService.fetchFileMetadata(data.fileId);
+				trace.info("file.metadata.fetch.success", {
+					fileId: fileData.id,
+					fileName: fileData.name,
+					fileSize: fileData.size,
+					fileType: fileData.mime_type,
+				});
 
 				process.log(`Arquivo encontrado: ${fileData.name}`);
-				const publicFileUrl = `https://inpulse.infotecrs.inf.br/public/${session.instance}/files/${fileData.public_id}`;
+				const publicFileUrl = filesService.getPublicFileUrl(session.instance, fileData.public_id);
 
 				options = {
 					...options,
@@ -283,14 +305,29 @@ class WhatsappService {
 			}
 
 			process.log("Salvando mensagem no banco de dados.", message);
+			trace.info("message.pending.persist.start", {
+				type: message.type,
+				fileId: message.fileId,
+			});
 			pendingMsg = await messagesService.insertMessage(message);
+			trace.info("message.pending.persist.success", { messageId: pendingMsg.id });
 			process.log("Enviando mensagem para o cliente.");
 
 			messagesDistributionService.notifyMessage(process, pendingMsg);
 			process.log("Mensagem pendente notificada via socket.", pendingMsg);
 
 			process.log("Enviando mensagem para o WhatsApp.", options);
+			trace.info("client.send.start", {
+				clientId: client.id,
+				to: options.to,
+				hasFile: "fileId" in data && !!data.fileId,
+			});
 			const sentMsg = await client.sendMessage(options);
+			trace.info("client.send.success", {
+				wwebjsId: sentMsg.wwebjsId,
+				wabaId: sentMsg.wabaId,
+				gupshupId: sentMsg.gupshupId,
+			});
 			process.log("Atualizando mensagem no banco de dados.", sentMsg);
 
 			message = {
@@ -317,10 +354,21 @@ class WhatsappService {
 
 			messagesDistributionService.notifyMessage(process, savedMsg);
 			process.log("Mensagem salva no banco de dados.", savedMsg);
+			trace.info("send-message.success", {
+				messageId: savedMsg.id,
+				status: savedMsg.status,
+				fileId: savedMsg.fileId,
+			});
 			process.success(savedMsg);
 
 			return savedMsg;
 		} catch (err) {
+			trace.error("send-message.failed", err, {
+				pendingMessageId: pendingMsg?.id,
+				clientId,
+				to,
+				fileId: data.fileId,
+			});
 			if (pendingMsg) {
 				try {
 					const errorMessage = await messagesService.updateMessage(pendingMsg.id, { status: "ERROR" });
@@ -336,12 +384,225 @@ class WhatsappService {
 		}
 	}
 
+	public async createSimulatedAgentMessage(chatId: number, text: string, agentId: number) {
+		const process = new ProcessingLogger("internal", "simulate-agent-message", `${chatId}-${Date.now()}`, {
+			chatId,
+			agentId,
+		});
+
+		const chat = await prismaService.wppChat.findUnique({
+			where: { id: chatId },
+			include: { contact: true },
+		});
+
+		if (!chat || !chat.contact) {
+			throw new BadRequestError("Chat ou contato não encontrado.");
+		}
+
+		const contactAddress = contactsService.resolveContactAddress(chat.contact);
+		if (!contactAddress) {
+			throw new BadRequestError("Contato sem identificador WhatsApp para envio.");
+		}
+
+		const now = new Date();
+		const message = await messagesService.insertMessage({
+			instance: chat.instance,
+			status: "SENT",
+			timestamp: now.getTime().toString(),
+			sentAt: now,
+			from: `bot:ai-agent:${agentId}`,
+			to: contactAddress,
+			type: "chat",
+			body: text,
+			chatId: chat.id,
+			contactId: chat.contact.id,
+			agentId,
+			clientId: null,
+		});
+
+		await messagesDistributionService.notifyMessage(process, message);
+		process.success(message);
+
+		return message;
+	}
+
+	public async sendAgentMessage(chatId: number, text: string, agentId: number, providedClientId: number | null = null) {
+		Logger.info(`[agent-send] Starting agent message send for chat ${chatId}`);
+		const chat = await prismaService.wppChat.findUnique({
+			where: { id: chatId },
+			include: {
+				contact: true,
+				sector: true,
+			},
+		});
+
+		if (!chat || !chat.contact) {
+			throw new BadRequestError("Chat ou contato não encontrado.");
+		}
+
+		const contactAddress = contactsService.resolveContactAddress(chat.contact);
+		if (!contactAddress) {
+			throw new BadRequestError("Contato sem identificador WhatsApp para envio.");
+		}
+
+		let resolvedFrom: "provided" | "last-message" | "sector-default" | "none" = "none";
+		let resolvedClientId =
+			typeof providedClientId === "number" && Number.isInteger(providedClientId) && providedClientId > 0
+				? providedClientId
+				: null;
+
+		if (resolvedClientId !== null) {
+			resolvedFrom = "provided";
+		}
+
+		if (resolvedClientId === null) {
+			const latestChatMessage = await prismaService.wppMessage.findFirst({
+				where: {
+					chatId,
+					clientId: { not: null },
+				},
+				orderBy: [{ sentAt: "desc" }, { id: "desc" }],
+			});
+
+			resolvedClientId = latestChatMessage?.clientId ?? null;
+			if (resolvedClientId !== null) {
+				resolvedFrom = "last-message";
+			}
+		}
+
+		if (resolvedClientId === null) {
+			resolvedClientId = chat.sector?.defaultClientId ?? null;
+			if (resolvedClientId !== null) {
+				resolvedFrom = "sector-default";
+			}
+		}
+
+		Logger.debug(`[agent-send] Agent message resolution context for chat ${chatId}`, {
+			agentId,
+			providedClientId,
+			resolvedClientId,
+			resolvedFrom,
+			sectorDefaultClientId: chat.sector?.defaultClientId ?? null,
+			contactId: chat.contact.id,
+			textLength: text.length,
+		});
+
+		if (resolvedClientId === null) {
+			Logger.error(`[agent-send] No clientId available to send agent message for chat ${chatId}`);
+			throw new BadRequestError("Client do WhatsApp não encontrado para envio do agente.");
+		}
+
+		Logger.info(`[agent-send] Sending agent ${agentId} message on chat ${chatId} using client ${resolvedClientId} (${resolvedFrom})`);
+
+		return this.sendBotMessage(contactAddress, resolvedClientId, {
+			chat,
+			text,
+			agentId,
+		});
+	}
+
+	public async createSimulatedAgentTemplateMessage(
+		chatId: number,
+		agentId: number,
+		templateName: string,
+		templateLanguage: string | null,
+	) {
+		const process = new ProcessingLogger("internal", "simulate-agent-template-message", `${chatId}-${Date.now()}`, {
+			chatId,
+			agentId,
+			templateName,
+			templateLanguage,
+		});
+
+		const chat = await prismaService.wppChat.findUnique({
+			where: { id: chatId },
+			include: {
+				contact: true,
+				sector: true,
+			},
+		});
+
+		if (!chat || !chat.contact) {
+			throw new BadRequestError("Chat ou contato não encontrado.");
+		}
+
+		const contactAddress = contactsService.resolveContactAddress(chat.contact);
+		if (!contactAddress) {
+			throw new BadRequestError("Contato sem identificador WhatsApp para envio.");
+		}
+
+		const templateText = await this.resolveTemplatePreviewText(
+			chat.sector?.defaultClientId ?? null,
+			templateName,
+			templateLanguage,
+		);
+
+		const now = new Date();
+		const message = await messagesService.insertMessage({
+			instance: chat.instance,
+			status: "SENT",
+			timestamp: now.getTime().toString(),
+			sentAt: now,
+			from: `bot:ai-agent:${agentId}`,
+			to: contactAddress,
+			type: "chat",
+			body: templateText,
+			chatId: chat.id,
+			contactId: chat.contact.id,
+			agentId,
+			clientId: null,
+		});
+
+		await messagesDistributionService.notifyMessage(process, message);
+		process.success(message);
+
+		return message;
+	}
+
+	private async resolveTemplatePreviewText(
+		clientId: number | null,
+		templateName: string,
+		templateLanguage: string | null,
+	): Promise<string> {
+		if (!clientId) {
+			return templateName;
+		}
+
+		try {
+			const templates = await this.getTemplates(clientId);
+			const template = templates.find((item) => {
+				if (item.name !== templateName) {
+					return false;
+				}
+
+				if (!templateLanguage) {
+					return true;
+				}
+
+				return item.language === templateLanguage;
+			});
+
+			return template?.text?.trim() || templateName;
+		} catch (error) {
+			Logger.debug(`[simulate-agent-template-message] Failed to resolve template text: ${sanitizeErrorMessage(error)}`);
+			return templateName;
+		}
+	}
+
 	public async sendBotMessage(to: string, clientId: number, data: SendBotMessageData) {
 		const process = new ProcessingLogger(data.chat.instance, "send-bot-message", `${to}-${Date.now()}`, data);
 		let pendingMsg: WppMessage | null = null;
 		const text = data.text ?? "";
 
 		process.log("Iniciando o envio da mensagem.");
+		Logger.info(`[send-bot-message] Starting outbound send for chat ${data.chat.id} using client ${clientId}`);
+		Logger.debug(`[send-bot-message] Outbound payload`, {
+			chatId: data.chat.id,
+			contactId: data.chat.contactId,
+			agentId: data.agentId ?? null,
+			quotedId: data.quotedId ?? null,
+			textLength: text.length,
+		});
 		try {
 			process.log("Obtendo client do whatsapp...");
 			const client = this.getClient(clientId);
@@ -357,11 +618,12 @@ class WhatsappService {
 				status: "PENDING",
 				timestamp: now.getTime().toString(),
 				sentAt: now,
-				from: `bot:${client._phone}`,
+				from: data.agentId ? `bot:ai-agent:${data.agentId}` : `bot:${client._phone}`,
 				to: `${to}`,
 				type: "chat",
 				body: text,
-				clientId: client.id
+				clientId: client.id,
+				...(data.agentId ? { agentId: data.agentId } : {}),
 			} as CreateMessageDto;
 
 			let options = { to, text } as SendMessageOptions;
@@ -376,7 +638,7 @@ class WhatsappService {
 					}
 				});
 
-				options.quotedId = (quotedMsg.wwebjsId || quotedMsg.wabaId)!;
+				options.quotedId = (quotedMsg.wwebjsIdStanza || quotedMsg.wwebjsId || quotedMsg.wabaId || quotedMsg.gupshupId)!;
 				message.quotedId = quotedMsg.id;
 			}
 
@@ -389,7 +651,7 @@ class WhatsappService {
 					file: fileData,
 					fileId: data.fileId,
 					localFileUrl: filesService.getFileDownloadUrl(data.fileId),
-					publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${data.chat.instance}/files/${fileData.public_id}`,
+					publicFileUrl: filesService.getPublicFileUrl(data.chat.instance, fileData.public_id),
 					sendAsAudio: false,
 					sendAsDocument: ["image", "video"].every((type) => !fileData.mime_type.startsWith(type)),
 				};
@@ -432,6 +694,12 @@ class WhatsappService {
 							: null
 			});
 			process.log("Mensagem salva no banco de dados.", savedMsg);
+			Logger.info(`[send-bot-message] Outbound send completed for chat ${data.chat.id}`);
+			Logger.debug(`[send-bot-message] Outbound send summary`, {
+				messageId: savedMsg.id,
+				agentId: data.agentId ?? null,
+				clientId,
+			});
 
 			messagesDistributionService.notifyMessage(process, savedMsg);
 			process.success(savedMsg);
@@ -449,6 +717,10 @@ class WhatsappService {
 			}
 
 			process.failed("Erro ao enviar mensagem: " + sanitizeErrorMessage(err));
+			Logger.error(
+				`[send-bot-message] Outbound send failed for chat ${data.chat.id}`,
+				err instanceof Error ? err : new Error(String(err)),
+			);
 			throw new BadRequestError("Erro ao enviar mensagem.", err);
 		}
 	}
@@ -631,22 +903,22 @@ class WhatsappService {
 			try {
 				const client = await this.getClient(clientId);
 
-				if (!(client instanceof WWEBJSWhatsappClient)) {
-					throw new BadRequestError(
-						"O encaminhamento nativo só é suportado por conexões do tipo QR Code (WWEBJS)."
+				if (!client) {
+					throw new BadRequestError("Client do WhatsApp não encontrado.");
+				}
+
+				if (
+					!(client instanceof WWEBJSWhatsappClient) &&
+					!(client instanceof RemoteWhatsappClient)
+				) {
+					process.log(
+						"Cliente sem encaminhamento nativo detectado. Aplicando fallback de encaminhamento para o provedor atual."
 					);
 				}
 
 				for (const target of whatsappTargets) {
 					try {
-						const contact = await prismaService.wppContact.findUnique({
-							where: {
-								instance_phone: {
-									instance: session.instance,
-									phone: target.id
-								}
-							}
-						});
+						const contact = await contactsService.findContactByAddress(session.instance, target.id);
 						const chat = contact
 							? await prismaService.wppChat.findFirst({
 								where: {
@@ -696,9 +968,20 @@ class WhatsappService {
 									(options as SendFileOptions).sendAsDocument = originalMsg.type === "document";
 								}
 
-								await client.sendMessage(options);
+								await client.sendMessage(options, target.isGroup);
 							} else {
-								await client.forwardMessage(target.id, originalMsg.wwebjsId!, target.isGroup);
+								const messageId = this.resolveForwardSourceMessageId(
+									client,
+									originalMsg as WppMessage
+								);
+
+								if (!messageId) {
+									throw new BadRequestError(
+										`A mensagem original ID:${originalMsg.id} não possui identificador compatível para encaminhamento no cliente atual.`
+									);
+								}
+
+								await client.forwardMessage(target.id, messageId, target.isGroup);
 							}
 
 							process.log(
@@ -734,6 +1017,26 @@ class WhatsappService {
 		process.success("Processo de encaminhamento concluído.");
 	}
 
+	private resolveForwardSourceMessageId(client: WhatsappClient, message: WppMessage): string | null {
+		if (client instanceof WWEBJSWhatsappClient) {
+			return message.wwebjsId;
+		}
+
+		if (client instanceof RemoteWhatsappClient) {
+			return message.wwebjsIdStanza || message.wwebjsId || message.wabaId || message.gupshupId || null;
+		}
+
+		if (client instanceof WABAWhatsappClient) {
+			return message.wabaId || message.gupshupId || message.wwebjsId || message.wwebjsIdStanza || null;
+		}
+
+		if (client instanceof GupshupWhatsappClient) {
+			return message.gupshupId || message.wabaId || message.wwebjsId || message.wwebjsIdStanza || null;
+		}
+
+		return message.wwebjsId || message.wwebjsIdStanza || message.wabaId || message.gupshupId || null;
+	}
+
 	public async sendAutoReplyMessage(
 		instance: string,
 		sector: WppSector,
@@ -750,9 +1053,7 @@ class WhatsappService {
 			if (!client) {
 				throw new InternalServerError("Client do WhatsApp não encontrado.");
 			}
-			const contact = await prismaService.wppContact.findUnique({
-				where: { instance_phone: { instance, phone: to } }
-			});
+			const contact = await contactsService.findContactByAddress(instance, to);
 			const chat = contact
 				? await prismaService.wppChat.findFirst({
 					where: { contactId: contact.id, isFinished: false }
@@ -771,7 +1072,7 @@ class WhatsappService {
 					file: fileData,
 					fileId: fileId,
 					localFileUrl: filesService.getFileDownloadUrl(fileId),
-					publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${instance}/files/${fileId}`,
+					publicFileUrl: filesService.getPublicFileUrl(instance, fileData.public_id),
 					sendAsAudio: false,
 					sendAsDocument: ["image", "video"].every((type) => !fileData.mime_type.startsWith(type)),
 				}
@@ -832,14 +1133,7 @@ class WhatsappService {
 		try {
 			process.log("Verificando janela de conversa...");
 
-			const contact = await prismaService.wppContact.findUnique({
-				where: {
-					instance_phone: {
-						instance,
-						phone
-					}
-				}
-			});
+			const contact = await contactsService.findContactByAddress(instance, phone);
 
 			if (!contact) {
 				process.log("Contato não encontrado - janela considerada fechada");

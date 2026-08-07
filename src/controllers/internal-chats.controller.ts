@@ -3,46 +3,28 @@ import internalChatsService from "../services/internal-chats.service";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import upload from "../middlewares/multer.middleware";
+import { createUploadTraceLogger, resolveUploadTraceId } from "../utils/file-upload-trace";
 
 class InternalChatsController {
 	constructor(public readonly router: Router) {
 		this.router = Router();
 
 		// Cria um chat interno de grupo ou direto
-		this.router.post(
-			"/api/internal/chats",
-			isAuthenticated,
-			upload.single("file"),
-			this.startInternalChat
-		);
+		this.router.post("/api/internal/chats", isAuthenticated, upload.single("file"), this.startInternalChat);
 
 		// Obtem chats internos do usuário através da sessão
-		this.router.get(
-			"/api/internal/session/chats",
-			isAuthenticated,
-			this.getSessionInternalChats
-		);
+		this.router.get("/api/internal/session/chats", isAuthenticated, this.getSessionInternalChats);
+
+		this.router.get("/api/internal/chats/:id/messages", isAuthenticated, this.getInternalChatMessages);
 
 		// Obtem grupos internos
-		this.router.get(
-			"/api/internal/groups",
-			isAuthenticated,
-			this.getInternalGroups
-		);
+		this.router.get("/api/internal/groups", isAuthenticated, this.getInternalGroups);
 
 		// Deletar chat interno
-		this.router.delete(
-			"/api/internal/chats/:id",
-			isAuthenticated,
-			this.deleteInternalChat
-		);
+		this.router.delete("/api/internal/chats/:id", isAuthenticated, this.deleteInternalChat);
 
 		// Finalizar chat interno (sem excluir)
-		this.router.post(
-			"/api/internal/chats/:id/finish",
-			isAuthenticated,
-			this.finishInternalChat
-		);
+		this.router.post("/api/internal/chats/:id/finish", isAuthenticated, this.finishInternalChat);
 
 		// Envia mensagem para um chat interno
 		this.router.post(
@@ -53,18 +35,10 @@ class InternalChatsController {
 		);
 
 		// Edita uma mensagem de chat interno
-		this.router.put(
-			"/api/internal/messages/:id",
-			isAuthenticated,
-			this.editInternalMessage
-		);
+		this.router.put("/api/internal/messages/:id", isAuthenticated, this.editInternalMessage);
 
 		// Atualiza grupo interno
-		this.router.put(
-			"/api/internal/groups/:id",
-			isAuthenticated,
-			this.updateInternalGroup
-		);
+		this.router.put("/api/internal/groups/:id", isAuthenticated, this.updateInternalGroup);
 
 		// Atualiza imagem do grupo interno
 		this.router.put(
@@ -75,23 +49,11 @@ class InternalChatsController {
 		);
 
 		// Atualiza grupo interno
-		this.router.put(
-			"/api/internal/groups/:id/image",
-			isAuthenticated,
-			this.updateInternalGroup
-		);
+		this.router.put("/api/internal/groups/:id/image", isAuthenticated, this.updateInternalGroup);
 
-		this.router.patch(
-			"/api/internal/chat/:id/mark-as-read",
-			isAuthenticated,
-			this.markChatAsRead
-		);
+		this.router.patch("/api/internal/chat/:id/mark-as-read", isAuthenticated, this.markChatAsRead);
 
-		this.router.get(
-			"/api/internal/monitor/chats",
-			isAuthenticated,
-			this.getInternalChatsMonitor
-		);
+		this.router.get("/api/internal/monitor/chats", isAuthenticated, this.getInternalChatsMonitor);
 	}
 
 	private async startInternalChat(req: Request, res: Response) {
@@ -104,14 +66,8 @@ class InternalChatsController {
 		const groupName = body.groupName || "";
 		const groupId = body.groupId || null;
 
-		if (
-			!participants ||
-			!Array.isArray(participants) ||
-			!participants.every((v) => typeof v === "number")
-		) {
-			throw new BadRequestError(
-				"Participants must be an array of numbers"
-			);
+		if (!participants || !Array.isArray(participants) || !participants.every((v) => typeof v === "number")) {
+			throw new BadRequestError("Participants must be an array of numbers");
 		}
 
 		if (isGroup && groupName.length < 1) {
@@ -134,9 +90,7 @@ class InternalChatsController {
 	}
 
 	private async getInternalChatsMonitor(req: Request, res: Response) {
-		const data = await internalChatsService.getInternalChatsMonitor(
-			req.session
-		);
+		const data = await internalChatsService.getInternalChatsMonitor(req.session);
 
 		res.status(200).send({
 			message: "Internal chats retrieved successfully!",
@@ -144,12 +98,32 @@ class InternalChatsController {
 		});
 	}
 	private async getSessionInternalChats(req: Request, res: Response) {
-		const data = await internalChatsService.getInternalChatsBySession(
-			req.session
-		);
+		const includeMessages = req.query["messages"] !== "false";
+		const data = await internalChatsService.getInternalChatsBySession(req.session, includeMessages);
 
 		res.status(200).send({
 			message: "Internal chats retrieved successfully!",
+			data
+		});
+	}
+
+	private async getInternalChatMessages(req: Request, res: Response) {
+		const chatId = Number(req.params["id"]);
+		const limit = Math.min(Math.max(Math.trunc(Number(req.query["limit"])) || 50, 1), 100);
+		const beforeId = req.query["beforeId"] ? Number(req.query["beforeId"]) : null;
+
+		if (!Number.isInteger(chatId) || chatId <= 0) {
+			throw new BadRequestError("Chat ID is required!");
+		}
+
+		if (beforeId !== null && (!Number.isInteger(beforeId) || beforeId <= 0)) {
+			throw new BadRequestError("beforeId must be a positive integer!");
+		}
+
+		const data = await internalChatsService.getInternalChatMessagesPage(req.session, chatId, limit, beforeId);
+
+		res.status(200).send({
+			message: "Internal chat messages retrieved successfully!",
 			data
 		});
 	}
@@ -164,8 +138,23 @@ class InternalChatsController {
 	}
 
 	private async sendMessageToChat(req: Request, res: Response) {
+		const traceId = resolveUploadTraceId(req.body.traceId, req.headers["x-upload-trace-id"]);
+		const trace = createUploadTraceLogger("whatsapp-service.controller.internal-chats", traceId);
 		const data = { ...req.body, file: req.file || null };
+		data.authToken = (req.headers["authorization"] as string | undefined) || "";
+		data.traceId = traceId;
+		trace.info("request.received", {
+			chatId: data.chatId,
+			hasFile: !!req.file,
+			fileName: req.file?.originalname,
+			fileSize: req.file?.size,
+			fileType: req.file?.mimetype
+		});
 		await internalChatsService.sendMessage(req.session, data);
+		trace.info("request.completed", {
+			chatId: data.chatId,
+			hasFile: !!req.file
+		});
 
 		res.status(201).send({ message: "Message sent successfully!" });
 	}
@@ -198,10 +187,7 @@ class InternalChatsController {
 	private async updateInternalGroup(req: Request, res: Response) {
 		const groupId = Number(req.params["id"]);
 
-		const updated = await internalChatsService.updateInternalGroup(
-			groupId,
-			req.body
-		);
+		const updated = await internalChatsService.updateInternalGroup(groupId, req.body);
 
 		res.status(200).send({
 			message: "Group members updated!",
@@ -217,11 +203,7 @@ class InternalChatsController {
 			throw new BadRequestError("File is required");
 		}
 
-		const updated = await internalChatsService.updateGroupImage(
-			req.session,
-			groupId,
-			file
-		);
+		const updated = await internalChatsService.updateGroupImage(req.session, groupId, file);
 
 		res.status(200).send({
 			message: "Group image updated!",
@@ -257,10 +239,7 @@ class InternalChatsController {
 	private async markChatAsRead(req: Request, res: Response) {
 		const chatId = Number(req.params["id"]);
 
-		await internalChatsService.markChatMessagesAsRead(
-			chatId,
-			req.session.userId
-		);
+		await internalChatsService.markChatMessagesAsRead(chatId, req.session.userId);
 
 		res.status(200).send({
 			message: "Chat marked as read!"

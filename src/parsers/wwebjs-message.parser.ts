@@ -1,5 +1,5 @@
 import WAWebJS from "whatsapp-web.js";
-import { FileDirType } from "@in.pulse-crm/sdk";
+import { FileDirType } from "../sdk-local";
 import { WppMessageStatus } from "@prisma/client";
 import mime from "mime-types";
 import ProcessingLogger from "../utils/processing-logger";
@@ -20,13 +20,17 @@ class WWEBJSMessageParser {
 		fromPhone: string | null = null
 	) {
 		logger.log(`Sanitizando mensagem...`);
+		const fallbackFrom = message.from.split("@")[0] || "";
+		const fallbackTo = message.to.split("@")[0] || "";
+		const resolvedFrom = fromPhone || fallbackFrom;
+		const resolvedTo = fallbackTo;
 
 		const parsedMessage: CreateMessageDto = {
 			instance,
 			wwebjsId: message.id._serialized,
 			wwebjsIdStanza: message.id.id,
-			from: `${(message.fromMe ? "me:" : "") + fromPhone || message.from.split("@")[0]}`,
-			to: `${(message.fromMe ? "" : "me:") + message.to.split("@")[0]}`,
+			from: message.fromMe ? `me:${resolvedFrom}` : resolvedFrom,
+			to: message.fromMe ? resolvedTo : `me:${resolvedTo}`,
 			body: message.type === "vcard" ? parseVCard(message.body) : message.body,
 			type: message.type,
 			timestamp: String(message.timestamp * 1000),

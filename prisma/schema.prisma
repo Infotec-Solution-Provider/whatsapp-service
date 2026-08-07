@@ -4,37 +4,85 @@ generator client {
 
 datasource db {
   provider = "mysql"
-    url      = env("WHATSAPP_DATABASE_URL")
+  url      = env("WHATSAPP_DATABASE_URL")
 }
 
 model WppClient {
-  id                Int               @id @default(autoincrement())
+  id                Int                       @id @default(autoincrement())
   name              String
   phone             String?
-  instance          String            @map("instance")
+  instance          String                    @map("instance")
   type              WppClientType
-  isActive          Boolean           @map("is_active")
-  WABAPhoneId       String?           @map("waba_phone_id")
-  WABAAccountId     String?           @map("waba_account_id")
-  WABAToken         String?           @map("waba_token")
-  gupshupToken      String?           @map("gupshup_token")
-  gupshupAppName    String?           @map("gupshup_app_name")
-  gupshupAppId      String?           @map("gupshup_app_id")
-  remoteClientUrl   String?           @map("remote_client_url")
-  sectors           WppSector[]       @relation("sector_clients")
-  defaultForSectors WppSector[]       @relation("sector_default_client")
+  isActive          Boolean                   @map("is_active")
+  WABAPhoneId       String?                   @map("waba_phone_id")
+  WABAAccountId     String?                   @map("waba_account_id")
+  WABAToken         String?                   @map("waba_token")
+  gupshupToken      String?                   @map("gupshup_token")
+  gupshupAppName    String?                   @map("gupshup_app_name")
+  gupshupAppId      String?                   @map("gupshup_app_id")
+  remoteClientUrl   String?                   @map("remote_client_url")
+  sectors           WppSector[]               @relation("sector_clients")
+  defaultForSectors WppSector[]               @relation("sector_default_client")
   messages          WppMessage[]
   internalMessages  InternalMessage[]
+  sessionSnapshot   WppClientSessionSnapshot?
+  sessionEvents     WppClientSessionEvent[]
 
   @@unique([name])
   @@index([isActive])
   @@map("clients")
 }
 
+model WppClientSessionSnapshot {
+  clientId                Int       @id @map("client_id")
+  contractVersion         Int       @map("contract_version")
+  state                   String
+  phone                   String?
+  processStartedAt        DateTime  @map("process_started_at")
+  stateChangedAt          DateTime  @map("state_changed_at")
+  lastActivityAt          DateTime? @map("last_activity_at")
+  connectedSince          DateTime? @map("connected_since")
+  lastConnectedAt         DateTime? @map("last_connected_at")
+  lastDisconnectedAt      DateTime? @map("last_disconnected_at")
+  lastDisconnectReason    String?   @map("last_disconnect_reason") @db.VarChar(255)
+  reconnectAttempts       Int       @default(0) @map("reconnect_attempts")
+  lastReconnectAt         DateTime? @map("last_reconnect_at")
+  lastObservedAt          DateTime  @map("last_observed_at")
+  currentOperationId      String?   @map("current_operation_id") @db.VarChar(36)
+  currentOperationType    String?   @map("current_operation_type") @db.VarChar(32)
+  currentOperationStarted DateTime? @map("current_operation_started_at")
+  consecutivePollFailures Int       @default(0) @map("consecutive_poll_failures")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+  client                  WppClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([state])
+  @@index([lastObservedAt])
+  @@map("client_session_snapshots")
+}
+
+model WppClientSessionEvent {
+  id            Int       @id @default(autoincrement())
+  clientId      Int       @map("client_id")
+  previousState String?   @map("previous_state") @db.VarChar(32)
+  state         String    @db.VarChar(32)
+  reason        String?   @db.VarChar(255)
+  occurredAt    DateTime  @map("occurred_at")
+  traceId       String    @unique @map("trace_id") @db.VarChar(64)
+  transitionKey String    @unique @map("transition_key") @db.VarChar(128)
+  source        String    @db.VarChar(16)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  client        WppClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, occurredAt])
+  @@map("client_session_events")
+}
+
 model WppContact {
   id                        Int       @id @default(autoincrement())
   name                      String
-  phone                     String
+  phone                     String?
+  whatsappId                String?   @map("whatsapp_id")
   customerId                Int?      @map("customer_id")
   instance                  String    @map("instance")
   isDeleted                 Boolean   @default(false) @map("is_deleted")
@@ -51,6 +99,7 @@ model WppContact {
   WppSchedule WppSchedule[]
   sectors     WppContactSector[]
 
+  @@unique([instance, whatsappId])
   @@unique([instance, phone])
   @@index([customerId, instance])
   @@map("contacts")
@@ -72,7 +121,7 @@ model WppMessage {
   contactId        Int?             @map("contact_id")
   isForwarded      Boolean          @default(false) @map("is_forwarded")
   isEdited         Boolean          @default(false) @map("is_edited")
-  body             String
+  body             String           @db.Text
   timestamp        String
   statusTimestamp  String?          @map("status_timestamp")
   sentAt           DateTime         @map("sent_at")
@@ -82,6 +131,7 @@ model WppMessage {
   fileType         String?          @map("file_type")
   fileSize         String?          @map("file_size")
   userId           Int?             @map("user_id")
+  agentId          Int?             @map("agent_id")
   billingCategory  String?          @map("billing_category")
   clientId         Int?             @map("client_id")
   WppChat          WppChat?         @relation(fields: [chatId], references: [id])
@@ -90,6 +140,8 @@ model WppMessage {
 
   @@index([from, to, chatId])
   @@index([chatId, userId])
+  @@index([instance, sentAt, chatId], map: "messages_instance_sent_at_chat_id_idx")
+  @@index([instance, chatId, sentAt, id], map: "messages_instance_chat_id_sent_at_id_idx")
   @@map("messages")
 }
 
@@ -100,6 +152,7 @@ model WppChat {
   userId     Int?            @map("user_id")
   walletId   Int?            @map("wallet_id")
   botId      Int?            @map("bot_id")
+  agentId    Int?            @map("agent_id")
   resultId   Int?            @map("result_id")
   sectorId   Int?            @map("sector_id")
   scheduleId Int?            @unique @map("schedule_id")
@@ -122,6 +175,9 @@ model WppChat {
   notifications Notification[]
 
   @@index([userId])
+  @@index([instance, isFinished, finishedAt], map: "chats_instance_is_finished_finished_at_idx")
+  @@index([instance, isFinished, userId, sectorId], map: "chats_instance_is_finished_user_id_sector_id_idx")
+  @@index([instance, contactId, isFinished, finishedAt], map: "chats_instance_contact_id_is_finished_finished_at_idx")
   @@map("chats")
 }
 
@@ -134,25 +190,45 @@ model InternalMessage {
   isForwarded Boolean @map("is_forwarded")
   isEdited    Boolean @map("is_edited")
 
-  wwebjsId       String?           @unique @map("wwebjs_id")
-  wwebjsIdStanza String?           @unique @map("wwebjs_id_stanza")
-  internalChatId Int               @map("internalchat_id")
-  body           String
-  timestamp      String            @map("timestamp")
-  status         WppMessageStatus
-  fileId         Int?              @map("file_id")
-  fileName       String?           @map("file_name")
-  fileType       String?           @map("file_type")
-  fileSize       String?           @map("file_size")
-  mentions       InternalMention[]
-  clientId       Int?              @map("client_id")
+  wwebjsId         String?           @unique @map("wwebjs_id")
+  wwebjsIdStanza   String?           @unique @map("wwebjs_id_stanza")
+  internalChatId   Int               @map("internalchat_id")
+  body             String            @db.Text
+  timestamp        String            @map("timestamp")
+  status           WppMessageStatus
+  fileId           Int?              @map("file_id")
+  fileName         String?           @map("file_name")
+  fileType         String?           @map("file_type")
+  fileSize         String?           @map("file_size")
+  mentions         InternalMention[]
+  clientId         Int?              @map("client_id")
+  whatsappSenderId Int?              @map("whatsapp_sender_id")
 
   // Relações
-  chat   InternalChat? @relation(fields: [internalChatId], references: [id])
-  client WppClient?    @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  chat           InternalChat?           @relation(fields: [internalChatId], references: [id])
+  client         WppClient?              @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  whatsappSender InternalWhatsappSender? @relation(fields: [whatsappSenderId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   @@index([from, internalChatId])
+  @@index([internalChatId, id], map: "internalmessages_chat_id_id_idx")
+  @@index([whatsappSenderId, id], map: "internalmessages_whatsapp_sender_id_id_idx")
   @@map("internalmessages")
+}
+
+model InternalWhatsappSender {
+  id              Int               @id @default(autoincrement())
+  instance        String
+  senderId        String            @map("sender_id")
+  displayName     String?           @map("display_name")
+  isManuallyNamed Boolean           @default(false) @map("is_manually_named")
+  assignedBy      Int?              @map("assigned_by")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  messages        InternalMessage[]
+
+  @@unique([instance, senderId])
+  @@index([instance, displayName], map: "internal_whatsapp_senders_instance_display_name_idx")
+  @@map("internal_whatsapp_senders")
 }
 
 model InternalChat {
@@ -242,6 +318,23 @@ model WppContactSector {
 
   @@id([contactId, sectorId])
   @@map("contacts_sectors")
+}
+
+model CustomerProfileTag {
+  id           Int                    @id @default(autoincrement())
+  instance     String                 @map("instance")
+  customerId   Int                    @map("customer_id")
+  tagType      CustomerProfileTagType @map("tag_type")
+  tagValue     String                 @map("tag_value") @db.VarChar(64)
+  label        String                 @map("label") @db.VarChar(120)
+  color        String                 @map("color") @db.VarChar(32)
+  calculatedAt DateTime               @default(now()) @map("calculated_at")
+  metadataJson Json?                  @map("metadata_json")
+
+  @@unique([instance, customerId, tagType])
+  @@index([instance, customerId])
+  @@index([instance, tagType, tagValue])
+  @@map("customer_profile_tags")
 }
 
 model WppMessageFlow {
@@ -395,6 +488,14 @@ enum ParameterScope {
   INSTANCE
   SECTOR
   USER
+}
+
+enum CustomerProfileTagType {
+  INTERACTION_LEVEL
+  PURCHASE_LEVEL
+  CUSTOMER_AGE
+
+  @@map("customer_profile_tag_type")
 }
 
 model Notification {
@@ -642,22 +743,22 @@ enum WABAWebhookQueueStatus {
 }
 
 model WppMessageProcessingQueue {
-  id                  String                           @id @default(uuid())
-  instance            String                           @map("instance")
-  clientId            Int                              @map("client_id")
-  messageId           Int                              @map("message_id")
-  contactPhone        String                           @map("contact_phone")
-  contactName         String?                          @map("contact_name")
-  status              WppMessageProcessingQueueStatus  @default(PENDING)
-  retryCount          Int                              @default(0) @map("retry_count")
-  maxRetries          Int                              @default(3) @map("max_retries")
-  error               String?                          @map("error") @db.Text
-  createdAt           DateTime                         @default(now()) @map("created_at")
-  updatedAt           DateTime                         @updatedAt @map("updated_at")
-  processingStartedAt DateTime?                        @map("processing_started_at")
-  processedAt         DateTime?                        @map("processed_at")
-  lockedUntil         DateTime?                        @map("locked_until")
-  lockedBy            String?                          @map("locked_by")
+  id                  String                          @id @default(uuid())
+  instance            String                          @map("instance")
+  clientId            Int                             @map("client_id")
+  messageId           Int                             @map("message_id")
+  contactPhone        String                          @map("contact_phone")
+  contactName         String?                         @map("contact_name")
+  status              WppMessageProcessingQueueStatus @default(PENDING)
+  retryCount          Int                             @default(0) @map("retry_count")
+  maxRetries          Int                             @default(3) @map("max_retries")
+  error               String?                         @map("error") @db.Text
+  createdAt           DateTime                        @default(now()) @map("created_at")
+  updatedAt           DateTime                        @updatedAt @map("updated_at")
+  processingStartedAt DateTime?                       @map("processing_started_at")
+  processedAt         DateTime?                       @map("processed_at")
+  lockedUntil         DateTime?                       @map("locked_until")
+  lockedBy            String?                         @map("locked_by")
 
   @@index([instance, status, contactPhone])
   @@index([status, createdAt])
@@ -676,23 +777,23 @@ enum WppMessageProcessingQueueStatus {
 }
 
 model InternalMessageProcessingQueue {
-  id                  String                              @id @default(uuid())
-  instance            String                              @map("instance")
-  internalChatId      Int                                 @map("internal_chat_id")
-  internalMessageId   Int?                                @map("internal_message_id")
-  groupId             String                              @map("group_id")
-  messageData         String                              @map("message_data") @db.LongText  // JSON serializado da mensagem
-  authorName          String?                             @map("author_name")
+  id                  String                               @id @default(uuid())
+  instance            String                               @map("instance")
+  internalChatId      Int                                  @map("internal_chat_id")
+  internalMessageId   Int?                                 @map("internal_message_id")
+  groupId             String                               @map("group_id")
+  messageData         String                               @map("message_data") @db.LongText // JSON serializado da mensagem
+  authorName          String?                              @map("author_name")
   status              InternalMessageProcessingQueueStatus @default(PENDING)
-  retryCount          Int                                 @default(0) @map("retry_count")
-  maxRetries          Int                                 @default(3) @map("max_retries")
-  error               String?                             @map("error") @db.Text
-  createdAt           DateTime                            @default(now()) @map("created_at")
-  updatedAt           DateTime                            @updatedAt @map("updated_at")
-  processingStartedAt DateTime?                           @map("processing_started_at")
-  processedAt         DateTime?                           @map("processed_at")
-  lockedUntil         DateTime?                           @map("locked_until")
-  lockedBy            String?                             @map("locked_by")
+  retryCount          Int                                  @default(0) @map("retry_count")
+  maxRetries          Int                                  @default(3) @map("max_retries")
+  error               String?                              @map("error") @db.Text
+  createdAt           DateTime                             @default(now()) @map("created_at")
+  updatedAt           DateTime                             @updatedAt @map("updated_at")
+  processingStartedAt DateTime?                            @map("processing_started_at")
+  processedAt         DateTime?                            @map("processed_at")
+  lockedUntil         DateTime?                            @map("locked_until")
+  lockedBy            String?                              @map("locked_by")
 
   @@index([instance, status, groupId])
   @@index([status, createdAt])
@@ -711,24 +812,23 @@ enum InternalMessageProcessingQueueStatus {
 }
 
 model ProcessLog {
-  id               Int       @id @default(autoincrement())
-  instance         String    @map("instance")
-  processName      String    @map("process_name")
-  processId        String    @map("process_id")
-  status           String    @map("status") // SUCCESS or FAILED
-  startTime        DateTime  @map("start_time")
-  endTime          DateTime  @map("end_time")
-  duration         Int       @map("duration") // em ms
-  input            String?   @map("input") @db.LongText
-  output           String?   @map("output") @db.LongText
-  error            String?   @map("error") @db.LongText
-  errorMessage     String?   @map("error_message") @db.Text
-  logEntries       String?   @map("log_entries") @db.LongText
-  createdAt        DateTime  @default(now()) @map("created_at")
+  id           Int      @id @default(autoincrement())
+  instance     String   @map("instance")
+  processName  String   @map("process_name")
+  processId    String   @map("process_id")
+  status       String   @map("status") // SUCCESS or FAILED
+  startTime    DateTime @map("start_time")
+  endTime      DateTime @map("end_time")
+  duration     Int      @map("duration") // em ms
+  input        String?  @map("input") @db.LongText
+  output       String?  @map("output") @db.LongText
+  error        String?  @map("error") @db.LongText
+  errorMessage String?  @map("error_message") @db.Text
+  logEntries   String?  @map("log_entries") @db.LongText
+  createdAt    DateTime @default(now()) @map("created_at")
 
   @@index([instance, processName])
   @@index([status, createdAt])
   @@index([instance, status])
   @@map("process_logs")
 }
-

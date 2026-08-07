@@ -6,10 +6,20 @@ import onlyLocal from "../middlewares/only-local.middleware";
 
 class ChatsController {
 	constructor(public readonly router: Router) {
-		this.router.get("/api/internal/whatsapp/chats/:id", onlyLocal, this.getInternalChatById);
-		this.router.post("/api/internal/whatsapp/chats/:id/agent-send-message", onlyLocal, this.sendInternalAgentMessage);
 		this.router.get("/api/whatsapp/session/chats", isAuthenticated, this.getChatsBySession);
-		this.router.get("/api/whatsapp/chats/:id", isAuthenticated, this.getChatById);
+		this.router.get("/api/whatsapp/chats/:id", isAuthenticated, this.getChatById.bind(this));
+		this.router.get("/api/whatsapp/chats/:id/messages", isAuthenticated, this.getChatMessages.bind(this));
+		this.router.get("/api/internal/whatsapp/chats/:id", onlyLocal, this.getInternalChatById.bind(this));
+		this.router.post(
+			"/api/internal/whatsapp/chats/:id/agent-send-message",
+			onlyLocal,
+			this.sendInternalAgentMessage.bind(this)
+		);
+		this.router.post(
+			"/api/internal/whatsapp/chats/ensure-active",
+			onlyLocal,
+			this.ensureInternalActiveChat.bind(this)
+		);
 		this.router.post("/api/whatsapp/chats/:id/finish", isAuthenticated, this.finishChatById);
 		this.router.post("/api/whatsapp/chats", isAuthenticated, this.startChatByContactId);
 		this.router.get("/api/whatsapp/session/monitor", isAuthenticated, this.getChatsMonitor);
@@ -37,6 +47,35 @@ class ChatsController {
 		});
 	}
 	private async getChatById(req: Request, res: Response) {
+		return this.sendChatById(req, res);
+	}
+
+	private async getChatMessages(req: Request, res: Response) {
+		const chatId = Number(req.params["id"]);
+		const limit = Math.min(Math.max(Math.trunc(Number(req.query["limit"])) || 50, 1), 100);
+		const beforeId = req.query["beforeId"] ? Number(req.query["beforeId"]) : null;
+
+		if (!Number.isInteger(chatId) || chatId <= 0) {
+			throw new BadRequestError("Chat ID is required!");
+		}
+
+		if (beforeId !== null && (!Number.isInteger(beforeId) || beforeId <= 0)) {
+			throw new BadRequestError("beforeId must be a positive integer!");
+		}
+
+		const data = await chatsService.getChatMessagesPage(req.session, chatId, limit, beforeId);
+
+		res.status(200).send({
+			message: "Chat messages retrieved successfully!",
+			data
+		});
+	}
+
+	private async getInternalChatById(req: Request, res: Response) {
+		return this.sendChatById(req, res);
+	}
+
+	private async sendChatById(req: Request, res: Response) {
 		const { id } = req.params;
 
 		if (!id) {
@@ -55,22 +94,33 @@ class ChatsController {
 		});
 	}
 
-	private async getInternalChatById(req: Request, res: Response) {
-		const chatId = Number(req.params["id"]);
+	private async ensureInternalActiveChat(req: Request, res: Response) {
+		const { instance, contactId, agentId, systemMessage, sectorId, userId } = req.body as Record<string, unknown>;
 
-		if (!chatId || Number.isNaN(chatId)) {
-			throw new BadRequestError("Chat ID is required!");
+		if (typeof instance !== "string" || !instance.trim()) {
+			throw new BadRequestError("Instance is required!");
 		}
 
-		const chat = await chatsService.getChatById(chatId);
-
-		if (!chat) {
-			throw new NotFoundError("Chat not found!");
+		if (!Number.isInteger(contactId) || Number(contactId) <= 0) {
+			throw new BadRequestError("Contact ID is required!");
 		}
+
+		if (!Number.isInteger(agentId) || Number(agentId) <= 0) {
+			throw new BadRequestError("Agent ID is required!");
+		}
+
+		const data = await chatsService.ensureActiveChatForAgent({
+			instance: instance.trim(),
+			contactId: Number(contactId),
+			agentId: Number(agentId),
+			...(typeof systemMessage === "string" ? { systemMessage } : {}),
+			sectorId: Number.isInteger(sectorId) ? Number(sectorId) : null,
+			userId: Number.isInteger(userId) ? Number(userId) : null
+		});
 
 		res.status(200).send({
-			message: "Internal chat retrieved successfully!",
-			data: chat
+			message: data.existed ? "Chat already active." : "Chat started successfully!",
+			data
 		});
 	}
 
@@ -92,7 +142,7 @@ class ChatsController {
 		const message = await chatsService.sendInternalAgentMessage(chatId, {
 			clientId,
 			text,
-			fileId,
+			fileId
 		});
 
 		res.status(201).send({

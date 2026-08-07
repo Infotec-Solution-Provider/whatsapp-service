@@ -1,9 +1,8 @@
 import "dotenv/config";
 import { Logger } from "@in.pulse-crm/utils";
-import { GupshupWebhookQueueStatus, PrismaClient } from "@prisma/client";
+import { GupshupWebhookQueueStatus } from "@prisma/client";
+import prismaService from "./prisma.service";
 import gupshupService from "./gupshup.service";
-
-const prisma = new PrismaClient();
 
 const QUEUE_POLL_INTERVAL = parseInt(process.env["GUPSHUP_WEBHOOK_QUEUE_POLL_INTERVAL"] || "1000", 10);
 const MAX_CONCURRENT_PROCESSING = parseInt(process.env["GUPSHUP_WEBHOOK_MAX_CONCURRENT"] || "5", 10);
@@ -16,7 +15,7 @@ class GupshupWebhookQueueService {
    * Enqueue a webhook for later processing
    */
   async enqueue(instance: string, payload: unknown): Promise<string> {
-    const item = await prisma.gupshupWebhookQueue.create({
+    const item = await prismaService.gupshupWebhookQueue.create({
       data: {
         instance,
         payload: payload as any,
@@ -75,7 +74,7 @@ class GupshupWebhookQueueService {
   }
 
   private async getNextPendingItem() {
-    return prisma.gupshupWebhookQueue.findFirst({
+    return prismaService.gupshupWebhookQueue.findFirst({
       where: {
         status: GupshupWebhookQueueStatus.PENDING
       },
@@ -86,7 +85,7 @@ class GupshupWebhookQueueService {
   }
 
   private async processItem(id: string): Promise<void> {
-    const item = await prisma.gupshupWebhookQueue.update({
+    const item = await prismaService.gupshupWebhookQueue.update({
       where: { id },
       data: {
         status: GupshupWebhookQueueStatus.PROCESSING,
@@ -99,7 +98,7 @@ class GupshupWebhookQueueService {
       await gupshupService.handleWebhookEntry(item.instance, item.payload);
 
       // Mark as completed
-      await prisma.gupshupWebhookQueue.update({
+      await prismaService.gupshupWebhookQueue.update({
         where: { id },
         data: {
           status: GupshupWebhookQueueStatus.COMPLETED,
@@ -110,7 +109,7 @@ class GupshupWebhookQueueService {
       const newRetryCount = item.retryCount + 1;
       const shouldRetry = newRetryCount < item.maxRetries;
 
-      await prisma.gupshupWebhookQueue.update({
+      await prismaService.gupshupWebhookQueue.update({
         where: { id },
         data: {
           status: shouldRetry ? GupshupWebhookQueueStatus.PENDING : GupshupWebhookQueueStatus.FAILED,
@@ -127,7 +126,7 @@ class GupshupWebhookQueueService {
   }
 
   private async resetProcessingToPending(): Promise<void> {
-    const result = await prisma.gupshupWebhookQueue.updateMany({
+    const result = await prismaService.gupshupWebhookQueue.updateMany({
       where: {
         status: GupshupWebhookQueueStatus.PROCESSING
       },
@@ -147,10 +146,10 @@ class GupshupWebhookQueueService {
    */
   async getStats() {
     const [pending, processing, completed, failed] = await Promise.all([
-      prisma.gupshupWebhookQueue.count({ where: { status: GupshupWebhookQueueStatus.PENDING } }),
-      prisma.gupshupWebhookQueue.count({ where: { status: GupshupWebhookQueueStatus.PROCESSING } }),
-      prisma.gupshupWebhookQueue.count({ where: { status: GupshupWebhookQueueStatus.COMPLETED } }),
-      prisma.gupshupWebhookQueue.count({ where: { status: GupshupWebhookQueueStatus.FAILED } })
+      prismaService.gupshupWebhookQueue.count({ where: { status: GupshupWebhookQueueStatus.PENDING } }),
+      prismaService.gupshupWebhookQueue.count({ where: { status: GupshupWebhookQueueStatus.PROCESSING } }),
+      prismaService.gupshupWebhookQueue.count({ where: { status: GupshupWebhookQueueStatus.COMPLETED } }),
+      prismaService.gupshupWebhookQueue.count({ where: { status: GupshupWebhookQueueStatus.FAILED } })
     ]);
 
     return { pending, processing, completed, failed, activeProcessing: this.activeProcessing };
@@ -160,7 +159,7 @@ class GupshupWebhookQueueService {
    * Retry all failed items
    */
   async retryFailed(): Promise<number> {
-    const result = await prisma.gupshupWebhookQueue.updateMany({
+    const result = await prismaService.gupshupWebhookQueue.updateMany({
       where: { status: GupshupWebhookQueueStatus.FAILED },
       data: {
         status: GupshupWebhookQueueStatus.PENDING,

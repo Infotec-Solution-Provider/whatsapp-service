@@ -1,4 +1,4 @@
-import { CustomersClient } from "@in.pulse-crm/sdk";
+import { CustomersClient } from "../sdk-local";
 
 const CUSTOMERS_API_URL =
 	process.env["CUSTOMERS_API_URL"] || "http://localhost:8002";

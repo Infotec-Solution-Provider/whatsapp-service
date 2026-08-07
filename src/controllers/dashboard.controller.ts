@@ -1,4 +1,5 @@
 import { Request, Response, Router } from "express";
+import { BadRequestError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import dashboardService from "../services/dashboard.service";
 import operatorPerformanceService from "../services/operator-performance.service";
@@ -33,6 +34,12 @@ class DashboardController {
 			"/api/whatsapp/dashboard/operator-performance",
 			isAuthenticated,
 			this.operatorPerformance
+		);
+
+		this.router.get(
+			"/api/whatsapp/dashboard/operator-performance/:operatorId/details",
+			isAuthenticated,
+			this.operatorPerformanceDetails
 		);
 	}
 
@@ -108,6 +115,30 @@ class DashboardController {
 
 		res.status(200).send({
 			message: "Operator performance retrieved successfully!",
+			data
+		});
+	}
+
+	private async operatorPerformanceDetails(req: Request, res: Response) {
+		const operatorId = Number(req.params["operatorId"]);
+		if (!Number.isInteger(operatorId) || operatorId <= 0) {
+			throw new BadRequestError("Operator ID must be a positive integer!");
+		}
+
+		const startDate = (req.query["startDate"] as string) || null;
+		const endDate = (req.query["endDate"] as string) || null;
+		const SETORES = (req.query["SETORES"] as string) || "*";
+
+		const data = await operatorPerformanceService.getOperatorPerformanceDetails(
+			req.session.instance,
+			operatorId,
+			startDate,
+			endDate,
+			SETORES
+		);
+
+		res.status(200).send({
+			message: "Operator performance details retrieved successfully!",
 			data
 		});
 	}

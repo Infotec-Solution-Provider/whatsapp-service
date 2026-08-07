@@ -51,19 +51,48 @@ interface MessagesPerContactRow {
 	attendancesCount: number;
 }
 
-const FROM_US_SQL_CONDITION = (alias: string) =>
-	`(${alias}.user_id IS NOT NULL OR ${alias}.\`from\` LIKE 'me:%' OR ${alias}.\`from\` LIKE 'user:%' OR ${alias}.\`from\` LIKE 'system:%' OR ${alias}.\`from\` LIKE 'bot%' OR ${alias}.\`from\` LIKE 'thirdparty:%')`;
+const SYSTEM_OR_THIRDPARTY_SQL_CONDITION = (alias: string) =>
+	`(${alias}.\`from\` LIKE 'system%' OR ${alias}.\`to\` LIKE 'system%' OR ${alias}.\`from\` LIKE 'thirdparty:%' OR ${alias}.\`to\` LIKE 'thirdparty:%' OR ${alias}.\`from\` LIKE 'bot%' OR ${alias}.\`to\` LIKE 'bot%')`;
 
-const isFromUs = (fromValue: string | null | undefined, userId?: number | null) => {
-	if (userId) return true;
+const OPERATION_MESSAGE_SQL_CONDITION = (alias: string) =>
+	`(${alias}.user_id IS NOT NULL OR ${alias}.\`from\` LIKE 'me:%' OR ${alias}.\`from\` LIKE 'user:%')`;
+
+const CUSTOMER_MESSAGE_SQL_CONDITION = (alias: string) =>
+	`(NOT ${SYSTEM_OR_THIRDPARTY_SQL_CONDITION(alias)} AND NOT ${OPERATION_MESSAGE_SQL_CONDITION(alias)} AND ${alias}.\`from\` REGEXP '^[0-9]')`;
+
+const isSystemOrThirdpartyMessage = (fromValue: string | null | undefined, toValue?: string | null | undefined) => {
 	const from = String(fromValue || "").toLowerCase();
+	const to = String(toValue || "").toLowerCase();
 	return (
-		from.startsWith("me:") ||
-		from.startsWith("user:") ||
-		from.startsWith("system:") ||
+		from.startsWith("system") ||
+		to.startsWith("system") ||
+		from.startsWith("thirdparty:") ||
+		to.startsWith("thirdparty:") ||
 		from.startsWith("bot") ||
-		from.startsWith("thirdparty:")
+		to.startsWith("bot")
 	);
+};
+
+const isOperationalMessage = (
+	fromValue: string | null | undefined,
+	toValue?: string | null | undefined,
+	userId?: number | null
+) => {
+	if (userId) return true;
+	if (isSystemOrThirdpartyMessage(fromValue, toValue)) return false;
+	const from = String(fromValue || "").toLowerCase();
+	return from.startsWith("me:") || from.startsWith("user:");
+};
+
+const isCustomerMessage = (
+	fromValue: string | null | undefined,
+	toValue?: string | null | undefined,
+	userId?: number | null
+) => {
+	if (isOperationalMessage(fromValue, toValue, userId)) return false;
+	if (isSystemOrThirdpartyMessage(fromValue, toValue)) return false;
+	const from = String(fromValue || "").trim();
+	return /^[0-9]/.test(from);
 };
 
 const parseDate = (value?: string | null): Date | null => {
@@ -133,7 +162,7 @@ class DashboardService {
 					SELECT msg1.sent_at
 					FROM messages msg1
 					WHERE msg1.chat_id = ch.id
-						AND NOT ${FROM_US_SQL_CONDITION("msg1")}
+						AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg1")}
 					ORDER BY msg1.sent_at ASC
 					LIMIT 1
 				) AS DATA_MENSAGEM_CLIENTE
@@ -145,19 +174,19 @@ class DashboardService {
 					SELECT 1
 					FROM messages msg2
 					WHERE msg2.chat_id = ch.id
-						AND NOT ${FROM_US_SQL_CONDITION("msg2")}
+						AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg2")}
 					LIMIT 1
 				)
 				AND NOT EXISTS (
 					SELECT 1
 					FROM messages msg3
 					WHERE msg3.chat_id = ch.id
-						AND ${FROM_US_SQL_CONDITION("msg3")}
+						AND ${OPERATION_MESSAGE_SQL_CONDITION("msg3")}
 						AND msg3.sent_at > (
 							SELECT msg4.sent_at
 							FROM messages msg4
 							WHERE msg4.chat_id = ch.id
-								AND NOT ${FROM_US_SQL_CONDITION("msg4")}
+								AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg4")}
 							ORDER BY msg4.sent_at ASC
 							LIMIT 1
 						)
@@ -222,6 +251,7 @@ class DashboardService {
 				contactId: true,
 				chatId: true,
 				from: true,
+				to: true,
 				WppChat: { select: { userId: true } }
 			}
 		});
@@ -264,10 +294,11 @@ class DashboardService {
 				messagesPerUser.set(operatorId, userMessage);
 			}
 
-			userMessage.messagesCount++;
-			if (isFromUs(message.from, message.userId)) {
+			if (isOperationalMessage(message.from, message.to, message.userId)) {
+				userMessage.messagesCount++;
 				userMessage.sentMessagesCount++;
-			} else {
+			} else if (isCustomerMessage(message.from, message.to, message.userId)) {
+				userMessage.messagesCount++;
 				userMessage.receivedMessagesCount++;
 			}
 
@@ -340,9 +371,9 @@ class DashboardService {
 				c.id AS contactId,
 				c.name AS contactName,
 				c.customer_id AS customerId,
-				SUM(CASE WHEN msg.id IS NOT NULL THEN 1 ELSE 0 END) AS messagesCount,
-				SUM(CASE WHEN msg.id IS NOT NULL AND ${FROM_US_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS sentMessagesCount,
-				SUM(CASE WHEN msg.id IS NOT NULL AND NOT ${FROM_US_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS receivedMessagesCount,
+				SUM(CASE WHEN msg.id IS NOT NULL AND (${OPERATION_MESSAGE_SQL_CONDITION("msg")} OR ${CUSTOMER_MESSAGE_SQL_CONDITION("msg")}) THEN 1 ELSE 0 END) AS messagesCount,
+				SUM(CASE WHEN msg.id IS NOT NULL AND ${OPERATION_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS sentMessagesCount,
+				SUM(CASE WHEN msg.id IS NOT NULL AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS receivedMessagesCount,
 				COUNT(DISTINCT ch.id) AS attendancesCount
 			FROM contacts c
 			LEFT JOIN messages msg ON msg.contact_id = c.id AND msg.instance = c.instance
@@ -445,6 +476,7 @@ class DashboardService {
 			select: {
 				id: true,
 				from: true,
+				to: true,
 				userId: true,
 				sentAt: true,
 				WppChat: { select: { userId: true } }
@@ -501,10 +533,11 @@ class DashboardService {
 				receivedMessagesCount: 0
 			};
 
-			row.messagesCount++;
-			if (isFromUs(message.from, message.userId)) {
+			if (isOperationalMessage(message.from, message.to, message.userId)) {
+				row.messagesCount++;
 				row.sentMessagesCount++;
-			} else {
+			} else if (isCustomerMessage(message.from, message.to, message.userId)) {
+				row.messagesCount++;
 				row.receivedMessagesCount++;
 			}
 

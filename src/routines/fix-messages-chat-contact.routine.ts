@@ -139,6 +139,9 @@ async function loadContactMap(instance: string): Promise<ContactMap> {
 
 	const map: ContactMap = new Map();
 	for (const contact of contacts) {
+		if (!contact.phone) {
+			continue;
+		}
 		map.set(normalizeDigits(contact.phone), contact.id);
 	}
 	return map;

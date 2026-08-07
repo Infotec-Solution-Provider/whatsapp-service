@@ -2,7 +2,7 @@ import { WppChat, WppContact, WppMessage } from "@prisma/client";
 import whatsappService from "../services/whatsapp.service";
 import messagesDistributionService from "../services/messages-distribution.service";
 import prismaService from "../services/prisma.service";
-import { User } from "@in.pulse-crm/sdk";
+import { User } from "../sdk-local";
 import ProcessingLogger from "../utils/processing-logger";
 import CheckAvailableUsersStep from "../message-flow/steps/check-available-users.step";
 import instancesService from "../services/instances.service";

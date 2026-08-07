@@ -1,4 +1,4 @@
-import { NextFunction, Request, Response } from "express";
+import type { NextFunction, Request, Response } from "express";
 import { Logger } from "@in.pulse-crm/utils";
 
 function onlyLocal(req: Request, res: Response, next: NextFunction) {

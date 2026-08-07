@@ -1,4 +1,4 @@
-import { SessionData } from "@in.pulse-crm/sdk";
+import { SessionData } from "../sdk-local";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { InternalMessage, WppMessage } from "@prisma/client";
 import { BadRequestError } from "@rgranatodutra/http-errors";
@@ -14,6 +14,7 @@ import internalChatsService from "./internal-chats.service";
 import messagesDistributionService from "./messages-distribution.service";
 import messagesService from "./messages.service";
 import prismaService from "./prisma.service";
+import contactsService from "./contacts.service";
 import whatsappService from "./whatsapp.service";
 
 interface WhatsappForwardTarget {
@@ -208,14 +209,7 @@ class MessageForwardingService {
 	}
 
 	private async getOrCreateContactAndChat(instance: string, targetId: string) {
-		const contact = await prismaService.wppContact.findUnique({
-			where: {
-				instance_phone: {
-					instance,
-					phone: targetId
-				}
-			}
-		});
+		const contact = await contactsService.findContactByAddress(instance, targetId);
 
 		const chat = contact
 			? await prismaService.wppChat.findFirst({
@@ -321,7 +315,7 @@ class MessageForwardingService {
 				file: fileData,
 				fileId: originalMessage.fileId,
 				localFileUrl: filesService.getFileDownloadUrl(originalMessage.fileId),
-				publicFileUrl: `https://inpulse.infotecrs.inf.br/public/${client.instance}/files/${fileData.public_id}`,
+				publicFileUrl: filesService.getPublicFileUrl(client.instance, fileData.public_id),
 			}
 		}
 
