@@ -10,6 +10,7 @@ const DEFAULT_FEATURE_PARAMETERS: Record<string, string> = {
 	feature_mass_messages_enabled: "false",
 	feature_reports_advanced_enabled: "false",
 	feature_reports_dashboards_enabled: "false",
+	feature_chat_export_enabled: "true",
 	feature_sales_reports_enabled: "false",
 	feature_sip_config_enabled: "false",
 	feature_telephony_dialer_enabled: "false",
