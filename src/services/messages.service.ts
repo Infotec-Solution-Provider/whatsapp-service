@@ -1,5 +1,5 @@
 import { SessionData, SocketEventType, SocketServerChatRoom } from "../sdk-local";
-import { WppMessage } from "@prisma/client";
+import { Prisma, WppMessage } from "@prisma/client";
 import { NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
 import CreateMessageDto from "../dtos/create-message.dto";
 import prismaService from "./prisma.service";
@@ -148,7 +148,53 @@ class MessagesService {
 		return message;
 	}
 
-	public async updateMessage(id: number, data: Partial<WppMessage>) {
+	/**
+	 * Persists a remote inbound message exactly once by its provider ID. The
+	 * inbox worker may safely call this again after a crash between message
+	 * persistence and downstream queue creation.
+	 */
+	public async insertOrGetIncomingMessage(data: CreateMessageDto) {
+		const stableIds = [data.wwebjsIdStanza, data.wwebjsId].filter(
+			(value): value is string => typeof value === "string" && value.trim().length > 0
+		);
+		if (stableIds.length === 0) {
+			throw new Error("Remote inbound message has no stable provider ID");
+		}
+
+		const existing = await prismaService.wppMessage.findFirst({
+			where: {
+				OR: [
+					...(data.wwebjsIdStanza ? [{ wwebjsIdStanza: data.wwebjsIdStanza }] : []),
+					...(data.wwebjsId ? [{ wwebjsId: data.wwebjsId }] : [])
+				]
+			}
+		});
+		if (existing) {
+			await this.syncMessageToLocal(existing, true);
+			return existing;
+		}
+
+		try {
+			const inserted = await this.insertMessage({ ...data });
+			await this.syncMessageToLocal(inserted, true);
+			return inserted;
+		} catch (error) {
+			if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+			const racedMessage = await prismaService.wppMessage.findFirst({
+				where: {
+					OR: [
+						...(data.wwebjsIdStanza ? [{ wwebjsIdStanza: data.wwebjsIdStanza }] : []),
+						...(data.wwebjsId ? [{ wwebjsId: data.wwebjsId }] : [])
+					]
+				}
+			});
+			if (!racedMessage) throw error;
+			await this.syncMessageToLocal(racedMessage, true);
+			return racedMessage;
+		}
+	}
+
+	public async updateMessage(id: number, data: Partial<WppMessage>, strictLocalSync = false) {
 		const { contactId, chatId, clientId, ...rest } = this.getPersistableMessageFields(
 			data as Record<string, unknown>
 		) as Partial<WppMessage>;
@@ -174,7 +220,7 @@ class MessagesService {
 			}
 		});
 
-		await this.syncMessageToLocal(message);
+		await this.syncMessageToLocal(message, strictLocalSync);
 		return message;
 	}
 
@@ -392,7 +438,7 @@ class MessagesService {
 		}
 	}
 
-	private async syncMessageToLocal(message: WppMessage) {
+	private async syncMessageToLocal(message: WppMessage, strict = false) {
 		const query = `
 				INSERT INTO wpp_messages (
 					id, instance, wwebjs_id, wwebjs_id_stanza, waba_id, gupshup_id, gupshup_request_id,
@@ -597,11 +643,13 @@ class MessagesService {
 					return;
 				} catch (retryError) {
 					console.error("[syncMessageToLocal] Erro ao sincronizar mensagem após criar tabelas:", retryError);
+					if (strict) throw retryError;
 					return;
 				}
 			}
 
 			console.error("[syncMessageToLocal] Erro ao sincronizar mensagem:", error);
+			if (strict) throw error;
 		}
 	}
 

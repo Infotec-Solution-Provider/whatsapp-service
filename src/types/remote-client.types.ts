@@ -1,4 +1,18 @@
 export type MessageStatus = "PENDING" | "SENT" | "RECEIVED" | "READ" | "DOWNLOADED" | "ERROR" | "REVOKED";
+export type RemoteMessageJobStatus = "PENDING" | "PROCESSING" | "SENT" | "FAILED" | "UNKNOWN";
+
+export interface RemoteMessageJobResponse {
+	contractVersion: 1;
+	jobId: string;
+	idempotencyKey: string;
+	status: RemoteMessageJobStatus;
+	result: MessageDto | null;
+	error: string | null;
+	attempts: number;
+	createdAt: string;
+	updatedAt: string;
+	created?: boolean;
+}
 
 export interface MessageIdentity {
 	addressingMode: "pn" | "lid";

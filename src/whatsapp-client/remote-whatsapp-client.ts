@@ -8,12 +8,12 @@ import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
 import contactsService from "../services/contacts.service";
 import internalChatsService from "../services/internal-chats.service";
-import MessageDto, { MessageReactionEvent, MessageRevokedEvent } from "../types/remote-client.types";
+import MessageDto, { MessageReactionEvent, MessageRevokedEvent, RemoteMessageJobResponse } from "../types/remote-client.types";
 import { EditMessageOptions, Mentions, SendFileType, SendMessageOptions, SendTemplateOptions, WhatsappGroup } from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
 import socketService from "../services/socket.service";
-import { WppMessageStatus } from "@prisma/client";
+import { Prisma, WppMessageStatus } from "@prisma/client";
 import { Logger } from "@in.pulse-crm/utils";
 import axios from "axios";
 
@@ -43,6 +43,34 @@ export interface SendTextOptions extends BaseSendMessageOptions {
 export type RemoteSendMessageOptions = SendTextOptions | SendFileOptions;
 
 class RemoteWhatsappClient implements WhatsappClient {
+	private readonly jobRequestTimeoutMs = Number(process.env["REMOTE_MESSAGE_JOB_REQUEST_TIMEOUT_MS"] || 10000);
+	private readonly jobRequestMaxAttempts = Math.max(
+		1,
+		Number(process.env["REMOTE_MESSAGE_JOB_REQUEST_MAX_ATTEMPTS"] || 3)
+	);
+
+	private isRetryableJobRequestError(error: unknown): boolean {
+		if (!axios.isAxiosError(error)) return false;
+		if (["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EPIPE", "EAI_AGAIN"].includes(error.code || "")) {
+			return true;
+		}
+		return !!error.response && [502, 503, 504].includes(error.response.status);
+	}
+
+	private async runIdempotentJobRequest<T>(request: () => Promise<T>): Promise<T> {
+		let lastError: unknown;
+		for (let attempt = 1; attempt <= this.jobRequestMaxAttempts; attempt += 1) {
+			try {
+				return await request();
+			} catch (error) {
+				lastError = error;
+				if (!this.isRetryableJobRequestError(error) || attempt === this.jobRequestMaxAttempts) throw error;
+				const backoffMs = 250 * 2 ** (attempt - 1) + Math.floor(Math.random() * 100);
+				await new Promise((resolve) => setTimeout(resolve, backoffMs));
+			}
+		}
+		throw lastError;
+	}
 	private resolveGroupId(message: MessageDto): string | null {
 		if (message.groupId) {
 			return message.groupId;
@@ -127,8 +155,9 @@ class RemoteWhatsappClient implements WhatsappClient {
 		}
 	}
 
-	public async handleMessageReceived(message: MessageDto) {
-		const id = message.wwebjsIdStanza || message.wwebjsId || Date.now().toString();
+	public async handleMessageReceived(message: MessageDto): Promise<number | null> {
+		const id = message.wwebjsIdStanza || message.wwebjsId;
+		if (!id) throw new Error("Remote inbound message has no stable provider ID");
 		const process = new ProcessingLogger(this.instance, "rc-message-receive", id, message);
 
 		try {
@@ -139,23 +168,42 @@ class RemoteWhatsappClient implements WhatsappClient {
 				if (!groupId) {
 					process.log("Group message ignored: groupId is missing from payload.");
 					process.success({ ignored: true, reason: "missing-group-id" });
-					return;
+					return null;
 				}
 
 				if (!ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
 					process.log("Group message ignored: WhatsApp group synchronization is disabled.");
 					process.success({ ignored: true, reason: "group-sync-disabled" });
-					return;
+					return null;
 				}
 
 				const { isGroup, authorName, contactName, sender, recipient, participant, ...cleanMessage } = message;
-				await internalChatsService.receiveMessage(
-					this.instance,
-					groupId,
-					cleanMessage,
-					contactName || authorName || message.from
-				);
+				const canonicalMessage = { ...cleanMessage, instance: this.instance, clientId: this.id };
+				const findExistingGroupMessage = () => prismaService.internalMessage.findFirst({
+					where: {
+						OR: [
+							...(message.wwebjsIdStanza ? [{ wwebjsIdStanza: message.wwebjsIdStanza }] : []),
+							...(message.wwebjsId ? [{ wwebjsId: message.wwebjsId }] : [])
+						]
+					}
+				});
+				let savedGroupMessage = await findExistingGroupMessage();
+				if (!savedGroupMessage) {
+					try {
+						savedGroupMessage = await internalChatsService.receiveMessage(
+							this.instance,
+							groupId,
+							canonicalMessage,
+							contactName || authorName || message.from
+						) || null;
+					} catch (error) {
+						if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+						savedGroupMessage = await findExistingGroupMessage();
+						if (!savedGroupMessage) throw error;
+					}
+				}
 				process.success({ groupId, synced: true });
+				return savedGroupMessage?.id ?? null;
 			} else {
 				const identity = message.sender ?? null;
 				const normalizedWhatsappId = identity?.lid || message.from;
@@ -173,8 +221,10 @@ class RemoteWhatsappClient implements WhatsappClient {
 				}
 
 				const { isGroup, groupId, authorName, contactName, sender, recipient, participant, ...cleanMessage } = message;
-				const savedMsg = await messagesService.insertMessage({
+				const savedMsg = await messagesService.insertOrGetIncomingMessage({
 					...cleanMessage,
+					instance: this.instance,
+					clientId: this.id,
 					contactId: resolvedContactId
 				});
 
@@ -184,15 +234,18 @@ class RemoteWhatsappClient implements WhatsappClient {
 					clientId: this.id,
 					messageId: savedMsg.id,
 					contactPhone: normalizedWhatsappId,
-					contactName: message.contactName
+					contactName: message.contactName,
+					retryForever: true
 				});
 
 				process.log("Message enqueued successfully");
 				process.success(savedMsg);
+				return savedMsg.id;
 			}
 		} catch (err: any) {
 			process.log(`Failed to handle message received: ${err?.message}`);
 			process.failed(err);
+			throw err;
 		}
 	}
 
@@ -352,6 +405,24 @@ class RemoteWhatsappClient implements WhatsappClient {
 		return "document";
 	}
 
+	private buildRemoteMessageOptions(props: SendMessageOptions, isGroup: boolean): RemoteSendMessageOptions {
+		return {
+			text: props.text || "",
+			to: props.to,
+			quotedId: props.quotedId || null,
+			isGroup,
+			...(props.mentions ? { mentions: props.mentions } : {}),
+			...("file" in props && props.file
+				? {
+						file: props.file,
+						fileName: props.file.name,
+						fileType: this.getSendFileType(props),
+						fileUrl: props.publicFileUrl
+					}
+				: {})
+		};
+	}
+
 
 	public async sendMessage(props: SendMessageOptions, isGroup: boolean): Promise<CreateMessageDto> {
 		const id = `send-msg-${Date.now()}`;
@@ -360,19 +431,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 		try {
 			process.log("Sending message via wwebjs-api");
 
-			const options: RemoteSendMessageOptions = {
-				text: props.text || "",
-				to: props.to,
-				quotedId: props.quotedId || null,
-				isGroup,
-				...(props.mentions ? { mentions: props.mentions } : {}),
-				...("file" in props && props.file ? {
-					file: props.file,
-					fileName: props.file.name,
-					fileType: this.getSendFileType(props),
-					fileUrl: props.publicFileUrl,
-				} : {})
-			}
+			const options = this.buildRemoteMessageOptions(props, isGroup);
 
 			console.log(`URL: ${this.clientUrl}/api/send-message`, options);
 			const response = await axios.post<MessageDto>(`${this.clientUrl}/api/send-message`, options);
@@ -394,6 +453,35 @@ class RemoteWhatsappClient implements WhatsappClient {
 			process.failed(err);
 			throw err;
 		}
+	}
+
+	public async submitMessageJob(
+		props: SendMessageOptions,
+		isGroup: boolean,
+		idempotencyKey: string
+	): Promise<RemoteMessageJobResponse> {
+		const options = this.buildRemoteMessageOptions(props, isGroup);
+		return this.runIdempotentJobRequest(async () => {
+			const response = await axios.post<RemoteMessageJobResponse>(
+				`${this.clientUrl}/api/send-message/jobs`,
+				{ ...options, isGroup },
+				{
+					headers: { "Idempotency-Key": idempotencyKey },
+					timeout: this.jobRequestTimeoutMs
+				}
+			);
+			return response.data;
+		});
+	}
+
+	public async getMessageJob(jobId: string): Promise<RemoteMessageJobResponse> {
+		return this.runIdempotentJobRequest(async () => {
+			const response = await axios.get<RemoteMessageJobResponse>(
+				`${this.clientUrl}/api/send-message/jobs/${encodeURIComponent(jobId)}`,
+				{ timeout: this.jobRequestTimeoutMs }
+			);
+			return response.data;
+		});
 	}
 
 	public async editMessage(props: EditMessageOptions): Promise<void> {

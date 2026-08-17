@@ -23,6 +23,12 @@ import whatsappService, { getMessageType } from "./whatsapp.service";
 import { createUploadTraceLogger } from "../utils/file-upload-trace";
 import getUsersClient from "./users.service";
 import internalWhatsappSendersService from "./internal-whatsapp-senders.service";
+import axios from "axios";
+import internalWhatsappMessageQueueService, {
+	InternalWhatsappQueueItem,
+	InternalWhatsappQueuePayload,
+	InternalWhatsappQueueProcessResult
+} from "./internal-whatsapp-message-queue.service";
 
 const ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] === "true";
 
@@ -809,32 +815,41 @@ class InternalChatsService {
 							wppGroupId: chat.wppGroupId,
 							messageId: savedMsg.id
 						});
-						const sentMsg = await this.sendMessageToWppGroup(session, chat.wppGroupId, data, savedMsg);
-						trace.info("internal-message.forward-whatsapp.success", {
-							messageId: savedMsg.id,
-							wwebjsId: sentMsg?.wwebjsId,
-							wwebjsIdStanza: sentMsg?.wwebjsIdStanza
-						});
-						if (sentMsg?.wwebjsId || sentMsg?.wwebjsIdStanza) {
-							process.log(
-								`Mensagem enviada para WhatsApp com sucesso. wwebjsId: ${sentMsg.wwebjsId || "N/A"}, wwebjsIdStanza: ${sentMsg.wwebjsIdStanza || "N/A"}`
-							);
-							await prismaService.internalMessage.update({
-								where: { id: savedMsg.id },
-								data: { status: "RECEIVED" }
-							});
-							process.log(`Mensagem interna atualizada com status RECEIVED`);
-							await socketService.emit(SocketEventType.InternalMessageStatus, room, {
-								chatId,
-								internalMessageId: savedMsg.id,
-								status: "SENT"
+						const queued = await this.enqueueMessageToWppGroup(session, chat.wppGroupId, data, savedMsg);
+						if (queued) {
+							process.log(`Mensagem ${savedMsg.id} persistida na fila assincrona do WhatsApp`);
+							trace.info("internal-message.forward-whatsapp.queued", {
+								wppGroupId: chat.wppGroupId,
+								messageId: savedMsg.id
 							});
 						} else {
+							const sentMsg = await this.sendMessageToWppGroup(session, chat.wppGroupId, data, savedMsg);
+							trace.info("internal-message.forward-whatsapp.success", {
+								messageId: savedMsg.id,
+								wwebjsId: sentMsg?.wwebjsId,
+								wwebjsIdStanza: sentMsg?.wwebjsIdStanza
+							});
+							if (sentMsg?.wwebjsId || sentMsg?.wwebjsIdStanza) {
+								process.log(
+								`Mensagem enviada para WhatsApp com sucesso. wwebjsId: ${sentMsg.wwebjsId || "N/A"}, wwebjsIdStanza: ${sentMsg.wwebjsIdStanza || "N/A"}`
+								);
+								await prismaService.internalMessage.update({
+									where: { id: savedMsg.id },
+									data: { status: "RECEIVED" }
+								});
+								process.log(`Mensagem interna atualizada com status RECEIVED`);
+								await socketService.emit(SocketEventType.InternalMessageStatus, room, {
+									chatId,
+									internalMessageId: savedMsg.id,
+									status: "SENT"
+								});
+							} else {
 							process.log(`Aviso: Mensagem não foi enviada para o WhatsApp ou não retornou nenhum ID`);
 							await prismaService.internalMessage.update({
 								where: { id: savedMsg.id },
 								data: { status: "ERROR" }
 							});
+								}
 						}
 					} catch (err) {
 						const errorMsg = sanitizeErrorMessage(err) || "Erro desconhecido";
@@ -1427,6 +1442,211 @@ class InternalChatsService {
 		process.log(
 			`IDs do WhatsApp persistidos na mensagem interna ${messageId}. wwebjsId: ${sentMsg?.wwebjsId || "N/A"}, wwebjsIdStanza: ${sentMsg?.wwebjsIdStanza || "N/A"}`
 		);
+	}
+
+	private async enqueueMessageToWppGroup(
+		session: SessionData,
+		groupId: string,
+		data: InternalSendMessageData,
+		message: InternalMessage
+	): Promise<boolean> {
+		const sector = await prismaService.wppSector.findUnique({ where: { id: session.sectorId } });
+		if (!sector?.defaultClientId) {
+			throw new BadRequestError("Nenhum cliente WhatsApp padrÃ£o configurado para o setor do usuÃ¡rio.");
+		}
+
+		const client = whatsappService.getClient(sector.defaultClientId);
+		if (!client?.submitMessageJob || !client.getMessageJob) return false;
+
+		const payload: InternalWhatsappQueuePayload = {
+			clientId: sector.defaultClientId,
+			session: {
+				userId: session.userId,
+				sectorId: session.sectorId,
+				role: session.role,
+				instance: session.instance,
+				name: session.name
+			},
+			data: {
+				sendAsAudio: data.sendAsAudio === true || data.sendAsAudio === "true",
+				sendAsDocument: data.sendAsDocument === true || data.sendAsDocument === "true",
+				...(data.quotedId !== undefined ? { quotedId: data.quotedId } : {}),
+				...(data.mentions !== undefined ? { mentions: data.mentions } : {})
+			}
+		};
+
+		await internalWhatsappMessageQueueService.enqueue({
+			instance: session.instance,
+			internalChatId: message.internalChatId,
+			internalMessageId: message.id,
+			groupId,
+			authorName: session.name,
+			payload
+		});
+		return true;
+	}
+
+	private async buildQueuedWppGroupMessageOptions(
+		session: SessionData,
+		groupId: string,
+		data: InternalSendMessageData,
+		message: InternalMessage,
+		process: ProcessingLogger
+	): Promise<SendMessageOptions> {
+		let waMentions: Mention[] = [];
+		if (data.mentions) {
+			const mentions =
+				typeof data.mentions === "string" ? (JSON.parse(data.mentions) as Mention[]) : data.mentions;
+			waMentions = mentions.map((mention) => ({
+				userId: mention.userId ?? 0,
+				phone: mention.phone ?? "",
+				name: mention.name || mention.phone || ""
+			}));
+		}
+
+		let resolvedQuotedId: string | null = null;
+		if (data.quotedId) {
+			const quotedMessage = await prismaService.internalMessage.findUnique({
+				where: { id: Number(data.quotedId) }
+			});
+			resolvedQuotedId = quotedMessage?.wwebjsIdStanza || quotedMessage?.wwebjsId || null;
+		}
+
+		const text = `*${session.name}*: ${message.body}`;
+		if (!message.fileId || !message.fileName) {
+			return { to: groupId, quotedId: resolvedQuotedId, text, mentions: waMentions };
+		}
+
+		process.log(`Carregando metadados do arquivo ${message.fileId} para o job assÃ­ncrono`);
+		const file = await filesService.fetchFileMetadata(message.fileId);
+		return {
+			file,
+			fileId: message.fileId,
+			localFileUrl: filesService.getFileDownloadUrl(message.fileId),
+			publicFileUrl: filesService.getPublicFileUrl(session.instance, file.public_id),
+			to: groupId,
+			quotedId: resolvedQuotedId,
+			sendAsAudio: data.sendAsAudio === true || data.sendAsAudio === "true",
+			sendAsDocument: data.sendAsDocument === true || data.sendAsDocument === "true",
+			text,
+			mentions: waMentions
+		};
+	}
+
+	private async markQueuedWppMessageError(item: InternalWhatsappQueueItem, error: string): Promise<void> {
+		if (item.internalMessageId) {
+			await prismaService.internalMessage.update({
+				where: { id: item.internalMessageId },
+				data: { status: "ERROR" }
+			});
+			const room = `${item.instance}:internal-chat:${item.internalChatId}` as SocketServerInternalChatRoom;
+			await socketService.emit(SocketEventType.InternalMessageStatus, room, {
+				chatId: item.internalChatId,
+				internalMessageId: item.internalMessageId,
+				status: "ERROR"
+			});
+		}
+		Logger.error(`[InternalWhatsappQueue] ${error}`);
+	}
+
+	public async processQueuedWppGroupMessage(
+		item: InternalWhatsappQueueItem
+	): Promise<InternalWhatsappQueueProcessResult> {
+		if (!item.internalMessageId) {
+			return { status: "FAILED", error: "Queue item has no internal message ID" };
+		}
+
+		const payload = JSON.parse(item.messageData) as InternalWhatsappQueuePayload;
+		const message = await prismaService.internalMessage.findUnique({ where: { id: item.internalMessageId } });
+		if (!message) return { status: "FAILED", error: `Internal message ${item.internalMessageId} not found` };
+
+		const client = whatsappService.getClient(payload.clientId);
+		if (!client?.submitMessageJob || !client.getMessageJob) {
+			throw new Error(`Remote WhatsApp client ${payload.clientId} is not available`);
+		}
+
+		const process = new ProcessingLogger(item.instance, "internal-wpp-async-job", item.id, {
+			internalMessageId: item.internalMessageId,
+			groupId: item.groupId,
+			clientId: payload.clientId
+		});
+		const data: InternalSendMessageData = {
+			chatId: String(item.internalChatId),
+			text: message.body,
+			...(payload.data.quotedId !== undefined ? { quotedId: payload.data.quotedId } : {}),
+			...(payload.data.sendAsAudio !== undefined ? { sendAsAudio: payload.data.sendAsAudio } : {}),
+			...(payload.data.sendAsDocument !== undefined
+				? { sendAsDocument: payload.data.sendAsDocument }
+				: {}),
+			...(payload.data.mentions !== undefined
+				? { mentions: payload.data.mentions as Mention[] | string }
+				: {})
+		};
+		const idempotencyKey = `${item.instance}:internal-message:${item.internalMessageId}`;
+
+		try {
+			let job;
+			if (payload.remoteJobId) {
+				job = await client.getMessageJob(payload.remoteJobId);
+			} else {
+				const options = await this.buildQueuedWppGroupMessageOptions(
+					payload.session,
+					item.groupId,
+					data,
+					message,
+					process
+				);
+				job = await client.submitMessageJob(options, true, idempotencyKey);
+			}
+			if (!payload.remoteJobId) {
+				payload.remoteJobId = job.jobId;
+				await prismaService.internalMessageProcessingQueue.update({
+					where: { id: item.id },
+					data: { messageData: JSON.stringify(payload) }
+				});
+			}
+
+			if (job.status === "PENDING" || job.status === "PROCESSING") {
+				return { status: "PENDING" };
+			}
+
+			if (job.status === "SENT" && job.result) {
+				const { isGroup: _isGroup, groupId: _groupId, authorName: _authorName, ...sentMessage } = job.result;
+				await this.persistGeneratedWppIds(message.id, sentMessage, process);
+				await prismaService.internalMessage.update({ where: { id: message.id }, data: { status: "RECEIVED" } });
+				const room = `${item.instance}:internal-chat:${item.internalChatId}` as SocketServerInternalChatRoom;
+				await socketService.emit(SocketEventType.InternalMessageStatus, room, {
+					chatId: item.internalChatId,
+					internalMessageId: message.id,
+					status: "SENT"
+				});
+				process.success({ jobId: job.jobId, wwebjsId: sentMessage.wwebjsId });
+				return { status: "COMPLETED" };
+			}
+
+			const error = job.error || `Remote job ${job.jobId} ended with status ${job.status}`;
+			await this.markQueuedWppMessageError(item, error);
+			process.failed(new Error(error));
+			return { status: job.status === "UNKNOWN" ? "UNKNOWN" : "FAILED", error };
+		} catch (error) {
+			if (axios.isAxiosError(error) && error.response?.status === 404 && payload.remoteJobId) {
+				const message = `Remote message job ${payload.remoteJobId} disappeared; delivery outcome is unknown`;
+				await this.markQueuedWppMessageError(item, message);
+				return { status: "UNKNOWN", error: message };
+			}
+			if (
+				axios.isAxiosError(error) &&
+				error.response &&
+				error.response.status >= 400 &&
+				error.response.status < 500 &&
+				![404, 408, 429].includes(error.response.status)
+			) {
+				const message = `Remote message job rejected with HTTP ${error.response.status}`;
+				await this.markQueuedWppMessageError(item, message);
+				return { status: "FAILED", error: message };
+			}
+			throw error;
+		}
 	}
 
 	public async sendMessageToWppGroup(

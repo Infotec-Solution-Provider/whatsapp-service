@@ -438,7 +438,13 @@ class MessagesDistributionService {
 		return { chat, systemMessage: systemMessage || null };
 	}
 
-	public async processMessage(instance: string, clientId: number, msg: WppMessage, contactName?: string | null) {
+	public async processMessage(
+		instance: string,
+		clientId: number,
+		msg: WppMessage,
+		contactName?: string | null,
+		strictLocalSync = false
+	) {
 		const logger = new ProcessingLogger(instance, "message-distribution", `WppMessage-${msg.id}`, msg);
 
 		try {
@@ -463,7 +469,7 @@ class MessagesDistributionService {
 			if (currChat) {
 				logger.log("Chat anterior encontrado para o contato.", currChat);
 				await this.processBotMessage(currChat, contact, msg, logger);
-				const outputMessage = await this.insertAndNotify(logger, currChat, msg);
+				const outputMessage = await this.insertAndNotify(logger, currChat, msg, false, strictLocalSync);
 				await this.processAiAgentMessage(currChat, contact, clientId, logger);
 				return outputMessage;
 			}
@@ -497,7 +503,7 @@ class MessagesDistributionService {
 			await this.addSystemMessage(newChat, finalSystemMessage, true);
 			logger.log("Chat criado com sucesso!", newChat);
 
-			const outputMsg = await this.insertAndNotify(logger, newChat, msg, true);
+			const outputMsg = await this.insertAndNotify(logger, newChat, msg, true, strictLocalSync);
 			await this.processAiAgentMessage(newChat, contact, clientId, logger);
 			return outputMsg;
 		} catch (err) {
@@ -531,7 +537,7 @@ class MessagesDistributionService {
 		}
 
 		// Processa a mensagem normalmente
-		await this.processMessage(instance, clientId, message, contactName);
+		await this.processMessage(instance, clientId, message, contactName, true);
 	}
 
 	public async transferChatSector(sector: WppSector, contact: WppContact, chat: WppChat, message: WppMessage) {
@@ -698,13 +704,18 @@ class MessagesDistributionService {
 		}
 	}
 
-	private async insertMessageOnChat(logger: ProcessingLogger, message: WppMessage, chat: WppChat) {
+	private async insertMessageOnChat(
+		logger: ProcessingLogger,
+		message: WppMessage,
+		chat: WppChat,
+		strictLocalSync = false
+	) {
 		try {
 			const insertedMessage = await messagesService.updateMessage(message.id, {
 				contactId: chat.contactId,
 				chatId: chat.id,
 				status: "RECEIVED"
-			});
+			}, strictLocalSync);
 
 			logger.log("Mensagem inserida no chat.", insertedMessage);
 			return insertedMessage;
@@ -715,8 +726,14 @@ class MessagesDistributionService {
 		}
 	}
 
-	public async insertAndNotify(logger: ProcessingLogger, chat: WppChat, msg: WppMessage, isChatNew: boolean = false) {
-		const insertedMsg = await this.insertMessageOnChat(logger, msg, chat);
+	public async insertAndNotify(
+		logger: ProcessingLogger,
+		chat: WppChat,
+		msg: WppMessage,
+		isChatNew: boolean = false,
+		strictLocalSync = false
+	) {
+		const insertedMsg = await this.insertMessageOnChat(logger, msg, chat, strictLocalSync);
 		if (isChatNew) {
 			await this.notifyChatStarted(logger, chat);
 		}

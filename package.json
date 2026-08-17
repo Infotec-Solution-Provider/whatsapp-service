@@ -19,6 +19,8 @@
 		"start:all": "powershell -ExecutionPolicy Bypass -File scripts/start-all-services.ps1",
 		"sync:local": "ts-node src/scripts/sync-local.ts",
 		"sync:local:instance": "ts-node src/scripts/sync-local.ts",
+		"migration:panel": "ts-node src/scripts/migration-panel.ts",
+		"test:remote-inbound": "ts-node src/services/remote-inbound-event-inbox.test.ts",
 		"fix:messages:chat-contact": "ts-node src/routines/fix-messages-chat-contact.routine.ts",
 		"fix:messages:chat-contact:apply": "ts-node src/routines/fix-messages-chat-contact.routine.ts --apply",
 		"backfill:internal-message-wwebjs-ids": "ts-node src/routines/backfill-internal-message-wwebjs-ids.routine.ts",

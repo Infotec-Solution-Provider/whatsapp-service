@@ -37,8 +37,18 @@ import wabaWebhookQueueService from "./services/waba-webhook-queue.service";
 import whatsappService from "./services/whatsapp.service";
 import wwwebjsHealthCheckService from "./services/wwebjs-health-check.service";
 import remoteSessionMonitorRoutine from "./routines/remote-session-monitor.routine";
+import internalWhatsappMessageQueueService from "./services/internal-whatsapp-message-queue.service";
+import internalChatsService from "./services/internal-chats.service";
+import remoteInboundEventInboxService from "./services/remote-inbound-event-inbox.service";
+import remoteClientService from "./services/remote-client.service";
 
 whatsappService.buildClients();
+internalWhatsappMessageQueueService.setProcessHandler({
+	process: (item) => internalChatsService.processQueuedWppGroupMessage(item)
+});
+remoteInboundEventInboxService.setProcessor({
+	process: (item, payload) => remoteClientService.processInboundInboxItem(item, payload)
+});
 const app = express();
 
 const routesToLog: Array<express.Router> = [];
@@ -98,11 +108,13 @@ app.use(handleRequestError);
 
 const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;
 
-app.listen(serverPort, () => {
+const server = app.listen(serverPort, () => {
 	registerAllSteps();
 	gupshupWebhookQueueService.startProcessor();
 	wabaWebhookQueueService.startProcessor();
 	messageQueueService.startWorker();
+	internalWhatsappMessageQueueService.startWorker();
+	remoteInboundEventInboxService.startWorker();
 	remoteSessionMonitorRoutine.start();
 	Logger.info("Server listening on port " + serverPort);
 
@@ -119,3 +131,29 @@ app.listen(serverPort, () => {
 		Logger.info(`[WwebjsHealthCheck] Scheduled with cron="${healthCheckCron}"`);
 	}
 });
+
+let shuttingDown = false;
+const shutdown = async (signal: string): Promise<void> => {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	Logger.info(`[Shutdown] ${signal} received; draining durable workers`);
+
+	remoteInboundEventInboxService.stopWorker();
+	internalWhatsappMessageQueueService.stopWorker();
+	messageQueueService.stopWorker();
+	gupshupWebhookQueueService.stopProcessor();
+	wabaWebhookQueueService.stopProcessor();
+
+	const serverClosed = new Promise<void>((resolve) => server.close(() => resolve()));
+	const graceful = Promise.all([
+		serverClosed,
+		remoteInboundEventInboxService.stopAndDrain(30_000),
+		messageQueueService.stopAndDrain(30_000)
+	]);
+	const timeout = new Promise<void>((resolve) => setTimeout(resolve, 30_000));
+	await Promise.race([graceful, timeout]);
+	process.exit(0);
+};
+
+process.once("SIGINT", () => { void shutdown("SIGINT"); });
+process.once("SIGTERM", () => { void shutdown("SIGTERM"); });

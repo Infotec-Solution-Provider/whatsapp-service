@@ -1,6 +1,7 @@
 import { TemplateMessage } from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
 import { EditMessageOptions, SendMessageOptions, SendTemplateOptions, WhatsappGroup } from "../types/whatsapp-instance.types";
+import { RemoteMessageJobResponse } from "../types/remote-client.types";
 
 /**
  * Abstract class representing a WhatsApp instance.
@@ -58,6 +59,14 @@ abstract class WhatsappClient {
 	 * @returns - A promise resolved when the message is sent.
 	 */
 	public abstract sendMessage(props: SendMessageOptions, isGroup?: boolean): Promise<CreateMessageDto>;
+
+	/** Optional fast-return contract implemented by remote clients that support persistent jobs. */
+	public submitMessageJob?(
+		props: SendMessageOptions,
+		isGroup: boolean,
+		idempotencyKey: string
+	): Promise<RemoteMessageJobResponse>;
+	public getMessageJob?(jobId: string): Promise<RemoteMessageJobResponse>;
 
 	/**
 	 * Edits a previously sent message.
