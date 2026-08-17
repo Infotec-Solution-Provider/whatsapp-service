@@ -20,4 +20,49 @@ assert.equal(calculateSessionStability(snapshot("RECONNECTING"), 0, now).level, 
 assert.equal(calculateSessionStability(snapshot("DISCONNECTED", 0, 301), 0, now).level, "UNSTABLE");
 assert.equal(calculateSessionStability(snapshot("CONNECTED", 0, 0, 3), 0, now).level, "UNSTABLE");
 
+const passingProbe = {
+	dispatchStatus: "PASSED" as const,
+	receiveStatus: "PASSED" as const,
+	expiresAt: new Date(now + 60_000).toISOString(),
+	latencyMs: 1200,
+	reason: "probe passed"
+};
+assert.deepEqual(calculateSessionStability(snapshot("CONNECTED"), 0, now, passingProbe), {
+	level: "STABLE",
+	reason: "Session is connected and passed the functional probe (1200ms)"
+});
+assert.equal(
+	calculateSessionStability(snapshot("CONNECTED"), 0, now, {
+		...passingProbe,
+		receiveStatus: "FAILED",
+		reason: "Shadow did not receive the event"
+	}).level,
+	"UNSTABLE"
+);
+assert.equal(
+	calculateSessionStability(snapshot("CONNECTED"), 0, now, {
+		...passingProbe,
+		officialReceiveStatus: "FAILED",
+		responseDispatchStatus: "SKIPPED",
+		reason: "Official webhook did not receive the probe"
+	}).level,
+	"UNSTABLE"
+);
+assert.equal(
+	calculateSessionStability(snapshot("CONNECTED"), 0, now, {
+		...passingProbe,
+		dispatchStatus: "SKIPPED",
+		receiveStatus: "SKIPPED",
+		reason: "Canary is not configured"
+	}).level,
+	"ATTENTION"
+);
+assert.equal(
+	calculateSessionStability(snapshot("CONNECTED"), 0, now, {
+		...passingProbe,
+		expiresAt: new Date(now - 1).toISOString()
+	}).level,
+	"ATTENTION"
+);
+
 console.log("Remote session stability tests passed");

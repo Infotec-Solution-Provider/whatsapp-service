@@ -7,6 +7,7 @@ import messagesDistributionService from "./messages-distribution.service";
 import messagesService from "./messages.service";
 import prismaService from "./prisma.service";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import functionalHealthProbeRegistry from "./functional-health-probe-registry.service";
 
 interface ValidateEntryResultStatus {
 	type: "status";
@@ -100,6 +101,22 @@ class WABAService {
 				case "message":
 					logger.processName += "/message";
 					logger.log("Processando mensagem WABA");
+					if (validated.data.type === "text") {
+						const probe = await functionalHealthProbeRegistry.handleOfficialInbound({
+							clientId: client.id,
+							instance,
+							from: validated.data.from,
+							body: validated.data.text.body
+						});
+						if (probe.handled) {
+							logger.log("Mensagem de health-check WABA interceptada", { reason: probe.reason });
+							logger.success("Webhook WABA finalizado como ignored");
+							return {
+								ignored: true,
+								reason: probe.reason || "Webhook WABA de health-check ignorado"
+							};
+						}
+					}
 					const parsedMsg = await WABAMessageParser.parse(
 						client.id,
 						validated.recipient,
@@ -108,9 +125,11 @@ class WABAService {
 						logger
 					);
 
-					const existingMessage = parsedMsg.wabaId && await prismaService.wppMessage.findFirst({
-						where: { wabaId: parsedMsg.wabaId }
-					});
+					const existingMessage =
+						parsedMsg.wabaId &&
+						(await prismaService.wppMessage.findFirst({
+							where: { wabaId: parsedMsg.wabaId }
+						}));
 
 					if (!!existingMessage) {
 						logger.log("Mensagem WABA já existe no banco de dados, ignorando processamento", {

@@ -1,5 +1,4 @@
 import "dotenv/config";
-import { Formatter } from "@in.pulse-crm/utils";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import { Request, Response, Router } from "express";
 import CreateMessageDto from "../dtos/create-message.dto";
@@ -9,6 +8,7 @@ import messageQueueService from "../services/message-queue.service";
 import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
 import ProcessingLogger from "../utils/processing-logger";
+import resolveContactIdentity from "../utils/resolve-contact-identity";
 
 const ENDPOINT = "/api/whatsapp/parsed-messages";
 const ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] !== "false";
@@ -152,10 +152,12 @@ class ParsedMessagesController {
 				logger.log("Mensagem enviada pelo operador detectada, buscando contato pelo destinatário");
 
 				// Busca o contato pelo número de destino (to)
+				const contactIdentity = resolveContactIdentity(messageDto.to, contactName);
 				const contact = await contactsService.getOrCreateContact(
 					messageDto.instance,
-					contactName || Formatter.phone(messageDto.to),
-					messageDto.to
+					contactIdentity.name,
+					contactIdentity.phone,
+					contactIdentity.whatsappId
 				);
 				logger.log("Contato encontrado", { contactId: contact.id });
 
@@ -292,10 +294,12 @@ class ParsedMessagesController {
 					// Verifica se é uma mensagem enviada pelo operador (from começa com "me:")
 					if (messageDto.from.startsWith("me:")) {
 						// Busca o contato pelo número de destino (to)
+						const contactIdentity = resolveContactIdentity(messageDto.to, contactName);
 						const contact = await contactsService.getOrCreateContact(
 							messageDto.instance,
-							contactName || Formatter.phone(messageDto.to),
-							messageDto.to
+							contactIdentity.name,
+							contactIdentity.phone,
+							contactIdentity.whatsappId
 						);
 
 						// Insere a mensagem com o contactId, sem processar distribuição

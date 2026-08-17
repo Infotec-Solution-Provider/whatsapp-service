@@ -8,7 +8,7 @@ import {
 	User,
 	WppMessageEventData
 } from "../sdk-local";
-import { Formatter, Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import {
 	AutomaticResponseRule,
 	AutomaticResponseSchedule,
@@ -22,6 +22,7 @@ import { InternalServerError } from "@rgranatodutra/http-errors";
 import MessageFlow from "../message-flow/message-flow";
 import MessageFlowFactory from "../message-flow/message-flow.factory";
 import ProcessingLogger from "../utils/processing-logger";
+import resolveContactIdentity from "../utils/resolve-contact-identity";
 import chatsService from "./chats.service";
 import contactsService from "./contacts.service";
 import messageQueueService from "./message-queue.service";
@@ -58,6 +59,30 @@ class MessageStatusTargetNotFoundError extends Error {
 
 class MessagesDistributionService {
 	private flows: Map<string, MessageFlow> = new Map();
+
+	private async resolveMessageContact(
+		instance: string,
+		message: WppMessage,
+		contactName?: string | null
+	): Promise<WppContact> {
+		if (message.contactId !== null) {
+			const linkedContact = await prismaService.wppContact.findFirst({
+				where: { id: message.contactId, instance }
+			});
+			if (linkedContact) {
+				return linkedContact;
+			}
+		}
+
+		const identifier = message.from.startsWith("me:") ? message.to : message.from;
+		const identity = resolveContactIdentity(identifier, contactName);
+		return contactsService.getOrCreateContact(
+			instance,
+			identity.name,
+			identity.phone,
+			identity.whatsappId
+		);
+	}
 
 	private async sendPushNotification(
 		userId: number,
@@ -448,16 +473,9 @@ class MessagesDistributionService {
 		const logger = new ProcessingLogger(instance, "message-distribution", `WppMessage-${msg.id}`, msg);
 
 		try {
-			const contactIdentifier = msg.from.startsWith("me:") ? msg.to : msg.from;
-
 			// 1. Busca ou cria contato
 			logger.log("Buscando contato para a mensagem.");
-			const contact = await contactsService.getOrCreateContact(
-				instance,
-				contactName || Formatter.phone(contactIdentifier),
-				contactIdentifier,
-				contactIdentifier
-			);
+			const contact = await this.resolveMessageContact(instance, msg, contactName);
 			logger.log("Contato encontrado!", contact);
 
 			// 2. Busca chat existente

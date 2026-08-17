@@ -112,6 +112,57 @@ export interface RemoteSessionInfo {
 	currentOperation: RemoteSessionOperation | null;
 }
 
+export type RemoteAuthBatchStatus = "ACTIVE" | "COMPLETED" | "CANCELED" | "FAILED";
+export type RemoteAuthItemStatus =
+	| "WAITING"
+	| "READY"
+	| "ACTIVATING"
+	| "QR_PENDING"
+	| "CONNECTED"
+	| "FAILED"
+	| "CANCELED";
+
+export interface RemoteAuthBatchItem {
+	id: number;
+	batchId: string;
+	sessionId: string;
+	clientId: number;
+	instance: string;
+	library: "BAILEYS" | "ZAPO";
+	role: "PRIMARY" | "SHADOW";
+	position: number;
+	status: RemoteAuthItemStatus;
+	attempts: number;
+	lastError: string | null;
+	activatedAt: string | null;
+	connectedAt: string | null;
+	updatedAt: string;
+}
+
+export interface RemoteAuthBatch {
+	id: string;
+	groupId: string;
+	groupName: string;
+	expectedPhone: string;
+	status: RemoteAuthBatchStatus;
+	createdBy: string | null;
+	createdAt: string;
+	updatedAt: string;
+	completedAt: string | null;
+	items: RemoteAuthBatchItem[];
+}
+
+export interface RemoteSessionDirectoryItem {
+	sessionId: string;
+	clientId: number;
+	instance: string;
+	library: "BAILEYS" | "ZAPO";
+	monitorGroupId: string | null;
+	monitorRole: "PRIMARY" | "SHADOW";
+	authBatchId: string | null;
+	authQueueStatus: "WAITING" | "READY" | "ACTIVATING" | "QR_PENDING" | "FAILED" | null;
+}
+
 export interface SessionStatusChangedEvent {
 	type: "session-status-changed";
 	clientId: number;
@@ -159,4 +210,13 @@ export interface MessageStatusReceivedEvent {
 	timestamp: number;
 }
 
-export type RemoteClientEvent = QRReceivedEvent | AuthSuccessEvent | AuthLogoutEvent | SessionStatusChangedEvent | MessageReceivedEvent | MessageEditedEvent | MessageReactionEvent | MessageRevokedEvent | MessageStatusReceivedEvent;
+export type RemoteClientEvent =
+	| QRReceivedEvent
+	| AuthSuccessEvent
+	| AuthLogoutEvent
+	| SessionStatusChangedEvent
+	| MessageReceivedEvent
+	| MessageEditedEvent
+	| MessageReactionEvent
+	| MessageRevokedEvent
+	| MessageStatusReceivedEvent;

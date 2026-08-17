@@ -2,17 +2,21 @@ import { randomUUID } from "node:crypto";
 import { SessionData, SocketEventType, SocketServerAdminRoom } from "../sdk-local";
 import { WppClientType } from "@prisma/client";
 import axios, { AxiosError } from "axios";
-import { RemoteSessionInfo } from "../types/remote-client.types";
+import { RemoteAuthBatch, RemoteSessionDirectoryItem, RemoteSessionInfo } from "../types/remote-client.types";
 import prismaService from "./prisma.service";
 import socketService from "./socket.service";
 import { calculateSessionStability } from "./remote-session-stability";
+import wwebjsHealthCheckService from "./wwebjs-health-check.service";
 
 const REMOTE_TIMEOUT_MS = 5_000;
 const STABILITY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const EVENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 export class RemoteSessionMonitorError extends Error {
-	constructor(public readonly statusCode: number, message: string) {
+	constructor(
+		public readonly statusCode: number,
+		message: string
+	) {
 		super(message);
 		this.name = "RemoteSessionMonitorError";
 	}
@@ -65,7 +69,8 @@ class RemoteSessionMonitorService {
 		const stateChangedAt = requiredDate(session.stateChangedAt);
 		const reason = sanitizedReason(session.lastDisconnectReason);
 		const previousState = client.sessionSnapshot?.state || null;
-		const transitionChanged = previousState !== session.state || client.sessionSnapshot?.lastDisconnectReason !== reason;
+		const transitionChanged =
+			previousState !== session.state || client.sessionSnapshot?.lastDisconnectReason !== reason;
 
 		await prismaService.$transaction(async (transaction) => {
 			await transaction.wppClientSessionSnapshot.upsert({
@@ -113,16 +118,18 @@ class RemoteSessionMonitorService {
 
 			if (transitionChanged) {
 				await transaction.wppClientSessionEvent.createMany({
-					data: [{
-						clientId,
-						previousState,
-						state: session.state,
-						reason,
-						occurredAt: requiredDate(context.occurredAt),
-						traceId: context.traceId,
-						transitionKey: `${clientId}:${session.state}:${stateChangedAt.toISOString()}`,
-						source: context.source
-					}],
+					data: [
+						{
+							clientId,
+							previousState,
+							state: session.state,
+							reason,
+							occurredAt: requiredDate(context.occurredAt),
+							traceId: context.traceId,
+							transitionKey: `${clientId}:${session.state}:${stateChangedAt.toISOString()}`,
+							source: context.source
+						}
+					],
 					skipDuplicates: true
 				});
 			}
@@ -151,13 +158,20 @@ class RemoteSessionMonitorService {
 				id: true,
 				name: true,
 				phone: true,
+				remoteClientUrl: true,
 				sessionSnapshot: true
 			},
 			orderBy: { name: "asc" }
 		});
 
-		const disconnections = await this.countUnexpectedDisconnections(clients.map((client) => client.id));
-		return clients.map((client) => this.toClientResponse(client, disconnections.get(client.id) || 0));
+		const [disconnections, directory] = await Promise.all([
+			this.countUnexpectedDisconnections(clients.map((client) => client.id)),
+			this.loadRemoteSessionDirectory(clients)
+		]);
+		return clients.map((client) => ({
+			...this.toClientResponse(client, disconnections.get(client.id) || 0),
+			...this.sessionMetadata(directory.get(client.id))
+		}));
 	}
 
 	public async getClientDetail(session: SessionData, clientId: number) {
@@ -177,14 +191,16 @@ class RemoteSessionMonitorService {
 			orderBy: { occurredAt: "desc" },
 			take: 200
 		});
-		const disconnectCount = events.filter((event) => event.state === "DISCONNECTED" || event.state === "ERROR").length;
+		const disconnectCount = events.filter(
+			(event) => event.state === "DISCONNECTED" || event.state === "ERROR"
+		).length;
 
 		return { ...this.toClientResponse(client, disconnectCount), events };
 	}
 
 	public async restart(session: SessionData, clientId: number) {
-		const client = await this.getScopedRemoteClient(session, clientId);
-		return this.remoteRequest(client.remoteClientUrl, "post", "/api/session/restart");
+		const { client, pathPrefix } = await this.getScopedRemoteSessionTarget(session, clientId);
+		return this.remoteRequest(client.remoteClientUrl, "post", `${pathPrefix}/session/restart`);
 	}
 
 	public async resetForQr(session: SessionData, clientId: number, confirmed: boolean) {
@@ -192,13 +208,86 @@ class RemoteSessionMonitorService {
 			throw new RemoteSessionMonitorError(400, "Confirmation is required to generate a new QR code");
 		}
 
-		const client = await this.getScopedRemoteClient(session, clientId);
-		return this.remoteRequest(client.remoteClientUrl, "post", "/api/session/reset-qr", { confirm: true });
+		const { client, pathPrefix } = await this.getScopedRemoteSessionTarget(session, clientId);
+		return this.remoteRequest(client.remoteClientUrl, "post", `${pathPrefix}/session/reset-qr`, { confirm: true });
 	}
 
 	public async getQr(session: SessionData, clientId: number) {
+		const { client, pathPrefix } = await this.getScopedRemoteSessionTarget(session, clientId);
+		return this.remoteRequest(client.remoteClientUrl, "get", `${pathPrefix}/session/qr`);
+	}
+
+	public async runFunctionalCheck(session: SessionData, clientId: number) {
 		const client = await this.getScopedRemoteClient(session, clientId);
-		return this.remoteRequest(client.remoteClientUrl, "get", "/api/session/qr");
+		return wwebjsHealthCheckService.runHealthCheck({
+			clientId,
+			remoteClientUrl: client.remoteClientUrl!
+		});
+	}
+
+	public async createAuthBatch(
+		session: SessionData,
+		clientId: number,
+		monitorGroupId: string
+	): Promise<RemoteAuthBatch> {
+		if (!monitorGroupId.trim()) throw new RemoteSessionMonitorError(400, "Monitoring group id is required");
+		const client = await this.getScopedRemoteClient(session, clientId);
+		await this.assertClientMonitorGroup(client, monitorGroupId.trim());
+		return this.remoteRequest(client.remoteClientUrl, "post", "/api/auth-batches", {
+			monitorGroupId: monitorGroupId.trim(),
+			createdBy: `whatsapp-service:${clientId}`
+		});
+	}
+
+	public async getAuthBatch(session: SessionData, clientId: number, batchId: string): Promise<RemoteAuthBatch> {
+		return (await this.getAuthorizedAuthBatch(session, clientId, batchId)).batch;
+	}
+
+	public async activateNextAuthItem(
+		session: SessionData,
+		clientId: number,
+		batchId: string
+	): Promise<RemoteAuthBatch> {
+		const { client } = await this.getAuthorizedAuthBatch(session, clientId, batchId);
+		return this.remoteRequest(
+			client.remoteClientUrl,
+			"post",
+			`/api/auth-batches/${encodeURIComponent(batchId)}/next`
+		);
+	}
+
+	public async retryAuthItem(
+		session: SessionData,
+		clientId: number,
+		batchId: string,
+		itemId: number
+	): Promise<RemoteAuthBatch> {
+		const { client } = await this.getAuthorizedAuthBatch(session, clientId, batchId);
+		return this.remoteRequest(
+			client.remoteClientUrl,
+			"post",
+			`/api/auth-batches/${encodeURIComponent(batchId)}/items/${itemId}/retry`
+		);
+	}
+
+	public async cancelAuthBatch(session: SessionData, clientId: number, batchId: string): Promise<RemoteAuthBatch> {
+		const { client } = await this.getAuthorizedAuthBatch(session, clientId, batchId);
+		return this.remoteRequest(
+			client.remoteClientUrl,
+			"post",
+			`/api/auth-batches/${encodeURIComponent(batchId)}/cancel`
+		);
+	}
+
+	public async getAuthBatchQr(session: SessionData, clientId: number, batchId: string): Promise<unknown> {
+		const { client, batch } = await this.getAuthorizedAuthBatch(session, clientId, batchId);
+		const activeItem = batch.items.find((item) => item.status === "ACTIVATING" || item.status === "QR_PENDING");
+		const activeClient = activeItem ? await this.getScopedRemoteClient(session, activeItem.clientId) : client;
+		return this.remoteRequest(
+			activeClient.remoteClientUrl,
+			"get",
+			`/api/auth-batches/${encodeURIComponent(batchId)}/qr`
+		);
 	}
 
 	public async refreshClient(clientId: number): Promise<void> {
@@ -212,7 +301,18 @@ class RemoteSessionMonitorService {
 		}
 
 		try {
-			const session = await this.remoteRequest<RemoteSessionInfo>(client.remoteClientUrl, "get", "/api/session/info");
+			const directory = await this.remoteRequest<{ sessions: RemoteSessionDirectoryItem[] }>(
+				client.remoteClientUrl,
+				"get",
+				"/api/sessions"
+			).catch(() => null);
+			const remoteSessionId = directory?.sessions?.find((item) => item.clientId === clientId)?.sessionId;
+			const pathPrefix = remoteSessionId ? `/api/sessions/${encodeURIComponent(remoteSessionId)}` : "/api";
+			const session = await this.remoteRequest<RemoteSessionInfo>(
+				client.remoteClientUrl,
+				"get",
+				`${pathPrefix}/session/info`
+			);
 			await this.recordSnapshot(clientId, session, {
 				source: "POLL",
 				traceId: randomUUID(),
@@ -266,6 +366,49 @@ class RemoteSessionMonitorService {
 		return client;
 	}
 
+	private async getScopedRemoteSessionTarget(session: SessionData, clientId: number) {
+		const client = await this.getScopedRemoteClient(session, clientId);
+		const directory = await this.remoteRequest<{ sessions: RemoteSessionDirectoryItem[] }>(
+			client.remoteClientUrl,
+			"get",
+			"/api/sessions"
+		).catch(() => null);
+		const sessionId = directory?.sessions?.find((item) => item.clientId === clientId)?.sessionId;
+		return {
+			client,
+			pathPrefix: sessionId ? `/api/sessions/${encodeURIComponent(sessionId)}` : "/api"
+		};
+	}
+
+	private async getAuthorizedAuthBatch(session: SessionData, clientId: number, batchId: string) {
+		const client = await this.getScopedRemoteClient(session, clientId);
+		const batch = await this.remoteRequest<RemoteAuthBatch>(
+			client.remoteClientUrl,
+			"get",
+			`/api/auth-batches/${encodeURIComponent(batchId)}`
+		);
+		await this.assertClientMonitorGroup(client, batch.groupId);
+		return { client, batch };
+	}
+
+	private async assertClientMonitorGroup(
+		client: { id: number; remoteClientUrl: string | null },
+		groupId: string
+	): Promise<void> {
+		const directory = await this.remoteRequest<{ sessions: RemoteSessionDirectoryItem[] }>(
+			client.remoteClientUrl,
+			"get",
+			"/api/sessions"
+		);
+		const member = directory.sessions?.find((item) => item.clientId === client.id);
+		if (!member || member.monitorGroupId !== groupId) {
+			throw new RemoteSessionMonitorError(
+				403,
+				"The selected WhatsApp client does not belong to this monitoring group"
+			);
+		}
+	}
+
 	private async countUnexpectedDisconnections(clientIds: number[]): Promise<Map<number, number>> {
 		if (clientIds.length === 0) {
 			return new Map();
@@ -284,15 +427,20 @@ class RemoteSessionMonitorService {
 		return new Map(events.map((event) => [event.clientId, event._count._all]));
 	}
 
-	private toClientResponse(client: { id: number; name: string; phone: string | null; sessionSnapshot: any }, disconnectCount: number) {
+	private toClientResponse(
+		client: { id: number; name: string; phone: string | null; sessionSnapshot: any },
+		disconnectCount: number
+	) {
 		const snapshot = client.sessionSnapshot;
-		const stability = calculateSessionStability(snapshot, disconnectCount);
+		const functionalHealth = wwebjsHealthCheckService.getLatest(client.id);
+		const stability = calculateSessionStability(snapshot, disconnectCount, Date.now(), functionalHealth);
 
 		return {
 			id: client.id,
 			name: client.name,
 			phone: snapshot?.phone || client.phone,
 			snapshot,
+			functionalHealth,
 			stability: stability.level,
 			stabilityReason: stability.reason,
 			disconnections24h: disconnectCount,
@@ -302,7 +450,46 @@ class RemoteSessionMonitorService {
 		};
 	}
 
-	private emitStatus(client: { id: number; name: string; instance: string; sectors: Array<{ id: number }> }, session: RemoteSessionInfo, observedAt: Date): void {
+	private async loadRemoteSessionDirectory(
+		clients: Array<{ id: number; remoteClientUrl: string | null }>
+	): Promise<Map<number, RemoteSessionDirectoryItem>> {
+		const byClientId = new Map<number, RemoteSessionDirectoryItem>();
+		const urls = [
+			...new Set(clients.map((client) => client.remoteClientUrl).filter((url): url is string => !!url))
+		];
+		await Promise.all(
+			urls.map(async (url) => {
+				try {
+					const response = await this.remoteRequest<{ sessions: RemoteSessionDirectoryItem[] }>(
+						url,
+						"get",
+						"/api/sessions"
+					);
+					for (const item of response.sessions || []) byClientId.set(item.clientId, item);
+				} catch {
+					// Session monitoring remains available when an older remote does not expose the directory.
+				}
+			})
+		);
+		return byClientId;
+	}
+
+	private sessionMetadata(item: RemoteSessionDirectoryItem | undefined) {
+		return {
+			sessionId: item?.sessionId || null,
+			library: item?.library || null,
+			monitorGroupId: item?.monitorGroupId || null,
+			monitorRole: item?.monitorRole || null,
+			authBatchId: item?.authBatchId || null,
+			authQueueStatus: item?.authQueueStatus || null
+		};
+	}
+
+	private emitStatus(
+		client: { id: number; name: string; instance: string; sectors: Array<{ id: number }> },
+		session: RemoteSessionInfo,
+		observedAt: Date
+	): void {
 		const payload = {
 			clientId: client.id,
 			name: client.name,
@@ -320,7 +507,12 @@ class RemoteSessionMonitorService {
 		});
 	}
 
-	private async remoteRequest<T = unknown>(baseUrl: string | null, method: "get" | "post", path: string, data?: unknown): Promise<T> {
+	private async remoteRequest<T = unknown>(
+		baseUrl: string | null,
+		method: "get" | "post",
+		path: string,
+		data?: unknown
+	): Promise<T> {
 		if (!baseUrl) {
 			throw new RemoteSessionMonitorError(404, "Remote WhatsApp client not found");
 		}
@@ -340,8 +532,19 @@ class RemoteSessionMonitorService {
 			if (axiosError.code === "ECONNABORTED") {
 				throw new RemoteSessionMonitorError(504, "Remote WhatsApp session timed out");
 			}
-			if (axiosError.response?.status === 404 || axiosError.response?.status === 409) {
-				throw new RemoteSessionMonitorError(axiosError.response.status, axiosError.response.status === 404 ? "QR code is not available" : "Another session operation is in progress");
+			if (axiosError.response?.status && axiosError.response.status >= 400 && axiosError.response.status < 500) {
+				const message =
+					(axiosError.response.data as { error?: string; message?: string } | undefined)?.message ||
+					(axiosError.response.data as { error?: string } | undefined)?.error ||
+					"Remote WhatsApp request was rejected";
+				throw new RemoteSessionMonitorError(axiosError.response.status, message);
+			}
+			if (axiosError.response?.status === 503) {
+				const message =
+					(axiosError.response.data as { error?: string; message?: string } | undefined)?.message ||
+					(axiosError.response.data as { error?: string } | undefined)?.error ||
+					"Remote WhatsApp session is still starting";
+				throw new RemoteSessionMonitorError(503, message);
 			}
 			throw new RemoteSessionMonitorError(502, "Remote WhatsApp session is unavailable");
 		}
