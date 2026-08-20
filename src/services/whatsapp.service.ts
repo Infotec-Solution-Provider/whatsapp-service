@@ -25,6 +25,8 @@ import messagesService from "./messages.service";
 import prismaService from "./prisma.service";
 import contactsService from "./contacts.service";
 import { createUploadTraceLogger } from "../utils/file-upload-trace";
+import readyMessagesService from "./ready-messages.service";
+import { readyMessagePipelineSource, templatePipelineSource, type PipelineTriggerSource } from "../utils/pipeline-trigger-source";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -58,6 +60,7 @@ interface SendMessageData {
 	fileId?: number;
 	isForwarded?: boolean;
 	traceId?: string;
+	readyMessageId?: number | string;
 }
 
 interface EditMessageData {
@@ -208,6 +211,15 @@ class WhatsappService {
 
 		data.sendAsDocument = parseBoolean(data.sendAsDocument);
 		data.sendAsAudio = parseBoolean(data.sendAsAudio);
+		let pipelineSource: PipelineTriggerSource | undefined;
+		if (data.readyMessageId !== undefined && data.readyMessageId !== null && String(data.readyMessageId).trim()) {
+			const readyMessageId = Number(data.readyMessageId);
+			if (!Number.isInteger(readyMessageId) || readyMessageId <= 0) {
+				throw new BadRequestError("readyMessageId inválido.");
+			}
+			await readyMessagesService.getReadyMessageForSend(session, readyMessageId);
+			pipelineSource = readyMessagePipelineSource(readyMessageId);
+		}
 
 		const traceId = data.traceId || `${to}-${Date.now()}`;
 		const trace = createUploadTraceLogger("whatsapp-service.service.send-message", traceId);
@@ -350,7 +362,7 @@ class WhatsappService {
 						: typeof message.quotedId === "string" && /^\d+$/.test(message.quotedId)
 							? Number(message.quotedId)
 							: null
-			});
+			}, false, pipelineSource);
 
 			messagesDistributionService.notifyMessage(process, savedMsg);
 			process.log("Mensagem salva no banco de dados.", savedMsg);
@@ -840,13 +852,15 @@ class WhatsappService {
 				contactId
 			);
 
-			const savedMsg = await messagesService.insertMessage(message);
+			const source = templatePipelineSource(data.template.source, data.template.name, data.template.language);
+			const savedMsg = await messagesService.insertMessage(message, source);
 			process.log("Mensagem salva no banco de dados.", savedMsg);
 
 			messagesDistributionService.notifyMessage(process, savedMsg);
 			process.success("Mensagem de template enviada com sucesso.");
 		} catch (error) {
 			process.failed("Erro ao enviar mensagem de template.\n" + sanitizeErrorMessage(error));
+			throw new BadRequestError("Erro ao enviar mensagem de template: " + sanitizeErrorMessage(error), error);
 		}
 	}
 

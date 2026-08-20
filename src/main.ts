@@ -41,6 +41,7 @@ import internalWhatsappMessageQueueService from "./services/internal-whatsapp-me
 import internalChatsService from "./services/internal-chats.service";
 import remoteInboundEventInboxService from "./services/remote-inbound-event-inbox.service";
 import remoteClientService from "./services/remote-client.service";
+import pipelineEnrollmentOutboxService from "./services/pipeline-enrollment-outbox.service";
 
 whatsappService.buildClients();
 internalWhatsappMessageQueueService.setProcessHandler({
@@ -115,6 +116,7 @@ const server = app.listen(serverPort, () => {
 	messageQueueService.startWorker();
 	internalWhatsappMessageQueueService.startWorker();
 	remoteInboundEventInboxService.startWorker();
+	pipelineEnrollmentOutboxService.startWorker();
 	remoteSessionMonitorRoutine.start();
 	Logger.info("Server listening on port " + serverPort);
 
@@ -139,6 +141,7 @@ const shutdown = async (signal: string): Promise<void> => {
 	Logger.info(`[Shutdown] ${signal} received; draining durable workers`);
 
 	remoteInboundEventInboxService.stopWorker();
+	pipelineEnrollmentOutboxService.stopWorker();
 	internalWhatsappMessageQueueService.stopWorker();
 	messageQueueService.stopWorker();
 	gupshupWebhookQueueService.stopProcessor();

@@ -1,14 +1,16 @@
 import { Request, Response, Router } from "express";
-import chatsService from "../services/chats.service";
+import chatsService, { PublicConversationsFilters } from "../services/chats.service";
 import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import onlyLocal from "../middlewares/only-local.middleware";
 
 class ChatsController {
 	constructor(public readonly router: Router) {
+		this.router.get("/api/whatsapp/conversations", isAuthenticated, this.getPublicConversations.bind(this));
 		this.router.get("/api/whatsapp/session/chats", isAuthenticated, this.getChatsBySession);
 		this.router.get("/api/whatsapp/chats/:id", isAuthenticated, this.getChatById.bind(this));
 		this.router.get("/api/whatsapp/chats/:id/messages", isAuthenticated, this.getChatMessages.bind(this));
+		this.router.get("/api/whatsapp/conversations/:id/messages", isAuthenticated, this.getChatMessages.bind(this));
 		this.router.get("/api/internal/whatsapp/chats/:id", onlyLocal, this.getInternalChatById.bind(this));
 		this.router.post(
 			"/api/internal/whatsapp/chats/:id/agent-send-message",
@@ -24,6 +26,53 @@ class ChatsController {
 		this.router.post("/api/whatsapp/chats", isAuthenticated, this.startChatByContactId);
 		this.router.get("/api/whatsapp/session/monitor", isAuthenticated, this.getChatsMonitor);
 		this.router.post("/api/whatsapp/chats/:id/transfer", isAuthenticated, this.transferAttendance);
+	}
+
+	private async getPublicConversations(req: Request, res: Response) {
+		const parsePositiveInt = (value: unknown, fallback: number) => {
+			const parsed = Number(value);
+			return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+		};
+		const parseOptionalPositiveInt = (value: unknown, field: string) => {
+			if (value === undefined || value === "") return undefined;
+			const parsed = Number(value);
+			if (!Number.isInteger(parsed) || parsed <= 0) throw new BadRequestError(`${field} must be a positive integer!`);
+			return parsed;
+		};
+		const parseDate = (value: unknown, field: string) => {
+			if (value === undefined || value === "") return undefined;
+			const parsed = new Date(String(value));
+			if (Number.isNaN(parsed.getTime())) throw new BadRequestError(`${field} must be a valid date!`);
+			return parsed;
+		};
+		const rawIsFinished = req.query["isFinished"];
+
+		if (rawIsFinished !== undefined && rawIsFinished !== "true" && rawIsFinished !== "false") {
+			throw new BadRequestError("isFinished must be true or false!");
+		}
+
+		const page = parsePositiveInt(req.query["page"], 1);
+		const limit = Math.min(parsePositiveInt(req.query["limit"], 25), 100);
+		const userId = parseOptionalPositiveInt(req.query["userId"], "userId");
+		const sectorId = parseOptionalPositiveInt(req.query["sectorId"], "sectorId");
+		const contactId = parseOptionalPositiveInt(req.query["contactId"], "contactId");
+		const search = typeof req.query["search"] === "string" ? req.query["search"].trim().slice(0, 120) : "";
+		const startedFrom = parseDate(req.query["startedFrom"], "startedFrom");
+		const startedTo = parseDate(req.query["startedTo"], "startedTo");
+		const filters: PublicConversationsFilters = {
+			page,
+			limit,
+			...(rawIsFinished === undefined ? {} : { isFinished: rawIsFinished === "true" }),
+			...(userId === undefined ? {} : { userId }),
+			...(sectorId === undefined ? {} : { sectorId }),
+			...(contactId === undefined ? {} : { contactId }),
+			...(search ? { search } : {}),
+			...(startedFrom === undefined ? {} : { startedFrom }),
+			...(startedTo === undefined ? {} : { startedTo })
+		};
+
+		const data = await chatsService.getPublicConversations(req.session, filters);
+		res.status(200).send({ message: "Conversations retrieved successfully!", data });
 	}
 
 	private async getChatsBySession(req: Request, res: Response) {

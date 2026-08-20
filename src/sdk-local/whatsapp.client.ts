@@ -103,6 +103,7 @@ export default class WhatsappClient extends ApiClient {
 		("sendAsDocument" in data) && data.sendAsDocument && formData.append("sendAsDocument", "true");
 		("sendAsChatOwner" in data) && data.sendAsChatOwner && formData.append("sendAsChatOwner", String(data.sendAsChatOwner));
 		("traceId" in data) && data.traceId && formData.append("traceId", data.traceId);
+		("readyMessageId" in data) && data.readyMessageId && formData.append("readyMessageId", String(data.readyMessageId));
 
 		const { data: res } = await this.ax.post<DataResponse<WppMessage>>(
 			url,
@@ -226,6 +227,14 @@ export default class WhatsappClient extends ApiClient {
 		customerCnpj?: string;
 		customerName?: string;
 		hasCustomer?: boolean;
+		purchaseStatus?: "with_purchases" | "without_purchases";
+		purchaseFrom?: string;
+		purchaseTo?: string;
+		campaignIds?: number[];
+		segmentIds?: number[];
+		registeredFrom?: string;
+		registeredTo?: string;
+		loyaltyOperatorIds?: number[];
 		page?: number;
 		perPage?: number;
 	}) {
@@ -244,6 +253,16 @@ export default class WhatsappClient extends ApiClient {
 				params.append("customerName", filters.customerName);
 			if (filters.hasCustomer !== undefined)
 				params.append("hasCustomer", String(filters.hasCustomer));
+			if (filters.purchaseStatus)
+				params.append("purchaseStatus", filters.purchaseStatus);
+			if (filters.purchaseFrom) params.append("purchaseFrom", filters.purchaseFrom);
+			if (filters.purchaseTo) params.append("purchaseTo", filters.purchaseTo);
+			if (filters.campaignIds?.length) params.append("campaignIds", filters.campaignIds.join(","));
+			if (filters.segmentIds?.length) params.append("segmentIds", filters.segmentIds.join(","));
+			if (filters.registeredFrom) params.append("registeredFrom", filters.registeredFrom);
+			if (filters.registeredTo) params.append("registeredTo", filters.registeredTo);
+			if (filters.loyaltyOperatorIds?.length)
+				params.append("loyaltyOperatorIds", filters.loyaltyOperatorIds.join(","));
 			if (filters.page !== undefined)
 				params.append("page", String(filters.page));
 			if (filters.perPage !== undefined)

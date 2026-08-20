@@ -82,6 +82,54 @@ export class ContactQueryBuilder {
 			queryParams.push(`%${filters.customerName}%`, `%${filters.customerName}%`);
 		}
 
+		if (filters.campaignIds?.length) {
+			const placeholders = filters.campaignIds.map(() => "?").join(",");
+			whereConditions.push(`cli.COD_CAMPANHA IN (${placeholders})`);
+			queryParams.push(...filters.campaignIds);
+		}
+
+		if (filters.segmentIds?.length) {
+			const placeholders = filters.segmentIds.map(() => "?").join(",");
+			whereConditions.push(`cli.SEGMENTO IN (${placeholders})`);
+			queryParams.push(...filters.segmentIds);
+		}
+
+		if (filters.registeredFrom) {
+			whereConditions.push("cli.DATACAD >= ?");
+			queryParams.push(`${filters.registeredFrom} 00:00:00`);
+		}
+
+		if (filters.registeredTo) {
+			whereConditions.push("cli.DATACAD <= ?");
+			queryParams.push(`${filters.registeredTo} 23:59:59`);
+		}
+
+		if (filters.purchaseStatus === "without_purchases") {
+			whereConditions.push("NOT EXISTS (SELECT 1 FROM compras purchase WHERE purchase.CLIENTE = cli.CODIGO)");
+		} else if (filters.purchaseStatus === "with_purchases" || filters.purchaseFrom || filters.purchaseTo) {
+			const purchaseConditions = ["purchase.CLIENTE = cli.CODIGO"];
+			if (filters.purchaseFrom) {
+				purchaseConditions.push("purchase.DATA >= ?");
+				queryParams.push(`${filters.purchaseFrom} 00:00:00`);
+			}
+			if (filters.purchaseTo) {
+				purchaseConditions.push("purchase.DATA <= ?");
+				queryParams.push(`${filters.purchaseTo} 23:59:59`);
+			}
+			whereConditions.push(`EXISTS (SELECT 1 FROM compras purchase WHERE ${purchaseConditions.join(" AND ")})`);
+		}
+
+		if (filters.loyaltyOperatorIds?.length) {
+			const placeholders = filters.loyaltyOperatorIds.map(() => "?").join(",");
+			whereConditions.push(`EXISTS (
+				SELECT 1 FROM campanhas_clientes loyalty
+				WHERE loyalty.CLIENTE = cli.CODIGO
+				AND loyalty.OPERADOR IN (${placeholders})
+				AND (loyalty.CONCLUIDO = 'NAO' OR loyalty.DT_RESULTADO < '1970-01-01')
+			)`);
+			queryParams.push(...filters.loyaltyOperatorIds);
+		}
+
 		// Sector filters
 		if (filters.sectorIds && filters.sectorIds.length > 0) {
 			const placeholders = filters.sectorIds.map(() => "?").join(",");

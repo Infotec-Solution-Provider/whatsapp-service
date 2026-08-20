@@ -46,6 +46,18 @@ interface ChatsFilters {
 	isFinished?: string;
 }
 
+export interface PublicConversationsFilters {
+	page: number;
+	limit: number;
+	isFinished?: boolean;
+	userId?: number;
+	sectorId?: number;
+	contactId?: number;
+	search?: string;
+	startedFrom?: Date;
+	startedTo?: Date;
+}
+
 interface SystemStartNewChatProps {
 	instance: string;
 	contact: WppContact;
@@ -452,6 +464,63 @@ class ChatsService {
 		});
 
 		return chats;
+	}
+
+	public async getPublicConversations(session: SessionData, filters: PublicConversationsFilters) {
+		const where: Prisma.WppChatWhereInput = {
+			instance: session.instance,
+			...(filters.isFinished === undefined ? {} : { isFinished: filters.isFinished }),
+			...(filters.userId === undefined ? {} : { userId: filters.userId }),
+			...(filters.sectorId === undefined ? {} : { sectorId: filters.sectorId }),
+			...(filters.contactId === undefined ? {} : { contactId: filters.contactId }),
+			...(filters.startedFrom || filters.startedTo
+				? {
+						startedAt: {
+							...(filters.startedFrom ? { gte: filters.startedFrom } : {}),
+							...(filters.startedTo ? { lte: filters.startedTo } : {})
+						}
+				  }
+				: {}),
+			...(filters.search
+				? {
+						contact: {
+							OR: [
+								{ name: { contains: filters.search } },
+								{ phone: { contains: filters.search } },
+								{ whatsappId: { contains: filters.search } }
+							]
+						}
+				  }
+				: {})
+		};
+
+		const skip = (filters.page - 1) * filters.limit;
+		const [total, items] = await Promise.all([
+			prismaService.wppChat.count({ where }),
+			prismaService.wppChat.findMany({
+				where,
+				skip,
+				take: filters.limit,
+				orderBy: [{ startedAt: "desc" }, { id: "desc" }],
+				include: {
+					contact: true,
+					sector: true,
+					_count: { select: { messages: true } }
+				}
+			})
+		]);
+
+		return {
+			items,
+			pagination: {
+				page: filters.page,
+				limit: filters.limit,
+				total,
+				totalPages: Math.ceil(total / filters.limit),
+				hasNextPage: skip + items.length < total,
+				hasPreviousPage: filters.page > 1
+			}
+		};
 	}
 
 	public async getChatById(id: number) {

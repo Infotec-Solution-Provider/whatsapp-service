@@ -303,6 +303,7 @@ export interface SendMessageData {
 	sendAsDocument?: boolean;
 	fileId?: number;
 	traceId?: string;
+	readyMessageId?: number;
 }
 
 export interface SendFileMessageData extends SendMessageData {

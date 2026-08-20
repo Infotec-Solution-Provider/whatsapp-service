@@ -130,6 +130,17 @@ class ReadyMessagesService {
 		return readyMessage;
 	}
 
+	public async getReadyMessageForSend(session: SessionData, id: number): Promise<ReadyMessage> {
+		const readyMessage = await this.getReadyMessageById(session, id);
+		if (session.sectorId !== 3 && readyMessage.sectorId !== session.sectorId) {
+			throw new BadRequestError("Mensagem pronta não está disponível para este setor.");
+		}
+		if (readyMessage.onlyAdmin && session.role !== "ADMIN") {
+			throw new BadRequestError("Mensagem pronta disponível apenas para administradores.");
+		}
+		return readyMessage;
+	}
+
 	/**
 	 * Atualiza uma mensagem pronta
 	 */

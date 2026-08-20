@@ -23,6 +23,14 @@ export interface ContactsFilters {
 	customerName: string | null;
 	hasCustomer: boolean | null;
 	sectorIds: number[] | null;
+	purchaseStatus?: "with_purchases" | "without_purchases" | null;
+	purchaseFrom?: string | null;
+	purchaseTo?: string | null;
+	campaignIds?: number[] | null;
+	segmentIds?: number[] | null;
+	registeredFrom?: string | null;
+	registeredTo?: string | null;
+	loyaltyOperatorIds?: number[] | null;
 	page: number;
 	perPage: number;
 }

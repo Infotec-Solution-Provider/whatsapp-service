@@ -1,7 +1,7 @@
 import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import onlyLocal from "../middlewares/only-local.middleware";
-import contactsService from "../services/contacts.service";
+import contactsService, { ContactsFilters } from "../services/contacts.service";
 import ContactSearchService from "../services/contact-search.service";
 import parametersService from "../services/parameters.service";
 
@@ -82,7 +82,7 @@ class ContactsController {
 		const page = req.query["page"] ? Number(req.query["page"]) : 1;
 		const perPage = req.query["perPage"] ? Number(req.query["perPage"]) : 20;
 
-		const filters = {
+		const filters: ContactsFilters = {
 			ids,
 			id,
 			name: (req.query["name"] as string) || null,
@@ -94,6 +94,17 @@ class ContactsController {
 			customerName: (req.query["customerName"] as string) || null,
 			hasCustomer: req.query["hasCustomer"] ? req.query["hasCustomer"] === "true" : null,
 			sectorIds,
+			purchaseStatus:
+				req.query["purchaseStatus"] === "with_purchases" || req.query["purchaseStatus"] === "without_purchases"
+					? req.query["purchaseStatus"]
+					: null,
+			purchaseFrom: (req.query["purchaseFrom"] as string) || null,
+			purchaseTo: (req.query["purchaseTo"] as string) || null,
+			campaignIds: parseNumberList(req.query["campaignIds"] as string | undefined),
+			segmentIds: parseNumberList(req.query["segmentIds"] as string | undefined),
+			registeredFrom: (req.query["registeredFrom"] as string) || null,
+			registeredTo: (req.query["registeredTo"] as string) || null,
+			loyaltyOperatorIds: parseNumberList(req.query["loyaltyOperatorIds"] as string | undefined),
 			page,
 			perPage
 		};
@@ -170,6 +181,17 @@ class ContactsController {
 			customerName: typeof body["customerName"] === "string" ? body["customerName"] : null,
 			hasCustomer: typeof body["hasCustomer"] === "boolean" ? body["hasCustomer"] : null,
 			sectorIds: parseNumberArray(body["sectorIds"]),
+			purchaseStatus:
+				body["purchaseStatus"] === "with_purchases" || body["purchaseStatus"] === "without_purchases"
+					? body["purchaseStatus"]
+					: null,
+			purchaseFrom: typeof body["purchaseFrom"] === "string" ? body["purchaseFrom"] : null,
+			purchaseTo: typeof body["purchaseTo"] === "string" ? body["purchaseTo"] : null,
+			campaignIds: parseNumberArray(body["campaignIds"]),
+			segmentIds: parseNumberArray(body["segmentIds"]),
+			registeredFrom: typeof body["registeredFrom"] === "string" ? body["registeredFrom"] : null,
+			registeredTo: typeof body["registeredTo"] === "string" ? body["registeredTo"] : null,
+			loyaltyOperatorIds: parseNumberArray(body["loyaltyOperatorIds"]),
 			page: Number.isInteger(page) && page > 0 ? page : 1,
 			perPage: Number.isInteger(perPage) && perPage > 0 ? perPage : 20,
 		});

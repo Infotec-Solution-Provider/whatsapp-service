@@ -10,6 +10,7 @@ import ProcessingLogger from "../utils/processing-logger";
 import instancesService from "./instances.service";
 import localSyncService from "./local-sync.service";
 import { safeEncode } from "../utils/safe-encode";
+import type { PipelineTriggerSource } from "../utils/pipeline-trigger-source";
 
 interface FetchMessagesFilter {
 	minDate?: string;
@@ -56,6 +57,27 @@ const PERSISTABLE_WPP_MESSAGE_FIELDS = new Set([
 ]);
 
 class MessagesService {
+	private async createPipelineOutbox(
+		tx: Prisma.TransactionClient,
+		message: WppMessage,
+		source: PipelineTriggerSource,
+	): Promise<void> {
+		const contact = message.contactId
+			? await tx.wppContact.findUnique({ where: { id: message.contactId }, select: { customerId: true } })
+			: null;
+		await tx.pipelineEnrollmentOutbox.create({
+			data: {
+				idempotencyKey: `pipeline-event:v1:${message.id}`,
+				instance: message.instance,
+				sourceType: source.sourceType,
+				sourceKey: source.sourceKey,
+				messageId: message.id,
+				contactId: message.contactId ?? null,
+				customerId: contact?.customerId ?? null,
+			},
+		});
+	}
+
 	private getPersistableMessageFields(data: Record<string, unknown>): Partial<WppMessage> {
 		const persistableData: Partial<WppMessage> = {};
 
@@ -123,7 +145,7 @@ class MessagesService {
 		return quotedMessageById?.id ?? null;
 	}
 
-	public async insertMessage(data: CreateMessageDto) {
+	public async insertMessage(data: CreateMessageDto, pipelineSource?: PipelineTriggerSource) {
 		delete (data as any)["isGroup"];
 		delete (data as any)["authorName"];
 		delete (data as any)["groupId"];
@@ -143,7 +165,13 @@ class MessagesService {
 		if (typeof clientId === "number" && clientId > 0) {
 			createData.client = { connect: { id: clientId } };
 		}
-		const message = await prismaService.wppMessage.create({ data: createData });
+		const message = pipelineSource
+			? await prismaService.$transaction(async (tx) => {
+				const created = await tx.wppMessage.create({ data: createData });
+				await this.createPipelineOutbox(tx, created, pipelineSource);
+				return created;
+			})
+			: await prismaService.wppMessage.create({ data: createData });
 		await this.syncMessageToLocal(message);
 		return message;
 	}
@@ -194,7 +222,7 @@ class MessagesService {
 		}
 	}
 
-	public async updateMessage(id: number, data: Partial<WppMessage>, strictLocalSync = false) {
+	public async updateMessage(id: number, data: Partial<WppMessage>, strictLocalSync = false, pipelineSource?: PipelineTriggerSource) {
 		const { contactId, chatId, clientId, ...rest } = this.getPersistableMessageFields(
 			data as Record<string, unknown>
 		) as Partial<WppMessage>;
@@ -212,13 +240,17 @@ class MessagesService {
 			updateData.client = { connect: { id: clientId } };
 		}
 
-		const message = await prismaService.wppMessage.update({
-			where: { id },
-			data: updateData,
-			include: {
-				WppChat: true
-			}
-		});
+		const message = pipelineSource
+			? await prismaService.$transaction(async (tx) => {
+				const updated = await tx.wppMessage.update({
+					where: { id }, data: updateData, include: { WppChat: true },
+				});
+				await this.createPipelineOutbox(tx, updated, pipelineSource);
+				return updated;
+			})
+			: await prismaService.wppMessage.update({
+				where: { id }, data: updateData, include: { WppChat: true },
+			});
 
 		await this.syncMessageToLocal(message, strictLocalSync);
 		return message;

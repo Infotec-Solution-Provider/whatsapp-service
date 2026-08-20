@@ -35,6 +35,10 @@ export type SupervisorAiSessionStatus = "ACTIVE" | "ARCHIVED";
 
 export type SupervisorAiMessageRole = "USER" | "ASSISTANT";
 
+export type SupervisorAiActionType = "START_WHATSAPP_CHAT";
+
+export type SupervisorAiActionStatus = "PENDING" | "EXECUTING" | "EXECUTED" | "CANCELLED" | "FAILED";
+
 export type SupervisorAiReportFormat = "csv" | "pdf" | "txt";
 
 export interface SupervisorAiContextInput {
@@ -66,6 +70,7 @@ export interface SupervisorAiMessageMetadata {
 	context?: SupervisorAiContextInput;
 	sources?: SupervisorAiSource[];
 	reportPreview?: SupervisorAiReportPreview | null;
+	interrupted?: boolean;
 }
 
 export interface SupervisorAiSession {
@@ -88,6 +93,27 @@ export interface SupervisorAiMessage {
 	createdAt: string;
 }
 
+export interface SupervisorAiAction {
+	id: number;
+	sessionId: number;
+	assistantMessageId: number | null;
+	instance: string;
+	requestedByUserId: number;
+	decidedByUserId: number | null;
+	decidedByUserName: string | null;
+	type: SupervisorAiActionType;
+	status: SupervisorAiActionStatus;
+	label: string;
+	payload: Record<string, unknown>;
+	result: Record<string, unknown> | null;
+	errorMessage: string | null;
+	confirmedAt: string | null;
+	cancelledAt: string | null;
+	executedAt: string | null;
+	createdAt: string;
+	updatedAt: string;
+}
+
 export interface CreateSupervisorAiSessionRequest {
 	title?: string;
 }
@@ -108,13 +134,20 @@ export interface SendSupervisorAiMessageResponse {
 	session: SupervisorAiSession;
 	userMessage: SupervisorAiMessage;
 	assistantMessage: SupervisorAiMessage;
+	actions: SupervisorAiAction[];
 	sources: SupervisorAiSource[];
 	reportPreview: SupervisorAiReportPreview | null;
+	interrupted?: boolean;
 }
 
 export interface SupervisorAiSessionDetail {
 	session: SupervisorAiSession;
 	messages: SupervisorAiMessage[];
+	actions: SupervisorAiAction[];
+}
+
+export interface DecideSupervisorAiActionRequest {
+	decision: "CONFIRM" | "CANCEL";
 }
 
 export interface AiFeatureModels {

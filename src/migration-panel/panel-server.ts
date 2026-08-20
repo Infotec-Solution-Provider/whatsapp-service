@@ -56,7 +56,12 @@ class MigrationPanelServer {
 	}
 
 	private async getRun(req: Request, res: Response): Promise<void> {
-		const run = await this.runner.getRun(req.params["runId"]!);
+		const runId = req.params["runId"];
+		if (typeof runId !== "string") {
+			res.status(400).json({ message: "Identificador de migra\u00e7\u00e3o inv\u00e1lido" });
+			return;
+		}
+		const run = await this.runner.getRun(runId);
 		if (!run) {
 			res.status(404).json({ message: "Migração não encontrada" });
 			return;
@@ -70,7 +75,12 @@ class MigrationPanelServer {
 			res.status(400).json({ message: `Fase inválida. Use: ${phases.join(", ")}` });
 			return;
 		}
-		const run = await this.runner.requestPhase(req.params["runId"]!, phase);
+		const runId = req.params["runId"];
+		if (typeof runId !== "string") {
+			res.status(400).json({ message: "Identificador de migra\u00e7\u00e3o inv\u00e1lido" });
+			return;
+		}
+		const run = await this.runner.requestPhase(runId, phase);
 		res.status(202).json({ run });
 	}
 

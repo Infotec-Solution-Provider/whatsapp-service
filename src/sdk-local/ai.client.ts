@@ -6,9 +6,11 @@ import type {
 	AnalyzeCustomerRequest,
 	AnalyzeCustomerResponse,
 	CreateSupervisorAiSessionRequest,
+	DecideSupervisorAiActionRequest,
 	SuggestResponseRequest,
 	SuggestResponseResponse,
 	SupervisorAiSession,
+	SupervisorAiAction,
 	SupervisorAiSessionDetail,
 	SummarizeChatRequest,
 	SummarizeChatResponse,
@@ -108,6 +110,20 @@ export default class AiClient extends ApiClient {
 	): Promise<SendSupervisorAiMessageResponse> {
 		const { data: res } = await this.ax.post<DataResponse<SendSupervisorAiMessageResponse>>(
 			`/api/ai/supervisor-chat/sessions/${sessionId}/messages`,
+			data,
+			{ headers: this.authHeader(token) },
+		);
+		return res.data;
+	}
+
+	async decideSupervisorAction(
+		sessionId: number,
+		actionId: number,
+		data: DecideSupervisorAiActionRequest,
+		token: string,
+	): Promise<SupervisorAiAction> {
+		const { data: res } = await this.ax.post<DataResponse<SupervisorAiAction>>(
+			`/api/ai/supervisor-chat/sessions/${sessionId}/actions/${actionId}/decision`,
 			data,
 			{ headers: this.authHeader(token) },
 		);

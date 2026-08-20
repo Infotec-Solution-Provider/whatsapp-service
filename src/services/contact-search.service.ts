@@ -22,6 +22,14 @@ export interface ContactSearchFilters {
 	customerName?: string | null;
 	hasCustomer?: boolean | null;
 	sectorIds?: number[] | null;
+	purchaseStatus?: "with_purchases" | "without_purchases" | null;
+	purchaseFrom?: string | null;
+	purchaseTo?: string | null;
+	campaignIds?: number[] | null;
+	segmentIds?: number[] | null;
+	registeredFrom?: string | null;
+	registeredTo?: string | null;
+	loyaltyOperatorIds?: number[] | null;
 }
 
 export interface PaginationParams {
@@ -147,97 +155,56 @@ class CustomerSearcher {
 	}
 
 	async searchByFilters(filters: ContactSearchFilters): Promise<number[] | null> {
-		const hasFilters = !!(filters.customerErp || filters.customerCnpj || filters.customerName);
+		const hasFilters = !!(
+			filters.customerErp ||
+			filters.customerCnpj ||
+			filters.customerName ||
+			filters.purchaseStatus ||
+			filters.purchaseFrom ||
+			filters.purchaseTo ||
+			filters.campaignIds?.length ||
+			filters.segmentIds?.length ||
+			filters.registeredFrom ||
+			filters.registeredTo ||
+			filters.loyaltyOperatorIds?.length
+		);
 		if (!hasFilters) {
 			return null; // Null significa "sem filtro de cliente"
 		}
 
 		const ids = new Set<number>();
 
-		// Busca paralela por ERP e CNPJ (são independentes)
-		await Promise.all([
-			this.searchByErp(filters.customerErp, ids),
-			this.searchByCnpj(filters.customerCnpj, ids)
-		]);
+		const perPage = 100;
+		const requestFilters: Record<string, string> = {
+			perPage: String(perPage),
+			...(filters.customerErp?.trim() ? { COD_ERP: filters.customerErp.trim() } : {}),
+			...(filters.customerCnpj?.trim() ? { CPF_CNPJ: filters.customerCnpj.replace(/\D/g, "") } : {}),
+			...(filters.customerName?.trim() ? { RAZAO: filters.customerName.trim() } : {}),
+			...(filters.purchaseStatus ? { purchaseStatus: filters.purchaseStatus } : {}),
+			...(filters.purchaseFrom ? { purchaseFrom: filters.purchaseFrom } : {}),
+			...(filters.purchaseTo ? { purchaseTo: filters.purchaseTo } : {}),
+			...(filters.campaignIds?.length ? { campaignIds: filters.campaignIds.join(",") } : {}),
+			...(filters.segmentIds?.length ? { segmentIds: filters.segmentIds.join(",") } : {}),
+			...(filters.registeredFrom ? { registeredFrom: filters.registeredFrom } : {}),
+			...(filters.registeredTo ? { registeredTo: filters.registeredTo } : {}),
+			...(filters.loyaltyOperatorIds?.length
+				? { loyaltyOperatorIds: filters.loyaltyOperatorIds.join(",") }
+				: {}),
+		};
 
-		// Busca por nome apenas se não encontrou por ERP/CNPJ
-		if (ids.size === 0 && filters.customerName?.trim()) {
-			await this.searchByName(filters.customerName, ids);
+		for (let page = 1; ; page++) {
+			const response = await this.customersService.getCustomers({
+				...requestFilters,
+				instance: this.instance,
+				page: String(page),
+			} as any);
+
+			this.extractCustomerIds(response.data, ids);
+			const totalRows = Number(response.page?.totalRows ?? response.data?.length ?? 0);
+			if (page * perPage >= totalRows || !response.data?.length) break;
 		}
 
 		return Array.from(ids);
-	}
-
-	private async searchByErp(erp: string | null | undefined, ids: Set<number>): Promise<void> {
-		const erpRaw = erp?.trim();
-		if (!erpRaw) return;
-
-		try {
-			// Busca por COD_ERP exato
-			const { data } = await this.customersService.getCustomers({
-				instance: this.instance,
-				COD_ERP: erpRaw,
-				perPage: "10"
-			} as any);
-
-			this.extractCustomerIds(data, ids);
-
-			// Se for numérico, também tenta por CODIGO
-			const erpDigits = erpRaw.replace(/\D/g, "");
-			if (erpDigits) {
-				const { data: dataById } = await this.customersService.getCustomers({
-					instance: this.instance,
-					CODIGO: erpDigits,
-					perPage: "1"
-				} as any);
-				this.extractCustomerIds(dataById, ids);
-			}
-		} catch (err) {
-			Logger.error(`[CustomerSearcher] Erro ao buscar por ERP: ${err}`);
-		}
-	}
-
-	private async searchByCnpj(cnpj: string | null | undefined, ids: Set<number>): Promise<void> {
-		const digits = cnpj?.replace(/\D/g, "");
-		if (!digits) return;
-
-		try {
-			const { data } = await this.customersService.getCustomers({
-				instance: this.instance,
-				CPF_CNPJ: digits,
-				perPage: "10"
-			} as any);
-			this.extractCustomerIds(data, ids);
-		} catch (err) {
-			Logger.error(`[CustomerSearcher] Erro ao buscar por CPF/CNPJ: ${err}`);
-		}
-	}
-
-	private async searchByName(name: string | null | undefined, ids: Set<number>): Promise<void> {
-		const trimmed = name?.trim();
-		if (!trimmed) return;
-
-		const maxPages = 5;
-		const perPage = 50;
-
-		for (let page = 1; page <= maxPages; page++) {
-			try {
-				const { data } = await this.customersService.getCustomers({
-					instance: this.instance,
-					RAZAO: trimmed,
-					page: page.toString(),
-					perPage: perPage.toString()
-				} as any);
-
-				this.extractCustomerIds(data, ids);
-
-				// Se encontrou resultados ou não há mais páginas, para
-				if (ids.size > 0 || !data || data.length < perPage) break;
-			} catch (err) {
-				Logger.error(`[CustomerSearcher] Erro ao buscar por nome: ${err}`);
-				break;
-			}
-		}
 	}
 
 	private extractCustomerIds(data: any[] | undefined, ids: Set<number>): void {
