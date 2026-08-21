@@ -850,17 +850,51 @@ class WhatsappService {
 		contactId: number
 	) {
 		const process = new ProcessingLogger(session.instance, "send-template", `${to}-${Date.now()}`, data);
+		let stage = "normalize-template";
 
 		try {
+			process.debug("[send-template] Iniciando envio", {
+				clientId,
+				chatId,
+				contactId,
+				template: {
+					id: data?.template?.id,
+					name: data?.template?.name,
+					source: data?.template?.source,
+					language: data?.template?.language,
+					sourceType: typeof data?.template?.source,
+					nameType: typeof data?.template?.name,
+					languageType: typeof data?.template?.language,
+					rawPresent: Boolean(data?.template?.raw),
+					rawLanguage: data?.template?.raw?.language,
+				},
+				componentCount: Array.isArray(data?.components) ? data.components.length : null,
+				templateVariableKeys: data?.templateVariables ? Object.keys(data.templateVariables) : [],
+			});
+
 			// Normalize before sending so a malformed template cannot be sent and then
 			// fail later while creating the pipeline trigger source.
 			const template = normalizeTemplateMessage(data.template);
+			process.debug("[send-template] Template normalizado", {
+				id: template.id,
+				name: template.name,
+				source: template.source,
+				language: template.language,
+			});
+
+			stage = "resolve-client";
 			const client = this.getClient(clientId);
 
 			if (!client) {
 				throw new BadRequestError("Client do WhatsApp não encontrado.");
 			}
 
+			process.debug("[send-template] Cliente resolvido", {
+				clientId,
+				clientType: client.constructor.name,
+			});
+
+			stage = "provider-send";
 			const message = await client.sendTemplate(
 				{
 					to,
@@ -871,15 +905,39 @@ class WhatsappService {
 				chatId,
 				contactId
 			);
+			process.debug("[send-template] Provider retornou sucesso", {
+				messageType: message.type,
+				status: message.status,
+				wabaId: message.wabaId,
+				gupshupId: message.gupshupId,
+			});
 
+			stage = "pipeline-source";
 			const source = templatePipelineSource(template.source, template.name, template.language);
+			process.debug("[send-template] Origem do gatilho criada", source);
+
+			stage = "persist-message";
 			const savedMsg = await messagesService.insertMessage(message, source);
 			process.log("Mensagem salva no banco de dados.", savedMsg);
 
+			stage = "notify-message";
 			messagesDistributionService.notifyMessage(process, savedMsg);
 			process.success("Mensagem de template enviada com sucesso.");
 		} catch (error) {
-			process.failed("Erro ao enviar mensagem de template.\n" + sanitizeErrorMessage(error));
+			const originalError = error instanceof Error
+				? error
+				: new Error(sanitizeErrorMessage(error) ?? String(error));
+			process.debug("[send-template] Falha", {
+				stage,
+				name: originalError.name,
+				message: originalError.message,
+				stack: originalError.stack,
+			});
+			Logger.error(
+				`[send-template] Falha na etapa ${stage} | instance=${session.instance} | clientId=${clientId} | chatId=${chatId} | template=${data?.template?.name || "unknown"}`,
+				originalError
+			);
+			process.failed(originalError);
 			throw new BadRequestError("Erro ao enviar mensagem de template: " + sanitizeErrorMessage(error), error);
 		}
 	}
