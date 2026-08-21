@@ -34,6 +34,23 @@ export interface SendTemplateData {
 	components: string[];
 }
 
+function normalizeTemplateMessage(template: SendTemplateData["template"]): TemplateMessage {
+	const raw = (template as TemplateMessage & { raw?: any }).raw;
+	// Templates received from the official WhatsApp flow may omit source;
+	// official WABA is the compatible default for this endpoint.
+	const source = template?.source || (raw?.language ? "waba" : raw?.elementName ? "gupshup" : "waba");
+	const name = template?.name || raw?.name || raw?.elementName || "";
+	const language = template?.language || raw?.language?.code || raw?.languageCode || "";
+
+	if (!source.trim() || !name.trim() || !language.trim()) {
+		throw new BadRequestError(
+			"Template inválido: informe source, name e language (ou forneça um template raw compatível)."
+		);
+	}
+
+	return { ...template, source, name, language };
+}
+
 interface SendBotMessageData {
 	chat: WppChat;
 	text?: string | null;
@@ -835,6 +852,9 @@ class WhatsappService {
 		const process = new ProcessingLogger(session.instance, "send-template", `${to}-${Date.now()}`, data);
 
 		try {
+			// Normalize before sending so a malformed template cannot be sent and then
+			// fail later while creating the pipeline trigger source.
+			const template = normalizeTemplateMessage(data.template);
 			const client = this.getClient(clientId);
 
 			if (!client) {
@@ -844,7 +864,7 @@ class WhatsappService {
 			const message = await client.sendTemplate(
 				{
 					to,
-					template: data.template,
+					template,
 					templateVariables: data.templateVariables,
 					components: data.components
 				},
@@ -852,7 +872,7 @@ class WhatsappService {
 				contactId
 			);
 
-			const source = templatePipelineSource(data.template.source, data.template.name, data.template.language);
+			const source = templatePipelineSource(template.source, template.name, template.language);
 			const savedMsg = await messagesService.insertMessage(message, source);
 			process.log("Mensagem salva no banco de dados.", savedMsg);
 

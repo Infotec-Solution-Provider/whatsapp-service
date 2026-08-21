@@ -1,0 +1,226 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-08-21T12:00:00.000Z",
+  "__export_source": "insomnia.desktop.app:v2023.5.8",
+  "resources": [
+    {
+      "_id": "wrk_inpulse_public_conversations",
+      "parentId": null,
+      "modified": 1787313600000,
+      "created": 1787313600000,
+      "name": "InPulse - Conversas públicas",
+      "description": "Rotas públicas autenticadas para consulta de conversas e mensagens do tenant.",
+      "scope": "collection",
+      "_type": "workspace"
+    },
+    {
+      "_id": "env_inpulse_public_conversations",
+      "parentId": "wrk_inpulse_public_conversations",
+      "modified": 1787313600000,
+      "created": 1787313600000,
+      "name": "Base Environment",
+      "data": {
+        "base_url": "https://inpulse.infotecrs.inf.br",
+        "token": "SEU_TOKEN",
+        "conversation_id": 123,
+        "before_id": 980
+      },
+      "dataPropertyOrder": {
+        "&": [
+          "base_url",
+          "token",
+          "conversation_id",
+          "before_id"
+        ]
+      },
+      "color": null,
+      "isPrivate": false,
+      "metaSortKey": 1,
+      "_type": "environment"
+    },
+    {
+      "_id": "fld_inpulse_public_conversations",
+      "parentId": "wrk_inpulse_public_conversations",
+      "modified": 1787313600000,
+      "created": 1787313600000,
+      "name": "Conversas",
+      "description": "Consultas paginadas de conversas e suas mensagens.",
+      "environment": {},
+      "environmentPropertyOrder": null,
+      "metaSortKey": -1000,
+      "_type": "request_group"
+    },
+    {
+      "_id": "req_list_inpulse_conversations",
+      "parentId": "fld_inpulse_public_conversations",
+      "modified": 1787313600000,
+      "created": 1787313600000,
+      "url": "{{ _.base_url }}/api/whatsapp/conversations",
+      "name": "Listar conversas",
+      "description": "Lista todas as conversas do tenant associado ao token. Os filtros desabilitados podem ser ativados conforme necessário.",
+      "method": "GET",
+      "body": {},
+      "parameters": [
+        {
+          "id": "pair_conversations_page",
+          "name": "page",
+          "value": "1",
+          "description": "Número da página",
+          "disabled": false
+        },
+        {
+          "id": "pair_conversations_limit",
+          "name": "limit",
+          "value": "25",
+          "description": "Máximo de 100 itens",
+          "disabled": false
+        },
+        {
+          "id": "pair_conversations_finished",
+          "name": "isFinished",
+          "value": "false",
+          "description": "true para finalizadas; false para em andamento",
+          "disabled": true
+        },
+        {
+          "id": "pair_conversations_user",
+          "name": "userId",
+          "value": "10",
+          "description": "ID do usuário responsável",
+          "disabled": true
+        },
+        {
+          "id": "pair_conversations_sector",
+          "name": "sectorId",
+          "value": "2",
+          "description": "ID do setor",
+          "disabled": true
+        },
+        {
+          "id": "pair_conversations_contact",
+          "name": "contactId",
+          "value": "456",
+          "description": "ID do contato",
+          "disabled": true
+        },
+        {
+          "id": "pair_conversations_search",
+          "name": "search",
+          "value": "Maria",
+          "description": "Nome, telefone ou WhatsApp ID",
+          "disabled": true
+        },
+        {
+          "id": "pair_conversations_started_from",
+          "name": "startedFrom",
+          "value": "2026-08-01T00:00:00Z",
+          "description": "Início do período",
+          "disabled": true
+        },
+        {
+          "id": "pair_conversations_started_to",
+          "name": "startedTo",
+          "value": "2026-08-31T23:59:59Z",
+          "description": "Fim do período",
+          "disabled": true
+        }
+      ],
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "{{ _.token }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": -1000,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "_type": "request"
+    },
+    {
+      "_id": "req_list_inpulse_conversation_messages",
+      "parentId": "fld_inpulse_public_conversations",
+      "modified": 1787313600000,
+      "created": 1787313600000,
+      "url": "{{ _.base_url }}/api/whatsapp/conversations/{{ _.conversation_id }}/messages",
+      "name": "Listar mensagens da conversa",
+      "description": "Retorna a página mais recente de mensagens da conversa.",
+      "method": "GET",
+      "body": {},
+      "parameters": [
+        {
+          "id": "pair_messages_limit",
+          "name": "limit",
+          "value": "50",
+          "description": "Máximo de 100 mensagens",
+          "disabled": false
+        }
+      ],
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "{{ _.token }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": -900,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "_type": "request"
+    },
+    {
+      "_id": "req_list_inpulse_conversation_messages_before",
+      "parentId": "fld_inpulse_public_conversations",
+      "modified": 1787313600000,
+      "created": 1787313600000,
+      "url": "{{ _.base_url }}/api/whatsapp/conversations/{{ _.conversation_id }}/messages",
+      "name": "Listar mensagens anteriores",
+      "description": "Use em before_id o nextCursor retornado pela requisição anterior.",
+      "method": "GET",
+      "body": {},
+      "parameters": [
+        {
+          "id": "pair_messages_before_limit",
+          "name": "limit",
+          "value": "50",
+          "description": "Máximo de 100 mensagens",
+          "disabled": false
+        },
+        {
+          "id": "pair_messages_before_cursor",
+          "name": "beforeId",
+          "value": "{{ _.before_id }}",
+          "description": "Informe o nextCursor da página anterior",
+          "disabled": false
+        }
+      ],
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "{{ _.token }}"
+        }
+      ],
+      "authentication": {},
+      "metaSortKey": -800,
+      "isPrivate": false,
+      "settingStoreCookies": true,
+      "settingSendCookies": true,
+      "settingDisableRenderRequestBody": false,
+      "settingEncodeUrl": true,
+      "settingRebuildPath": true,
+      "settingFollowRedirects": "global",
+      "_type": "request"
+    }
+  ]
+}
