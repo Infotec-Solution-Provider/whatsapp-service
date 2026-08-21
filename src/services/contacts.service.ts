@@ -35,6 +35,25 @@ export interface ContactsFilters {
 	perPage: number;
 }
 
+export class ContactAlreadyExistsError extends Error {
+	constructor(
+		public readonly contactId: number,
+		public readonly isDeleted: boolean
+	) {
+		super("Este número já está cadastrado.");
+		this.name = "ContactAlreadyExistsError";
+	}
+}
+
+export class DeletedContactConflictError extends Error {
+	public readonly isDeleted = true;
+
+	constructor(public readonly contactId: number) {
+		super("Este contato está desativado e precisa de aprovação para ser reativado.");
+		this.name = "DeletedContactConflictError";
+	}
+}
+
 class ContactsService {
 	private normalizeDigits(value: string) {
 		return value.replace(/\D/g, "");
@@ -117,7 +136,7 @@ class ContactsService {
 		const contactByWhatsappId = normalizedWhatsappId
 			? await prismaService.wppContact.findFirst({
 					where: { instance, whatsappId: normalizedWhatsappId }
-			  })
+				})
 			: null;
 
 		const whereFilters: Prisma.WppContactWhereInput[] = [];
@@ -130,12 +149,14 @@ class ContactsService {
 			}
 		}
 
-		const contact = contactByWhatsappId ?? await prismaService.wppContact.findFirst({
-			where: {
-				instance,
-				OR: whereFilters
-			}
-		});
+		const contact =
+			contactByWhatsappId ??
+			(await prismaService.wppContact.findFirst({
+				where: {
+					instance,
+					OR: whereFilters
+				}
+			}));
 
 		if (contact) {
 			const updateData: Prisma.WppContactUpdateInput = {};
@@ -170,7 +191,11 @@ class ContactsService {
 					await this.syncContactToLocal(updated);
 					return updated;
 				} catch (error) {
-					if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002" && normalizedWhatsappId) {
+					if (
+						error instanceof Prisma.PrismaClientKnownRequestError &&
+						error.code === "P2002" &&
+						normalizedWhatsappId
+					) {
 						const owner = await prismaService.wppContact.findFirst({
 							where: { instance, whatsappId: normalizedWhatsappId }
 						});
@@ -198,7 +223,11 @@ class ContactsService {
 		} catch (error) {
 			// Another request may have created the same contact between the lookup
 			// and create. Re-read the unique owner and continue idempotently.
-			if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002" && normalizedWhatsappId) {
+			if (
+				error instanceof Prisma.PrismaClientKnownRequestError &&
+				error.code === "P2002" &&
+				normalizedWhatsappId
+			) {
 				const concurrentContact = await prismaService.wppContact.findFirst({
 					where: { instance, whatsappId: normalizedWhatsappId }
 				});
@@ -224,11 +253,7 @@ class ContactsService {
 
 		// Execute count query
 		const countQuery = ContactQueryBuilder.buildCountQuery(whereClause);
-		const countResult = await instancesService.executeQuery<Array<{ total: number }>>(
-			instance,
-			countQuery,
-			params
-		);
+		const countResult = await instancesService.executeQuery<Array<{ total: number }>>(instance, countQuery, params);
 
 		const total = countResult[0]?.total || 0;
 
@@ -279,7 +304,6 @@ class ContactsService {
 		return contacts;
 	}
 
-
 	public async getContacts(instance: string) {
 		const contacts = await prismaService.wppContact.findMany({
 			where: {
@@ -298,32 +322,55 @@ class ContactsService {
 		name: string,
 		phone: string,
 		customerId?: number,
-		sectorIds?: number[]
+		sectorIds?: number[],
+		overwriteExisting = false
 	) {
 		const hasDDI = phone.startsWith("55");
 		const validPhone = hasDDI ? phone : "55" + phone;
 		const hasExtraDigit = validPhone.length === 13;
-		const validPhoneAlt = hasExtraDigit ? validPhone.slice(0, 4) + validPhone.slice(5) : validPhone.slice(0, 4) + "9" + validPhone.slice(4);
+		const validPhoneAlt = hasExtraDigit
+			? validPhone.slice(0, 4) + validPhone.slice(5)
+			: validPhone.slice(0, 4) + "9" + validPhone.slice(4);
 
 		const existingContact = await prismaService.wppContact.findFirst({
 			where: {
 				instance,
-				OR: [
-					{ phone: validPhone },
-					{ phone: validPhoneAlt }
-				]
+				OR: [{ phone: validPhone }, { phone: validPhoneAlt }]
 			},
 			// include sectors - cast to any because Prisma client types must be regenerated after schema change
 			include: { sectors: true } as any
 		});
 
+		if (existingContact && !overwriteExisting) {
+			throw new ContactAlreadyExistsError(existingContact.id, existingContact.isDeleted);
+		}
+
+		if (existingContact?.isDeleted) {
+			throw new DeletedContactConflictError(existingContact.id);
+		}
+
+		if (existingContact && overwriteExisting) {
+			const cleanedSectorIds = [...new Set(sectorIds ?? [])];
+			const updated = await prismaService.wppContact.update({
+				where: { id: existingContact.id },
+				data: {
+					name,
+					customerId: customerId ?? null,
+					sectors: {
+						deleteMany: {},
+						create: cleanedSectorIds.map((sectorId) => ({ sectorId }))
+					}
+				} as any,
+				include: { sectors: true } as any
+			});
+
+			await this.syncContactToLocal(updated);
+			await this.syncContactSectorsToLocal(updated.id, instance, cleanedSectorIds);
+			return updated;
+		}
+
 		// If contact exists and mapped to a customer, keep old behavior
-		if (
-			existingContact &&
-			!!existingContact.customerId &&
-			existingContact.customerId !== -1 &&
-			customerId
-		) {
+		if (existingContact && !!existingContact.customerId && existingContact.customerId !== -1 && customerId) {
 			const message = `Este número já está cadastrado no cliente de código ${existingContact.customerId}`;
 			throw new ConflictError(message);
 		}
@@ -530,7 +577,6 @@ class ContactsService {
 				id: contactId
 			},
 			data: {
-				customerId: null,
 				isDeleted: true
 			}
 		});
@@ -538,6 +584,60 @@ class ContactsService {
 		await this.syncContactToLocal(contact);
 
 		return contact;
+	}
+
+	public async getDeletedContacts(instance: string, page: number, perPage: number) {
+		const safePage = Number.isInteger(page) && page > 0 ? page : 1;
+		const safePerPage = Number.isInteger(perPage) && perPage > 0 ? Math.min(100, perPage) : 20;
+		const where = { instance, isDeleted: true };
+		const [contacts, total] = await prismaService.$transaction([
+			prismaService.wppContact.findMany({
+				where,
+				include: { sectors: true } as any,
+				orderBy: { updatedAt: "desc" },
+				skip: (safePage - 1) * safePerPage,
+				take: safePerPage
+			}),
+			prismaService.wppContact.count({ where })
+		]);
+
+		return {
+			contacts,
+			pagination: {
+				page: safePage,
+				perPage: safePerPage,
+				total,
+				totalPages: Math.ceil(total / safePerPage)
+			}
+		};
+	}
+
+	public async reactivateContact(instance: string, contactId: number) {
+		const existing = await prismaService.wppContact.findFirst({
+			where: { id: contactId, instance },
+			include: { sectors: true } as any
+		});
+		if (!existing) {
+			throw new BadRequestError("Contato não encontrado.");
+		}
+
+		const contact = existing.isDeleted
+			? await prismaService.wppContact.update({
+					where: { id: contactId },
+					data: { isDeleted: false },
+					include: { sectors: true } as any
+				})
+			: existing;
+
+		await this.syncContactToLocal(contact);
+		return contact;
+	}
+
+	public async syncContactStateToLocal(contact: WppContact, sectorIds?: number[]) {
+		await this.syncContactToLocal(contact);
+		if (sectorIds) {
+			await this.syncContactSectorsToLocal(contact.id, contact.instance, sectorIds);
+		}
 	}
 
 	private async syncContactToLocal(contact: WppContact) {
@@ -552,11 +652,14 @@ class ContactsService {
 					is_deleted = VALUES(is_deleted)
 			`;
 
-			await instancesService.executeQuery(
+			await instancesService.executeQuery(contact.instance, query, [
+				contact.id,
 				contact.instance,
-				query,
-				[contact.id, contact.instance, safeEncode(contact.name), contact.phone, contact.customerId, contact.isDeleted]
-			);
+				safeEncode(contact.name),
+				contact.phone,
+				contact.customerId,
+				contact.isDeleted
+			]);
 		} catch (error) {
 			console.error("[syncContactToLocal] Erro ao sincronizar contato:", error);
 		}

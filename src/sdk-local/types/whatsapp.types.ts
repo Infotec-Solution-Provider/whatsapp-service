@@ -15,7 +15,8 @@ export interface WppContact {
 		sectorId: number;
 	}[];
 	sectorIds?: number[];
-}export interface WppContactWithCustomer {
+}
+export interface WppContactWithCustomer {
 	id: number;
 	name: string;
 	phone: string;
@@ -46,17 +47,9 @@ export interface PaginatedContactsResponse {
 	};
 }
 
-export type CustomerInteractionLevel =
-	| "sem_interacao"
-	| "pouca_interacao"
-	| "interacao_media"
-	| "interacao_alta";
+export type CustomerInteractionLevel = "sem_interacao" | "pouca_interacao" | "interacao_media" | "interacao_alta";
 
-export type CustomerPurchaseLevel =
-	| "sem_compras"
-	| "poucas_compras"
-	| "compras_medias"
-	| "muitas_compras";
+export type CustomerPurchaseLevel = "sem_compras" | "poucas_compras" | "compras_medias" | "muitas_compras";
 
 export type CustomerAgeLevel =
 	| "sem_data_cadastro"
@@ -257,18 +250,11 @@ export interface WppWallet {
 }
 
 // Enums
-export type WppMessageStatus =
-	| "PENDING"
-	| "SENT"
-	| "RECEIVED"
-	| "READ"
-	| "DOWNLOADED"
-	| "ERROR"
-	| "REVOKED";
+export type WppMessageStatus = "PENDING" | "SENT" | "RECEIVED" | "READ" | "DOWNLOADED" | "ERROR" | "REVOKED";
 
 export enum WppChatType {
 	RECEPTIVE = "RECEPTIVE",
-	ACTIVE = "ACTIVE",
+	ACTIVE = "ACTIVE"
 }
 
 export enum WppChatPriority {
@@ -276,7 +262,7 @@ export enum WppChatPriority {
 	NORMAL = "NORMAL",
 	HIGH = "HIGH",
 	VERY_HIGH = "VERY_HIGH",
-	URGENCY = "URGENCY",
+	URGENCY = "URGENCY"
 }
 
 export type WppChatWithDetails = WppChat & {
@@ -432,7 +418,8 @@ export type NotificationType =
 	| "ALERT"
 	| "INFO"
 	| "WARNING"
-	| "ERROR";
+	| "ERROR"
+	| "CONTACT_ACTION_REQUEST";
 
 export interface AppNotification {
 	id: number;
@@ -442,6 +429,7 @@ export interface AppNotification {
 	instance: string;
 	userId: number | null;
 	chatId: number | null;
+	actionUrl?: string | null;
 	type: NotificationType;
 	createdAt: string;
 }

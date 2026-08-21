@@ -1,9 +1,15 @@
 import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
+import isAdmin from "../middlewares/is-admin.middleware";
 import onlyLocal from "../middlewares/only-local.middleware";
-import contactsService, { ContactsFilters } from "../services/contacts.service";
+import contactsService, {
+	ContactAlreadyExistsError,
+	DeletedContactConflictError,
+	ContactsFilters
+} from "../services/contacts.service";
+import contactActionRequestsService from "../services/contact-action-requests.service";
 import ContactSearchService from "../services/contact-search.service";
-import parametersService from "../services/parameters.service";
+import parametersService, { CONTACT_APPROVAL_PARAMETERS } from "../services/parameters.service";
 
 class ContactsController {
 	constructor(public readonly router: Router) {
@@ -11,8 +17,10 @@ class ContactsController {
 		this.router.get("/api/whatsapp/contacts/customer", isAuthenticated, this.getContactsWithCustomer);
 		this.router.post("/api/internal/whatsapp/contacts/customer", onlyLocal, this.getInternalContactsWithCustomer);
 		this.router.get("/api/whatsapp/contacts", isAuthenticated, this.getContacts);
+		this.router.get("/api/whatsapp/contacts/deleted", isAuthenticated, isAdmin, this.getDeletedContacts);
 		this.router.post("/api/whatsapp/customers/:id/contacts", isAuthenticated, this.createContact);
 		this.router.post("/api/whatsapp/contacts", isAuthenticated, this.createContact);
+		this.router.post("/api/whatsapp/contacts/:contactId/reactivate", isAuthenticated, this.reactivateContact);
 		this.router.post("/api/whatsapp/contacts/:contactId/sectors", isAuthenticated, this.addSectorToContact);
 		this.router.put("/api/whatsapp/contacts/:contactId", isAuthenticated, this.updateContact);
 		this.router.delete("/api/whatsapp/contacts/:contactId", isAuthenticated, this.deleteContact);
@@ -74,9 +82,9 @@ class ContactsController {
 		const sectorIdsParam = req.query["sectorIds"] as string | undefined;
 		const sectorIds = sectorIdsParam
 			? sectorIdsParam
-				.split(",")
-				.map((id) => Number(id))
-				.filter((id) => !Number.isNaN(id))
+					.split(",")
+					.map((id) => Number(id))
+					.filter((id) => !Number.isNaN(id))
 			: null;
 
 		const page = req.query["page"] ? Number(req.query["page"]) : 1;
@@ -116,19 +124,12 @@ class ContactsController {
 		let result;
 		if (useLocalSync) {
 			// Use local sync method
-			result = await contactsService.getContactsWithCustomerLocally(
-				req.session.instance,
-				filters
-			);
+			result = await contactsService.getContactsWithCustomerLocally(req.session.instance, filters);
 		} else {
 			const token = req.headers["authorization"] || "";
 			const contactSearchService = new ContactSearchService(token);
 
-			result = await contactSearchService.search(
-				req.session.instance,
-				filters,
-				{ page, perPage }
-			);
+			result = await contactSearchService.search(req.session.instance, filters, { page, perPage });
 		}
 
 		const resBody = {
@@ -152,17 +153,13 @@ class ContactsController {
 				return null;
 			}
 
-			const parsed = value
-				.map((item) => Number(item))
-				.filter((item) => Number.isInteger(item) && item > 0);
+			const parsed = value.map((item) => Number(item)).filter((item) => Number.isInteger(item) && item > 0);
 
 			return parsed.length ? Array.from(new Set(parsed)) : null;
 		};
 
 		const phones = Array.isArray(body["phones"])
-			? body["phones"]
-				.map((item) => String(item).replace(/\D/g, ""))
-				.filter((item) => item.length > 0)
+			? body["phones"].map((item) => String(item).replace(/\D/g, "")).filter((item) => item.length > 0)
 			: null;
 
 		const page = Number(body["page"] ?? 1);
@@ -193,33 +190,100 @@ class ContactsController {
 			registeredTo: typeof body["registeredTo"] === "string" ? body["registeredTo"] : null,
 			loyaltyOperatorIds: parseNumberArray(body["loyaltyOperatorIds"]),
 			page: Number.isInteger(page) && page > 0 ? page : 1,
-			perPage: Number.isInteger(perPage) && perPage > 0 ? perPage : 20,
+			perPage: Number.isInteger(perPage) && perPage > 0 ? perPage : 20
 		});
 
 		res.status(200).send({
 			message: "Contacts retrieved successfully!",
-			...result,
+			...result
 		});
 	}
 
 	private async createContact(req: Request, res: Response) {
 		const customerId = req.params["id"] ? Number(req.params["id"]) : undefined;
-		const { name, phone, sectorIds } = req.body;
+		const { name, phone, sectorIds, overwriteExisting } = req.body;
 
 		// sectorIds is optional and should be an array of numbers when provided
 		const parsedSectorIds = Array.isArray(sectorIds) ? sectorIds.map((s: any) => Number(s)) : undefined;
 
-		const contact = await contactsService.createContact(
-			req.session.instance,
-			name,
-			phone,
-			customerId,
-			parsedSectorIds
-		);
+		let contact;
+		try {
+			contact = await contactsService.createContact(
+				req.session.instance,
+				name,
+				phone,
+				customerId,
+				parsedSectorIds,
+				overwriteExisting === true
+			);
+		} catch (error) {
+			if (error instanceof ContactAlreadyExistsError || error instanceof DeletedContactConflictError) {
+				const requiresSupervisorApproval =
+					error.isDeleted === true && req.session.role !== "ADMIN"
+						? await parametersService.getInstanceBooleanParam(
+								req.session.instance,
+								CONTACT_APPROVAL_PARAMETERS.reactivation,
+								false
+							)
+						: false;
+				const token = req.headers["authorization"] || "";
+				const contactSearchService = new ContactSearchService(token);
+				const existingContact = await contactSearchService.getContactSummary(
+					req.session.instance,
+					error.contactId
+				);
+				res.status(409).send({
+					message: error.message,
+					code: "CONTACT_ALREADY_EXISTS",
+					existingContact,
+					requiresSupervisorApproval
+				});
+				return;
+			}
+			throw error;
+		}
 
 		res.status(200).send({
 			message: "Contact created successfully!",
 			data: contact
+		});
+	}
+
+	private async getDeletedContacts(req: Request, res: Response) {
+		const page = Number(req.query["page"] ?? 1);
+		const perPage = Number(req.query["perPage"] ?? 20);
+		const result = await contactsService.getDeletedContacts(req.session.instance, page, perPage);
+		const token = req.headers["authorization"] || "";
+		const contactSearchService = new ContactSearchService(token);
+		const data = await contactSearchService.enrichContacts(req.session.instance, result.contacts);
+
+		res.status(200).send({
+			message: "Contatos desativados carregados com sucesso!",
+			data,
+			pagination: result.pagination
+		});
+	}
+
+	private async reactivateContact(req: Request, res: Response) {
+		const contactId = Number(req.params["contactId"]);
+		const result = await contactActionRequestsService.process(
+			req.session,
+			contactId,
+			"REACTIVATE",
+			{
+				name: req.body?.name,
+				customerId: req.body?.customerId,
+				sectorIds: req.body?.sectorIds
+			},
+			req.headers["authorization"] || ""
+		);
+
+		res.status(result.outcome === "REQUESTED" ? 202 : 200).send({
+			message:
+				result.outcome === "REQUESTED"
+					? "Solicitação enviada ao supervisor!"
+					: "Contato reativado com sucesso!",
+			data: result
 		});
 	}
 
@@ -243,11 +307,18 @@ class ContactsController {
 
 	private async deleteContact(req: Request, res: Response) {
 		const contactId = Number(req.params["contactId"]);
+		const result = await contactActionRequestsService.process(
+			req.session,
+			contactId,
+			"DELETE",
+			undefined,
+			req.headers["authorization"] || ""
+		);
 
-		await contactsService.deleteContact(contactId);
-
-		res.status(200).send({
-			message: "Contact deleted successfully!"
+		res.status(result.outcome === "REQUESTED" ? 202 : 200).send({
+			message:
+				result.outcome === "REQUESTED" ? "Solicitação enviada ao supervisor!" : "Contact deleted successfully!",
+			data: result
 		});
 	}
 }

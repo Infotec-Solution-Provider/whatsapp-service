@@ -94,10 +94,11 @@ model WppContact {
   lastOutOfHoursReplySentAt DateTime? @map("last_out_of_hours_reply_sent_at")
   conversationExpiration    String?   @map("conversation_expiration")
 
-  WppChat     WppChat[]
-  WppMessage  WppMessage[]
-  WppSchedule WppSchedule[]
-  sectors     WppContactSector[]
+  WppChat        WppChat[]
+  WppMessage     WppMessage[]
+  WppSchedule    WppSchedule[]
+  sectors        WppContactSector[]
+  actionRequests ContactActionRequest[]
 
   @@unique([instance, whatsappId])
   @@unique([instance, phone])
@@ -506,6 +507,7 @@ model Notification {
   chatId      Int?             @map("chat_id")
   userId      Int?             @map("user_id") // 👈 Aqui é só ID, sem relação
   type        NotificationType
+  actionUrl   String?          @map("action_url")
   read        Boolean          @default(false)
   createdAt   DateTime         @default(now()) @map("created_at")
 
@@ -542,6 +544,7 @@ enum NotificationType {
   INFO
   WARNING
   ERROR
+  CONTACT_ACTION_REQUEST
 
   @@map("notification_type")
 }
@@ -811,6 +814,45 @@ enum RemoteInboundEventInboxStatus {
   FAILED
 
   @@map("remote_inbound_event_inbox_status")
+}
+
+model ContactActionRequest {
+  id              Int                        @id @default(autoincrement())
+  instance        String
+  contactId       Int                        @map("contact_id")
+  action          ContactActionRequestType
+  requestedBy     Int                        @map("requested_by")
+  requestedByName String?                    @map("requested_by_name")
+  payload         Json?
+  contactSnapshot Json                       @map("contact_snapshot")
+  status          ContactActionRequestStatus @default(PENDING)
+  pendingKey      String?                    @unique @map("pending_key")
+  reviewedBy      Int?                       @map("reviewed_by")
+  reviewedAt      DateTime?                  @map("reviewed_at")
+  reviewNote      String?                    @map("review_note") @db.VarChar(500)
+  createdAt       DateTime                   @default(now()) @map("created_at")
+  updatedAt       DateTime                   @updatedAt @map("updated_at")
+
+  contact WppContact @relation(fields: [contactId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([instance, status, action, createdAt])
+  @@index([contactId, action, status])
+  @@map("contact_action_requests")
+}
+
+enum ContactActionRequestType {
+  REACTIVATE
+  DELETE
+
+  @@map("contact_action_request_type")
+}
+
+enum ContactActionRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+
+  @@map("contact_action_request_status")
 }
 
 enum PipelineTriggerSourceType {

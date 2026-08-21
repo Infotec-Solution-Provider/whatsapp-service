@@ -19,6 +19,7 @@ import messageQueueController from "./controllers/message-queue.controller";
 import messagesController from "./controllers/messages.controller";
 import monitorController from "./controllers/monitor.controller";
 import notificationsController from "./controllers/notifications.controller";
+import contactActionRequestsController from "./controllers/contact-action-requests.controller";
 import parametersController from "./controllers/parameters.controller";
 import parsedMessagesController from "./controllers/parsed-messages.controller";
 import readyMessagesController from "./controllers/ready-messages.controller";
@@ -80,6 +81,7 @@ app.use(logRoute(internalchatsController.router));
 app.use(logRoute(internalWhatsappSendersController.router));
 app.use(logRoute(readyMessagesController.router));
 app.use(logRoute(notificationsController.router));
+app.use(logRoute(contactActionRequestsController.router));
 app.use(logRoute(monitorController.router));
 app.use(logRoute(parametersController.router));
 app.use(logRoute(gupshupController.router));
@@ -158,5 +160,9 @@ const shutdown = async (signal: string): Promise<void> => {
 	process.exit(0);
 };
 
-process.once("SIGINT", () => { void shutdown("SIGINT"); });
-process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
+process.once("SIGINT", () => {
+	void shutdown("SIGINT");
+});
+process.once("SIGTERM", () => {
+	void shutdown("SIGTERM");
+});

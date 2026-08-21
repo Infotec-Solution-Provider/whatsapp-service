@@ -150,7 +150,10 @@ class ContactQueryBuilder {
 class CustomerSearcher {
 	private instance: string;
 
-	constructor(instance: string, private customersService: CustomersClient) {
+	constructor(
+		instance: string,
+		private customersService: CustomersClient
+	) {
 		this.instance = instance;
 	}
 
@@ -187,16 +190,14 @@ class CustomerSearcher {
 			...(filters.segmentIds?.length ? { segmentIds: filters.segmentIds.join(",") } : {}),
 			...(filters.registeredFrom ? { registeredFrom: filters.registeredFrom } : {}),
 			...(filters.registeredTo ? { registeredTo: filters.registeredTo } : {}),
-			...(filters.loyaltyOperatorIds?.length
-				? { loyaltyOperatorIds: filters.loyaltyOperatorIds.join(",") }
-				: {}),
+			...(filters.loyaltyOperatorIds?.length ? { loyaltyOperatorIds: filters.loyaltyOperatorIds.join(",") } : {})
 		};
 
 		for (let page = 1; ; page++) {
 			const response = await this.customersService.getCustomers({
 				...requestFilters,
 				instance: this.instance,
-				page: String(page),
+				page: String(page)
 			} as any);
 
 			this.extractCustomerIds(response.data, ids);
@@ -223,7 +224,11 @@ class CustomerSearcher {
 class ContactEnricher {
 	private instance: string;
 
-	constructor(instance: string, private readonly customersService: CustomersClient, private readonly usersService: UsersClient) {
+	constructor(
+		instance: string,
+		private readonly customersService: CustomersClient,
+		private readonly usersService: UsersClient
+	) {
 		this.instance = instance;
 	}
 
@@ -233,17 +238,12 @@ class ContactEnricher {
 		const customerIds = this.extractUniqueCustomerIds(contacts);
 
 		// Busca paralela de chats e clientes
-		const [chats, customersMap] = await Promise.all([
-			this.fetchActiveChats(),
-			this.fetchCustomers(customerIds)
-		]);
+		const [chats, customersMap] = await Promise.all([this.fetchActiveChats(), this.fetchCustomers(customerIds)]);
 
 		const chatsMap = this.buildChatsMap(chats);
 
 		// Enriquece cada contato
-		return Promise.all(
-			contacts.map((contact) => this.enrichContact(contact, customersMap, chatsMap))
-		);
+		return Promise.all(contacts.map((contact) => this.enrichContact(contact, customersMap, chatsMap)));
 	}
 
 	private extractUniqueCustomerIds(contacts: any[]): number[] {
@@ -306,7 +306,7 @@ class ContactEnricher {
 		customersMap: Map<number, Customer>,
 		chatsMap: Map<number, any>
 	): Promise<EnrichedContact> {
-		const customer = contact.customerId ? customersMap.get(contact.customerId) ?? null : null;
+		const customer = contact.customerId ? (customersMap.get(contact.customerId) ?? null) : null;
 		const chat = chatsMap.get(contact.id);
 		const chatingWith = await this.resolveChatingWith(chat);
 
@@ -337,13 +337,34 @@ class ContactSearchService {
 	private customersService: CustomersClient;
 	private usersService: UsersClient;
 
-
 	constructor(token: string) {
 		const normalized = token.replace(/^Bearer\s+/i, "");
 		this.customersService = getCustomersClient();
 		this.usersService = getUsersClient();
 		this.customersService.setAuth(normalized);
 		this.usersService.setAuth(normalized);
+	}
+
+	async enrichContacts(instance: string, contacts: any[]): Promise<EnrichedContact[]> {
+		if (contacts.length === 0) {
+			return [];
+		}
+
+		const enricher = new ContactEnricher(instance, this.customersService, this.usersService);
+		return enricher.enrich(contacts);
+	}
+
+	async getContactSummary(instance: string, contactId: number): Promise<EnrichedContact | null> {
+		const contact = await prismaService.wppContact.findFirst({
+			where: { id: contactId, instance },
+			include: { sectors: true } as any
+		});
+		if (!contact) {
+			return null;
+		}
+
+		const [summary] = await this.enrichContacts(instance, [contact]);
+		return summary ?? null;
 	}
 
 	async search(
@@ -405,7 +426,6 @@ class ContactSearchService {
 		const enricher = new ContactEnricher(instance, this.customersService, this.usersService);
 		const enrichedContacts = await enricher.enrich(contacts);
 		const totalPages = Math.ceil(total / perPage);
-
 
 		return {
 			data: enrichedContacts,

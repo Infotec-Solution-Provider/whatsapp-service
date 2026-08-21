@@ -1,6 +1,8 @@
 import prismaService from "./prisma.service";
 
 const DEFAULT_FEATURE_PARAMETERS: Record<string, string> = {
+	require_supervisor_approval_for_contact_reactivation: "false",
+	require_supervisor_approval_for_contact_deletion: "false",
 	feature_ai_enabled: "false",
 	feature_ai_agents_enabled: "false",
 	feature_ai_supervisor_enabled: "false",
@@ -16,6 +18,11 @@ const DEFAULT_FEATURE_PARAMETERS: Record<string, string> = {
 	feature_telephony_dialer_enabled: "false",
 	feature_whatsapp_session_monitoring_enabled: "false"
 };
+
+export const CONTACT_APPROVAL_PARAMETERS = {
+	reactivation: "require_supervisor_approval_for_contact_reactivation",
+	deletion: "require_supervisor_approval_for_contact_deletion"
+} as const;
 
 class ParametersService {
 	public async getUserParams(instance: string, userId: number) {
@@ -47,6 +54,14 @@ class ParametersService {
 		});
 
 		return instanceParams;
+	}
+
+	public async getInstanceBooleanParam(instance: string, key: string, defaultValue = false) {
+		const params = await this.getInstanceParams(instance);
+		const value = params.find((parameter) => parameter.key === key)?.value;
+		if (value === "true") return true;
+		if (value === "false") return false;
+		return defaultValue;
 	}
 
 	public async getSessionParams({
