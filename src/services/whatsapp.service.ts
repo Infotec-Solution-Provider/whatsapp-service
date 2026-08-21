@@ -36,11 +36,12 @@ export interface SendTemplateData {
 
 function normalizeTemplateMessage(template: SendTemplateData["template"]): TemplateMessage {
 	const raw = (template as TemplateMessage & { raw?: any }).raw;
+	const rawLanguage = typeof raw?.language === "string" ? raw.language : raw?.language?.code;
 	// Templates received from the official WhatsApp flow may omit source;
 	// official WABA is the compatible default for this endpoint.
 	const source = template?.source || (raw?.language ? "waba" : raw?.elementName ? "gupshup" : "waba");
 	const name = template?.name || raw?.name || raw?.elementName || "";
-	const language = template?.language || raw?.language?.code || raw?.languageCode || "";
+	const language = template?.language || rawLanguage || raw?.languageCode || "";
 
 	if (!source.trim() || !name.trim() || !language.trim()) {
 		throw new BadRequestError(

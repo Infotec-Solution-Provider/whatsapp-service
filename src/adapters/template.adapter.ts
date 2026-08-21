@@ -26,10 +26,12 @@ export interface GupshupTemplateMessage extends TemplateMessage {
 
 class TemplateAdapter {
 	public static fromWABATemplate(raw: WABAMessageTemplate): WABATemplateMessage {
+		const language = typeof raw.language === "string" ? raw.language : raw.language.code;
+
 		return {
 			id: raw.name,
 			name: raw.name,
-			language: raw.language.code,
+			language,
 			category: raw.category,
 			status: raw.status,
 			text: raw.components?.find((c) => c.type === "BODY")?.text || "",

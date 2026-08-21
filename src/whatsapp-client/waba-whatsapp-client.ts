@@ -284,7 +284,7 @@ class WABAWhatsappClient implements WhatsappClient {
 				template: {
 					name: options.template.name,
 					language: {
-						code: options.template.raw.language
+						code: options.template.language
 					},
 					components
 				}

@@ -277,7 +277,7 @@ export interface WABAFileOptions {
 export interface WABAMessageTemplate {
 	name: string;
 	components: Array<WABATemplateComponents>;
-	language: {
+	language: string | {
 		code: string;
 		policy?: string;
 	};
