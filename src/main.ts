@@ -11,6 +11,7 @@ import contactsController from "./controllers/contacts.controller";
 import customerProfileTagsController from "./controllers/customer-profile-tags.controller";
 import dashboardController from "./controllers/dashboard.controller";
 import flowExecutionController from "./controllers/flow-execution.controller";
+import frontendPerformanceController from "./controllers/frontend-performance.controller";
 import gupshupController from "./controllers/gupshup.controller";
 import internalchatsController from "./controllers/internal-chats.controller";
 import internalWhatsappSendersController from "./controllers/internal-whatsapp-senders.controller";
@@ -43,6 +44,7 @@ import internalChatsService from "./services/internal-chats.service";
 import remoteInboundEventInboxService from "./services/remote-inbound-event-inbox.service";
 import remoteClientService from "./services/remote-client.service";
 import pipelineEnrollmentOutboxService from "./services/pipeline-enrollment-outbox.service";
+import frontendPerformanceService from "./services/frontend-performance.service";
 
 whatsappService.buildClients();
 internalWhatsappMessageQueueService.setProcessHandler({
@@ -89,6 +91,7 @@ app.use(logRoute(autoResponseController.router));
 app.use(logRoute(wabaController.router));
 app.use(logRoute(messageFlowsController.router));
 app.use(logRoute(flowExecutionController.router));
+app.use(logRoute(frontendPerformanceController.router));
 app.use(logRoute(remoteClientController.router));
 app.use(logRoute(remoteSessionMonitorController.router));
 app.use(logRoute(parsedMessagesController.router));
@@ -120,6 +123,7 @@ const server = app.listen(serverPort, () => {
 	remoteInboundEventInboxService.startWorker();
 	pipelineEnrollmentOutboxService.startWorker();
 	remoteSessionMonitorRoutine.start();
+	frontendPerformanceService.startRetentionRoutine();
 	Logger.info("Server listening on port " + serverPort);
 
 	// Wwebjs session health check

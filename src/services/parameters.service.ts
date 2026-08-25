@@ -16,6 +16,7 @@ const DEFAULT_FEATURE_PARAMETERS: Record<string, string> = {
 	feature_sales_reports_enabled: "false",
 	feature_sip_config_enabled: "false",
 	feature_telephony_dialer_enabled: "false",
+	feature_frontend_performance_telemetry_enabled: "false",
 	feature_whatsapp_session_monitoring_enabled: "false"
 };
 

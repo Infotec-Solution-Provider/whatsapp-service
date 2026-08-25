@@ -952,6 +952,50 @@ model ProcessLog {
   @@map("process_logs")
 }
 
+model FrontendPerformanceSession {
+  id                  Int                         @id @default(autoincrement())
+  instance            String                      @db.VarChar(191)
+  userId              Int                         @map("user_id")
+  sessionId           String                      @map("session_id") @db.VarChar(36)
+  buildId             String                      @map("build_id") @db.VarChar(64)
+  deviceClass         String                      @map("device_class") @db.VarChar(16)
+  browser             String                      @db.VarChar(64)
+  hardwareConcurrency Int?                        @map("hardware_concurrency")
+  deviceMemoryGb      Float?                      @map("device_memory_gb")
+  effectiveType       String?                     @map("effective_type") @db.VarChar(16)
+  viewportWidth       Int                         @map("viewport_width")
+  viewportHeight      Int                         @map("viewport_height")
+  startedAt           DateTime                    @map("started_at")
+  lastSeenAt          DateTime                    @map("last_seen_at")
+  createdAt           DateTime                    @default(now()) @map("created_at")
+  samples             FrontendPerformanceSample[]
+
+  @@unique([instance, userId, sessionId], map: "fps_instance_user_session_key")
+  @@index([instance, startedAt], map: "fps_instance_started_idx")
+  @@index([instance, deviceClass, startedAt], map: "fps_instance_device_started_idx")
+  @@index([buildId, startedAt], map: "fps_build_started_idx")
+  @@map("frontend_performance_sessions")
+}
+
+model FrontendPerformanceSample {
+  id         BigInt                     @id @default(autoincrement())
+  sessionId  Int                        @map("session_id")
+  instance   String                     @db.VarChar(191)
+  name       String                     @db.VarChar(64)
+  value      Float
+  unit       String                     @db.VarChar(16)
+  route      String                     @db.VarChar(255)
+  tags       Json?
+  occurredAt DateTime                   @map("occurred_at")
+  createdAt  DateTime                   @default(now()) @map("created_at")
+  session    FrontendPerformanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([instance, occurredAt], map: "fpm_instance_occurred_idx")
+  @@index([instance, name, occurredAt], map: "fpm_instance_name_occurred_idx")
+  @@index([sessionId, occurredAt], map: "fpm_session_occurred_idx")
+  @@map("frontend_performance_samples")
+}
+
 model InstanceMigrationRun {
   id           String                 @id @db.VarChar(36)
   instance     String                 @db.VarChar(191)

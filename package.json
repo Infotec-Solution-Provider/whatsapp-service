@@ -24,6 +24,8 @@
 		"test:functional-health": "ts-node src/services/wwebjs-health-check.service.test.ts && ts-node src/services/remote-session-stability.test.ts",
 		"test:remote-inbound": "ts-node src/services/remote-inbound-event-inbox.test.ts",
 		"test:pipeline-events": "ts-node src/utils/pipeline-trigger-source.test.ts",
+		"test:frontend-performance": "ts-node src/services/frontend-performance.service.test.ts",
+		"test:frontend-performance:mysql": "ts-node src/services/frontend-performance.mysql.test.ts",
 		"test:contact-action-requests:mysql": "node scripts/smoke-contact-action-requests.js",
 		"fix:messages:chat-contact": "ts-node src/routines/fix-messages-chat-contact.routine.ts",
 		"fix:messages:chat-contact:apply": "ts-node src/routines/fix-messages-chat-contact.routine.ts --apply",
