@@ -18,6 +18,7 @@ const DEFAULT_FEATURE_PARAMETERS: Record<string, string> = {
 	feature_telephony_dialer_enabled: "false",
 	feature_frontend_performance_telemetry_enabled: "false",
 	feature_perf_paginated_chat_history_enabled: "false",
+	feature_perf_stable_socket_listeners_enabled: "false",
 	feature_perf_virtualized_chat_list_enabled: "false",
 	feature_whatsapp_session_monitoring_enabled: "false"
 };
