@@ -15,12 +15,13 @@ const FRONTEND_PERFORMANCE_RETENTION_SAMPLE_BATCH_SIZE = 10_000;
 const FRONTEND_PERFORMANCE_RETENTION_RECEIPT_BATCH_SIZE = 10_000;
 const FRONTEND_PERFORMANCE_RETENTION_SESSION_BATCH_SIZE = 1_000;
 
-const METRIC_NAME_PATTERN = /^(web_vital\.(inp|lcp|cls|fcp|ttfb)|long_task\.(duration|total)|navigation\.duration|route_change\.duration|interaction\.(chat_filter|chat_filter_ready|chat_sort|chat_sort_ready|open_chat|open_chat_ready|socket_event_ready)|render\.(count|duration|commit_latency)|api\.(duration|ttfb|transfer_bytes)|socket\.(event_count|handler_duration)|dom\.nodes|memory\.js_heap_bytes|runtime\.(frame_rate|frame_jank|event_loop_lag)|error\.count|telemetry\.(flush_duration|dropped_samples)|resource\.(count|duration|transfer_bytes))$/;
+const METRIC_NAME_PATTERN = /^(web_vital\.(inp|lcp|cls|fcp|ttfb)|long_task\.(duration|total)|navigation\.duration|route_change\.duration|startup\.duration|interaction\.(chat_filter|chat_filter_ready|chat_sort|chat_sort_ready|open_chat|open_chat_ready|socket_event_ready)|render\.(count|duration|commit_latency)|api\.(duration|ttfb|transfer_bytes)|socket\.(event_count|handler_duration)|dom\.nodes|memory\.js_heap_bytes|runtime\.(frame_rate|frame_jank|event_loop_lag)|error\.count|telemetry\.(flush_duration|dropped_samples)|resource\.(count|duration|transfer_bytes))$/;
 const ALLOWED_UNITS = new Set(["ms", "bytes", "count", "ratio"]);
 const METRIC_UNIT_RULES: Array<[RegExp, string]> = [
 	[/^web_vital\.cls$/, "ratio"],
 	[/^web_vital\.(inp|lcp|fcp|ttfb)$/, "ms"],
 	[/^(long_task\.(duration|total)|navigation\.duration|route_change\.duration)$/, "ms"],
+	[/^startup\.duration$/, "ms"],
 	[/^interaction\.[a-z0-9_.-]+$/, "ms"],
 	[/^render\.count$/, "count"],
 	[/^render\.(duration|commit_latency)$/, "ms"],
@@ -50,6 +51,8 @@ const ALLOWED_TAGS = new Set([
 	"initiatorType",
 	"navigationType",
 	"source",
+	"phase",
+	"outcome",
 	"errorName",
 	"errorFingerprint",
 	"detailLevel"
@@ -115,6 +118,11 @@ const ENUMERATED_TAG_VALUES: Record<string, Set<string>> = {
 	initiatorType: ALLOWED_INITIATOR_TYPES,
 	navigationType: new Set(["back_forward", "navigate", "prerender", "reload"]),
 	source: ALLOWED_SOURCES,
+	phase: new Set([
+		"app_shell_ready", "session_ready", "parameters_ready", "initial_chats_ready",
+		"chat_list_ready", "interactive_ready"
+	]),
+	outcome: new Set(["success", "partial", "failed", "timeout"]),
 	errorName: ALLOWED_ERROR_NAMES,
 	detailLevel: new Set(["detailed", "light"])
 };

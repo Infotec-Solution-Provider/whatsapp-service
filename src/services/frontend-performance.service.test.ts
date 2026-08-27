@@ -165,6 +165,55 @@ assert.deepEqual(runtimeMetrics.metrics.map(({ name, unit }) => ({ name, unit })
 	{ name: "runtime.event_loop_lag", unit: "ms" },
 	{ name: "api.ttfb", unit: "ms" }
 ]);
+
+const startupMetrics = parseFrontendPerformanceBatch({
+	...parsed,
+	startedAt: now,
+	metrics: [{
+		name: "startup.duration",
+		value: 840,
+		unit: "ms",
+		occurredAt: now,
+		route: "/tenant-a/chats?contact=Maria",
+		tags: {
+			phase: "chat_list_ready",
+			outcome: "success",
+			ignored: "Contato particular Maria"
+		}
+	}]
+});
+assert.equal(startupMetrics.metrics[0]?.name, "startup.duration");
+assert.equal(startupMetrics.metrics[0]?.unit, "ms");
+assert.equal(startupMetrics.metrics[0]?.route, "/:instance/chats");
+assert.deepEqual(startupMetrics.metrics[0]?.tags, {
+	phase: "chat_list_ready",
+	outcome: "success"
+});
+
+const sanitizedStartupTags = parseFrontendPerformanceBatch({
+	...parsed,
+	startedAt: now,
+	metrics: [{
+		name: "startup.duration",
+		value: 50,
+		unit: "ms",
+		occurredAt: now,
+		route: "/tenant-a/chats",
+		tags: { phase: "contact_Maria", outcome: "unknown", endpoint: "/api/instances/tenant-a/chats" }
+	}]
+}, "tenant-a");
+assert.deepEqual(sanitizedStartupTags.metrics[0]?.tags, {
+	endpoint: "/api/instances/:instance/chats"
+});
+
+assert.throws(
+	() => parseFrontendPerformanceBatch({
+		...parsed,
+		startedAt: now,
+		metrics: [{ name: "startup.duration", value: 100, unit: "count", occurredAt: now, route: "/x" }]
+	}),
+	(error) => error instanceof FrontendPerformanceValidationError && error.message.includes("startup.duration")
+);
 assert.throws(
 	() => parseFrontendPerformanceBatch({
 		...parsed,
