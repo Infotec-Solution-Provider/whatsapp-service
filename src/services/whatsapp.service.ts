@@ -188,8 +188,14 @@ class WhatsappService {
 		);
 		process.log("Iniciando o processo de edição de mensagem.");
 		try {
-			const message = await prismaService.wppMessage.findUniqueOrThrow({
-				where: { wwebjsId: options.messageId }
+			const message = await prismaService.wppMessage.findFirstOrThrow({
+				where: {
+					instance: session.instance,
+					OR: [
+						{ wwebjsIdStanza: options.messageId },
+						{ wwebjsId: options.messageId }
+					]
+				}
 			});
 
 			if (!message.clientId) {

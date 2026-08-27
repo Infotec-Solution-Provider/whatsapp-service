@@ -427,8 +427,8 @@ class MessagesService {
 
 		try {
 			process.log("Procurando mensagem no banco de dados...");
-			const originalMessage = await prismaService.wppMessage.findUniqueOrThrow({
-				where: { id: options.messageId },
+			const originalMessage = await prismaService.wppMessage.findFirstOrThrow({
+				where: { id: options.messageId, instance: session.instance },
 				include: { WppChat: true }
 			});
 			process.log("Mensagem encontrada:", originalMessage);
@@ -464,6 +464,8 @@ class MessagesService {
 			} else {
 				process.log("A mensagem não pertence a um chat, pulando notificação via socket.");
 			}
+
+			return updatedMsg;
 		} catch (err) {
 			process.log("Erro ao editar a mensagem.", (err as Error).message);
 			throw new Error("Failed to edit message: " + (err as Error).message);
