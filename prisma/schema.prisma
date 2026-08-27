@@ -969,17 +969,21 @@ model FrontendPerformanceSession {
   lastSeenAt          DateTime                    @map("last_seen_at")
   createdAt           DateTime                    @default(now()) @map("created_at")
   samples             FrontendPerformanceSample[]
+  batchReceipts       FrontendPerformanceBatchReceipt[]
 
   @@unique([instance, userId, sessionId], map: "fps_instance_user_session_key")
   @@index([instance, startedAt], map: "fps_instance_started_idx")
   @@index([instance, deviceClass, startedAt], map: "fps_instance_device_started_idx")
   @@index([buildId, startedAt], map: "fps_build_started_idx")
+  @@index([lastSeenAt], map: "fps_last_seen_idx")
   @@map("frontend_performance_sessions")
 }
 
 model FrontendPerformanceSample {
   id         BigInt                     @id @default(autoincrement())
   sessionId  Int                        @map("session_id")
+  batchId    String                     @map("batch_id") @db.VarChar(64)
+  sampleIndex Int                       @map("sample_index")
   instance   String                     @db.VarChar(191)
   name       String                     @db.VarChar(64)
   value      Float
@@ -993,7 +997,22 @@ model FrontendPerformanceSample {
   @@index([instance, occurredAt], map: "fpm_instance_occurred_idx")
   @@index([instance, name, occurredAt], map: "fpm_instance_name_occurred_idx")
   @@index([sessionId, occurredAt], map: "fpm_session_occurred_idx")
+  @@index([occurredAt], map: "fpm_occurred_idx")
+  @@unique([sessionId, batchId, sampleIndex], map: "fpm_session_batch_sample_key")
   @@map("frontend_performance_samples")
+}
+
+model FrontendPerformanceBatchReceipt {
+  id          BigInt                     @id @default(autoincrement())
+  sessionDbId Int                        @map("session_db_id")
+  batchId     String                     @map("batch_id") @db.VarChar(64)
+  checksum    String                     @db.Char(64)
+  createdAt   DateTime                   @default(now()) @map("created_at")
+  session     FrontendPerformanceSession @relation(fields: [sessionDbId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionDbId, batchId], map: "fpbr_session_batch_key")
+  @@index([createdAt], map: "fpbr_created_idx")
+  @@map("frontend_performance_batch_receipts")
 }
 
 model InstanceMigrationRun {

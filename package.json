@@ -23,6 +23,7 @@
 		"test:contact-identity": "ts-node src/utils/resolve-contact-identity.test.ts",
 		"test:functional-health": "ts-node src/services/wwebjs-health-check.service.test.ts && ts-node src/services/remote-session-stability.test.ts",
 		"test:remote-inbound": "ts-node src/services/remote-inbound-event-inbox.test.ts",
+		"test:legacy-message-encoding": "ts-node src/services/messages-local-encoding.test.ts",
 		"test:pipeline-events": "ts-node src/utils/pipeline-trigger-source.test.ts",
 		"test:frontend-performance": "ts-node src/services/frontend-performance.service.test.ts",
 		"test:frontend-performance:mysql": "ts-node src/services/frontend-performance.mysql.test.ts",

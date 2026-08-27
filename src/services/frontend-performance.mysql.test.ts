@@ -12,7 +12,7 @@ function batch(sessionId: string, value: number) {
 	return parseFrontendPerformanceBatch({
 		schemaVersion: 1,
 		sessionId,
-		buildId: "mysql-smoke",
+		buildId: "b451e51",
 		startedAt: now.toISOString(),
 		device: {
 			browser: "Chrome 140",
@@ -37,7 +37,15 @@ async function run() {
 	await prismaService.frontendPerformanceSession.deleteMany({
 		where: { sessionId: { in: [sessionA, sessionB] } }
 	});
-	await frontendPerformanceService.ingest(tenantA, 11, batch(sessionA, 120));
+	const tenantABatch = batch(sessionA, 120);
+	assert.deepEqual(await frontendPerformanceService.ingest(tenantA, 11, tenantABatch), {
+		accepted: 1,
+		duplicate: false
+	});
+	assert.deepEqual(await frontendPerformanceService.ingest(tenantA, 11, tenantABatch), {
+		accepted: 0,
+		duplicate: true
+	});
 	await frontendPerformanceService.ingest(tenantB, 22, batch(sessionB, 900));
 
 	const filters = {
@@ -51,7 +59,8 @@ async function run() {
 	assert.equal(summaryA.metrics[0]?.p75, 120);
 	assert.equal(summaryB.metrics[0]?.p75, 900);
 
-	const csvA = await frontendPerformanceService.exportCsv(tenantA, filters);
+	let csvA = "";
+	for await (const chunk of frontendPerformanceService.exportCsvChunks(tenantA, filters)) csvA += chunk;
 	assert.match(csvA, /74677154-a6db-4dd1-914f-25454acb5b34/);
 	assert.doesNotMatch(csvA, /7d9eb273-c319-4fb4-b303-e45da0c4a7ef/);
 	console.log("frontend-performance MySQL tenant isolation smoke passed");

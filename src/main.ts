@@ -62,9 +62,12 @@ const logRoute = (r: express.Router) => {
 	return r;
 };
 
+app.use(cors());
+// Telemetry has its own 64 KiB parser after authentication/rate limiting. It
+// must be mounted before the legacy 2 GiB parsers used by the remaining APIs.
+app.use(logRoute(frontendPerformanceController.router));
 app.use(express.json({ limit: "2gb" }));
 app.use(express.urlencoded({ extended: true, limit: "2gb" }));
-app.use(cors());
 
 // Serve static files for frontend
 app.use(express.static("public"));
@@ -91,7 +94,6 @@ app.use(logRoute(autoResponseController.router));
 app.use(logRoute(wabaController.router));
 app.use(logRoute(messageFlowsController.router));
 app.use(logRoute(flowExecutionController.router));
-app.use(logRoute(frontendPerformanceController.router));
 app.use(logRoute(remoteClientController.router));
 app.use(logRoute(remoteSessionMonitorController.router));
 app.use(logRoute(parsedMessagesController.router));
