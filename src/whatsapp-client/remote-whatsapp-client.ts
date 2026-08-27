@@ -8,16 +8,26 @@ import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
 import contactsService from "../services/contacts.service";
 import internalChatsService from "../services/internal-chats.service";
-import MessageDto, { MessageReactionEvent, MessageRevokedEvent, RemoteMessageJobResponse } from "../types/remote-client.types";
-import { EditMessageOptions, Mentions, SendFileType, SendMessageOptions, SendTemplateOptions, WhatsappGroup } from "../types/whatsapp-instance.types";
+import MessageDto, {
+	MessageReactionEvent,
+	MessageRevokedEvent,
+	RemoteMessageJobResponse
+} from "../types/remote-client.types";
+import {
+	EditMessageOptions,
+	Mentions,
+	SendFileType,
+	SendMessageOptions,
+	SendTemplateOptions,
+	WhatsappGroup
+} from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
 import socketService from "../services/socket.service";
 import { Prisma, WppMessageStatus } from "@prisma/client";
 import { Logger } from "@in.pulse-crm/utils";
 import axios from "axios";
-
-const ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] !== "false";
+import parametersService from "../services/parameters.service";
 
 interface BaseSendMessageOptions {
 	to: string;
@@ -92,7 +102,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 		public readonly name: string,
 		public _phone: string,
 		private readonly clientUrl: string
-	) { }
+	) {}
 
 	public async handleQr(qr: string) {
 		const client = await prismaService.wppClient.findUnique({
@@ -171,7 +181,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 					return null;
 				}
 
-				if (!ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+				if (!(await parametersService.isInternalGroupWhatsappSyncEnabled(this.instance))) {
 					process.log("Group message ignored: WhatsApp group synchronization is disabled.");
 					process.success({ ignored: true, reason: "group-sync-disabled" });
 					return null;
@@ -179,25 +189,28 @@ class RemoteWhatsappClient implements WhatsappClient {
 
 				const { isGroup, authorName, contactName, sender, recipient, participant, ...cleanMessage } = message;
 				const canonicalMessage = { ...cleanMessage, instance: this.instance, clientId: this.id };
-				const findExistingGroupMessage = () => prismaService.internalMessage.findFirst({
-					where: {
-						OR: [
-							...(message.wwebjsIdStanza ? [{ wwebjsIdStanza: message.wwebjsIdStanza }] : []),
-							...(message.wwebjsId ? [{ wwebjsId: message.wwebjsId }] : [])
-						]
-					}
-				});
+				const findExistingGroupMessage = () =>
+					prismaService.internalMessage.findFirst({
+						where: {
+							OR: [
+								...(message.wwebjsIdStanza ? [{ wwebjsIdStanza: message.wwebjsIdStanza }] : []),
+								...(message.wwebjsId ? [{ wwebjsId: message.wwebjsId }] : [])
+							]
+						}
+					});
 				let savedGroupMessage = await findExistingGroupMessage();
 				if (!savedGroupMessage) {
 					try {
-						savedGroupMessage = await internalChatsService.receiveMessage(
-							this.instance,
-							groupId,
-							canonicalMessage,
-							contactName || authorName || message.from
-						) || null;
+						savedGroupMessage =
+							(await internalChatsService.receiveMessage(
+								this.instance,
+								groupId,
+								canonicalMessage,
+								contactName || authorName || message.from
+							)) || null;
 					} catch (error) {
-						if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+						if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002")
+							throw error;
 						savedGroupMessage = await findExistingGroupMessage();
 						if (!savedGroupMessage) throw error;
 					}
@@ -220,7 +233,8 @@ class RemoteWhatsappClient implements WhatsappClient {
 					resolvedContactId = contact.id;
 				}
 
-				const { isGroup, groupId, authorName, contactName, sender, recipient, participant, ...cleanMessage } = message;
+				const { isGroup, groupId, authorName, contactName, sender, recipient, participant, ...cleanMessage } =
+					message;
 				const savedMsg = await messagesService.insertOrGetIncomingMessage({
 					...cleanMessage,
 					instance: this.instance,
@@ -278,7 +292,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 				return;
 			}
 
-			if (!ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+			if (!(await parametersService.isInternalGroupWhatsappSyncEnabled(this.instance))) {
 				process.log("Group message edit ignored: WhatsApp group synchronization is disabled.");
 				process.success({ ignored: true, reason: "group-sync-disabled" });
 				return;
@@ -295,7 +309,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 
 	public async handleMessageReaction(event: MessageReactionEvent) {
 		if (event.isGroup) {
-			if (!event.groupId || !ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+			if (!event.groupId || !(await parametersService.isInternalGroupWhatsappSyncEnabled(this.instance))) {
 				return;
 			}
 			await internalChatsService.receiveMessageReaction(event.groupId, event.targetMessageId, event.reaction);
@@ -318,7 +332,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 
 	public async handleMessageRevoked(event: MessageRevokedEvent) {
 		if (event.isGroup) {
-			if (!event.groupId || !ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+			if (!event.groupId || !(await parametersService.isInternalGroupWhatsappSyncEnabled(this.instance))) {
 				return;
 			}
 			await internalChatsService.receiveMessageRevoked(event.groupId, event.targetMessageId);
@@ -423,7 +437,6 @@ class RemoteWhatsappClient implements WhatsappClient {
 		};
 	}
 
-
 	public async sendMessage(props: SendMessageOptions, isGroup: boolean): Promise<CreateMessageDto> {
 		const id = `send-msg-${Date.now()}`;
 		const process = new ProcessingLogger(this.instance, "rc-send-message", id, props);
@@ -445,7 +458,6 @@ class RemoteWhatsappClient implements WhatsappClient {
 			process.log("Message sent successfully from wwebjs-api");
 
 			process.success(response.data);
-
 
 			return messageData;
 		} catch (err: any) {
@@ -498,20 +510,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 			}
 
 			process.log("Message edited successfully from wwebjs-api");
-
-			const currentMessage = await prismaService.wppMessage.findFirstOrThrow({
-				where: {
-					OR: [{ wwebjsIdStanza: props.messageId }, { wwebjsId: props.messageId }]
-				}
-			});
-
-			await messagesService.updateMessage(currentMessage.id, {
-				body: props.text || response.data.body,
-				isEdited: true,
-				status: "SENT" as WppMessageStatus
-			});
-
-			process.success("Message edited successfully");
+			process.success({ status: "success", endpoint: "/api/edit-message" });
 		} catch (err: any) {
 			process.log(`Failed to edit message: ${err?.message}`);
 			process.failed(err);
@@ -533,7 +532,11 @@ class RemoteWhatsappClient implements WhatsappClient {
 		return [];
 	}
 
-	public async sendTemplate(props: SendTemplateOptions, chatId: number, contactId: number): Promise<CreateMessageDto> {
+	public async sendTemplate(
+		props: SendTemplateOptions,
+		chatId: number,
+		contactId: number
+	): Promise<CreateMessageDto> {
 		Logger.debug("RemoteWhatsappClient.sendTemplate not implemented", { props, chatId, contactId });
 		throw new Error("Method not implemented.");
 	}
@@ -590,7 +593,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 				to,
 				text: forwardedText,
 				quotedId: null,
-				isGroup,
+				isGroup
 			};
 
 			process.log("Enviando mensagem encaminhada para o endpoint remoto", options);
