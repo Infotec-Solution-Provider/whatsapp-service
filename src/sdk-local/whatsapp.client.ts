@@ -127,8 +127,9 @@ export default class WhatsappClient extends ApiClient {
 		newText: string,
 		isInternal = false,
 	) {
-		const type = isInternal ? "internal" : "whatsapp";
-		const url = `/api/${type}/${clientId}/messages/${messageId}`;
+		const url = isInternal
+			? `/api/internal/messages/${messageId}`
+			: `/api/whatsapp/${clientId}/messages/${messageId}`;
 		const body = { newText };
 		await this.ax.put(url, body);
 	}

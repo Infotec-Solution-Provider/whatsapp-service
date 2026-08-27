@@ -465,9 +465,11 @@ class MessagesService {
 				process.log("A mensagem não pertence a um chat, pulando notificação via socket.");
 			}
 
+			process.success(updatedMsg);
 			return updatedMsg;
 		} catch (err) {
 			process.log("Erro ao editar a mensagem.", (err as Error).message);
+			process.failed(err);
 			throw new Error("Failed to edit message: " + (err as Error).message);
 		}
 	}

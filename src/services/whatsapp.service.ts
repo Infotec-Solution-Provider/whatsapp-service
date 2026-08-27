@@ -179,13 +179,7 @@ class WhatsappService {
 		}));
 	}
 
-	public async editMessage({ session, options }: EditMessageData) {
-		const process = new ProcessingLogger(
-			session.instance,
-			"edit-message",
-			`${session.userId}-${Date.now()}`,
-			options
-		);
+	public async editMessage({ session, options, logger: process }: EditMessageData) {
 		process.log("Iniciando o processo de edição de mensagem.");
 		try {
 			const message = await prismaService.wppMessage.findFirstOrThrow({
@@ -215,7 +209,6 @@ class WhatsappService {
 			return editedMsg;
 		} catch (err) {
 			process.log("Erro ao editar mensagem no WhatsApp.", err);
-			process.failed("Erro ao editar mensagem: " + sanitizeErrorMessage(err));
 			throw new BadRequestError("Erro ao editar mensagem.", err);
 		}
 	}
