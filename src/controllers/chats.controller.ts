@@ -3,14 +3,25 @@ import chatsService, { PublicConversationsFilters } from "../services/chats.serv
 import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import onlyLocal from "../middlewares/only-local.middleware";
+import publicBiRateLimit from "../middlewares/public-bi-rate-limit.middleware";
 
 class ChatsController {
 	constructor(public readonly router: Router) {
-		this.router.get("/api/whatsapp/conversations", isAuthenticated, this.getPublicConversations.bind(this));
+		this.router.get(
+			"/api/whatsapp/conversations",
+			publicBiRateLimit,
+			isAuthenticated,
+			this.getPublicConversations.bind(this)
+		);
 		this.router.get("/api/whatsapp/session/chats", isAuthenticated, this.getChatsBySession);
 		this.router.get("/api/whatsapp/chats/:id", isAuthenticated, this.getChatById.bind(this));
 		this.router.get("/api/whatsapp/chats/:id/messages", isAuthenticated, this.getChatMessages.bind(this));
-		this.router.get("/api/whatsapp/conversations/:id/messages", isAuthenticated, this.getChatMessages.bind(this));
+		this.router.get(
+			"/api/whatsapp/conversations/:id/messages",
+			publicBiRateLimit,
+			isAuthenticated,
+			this.getChatMessages.bind(this)
+		);
 		this.router.get("/api/internal/whatsapp/chats/:id", onlyLocal, this.getInternalChatById.bind(this));
 		this.router.post(
 			"/api/internal/whatsapp/chats/:id/agent-send-message",

@@ -14,6 +14,7 @@ import getUsersClient from "./users.service";
 import whatsappService, { SendTemplateData } from "./whatsapp.service";
 import parametersService from "./parameters.service";
 import contactsService from "./contacts.service";
+import { withPublicMessageDirection } from "../utils/public-message-direction";
 
 interface InpulseResult {
 	CODIGO: number;
@@ -338,8 +339,8 @@ class ChatsService {
 		}
 
 		return {
-			messages,
-			quotedMessages,
+			messages: messages.map(withPublicMessageDirection),
+			quotedMessages: quotedMessages.map(withPublicMessageDirection),
 			nextCursor: hasMore && messages.length ? messages[0]!.id : null
 		};
 	}

@@ -11,6 +11,7 @@ import instancesService from "./instances.service";
 import localSyncService from "./local-sync.service";
 import { safeEncode } from "../utils/safe-encode";
 import type { PipelineTriggerSource } from "../utils/pipeline-trigger-source";
+import { withPublicMessageDirection } from "../utils/public-message-direction";
 
 interface FetchMessagesFilter {
 	minDate?: string;
@@ -18,6 +19,13 @@ interface FetchMessagesFilter {
 	userId?: number | null;
 	chatId?: number | null;
 	contactId?: number | null;
+}
+
+export interface PublicMessageExportFilters {
+	sentFrom: Date;
+	sentTo: Date;
+	limit: number;
+	afterId?: number;
 }
 
 interface EditMessageOptions {
@@ -415,6 +423,32 @@ class MessagesService {
 		});
 
 		return messages;
+	}
+
+	public async exportPublicMessages(session: SessionData, filters: PublicMessageExportFilters) {
+		const page = await prismaService.wppMessage.findMany({
+			where: {
+				instance: session.instance,
+				sentAt: {
+					gte: filters.sentFrom,
+					lte: filters.sentTo
+				},
+				...(filters.afterId === undefined ? {} : { id: { gt: filters.afterId } })
+			},
+			orderBy: { id: "asc" },
+			take: filters.limit + 1
+		});
+		const hasMore = page.length > filters.limit;
+		const items = page.slice(0, filters.limit);
+
+		return {
+			items: items.map(withPublicMessageDirection),
+			pagination: {
+				limit: filters.limit,
+				nextCursor: hasMore && items.length ? items[items.length - 1]!.id : null,
+				hasMore
+			}
+		};
 	}
 
 	public async editMessage({ options, session }: { options: EditMessageOptions; session: SessionData }) {

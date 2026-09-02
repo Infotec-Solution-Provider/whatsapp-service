@@ -4,12 +4,14 @@ import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import onlyLocal from "../middlewares/only-local.middleware";
 import upload from "../middlewares/multer.middleware";
+import publicBiRateLimit from "../middlewares/public-bi-rate-limit.middleware";
 import messagesService from "../services/messages.service";
 import whatsappService from "../services/whatsapp.service";
 import { createUploadTraceLogger, resolveUploadTraceId } from "../utils/file-upload-trace";
 
 class MessagesController {
 	constructor(public readonly router: Router) {
+		this.router.get("/api/whatsapp/messages/export", publicBiRateLimit, isAuthenticated, this.exportMessages);
 		this.router.get("/api/whatsapp/messages/:id", this.getMessageById);
 		this.router.patch("/api/whatsapp/messages/mark-as-read", isAuthenticated, this.readContactMessages);
 		this.router.post("/api/whatsapp/:clientId/messages", upload.single("file"), isAuthenticated, this.sendMessage);
@@ -17,9 +19,48 @@ class MessagesController {
 		this.router.post("/api/internal/whatsapp/chats/:chatId/agent-send-message", onlyLocal, this.sendAgentMessage);
 		this.router.post("/api/internal/whatsapp/chats/:chatId/agent-template-message", onlyLocal, this.createAgentTemplateMessage);
 		this.router.post("/api/whatsapp/:clientId/messages/forward", isAuthenticated, this.forwardMessages.bind(this));
-		this.router.get("/api/whatsapp/messages", isAuthenticated, this.fetchMessages);
+		this.router.get("/api/whatsapp/messages", publicBiRateLimit, isAuthenticated, this.fetchMessages);
 
 		this.router.put("/api/whatsapp/:clientId/messages/:id", isAuthenticated, this.editMessage);
+	}
+
+	private async exportMessages(req: Request, res: Response) {
+		const rawSentFrom = req.query["sentFrom"];
+		const rawSentTo = req.query["sentTo"];
+		const sentFrom = new Date(String(rawSentFrom || ""));
+		const sentTo = new Date(String(rawSentTo || ""));
+		const rawLimit = req.query["limit"];
+		const limit = rawLimit === undefined || rawLimit === "" ? 100 : Number(rawLimit);
+		const rawAfterId = req.query["afterId"];
+		const afterId = rawAfterId === undefined || rawAfterId === "" ? undefined : Number(rawAfterId);
+
+		if (Number.isNaN(sentFrom.getTime()) || Number.isNaN(sentTo.getTime())) {
+			throw new BadRequestError("sentFrom and sentTo must be valid dates!");
+		}
+
+		if (sentFrom > sentTo) {
+			throw new BadRequestError("sentFrom must be before or equal to sentTo!");
+		}
+
+		if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+			throw new BadRequestError("limit must be an integer between 1 and 100!");
+		}
+
+		if (afterId !== undefined && (!Number.isInteger(afterId) || afterId <= 0)) {
+			throw new BadRequestError("afterId must be a positive integer!");
+		}
+
+		const data = await messagesService.exportPublicMessages(req.session, {
+			sentFrom,
+			sentTo,
+			limit,
+			...(afterId === undefined ? {} : { afterId })
+		});
+
+		res.status(200).send({
+			message: "Messages exported successfully!",
+			data
+		});
 	}
 
 	private async getMessageById(req: Request, res: Response) {
