@@ -23,8 +23,9 @@ import HumanBehaviorSimulator, { HumanBehaviorConfig } from "../utils/human-beha
 import MessageQueue from "../utils/message-queue";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
+import parametersService from "../services/parameters.service";
 
-const ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] === "true";
+const LEGACY_INTERNAL_GROUP_WHATSAPP_SYNC_DEFAULT = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] === "true";
 
 const PUPPETEER_ARGS = {
 	headless: true,
@@ -66,9 +67,9 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				executablePath: BROWSER_PATH
 			},
 			webVersionCache: {
-				type: 'remote',
-				remotePath: `https://raw.githubusercontent.com/wppconnect-team/wa-version/refs/heads/main/html/2.3000.1031490220-alpha.html`,
-			},
+				type: "remote",
+				remotePath: `https://raw.githubusercontent.com/wppconnect-team/wa-version/refs/heads/main/html/2.3000.1031490220-alpha.html`
+			}
 		});
 
 		// Log events
@@ -330,10 +331,17 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 				process.success(savedMsg);
 			}
 			if (chat.isGroup) {
-				if (ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+				if (
+					await parametersService.isInternalGroupWhatsappSyncEnabled(
+						this.instance,
+						LEGACY_INTERNAL_GROUP_WHATSAPP_SYNC_DEFAULT
+					)
+				) {
 					await internalChatsService.receiveMessage(this.instance, chat.id.user, parsedMsg, contactName);
 				} else {
-					process.log("Group message ignored: internal chats are now native and no longer synced from WhatsApp groups.");
+					process.log(
+						"Group message ignored: internal chats are now native and no longer synced from WhatsApp groups."
+					);
 				}
 			}
 		} catch (err) {
@@ -351,10 +359,17 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			process.log("Chat info:", { id: chat.id._serialized, isGroup: chat.isGroup });
 			if (message && chat) {
 				if (chat.isGroup) {
-					if (ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+					if (
+						await parametersService.isInternalGroupWhatsappSyncEnabled(
+							this.instance,
+							LEGACY_INTERNAL_GROUP_WHATSAPP_SYNC_DEFAULT
+						)
+					) {
 						await internalChatsService.receiveMessageEdit(chat.id.user, message.id.id, message.body);
 					} else {
-						process.log("Group message edit ignored: internal chats are now native and no longer synced from WhatsApp groups.");
+						process.log(
+							"Group message edit ignored: internal chats are now native and no longer synced from WhatsApp groups."
+						);
 					}
 					return;
 				} else {
@@ -379,7 +394,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		}
 	}
 
-	private handleMessageReaction(_reaction: WAWebJS.Reaction) { }
+	private handleMessageReaction(_reaction: WAWebJS.Reaction) {}
 
 	private handleMessageRevoked({ id }: WAWebJS.Message) {
 		this.log("info", "Message revoked! " + id._serialized);
@@ -420,15 +435,16 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 			isGroup
 		};
 
-		const payload: SendMessageOptions & { isGroup: boolean } = "file" in options
-			? {
-				...basePayload,
-				file: options.file,
-				fileId: options.fileId,
-				publicFileUrl: options.publicFileUrl,
-				localFileUrl: options.localFileUrl,
-			}
-			: basePayload;
+		const payload: SendMessageOptions & { isGroup: boolean } =
+			"file" in options
+				? {
+						...basePayload,
+						file: options.file,
+						fileId: options.fileId,
+						publicFileUrl: options.publicFileUrl,
+						localFileUrl: options.localFileUrl
+					}
+				: basePayload;
 
 		// Enfileira a mensagem para envio sequencial com persistência
 		return this.messageQueue.enqueue(this.instance, this.id, chatId, id, payload, isGroup, async () => {
@@ -620,10 +636,12 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 	public async getGroups() {
 		const chats = await this.wwebjs.getChats();
 
-		return chats.filter((c) => c.isGroup).map(c => ({
-			id: c.id.user,
-			name: c.name || c.id.user
-		}))
+		return chats
+			.filter((c) => c.isGroup)
+			.map((c) => ({
+				id: c.id.user,
+				name: c.name || c.id.user
+			}));
 	}
 
 	public async forwardMessage(to: string, messageId: string, isGroup: boolean = false) {

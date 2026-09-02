@@ -12,6 +12,7 @@ import {
 	SendMessageOptions
 } from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
+import { resolveEditMessageId } from "../utils/resolve-edit-message-id";
 import GupshupWhatsappClient from "../whatsapp-client/gupshup-whatsapp-client";
 import RemoteWhatsappClient from "../whatsapp-client/remote-whatsapp-client";
 import WABAWhatsappClient from "../whatsapp-client/waba-whatsapp-client";
@@ -179,17 +180,17 @@ class WhatsappService {
 		}));
 	}
 
-	public async editMessage({ session, options }: EditMessageData) {
-		const process = new ProcessingLogger(
-			session.instance,
-			"edit-message",
-			`${session.userId}-${Date.now()}`,
-			options
-		);
+	public async editMessage({ session, options, logger: process }: EditMessageData) {
 		process.log("Iniciando o processo de edição de mensagem.");
 		try {
-			const message = await prismaService.wppMessage.findUniqueOrThrow({
-				where: { wwebjsId: options.messageId }
+			const message = await prismaService.wppMessage.findFirstOrThrow({
+				where: {
+					instance: session.instance,
+					OR: [
+						{ wwebjsIdStanza: options.messageId },
+						{ wwebjsId: options.messageId }
+					]
+				}
 			});
 
 			if (!message.clientId) {
@@ -203,13 +204,19 @@ class WhatsappService {
 				throw new BadRequestError("Client do WhatsApp não encontrado.");
 			}
 
+			const messageIdStrategy =
+				client instanceof WWEBJSWhatsappClient ? "WWEBJS" : "STANZA_FIRST";
+			const resolvedMessageId = resolveEditMessageId(messageIdStrategy, message);
+			if (!resolvedMessageId) {
+				throw new BadRequestError("Mensagem não possui um identificador compatível com o client.");
+			}
+
 			process.log(`Client obtido para o setor: ${session.sectorId}`);
-			const editedMsg = await client.editMessage(options);
+			const editedMsg = await client.editMessage({ ...options, messageId: resolvedMessageId });
 
 			return editedMsg;
 		} catch (err) {
 			process.log("Erro ao editar mensagem no WhatsApp.", err);
-			process.failed("Erro ao editar mensagem: " + sanitizeErrorMessage(err));
 			throw new BadRequestError("Erro ao editar mensagem.", err);
 		}
 	}
