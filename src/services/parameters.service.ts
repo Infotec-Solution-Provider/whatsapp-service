@@ -17,8 +17,15 @@ const DEFAULT_FEATURE_PARAMETERS: Record<string, string> = {
 	feature_sip_config_enabled: "false",
 	feature_telephony_dialer_enabled: "false",
 	feature_frontend_performance_telemetry_enabled: "false",
+	feature_perf_paginated_chat_history_enabled: "false",
+	feature_perf_stable_socket_listeners_enabled: "false",
+	feature_perf_virtualized_chat_list_enabled: "false",
 	feature_whatsapp_session_monitoring_enabled: "false"
 };
+
+// This key intentionally has no universal default above: legacy Remote/parsed
+// ingestion is opt-out, while WWEBJS/internal forwarding is opt-in.
+export const INTERNAL_GROUP_WHATSAPP_SYNC_PARAMETER = "feature_internal_group_whatsapp_sync_enabled";
 
 export const CONTACT_APPROVAL_PARAMETERS = {
 	reactivation: "require_supervisor_approval_for_contact_reactivation",
@@ -63,6 +70,10 @@ class ParametersService {
 		if (value === "true") return true;
 		if (value === "false") return false;
 		return defaultValue;
+	}
+
+	public async isInternalGroupWhatsappSyncEnabled(instance: string, legacyDefault: boolean) {
+		return this.getInstanceBooleanParam(instance, INTERNAL_GROUP_WHATSAPP_SYNC_PARAMETER, legacyDefault);
 	}
 
 	public async getSessionParams({

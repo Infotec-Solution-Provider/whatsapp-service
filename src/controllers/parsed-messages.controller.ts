@@ -9,9 +9,10 @@ import messagesService from "../services/messages.service";
 import prismaService from "../services/prisma.service";
 import ProcessingLogger from "../utils/processing-logger";
 import resolveContactIdentity from "../utils/resolve-contact-identity";
+import parametersService from "../services/parameters.service";
 
 const ENDPOINT = "/api/whatsapp/parsed-messages";
-const ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] !== "false";
+const LEGACY_INTERNAL_GROUP_WHATSAPP_SYNC_DEFAULT = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] !== "false";
 
 interface ProcessMessageBody extends CreateMessageDto {
 	/** Indica se a mensagem veio de grupo */
@@ -91,12 +92,7 @@ class ParsedMessagesController {
 	 * Processa uma única mensagem parseada
 	 */
 	private processMessage = async (req: Request, res: Response) => {
-		const logger = new ProcessingLogger(
-			"parsed-message",
-			"process-single",
-			Date.now().toString(),
-			req.body
-		);
+		const logger = new ProcessingLogger("parsed-message", "process-single", Date.now().toString(), req.body);
 
 		try {
 			logger.log("Recebendo mensagem parseada");
@@ -121,7 +117,11 @@ class ParsedMessagesController {
 
 			// Mensagens de grupo podem ser sincronizadas para chat interno quando habilitado.
 			if (messageDto.isGroup && messageDto.groupId) {
-				if (ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+				const groupWhatsappSyncEnabled = await parametersService.isInternalGroupWhatsappSyncEnabled(
+					messageDto.instance,
+					LEGACY_INTERNAL_GROUP_WHATSAPP_SYNC_DEFAULT
+				);
+				if (groupWhatsappSyncEnabled) {
 					await internalChatsService.receiveMessage(
 						messageDto.instance,
 						messageDto.groupId,
@@ -135,7 +135,7 @@ class ParsedMessagesController {
 
 				const response: ProcessMessageResponse = {
 					success: true,
-					message: ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC ? "Group message synced" : "Group message ignored",
+					message: groupWhatsappSyncEnabled ? "Group message synced" : "Group message ignored",
 					data: {
 						messageId: 0,
 						chatId: null,
@@ -229,12 +229,9 @@ class ParsedMessagesController {
 	 * Processa múltiplas mensagens parseadas em batch
 	 */
 	private processBatch = async (req: Request, res: Response) => {
-		const logger = new ProcessingLogger(
-			"parsed-message",
-			"process-batch",
-			Date.now().toString(),
-			{ count: Array.isArray(req.body) ? req.body.length : 0 }
-		);
+		const logger = new ProcessingLogger("parsed-message", "process-batch", Date.now().toString(), {
+			count: Array.isArray(req.body) ? req.body.length : 0
+		});
 
 		try {
 			if (!Array.isArray(req.body)) {
@@ -273,7 +270,12 @@ class ParsedMessagesController {
 
 					// Mensagens de grupo podem ser sincronizadas para chat interno quando habilitado.
 					if (messageDto.isGroup && messageDto.groupId) {
-						if (ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC) {
+						if (
+							await parametersService.isInternalGroupWhatsappSyncEnabled(
+								messageDto.instance,
+								LEGACY_INTERNAL_GROUP_WHATSAPP_SYNC_DEFAULT
+							)
+						) {
 							await internalChatsService.receiveMessage(
 								messageDto.instance,
 								messageDto.groupId,

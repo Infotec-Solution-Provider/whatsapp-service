@@ -461,8 +461,8 @@ class MessagesService {
 
 		try {
 			process.log("Procurando mensagem no banco de dados...");
-			const originalMessage = await prismaService.wppMessage.findUniqueOrThrow({
-				where: { id: options.messageId },
+			const originalMessage = await prismaService.wppMessage.findFirstOrThrow({
+				where: { id: options.messageId, instance: session.instance },
 				include: { WppChat: true }
 			});
 			process.log("Mensagem encontrada:", originalMessage);
@@ -498,8 +498,12 @@ class MessagesService {
 			} else {
 				process.log("A mensagem não pertence a um chat, pulando notificação via socket.");
 			}
+
+			process.success(updatedMsg);
+			return updatedMsg;
 		} catch (err) {
 			process.log("Erro ao editar a mensagem.", (err as Error).message);
+			process.failed(err);
 			throw new Error("Failed to edit message: " + (err as Error).message);
 		}
 	}
@@ -559,12 +563,12 @@ class MessagesService {
 				message.contactId,
 				message.isForwarded ? 1 : 0,
 				message.isEdited ? 1 : 0,
-				message.body || "",
+				safeEncode(message.body) || "",
 				message.timestamp,
 				sentAt,
 				message.status,
 				message.fileId,
-				message.fileName,
+				safeEncode(message.fileName),
 				message.fileType,
 				message.fileSize,
 				message.userId,
@@ -613,7 +617,7 @@ class MessagesService {
 					sentAt || this.formatDateForMySQL(new Date(0)),
 					message.status,
 					message.fileId,
-					message.fileName,
+					safeEncode(message.fileName),
 					message.fileType,
 					message.fileSize,
 					message.userId,
@@ -648,7 +652,7 @@ class MessagesService {
 						sentAt,
 						message.status,
 						message.fileId,
-						message.fileName,
+						safeEncode(message.fileName),
 						message.fileType,
 						message.fileSize,
 						message.userId,
@@ -697,7 +701,7 @@ class MessagesService {
 							sentAt || this.formatDateForMySQL(new Date(0)),
 							message.status,
 							message.fileId,
-							message.fileName,
+							safeEncode(message.fileName),
 							message.fileType,
 							message.fileSize,
 							message.userId,
