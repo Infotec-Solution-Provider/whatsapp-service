@@ -290,7 +290,7 @@ async function fixMessagesForInstance(instance: string, options: ResolvedFixOpti
 					continue;
 				}
 
-				const updatePayload: Partial<WppMessage> = {};
+				const updatePayload: Partial<Pick<WppMessage, "contactId" | "chatId">> = {};
 				if (shouldUpdateContact && resolved.contactId) {
 					updatePayload.contactId = resolved.contactId;
 				}

@@ -315,12 +315,16 @@ class RemoteWhatsappClient implements WhatsappClient {
 				return;
 			}
 
-			await internalChatsService.receiveMessageEdit(groupId, targetMessageId, message.body);
+			await internalChatsService.receiveMessageEdit(groupId, targetMessageId, message.body, {
+				instance: this.instance, clientId: this.id, mentionEntities: message.mentionEntities,
+			});
 			process.success({ groupId, targetMessageId, synced: true });
 			return;
 		}
 
-		await messagesDistributionService.processMessageEdit("wwebjs", targetMessageId, message.body);
+		await messagesDistributionService.processMessageEdit("wwebjs", targetMessageId, message.body, {
+			instance: this.instance, clientId: this.id, mentionEntities: message.mentionEntities,
+		});
 		process.success({ targetMessageId, synced: true });
 	}
 

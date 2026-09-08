@@ -13,6 +13,7 @@ import {
 } from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
 import { resolveEditMessageId } from "../utils/resolve-edit-message-id";
+import { normalizeMentionEntities } from "../utils/message-mention-metadata";
 import GupshupWhatsappClient from "../whatsapp-client/gupshup-whatsapp-client";
 import RemoteWhatsappClient from "../whatsapp-client/remote-whatsapp-client";
 import WABAWhatsappClient from "../whatsapp-client/waba-whatsapp-client";
@@ -1040,6 +1041,7 @@ class WhatsappService {
 								to: target.id,
 								type: originalMsg.type,
 								body: originalMsg.body,
+								...(originalMsg.mentionMetadata != null ? { mentionEntities: normalizeMentionEntities(originalMsg.mentionMetadata) } : {}),
 								isForwarded: true,
 								contactId: contact?.id ?? null,
 								chatId: chat?.id ?? null,

@@ -7,6 +7,7 @@ import CreateMessageDto from "../dtos/create-message.dto";
 import prismaService from "../services/prisma.service";
 import filesService from "../services/files.service";
 import parseVCard from "../utils/parse-wwebjs-vcard";
+import { mentionEntitiesFromJids } from "../utils/message-mention-persistence";
 
 class WWEBJSMessageParser {
 	public static async parse(
@@ -32,6 +33,7 @@ class WWEBJSMessageParser {
 			from: message.fromMe ? `me:${resolvedFrom}` : resolvedFrom,
 			to: message.fromMe ? resolvedTo : `me:${resolvedTo}`,
 			body: message.type === "vcard" ? parseVCard(message.body) : message.body,
+			mentionEntities: mentionEntitiesFromJids(message.mentionedIds ?? []),
 			type: message.type,
 			timestamp: String(message.timestamp * 1000),
 			sentAt: new Date(message.timestamp * 1000),

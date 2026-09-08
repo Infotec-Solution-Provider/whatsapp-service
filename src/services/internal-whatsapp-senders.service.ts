@@ -6,6 +6,8 @@ import {
 	InternalWhatsappSenderMessagesInput
 } from "../types/internal-whatsapp-sender.types";
 import { SessionData } from "../sdk-local";
+import messageMentionsService from "./message-mentions.service";
+import messagePresentationService from "./message-presentation.service";
 
 class InternalWhatsappSendersService {
 	public async register(instance: string, senderId: string, candidateName: string | null) {
@@ -67,6 +69,9 @@ class InternalWhatsappSendersService {
 						take: 1,
 						select: {
 							id: true,
+							instance: true,
+							internalChatId: true,
+							mentionMetadata: true,
 							body: true,
 							timestamp: true,
 							type: true,
@@ -77,11 +82,13 @@ class InternalWhatsappSendersService {
 			})
 		]);
 
+		const previews = await messageMentionsService.hydrate(instance, senders.flatMap((sender) => sender.messages));
+		const previewById = new Map(previews.map((message) => [message.id, messagePresentationService.fromStored(message)]));
 		return {
 			items: senders.map(({ _count, messages, ...sender }) => ({
 				...sender,
 				messageCount: _count.messages,
-				lastMessage: messages[0] ?? null
+				lastMessage: messages[0] ? previewById.get(messages[0].id) ?? null : null
 			})),
 			page: input.page,
 			perPage: input.perPage,
@@ -119,6 +126,9 @@ class InternalWhatsappSendersService {
 			take: input.limit + 1,
 			select: {
 				id: true,
+				instance: true,
+				internalChatId: true,
+				mentionMetadata: true,
 				body: true,
 				timestamp: true,
 				type: true,
@@ -130,7 +140,7 @@ class InternalWhatsappSendersService {
 		const pageMessages = hasMore ? messages.slice(0, input.limit) : messages;
 
 		return {
-			messages: pageMessages,
+			messages: (await messageMentionsService.hydrate(instance, pageMessages)).map((message) => messagePresentationService.fromStored(message)),
 			nextCursor: hasMore ? (pageMessages[pageMessages.length - 1]?.id ?? null) : null
 		};
 	}

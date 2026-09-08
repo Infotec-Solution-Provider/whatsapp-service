@@ -1,5 +1,6 @@
 import { Request, Response, Router } from "express";
 import internalChatsService from "../services/internal-chats.service";
+import messagePresentationService from "../services/message-presentation.service";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import upload from "../middlewares/multer.middleware";
@@ -198,7 +199,7 @@ class InternalChatsController {
 
 		res.status(200).send({
 			message: "Internal message edited successfully!",
-			data: updatedMessage
+			data: messagePresentationService.fromStored(updatedMessage)
 		});
 	}
 

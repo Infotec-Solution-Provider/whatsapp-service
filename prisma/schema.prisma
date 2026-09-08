@@ -123,6 +123,7 @@ model WppMessage {
   isForwarded      Boolean          @default(false) @map("is_forwarded")
   isEdited         Boolean          @default(false) @map("is_edited")
   body             String           @db.Text
+  mentionMetadata  Json?            @map("mention_metadata")
   timestamp        String
   statusTimestamp  String?          @map("status_timestamp")
   sentAt           DateTime         @map("sent_at")
@@ -196,6 +197,7 @@ model InternalMessage {
   wwebjsIdStanza   String?           @unique @map("wwebjs_id_stanza")
   internalChatId   Int               @map("internalchat_id")
   body             String            @db.Text
+  mentionMetadata  Json?             @map("mention_metadata")
   timestamp        String            @map("timestamp")
   status           WppMessageStatus
   fileId           Int?              @map("file_id")

@@ -27,7 +27,8 @@ import chatsService from "./chats.service";
 import contactsService from "./contacts.service";
 import messageQueueService from "./message-queue.service";
 import messagesService from "./messages.service";
-import messageReactionsService from "./message-reactions.service";
+import messagePresentationService from "./message-presentation.service";
+import messageMentionsService from "./message-mentions.service";
 import prismaService from "./prisma.service";
 import socketService from "./socket.service";
 import transferHistoryService from "./transfer-history.service";
@@ -698,7 +699,7 @@ class MessagesDistributionService {
 			}
 
 			const room: SocketServerChatRoom = `${instance}:chat:${message.chatId}`;
-			const data: WppMessageEventData = { message: (await messageReactionsService.hydrate(instance, [message]))[0]! };
+			const data: WppMessageEventData = { message: (await messagePresentationService.hydrate(instance, [message]))[0]! };
 			await socketService.emit(SocketEventType.WppMessage, room, data);
 			process?.log(`Mensagem transmitida para a sala: /${room}/ room!`);
 
@@ -916,7 +917,8 @@ class MessagesDistributionService {
 	 * @param newBody - Novo conteúdo da mensagem editada
 	 * @returns A mensagem atualizada ou undefined se não encontrada
 	 */
-	public async processMessageEdit(type: "wwebjs" | "waba", id: string, newBody: string) {
+	public async processMessageEdit(type: "wwebjs" | "waba", id: string, newBody: string,
+		options: { mentionEntities?: unknown; instance?: string; clientId?: number } = {}) {
 		const logger = new ProcessingLogger("", "message-edit", `${type}-${id}`, { id, newBody });
 
 		try {
@@ -924,9 +926,11 @@ class MessagesDistributionService {
 
 			// Busca a mensagem original
 			const originalMessage = await prismaService.wppMessage.findFirst({
-				where: type === "wwebjs"
-					? { OR: [{ wwebjsId: id }, { wwebjsIdStanza: id }] }
-					: { wabaId: id },
+				where: {
+					...(type === "wwebjs" ? { OR: [{ wwebjsId: id }, { wwebjsIdStanza: id }] } : { wabaId: id }),
+					...(options.instance ? { instance: options.instance } : {}),
+					...(options.clientId !== undefined ? { clientId: options.clientId } : {}),
+				},
 				include: {
 					WppChat: true,
 					WppContact: true
@@ -943,6 +947,7 @@ class MessagesDistributionService {
 			// Atualiza a mensagem com o novo conteúdo e marca como editada
 			const updatedMessage = await messagesService.updateMessage(originalMessage.id, {
 				body: newBody,
+				...(options.mentionEntities !== undefined ? { mentionEntities: options.mentionEntities } : {}),
 				isEdited: true
 			});
 
@@ -950,12 +955,14 @@ class MessagesDistributionService {
 
 			// Se a mensagem pertence a um chat, notifica via socket
 			if (updatedMessage.chatId) {
+				const [presented] = await messageMentionsService.hydrate(updatedMessage.instance, [updatedMessage]);
 				const chatRoom: SocketServerChatRoom = `${updatedMessage.instance}:chat:${updatedMessage.chatId}`;
 
 				await socketService.emit(SocketEventType.WppMessageEdit, chatRoom, {
 					messageId: updatedMessage.id,
 					contactId: updatedMessage.contactId || 0,
-					newText: updatedMessage.body
+					newText: updatedMessage.body,
+					...(presented?.mentionEntities !== undefined ? { mentionEntities: presented.mentionEntities } : {})
 				});
 
 				logger.log(`Edição da mensagem notificada para a sala: /${chatRoom}/`);

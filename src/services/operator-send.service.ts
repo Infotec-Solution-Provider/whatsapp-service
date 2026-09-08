@@ -14,6 +14,7 @@ import messagesDistributionService from "./messages-distribution.service";
 import prismaService from "./prisma.service";
 import readyMessagesService from "./ready-messages.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
+import { messageMentionPatch, operatorMentionEntities } from "../utils/message-mention-persistence";
 
 interface OperatorSendPayload {
 	options: SendMessageOptions;
@@ -100,6 +101,7 @@ class OperatorSendService {
 			status: "PENDING", sentAt: now, timestamp: now.getTime().toString(),
 			contactId: request.contactId, chatId: request.chatId, quotedId: request.quotedId,
 			isForwarded: request.isForwarded,
+			...messageMentionPatch({ mentionEntities: operatorMentionEntities(request.mentions) }),
 		};
 		let options: SendMessageOptions = { to: request.to, text };
 		if (request.mentions.length) options.mentions = request.mentions as Mentions;

@@ -1,3 +1,5 @@
+import type { MentionEntity } from "../utils/message-mention-metadata";
+
 export type MessageStatus = "PENDING" | "SENT" | "RECEIVED" | "READ" | "DOWNLOADED" | "ERROR" | "REVOKED";
 export type RemoteMessageJobStatus = "PENDING" | "PROCESSING" | "SENT" | "FAILED" | "UNKNOWN";
 
@@ -26,6 +28,7 @@ export default interface MessageDto {
 	from: string;
 	to: string;
 	body: string;
+	mentionEntities?: MentionEntity[];
 	type: string;
 	timestamp: string;
 	sentAt: Date;

@@ -3,6 +3,7 @@ import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import WAWebJS, { Client, LocalAuth } from "whatsapp-web.js";
+import { mentionEntitiesFromJids } from "../utils/message-mention-persistence";
 import CreateMessageDto from "../dtos/create-message.dto";
 import MessageParser from "../parsers/wwebjs-message.parser";
 import { scheduleMessageQueueCleanup } from "../routines/clean-message-queue.routine";
@@ -368,7 +369,9 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 							LEGACY_INTERNAL_GROUP_WHATSAPP_SYNC_DEFAULT
 						)
 					) {
-						await internalChatsService.receiveMessageEdit(chat.id.user, message.id.id, message.body);
+						await internalChatsService.receiveMessageEdit(chat.id.user, message.id.id, message.body, {
+							instance: this.instance, clientId: this.id, mentionEntities: mentionEntitiesFromJids(message.mentionedIds ?? []),
+						});
 					} else {
 						process.log(
 							"Group message edit ignored: internal chats are now native and no longer synced from WhatsApp groups."
@@ -380,7 +383,8 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 					await messagesDistributionService.processMessageEdit(
 						"wwebjs",
 						message.id._serialized,
-						message.body
+						message.body,
+						{ instance: this.instance, clientId: this.id, mentionEntities: mentionEntitiesFromJids(message.mentionedIds ?? []) }
 					);
 				}
 			}

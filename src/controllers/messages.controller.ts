@@ -11,6 +11,7 @@ import operatorSendService from "../services/operator-send.service";
 import { resolveOperatorIdempotencyKey } from "../utils/operator-send-request";
 import { createUploadTraceLogger, resolveUploadTraceId } from "../utils/file-upload-trace";
 import messageReactionsService from "../services/message-reactions.service";
+import messagePresentationService from "../services/message-presentation.service";
 import { MessageReactionError, positiveReactionId } from "../utils/message-reaction";
 
 class MessagesController {
@@ -98,7 +99,7 @@ class MessagesController {
 
 		res.status(200).send({
 			message: "Message retrieved successfully!",
-			data: (await messageReactionsService.hydrate(req.session.instance, [data]))[0]
+			data: (await messagePresentationService.hydrate(req.session.instance, [data]))[0]
 		});
 	}
 
@@ -130,7 +131,7 @@ class MessagesController {
 				res.setHeader("Location", `/api/whatsapp/${clientId}/message-attempts/${encodeURIComponent(idempotencyKey)}`);
 				res.setHeader("Retry-After", "2");
 				res.status(result.created ? 202 : 200).send({
-					message: "Message attempt persisted.", data: result.message,
+					message: "Message attempt persisted.", data: messagePresentationService.fromStored(result.message),
 				});
 				return;
 			}
@@ -169,7 +170,7 @@ class MessagesController {
 
 			res.status(201).send({
 				message: "Message sent successfully!",
-				data: message
+				data: messagePresentationService.fromStored(message)
 			});
 		} catch (error) {
 			trace.error("request.failed", error, {
@@ -197,7 +198,7 @@ class MessagesController {
 			res.status(404).send({ message: "Send attempt not found." });
 			return;
 		}
-		res.status(200).send({ message: "Send attempt retrieved.", data: message });
+		res.status(200).send({ message: "Send attempt retrieved.", data: messagePresentationService.fromStored(message) });
 	}
 
 	private async createAgentMessage(req: Request, res: Response) {
@@ -342,7 +343,7 @@ class MessagesController {
 
 		res.status(200).send({
 			message: "Messages retrieved successfully!",
-			data: await messageReactionsService.hydrate(req.session.instance, messages)
+			data: await messagePresentationService.hydrate(req.session.instance, messages)
 		});
 	};
 
@@ -367,7 +368,7 @@ class MessagesController {
 
 		res.status(200).send({
 			message: "Message edited successfully!",
-			data: updatedMessage
+			data: messagePresentationService.fromStored(updatedMessage)
 		});
 	}
 }

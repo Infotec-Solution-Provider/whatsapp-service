@@ -1,10 +1,12 @@
 import { WppMessageStatus } from "@prisma/client";
+import type { MentionEntity } from "../utils/message-mention-metadata";
 
 export default interface CreateMessageDto {
 	instance: string;
 	from: string;
 	to: string;
 	body: string;
+	mentionEntities?: MentionEntity[];
 	type: string;
 	timestamp: string;
 	sentAt: Date;

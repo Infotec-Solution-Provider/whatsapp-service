@@ -177,6 +177,7 @@ export interface CustomerProfileSummaryBatchRequest {
 }
 
 export interface WppMessage {
+	mentionEntities?: import("../../utils/message-mention-metadata").MentionEntity[];
 	reactions?: Array<{ actorId: string; emoji: string; fromMe: boolean; reactedAt: string }>;
 	reactionsUpdatedAt?: string | null;
 	id: number;

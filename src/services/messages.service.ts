@@ -12,6 +12,8 @@ import localSyncService from "./local-sync.service";
 import { safeEncode } from "../utils/safe-encode";
 import type { PipelineTriggerSource } from "../utils/pipeline-trigger-source";
 import { withPublicMessageDirection } from "../utils/public-message-direction";
+import { messageMentionPatch, operatorMentionEntities } from "../utils/message-mention-persistence";
+import messageMentionsService from "./message-mentions.service";
 
 interface FetchMessagesFilter {
 	minDate?: string;
@@ -161,7 +163,7 @@ class MessagesService {
 		const { clientId, contactId, chatId, quotedId, ...rest } = this.getPersistableMessageFields(
 			data as unknown as Record<string, unknown>
 		);
-		const createData: any = { ...rest };
+		const createData: any = { ...rest, ...messageMentionPatch(data) };
 		createData.quotedId = await this.resolveIncomingQuotedId(data.instance, quotedId);
 
 		if (typeof contactId === "number" && contactId > 0) {
@@ -230,11 +232,13 @@ class MessagesService {
 		}
 	}
 
-	public async updateMessage(id: number, data: Partial<WppMessage>, strictLocalSync = false, pipelineSource?: PipelineTriggerSource) {
+	public async updateMessage(id: number, data: Partial<WppMessage> & { mentionEntities?: unknown }, strictLocalSync = false, pipelineSource?: PipelineTriggerSource) {
 		const { contactId, chatId, clientId, ...rest } = this.getPersistableMessageFields(
 			data as Record<string, unknown>
 		) as Partial<WppMessage>;
-		const updateData: any = { ...rest };
+		const previous = data.body !== undefined && data.mentionEntities === undefined && data.mentionMetadata === undefined
+			? await prismaService.wppMessage.findUnique({ where: { id }, select: { body: true } }) : undefined;
+		const updateData: any = { ...rest, ...messageMentionPatch(data, previous ?? undefined) };
 
 		if (typeof contactId === "number" && contactId > 0) {
 			updateData.WppContact = { connect: { id: contactId } };
@@ -483,16 +487,19 @@ class MessagesService {
 
 			const updatedMsg = await this.updateMessage(originalMessage.id, {
 				body: options.text,
+				...(options.mentions ? { mentionEntities: operatorMentionEntities(options.mentions) } : {}),
 				isEdited: true
 			});
 			process.log("Mensagem atualizada no banco de dados.", updatedMsg);
 
 			if (updatedMsg.WppChat) {
+				const [presented] = await messageMentionsService.hydrate(session.instance, [updatedMsg]);
 				const room: SocketServerChatRoom = `${session.instance}:chat:${updatedMsg.WppChat.id}`;
 				socketService.emit(SocketEventType.WppMessageEdit, room, {
 					messageId: updatedMsg.id,
 					contactId: updatedMsg.contactId || 0,
-					newText: updatedMsg.body
+					newText: updatedMsg.body,
+					...(presented?.mentionEntities !== undefined ? { mentionEntities: presented.mentionEntities } : {})
 				});
 				process.log("Notificação via socket enviada.", room);
 			} else {

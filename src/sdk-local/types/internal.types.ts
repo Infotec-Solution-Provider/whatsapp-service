@@ -1,6 +1,8 @@
 import { WppMessageStatus } from "./whatsapp.types";
+import type { MentionEntity } from "../../utils/message-mention-metadata";
 
 export interface InternalMessage {
+	mentionEntities?: MentionEntity[];
 	clientId?: number | null;
 	wwebjsId?: string | null;
 	wwebjsIdStanza?: string | null;

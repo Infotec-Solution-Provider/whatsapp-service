@@ -15,7 +15,7 @@ import whatsappService, { SendTemplateData } from "./whatsapp.service";
 import parametersService from "./parameters.service";
 import contactsService from "./contacts.service";
 import { withPublicMessageDirection } from "../utils/public-message-direction";
-import messageReactionsService from "./message-reactions.service";
+import messagePresentationService from "./message-presentation.service";
 
 interface InpulseResult {
 	CODIGO: number;
@@ -286,7 +286,13 @@ class ChatsService {
 			}
 		}
 
-		return { chats, messages: await messageReactionsService.hydrate(session.instance, messages) };
+		const presentedLastMessages = await messagePresentationService.hydrate(session.instance,
+			chats.flatMap((chat) => chat.lastMessage ? [chat.lastMessage] : []));
+		const lastMessagesById = new Map(presentedLastMessages.map((message) => [message.id, message]));
+		return {
+			chats: chats.map((chat) => ({ ...chat, ...(chat.lastMessage ? { lastMessage: lastMessagesById.get(chat.lastMessage.id) } : {}) })),
+			messages: await messagePresentationService.hydrate(session.instance, messages),
+		};
 	}
 
 	public async getChatMessagesPage(session: SessionData, chatId: number, limit: number, beforeId: number | null) {
@@ -340,8 +346,8 @@ class ChatsService {
 		}
 
 		return {
-			messages: (await messageReactionsService.hydrate(session.instance, messages)).map(withPublicMessageDirection),
-			quotedMessages: (await messageReactionsService.hydrate(session.instance, quotedMessages)).map(withPublicMessageDirection),
+			messages: (await messagePresentationService.hydrate(session.instance, messages)).map(withPublicMessageDirection),
+			quotedMessages: (await messagePresentationService.hydrate(session.instance, quotedMessages)).map(withPublicMessageDirection),
 			nextCursor: hasMore && messages.length ? messages[0]!.id : null
 		};
 	}
@@ -442,7 +448,7 @@ class ChatsService {
 			messageCount: messages.length
 		});
 
-		return { chats, messages: await messageReactionsService.hydrate(session.instance, messages) };
+		return { chats, messages: await messagePresentationService.hydrate(session.instance, messages) };
 	}
 
 	public async getChats(filters: ChatsFilters) {
@@ -544,7 +550,7 @@ class ChatsService {
 				})
 			: [];
 
-		const messages = await messageReactionsService.hydrate(chat.instance, rawMessages);
+		const messages = await messagePresentationService.hydrate(chat.instance, rawMessages);
 		if (chat.contact?.customerId) {
 			try {
 				const customerRes = await instancesService.executeQuery<Customer[]>(

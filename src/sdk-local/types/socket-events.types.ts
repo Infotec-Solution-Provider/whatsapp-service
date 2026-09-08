@@ -264,6 +264,7 @@ export interface WppMessageEventData {
 }
 
 export interface WppMessageEditEventData {
+	mentionEntities?: import("../../utils/message-mention-metadata").MentionEntity[];
 	contactId: number;
 	messageId: number;
 	newText: string;
@@ -305,6 +306,7 @@ export interface InternalMessageEventData {
 	message: InternalMessage;
 }
 export interface InternalMessageEditEventData {
+	mentionEntities?: import("../../utils/message-mention-metadata").MentionEntity[];
 	chatId: number;
 	internalMessageId: number;
 	newText: string;
