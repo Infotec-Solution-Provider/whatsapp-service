@@ -845,24 +845,13 @@ class InternalChatsService {
 								process.log(
 									`Mensagem enviada para WhatsApp com sucesso. wwebjsId: ${sentMsg.wwebjsId || "N/A"}, wwebjsIdStanza: ${sentMsg.wwebjsIdStanza || "N/A"}`
 								);
-								await prismaService.internalMessage.update({
-									where: { id: savedMsg.id },
-									data: { status: "RECEIVED" }
-								});
+								await this.updateMessageStatusAndNotify(savedMsg.id, "RECEIVED");
 								process.log(`Mensagem interna atualizada com status RECEIVED`);
-								await socketService.emit(SocketEventType.InternalMessageStatus, room, {
-									chatId,
-									internalMessageId: savedMsg.id,
-									status: "SENT"
-								});
 							} else {
 								process.log(
 									`Aviso: Mensagem não foi enviada para o WhatsApp ou não retornou nenhum ID`
 								);
-								await prismaService.internalMessage.update({
-									where: { id: savedMsg.id },
-									data: { status: "ERROR" }
-								});
+								await this.updateMessageStatusAndNotify(savedMsg.id, "ERROR");
 							}
 						}
 					} catch (err) {
@@ -872,16 +861,10 @@ class InternalChatsService {
 							wppGroupId: chat.wppGroupId,
 							messageId: savedMsg.id
 						});
-						await prismaService.internalMessage.update({
-							where: { id: savedMsg.id },
-							data: { status: "ERROR" }
-						});
+						await this.updateMessageStatusAndNotify(savedMsg.id, "ERROR");
 					}
 				} else {
-					await prismaService.internalMessage.update({
-						where: { id: savedMsg.id },
-						data: { status: "RECEIVED" }
-					});
+					await this.updateMessageStatusAndNotify(savedMsg.id, "RECEIVED");
 					process.log(`Chat é apenas interno, não há grupo WhatsApp associado`);
 				}
 			} else {
@@ -892,17 +875,8 @@ class InternalChatsService {
 					status: "SENT"
 				});
 
-				await prismaService.internalMessage.update({
-					where: { id: savedMsg.id },
-					data: { status: "RECEIVED" }
-				});
+				await this.updateMessageStatusAndNotify(savedMsg.id, "RECEIVED");
 				process.log(`Mensagem interna marcada como RECEIVED`);
-
-				await socketService.emit(SocketEventType.InternalMessageStatus, room, {
-					chatId,
-					internalMessageId: savedMsg.id,
-					status: "RECEIVED"
-				});
 			}
 
 			if (parsedMentions.length) {
@@ -1601,18 +1575,23 @@ class InternalChatsService {
 		};
 	}
 
+	private async updateMessageStatusAndNotify(messageId: number, status: InternalMessage["status"]): Promise<void> {
+		const message = await prismaService.internalMessage.update({
+			where: { id: messageId },
+			data: { status }
+		});
+		// Publish the persisted value so live messages match a history reload.
+		const room = `${message.instance}:internal-chat:${message.internalChatId}` as SocketServerInternalChatRoom;
+		await socketService.emit(SocketEventType.InternalMessageStatus, room, {
+			chatId: message.internalChatId,
+			internalMessageId: message.id,
+			status: message.status
+		});
+	}
+
 	private async markQueuedWppMessageError(item: InternalWhatsappQueueItem, error: string): Promise<void> {
 		if (item.internalMessageId) {
-			await prismaService.internalMessage.update({
-				where: { id: item.internalMessageId },
-				data: { status: "ERROR" }
-			});
-			const room = `${item.instance}:internal-chat:${item.internalChatId}` as SocketServerInternalChatRoom;
-			await socketService.emit(SocketEventType.InternalMessageStatus, room, {
-				chatId: item.internalChatId,
-				internalMessageId: item.internalMessageId,
-				status: "ERROR"
-			});
+			await this.updateMessageStatusAndNotify(item.internalMessageId, "ERROR");
 		}
 		Logger.error(`[InternalWhatsappQueue] ${error}`);
 	}
@@ -1677,13 +1656,7 @@ class InternalChatsService {
 			if (job.status === "SENT" && job.result) {
 				const { isGroup: _isGroup, groupId: _groupId, authorName: _authorName, ...sentMessage } = job.result;
 				await this.persistGeneratedWppIds(message.id, sentMessage, process, payload.clientId);
-				await prismaService.internalMessage.update({ where: { id: message.id }, data: { status: "RECEIVED" } });
-				const room = `${item.instance}:internal-chat:${item.internalChatId}` as SocketServerInternalChatRoom;
-				await socketService.emit(SocketEventType.InternalMessageStatus, room, {
-					chatId: item.internalChatId,
-					internalMessageId: message.id,
-					status: "SENT"
-				});
+				await this.updateMessageStatusAndNotify(message.id, "RECEIVED");
 				process.success({ jobId: job.jobId, wwebjsId: sentMessage.wwebjsId });
 				return { status: "COMPLETED" };
 			}
