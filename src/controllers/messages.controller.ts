@@ -7,14 +7,19 @@ import upload from "../middlewares/multer.middleware";
 import publicBiRateLimit from "../middlewares/public-bi-rate-limit.middleware";
 import messagesService from "../services/messages.service";
 import whatsappService from "../services/whatsapp.service";
+import operatorSendService from "../services/operator-send.service";
+import { resolveOperatorIdempotencyKey } from "../utils/operator-send-request";
 import { createUploadTraceLogger, resolveUploadTraceId } from "../utils/file-upload-trace";
+import messageReactionsService from "../services/message-reactions.service";
+import { MessageReactionError, positiveReactionId } from "../utils/message-reaction";
 
 class MessagesController {
 	constructor(public readonly router: Router) {
 		this.router.get("/api/whatsapp/messages/export", publicBiRateLimit, isAuthenticated, this.exportMessages);
 		this.router.get("/api/whatsapp/messages/:id", this.getMessageById);
 		this.router.patch("/api/whatsapp/messages/mark-as-read", isAuthenticated, this.readContactMessages);
-		this.router.post("/api/whatsapp/:clientId/messages", upload.single("file"), isAuthenticated, this.sendMessage);
+		this.router.post("/api/whatsapp/:clientId/messages", isAuthenticated, upload.single("file"), this.sendMessage);
+		this.router.get("/api/whatsapp/:clientId/message-attempts/:idempotencyKey", isAuthenticated, this.getSendAttempt);
 		this.router.post("/api/internal/whatsapp/chats/:chatId/agent-message", onlyLocal, this.createAgentMessage);
 		this.router.post("/api/internal/whatsapp/chats/:chatId/agent-send-message", onlyLocal, this.sendAgentMessage);
 		this.router.post("/api/internal/whatsapp/chats/:chatId/agent-template-message", onlyLocal, this.createAgentTemplateMessage);
@@ -22,6 +27,21 @@ class MessagesController {
 		this.router.get("/api/whatsapp/messages", publicBiRateLimit, isAuthenticated, this.fetchMessages);
 
 		this.router.put("/api/whatsapp/:clientId/messages/:id", isAuthenticated, this.editMessage);
+		this.router.post("/api/whatsapp/:clientId/messages/:id/reaction", isAuthenticated, this.sendReaction);
+	}
+
+	private async sendReaction(req: Request, res: Response) {
+		try {
+			const data = await messageReactionsService.sendWpp(req.session, positiveReactionId(req.params["clientId"]),
+				positiveReactionId(req.params["id"]), req.body?.emoji, (id) => whatsappService.getClient(id));
+			res.status(200).send({ message: "Reaction confirmed.", data });
+		} catch (error) {
+			if (error instanceof MessageReactionError) {
+				res.status(error.statusCode).send({ message: error.message, code: error.code });
+				return;
+			}
+			throw error;
+		}
 	}
 
 	private async exportMessages(req: Request, res: Response) {
@@ -78,7 +98,7 @@ class MessagesController {
 
 		res.status(200).send({
 			message: "Message retrieved successfully!",
-			data
+			data: (await messageReactionsService.hydrate(req.session.instance, [data]))[0]
 		});
 	}
 
@@ -104,6 +124,16 @@ class MessagesController {
 			const clientId = Number(req.params["clientId"]);
 			const { to, ...data } = req.body;
 			const file = req.file;
+			const idempotencyKey = resolveOperatorIdempotencyKey(req.headers["idempotency-key"], data.idempotencyKey);
+			if (idempotencyKey) {
+				const result = await operatorSendService.submit(req.session, clientId, to, { ...data, traceId }, idempotencyKey, file);
+				res.setHeader("Location", `/api/whatsapp/${clientId}/message-attempts/${encodeURIComponent(idempotencyKey)}`);
+				res.setHeader("Retry-After", "2");
+				res.status(result.created ? 202 : 200).send({
+					message: "Message attempt persisted.", data: result.message,
+				});
+				return;
+			}
 			trace.info("request.received", {
 				clientId,
 				to,
@@ -147,11 +177,27 @@ class MessagesController {
 				to: req.body.to,
 				hasFile: !!req.file,
 			});
-			res.status(500).send({
+			const statusCode = (error as { statusCode?: number })?.statusCode;
+			res.status(statusCode === 400 || statusCode === 409 ? statusCode : 500).send({
 				message: sanitizeErrorMessage(error),
 				error: (error as Error).message
 			});
 		}
+	}
+
+	private async getSendAttempt(req: Request, res: Response) {
+		const clientId = Number(req.params["clientId"]);
+		const key = req.params["idempotencyKey"];
+		if (!Number.isSafeInteger(clientId) || clientId <= 0 || typeof key !== "string" || !/^[A-Za-z0-9:_-]{8,128}$/.test(key)) {
+			res.status(400).send({ message: "Invalid send attempt." });
+			return;
+		}
+		const message = await operatorSendService.lookup(req.session, clientId, key);
+		if (!message) {
+			res.status(404).send({ message: "Send attempt not found." });
+			return;
+		}
+		res.status(200).send({ message: "Send attempt retrieved.", data: message });
 	}
 
 	private async createAgentMessage(req: Request, res: Response) {
@@ -296,7 +342,7 @@ class MessagesController {
 
 		res.status(200).send({
 			message: "Messages retrieved successfully!",
-			data: messages
+			data: await messageReactionsService.hydrate(req.session.instance, messages)
 		});
 	};
 

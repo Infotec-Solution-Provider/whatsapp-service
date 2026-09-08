@@ -27,6 +27,7 @@ import chatsService from "./chats.service";
 import contactsService from "./contacts.service";
 import messageQueueService from "./message-queue.service";
 import messagesService from "./messages.service";
+import messageReactionsService from "./message-reactions.service";
 import prismaService from "./prisma.service";
 import socketService from "./socket.service";
 import transferHistoryService from "./transfer-history.service";
@@ -697,7 +698,7 @@ class MessagesDistributionService {
 			}
 
 			const room: SocketServerChatRoom = `${instance}:chat:${message.chatId}`;
-			const data: WppMessageEventData = { message };
+			const data: WppMessageEventData = { message: (await messageReactionsService.hydrate(instance, [message]))[0]! };
 			await socketService.emit(SocketEventType.WppMessage, room, data);
 			process?.log(`Mensagem transmitida para a sala: /${room}/ room!`);
 

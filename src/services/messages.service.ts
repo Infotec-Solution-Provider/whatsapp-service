@@ -508,7 +508,7 @@ class MessagesService {
 		}
 	}
 
-	private async syncMessageToLocal(message: WppMessage, strict = false) {
+	public async syncMessageToLocal(message: WppMessage, strict = false) {
 		const query = `
 				INSERT INTO wpp_messages (
 					id, instance, wwebjs_id, wwebjs_id_stanza, waba_id, gupshup_id, gupshup_request_id,

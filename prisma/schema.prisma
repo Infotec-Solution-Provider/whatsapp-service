@@ -138,6 +138,7 @@ model WppMessage {
   WppChat          WppChat?         @relation(fields: [chatId], references: [id])
   WppContact       WppContact?      @relation(fields: [contactId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   client           WppClient?       @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  operatorOutbound OperatorOutboundSend?
 
   @@index([from, to, chatId])
   @@index([chatId, userId])
@@ -557,6 +558,7 @@ enum WppMessageStatus {
   DOWNLOADED
   ERROR
   REVOKED
+  UNKNOWN
 
   @@map("message_status")
 }
@@ -977,6 +979,74 @@ model FrontendPerformanceSession {
   @@index([buildId, startedAt], map: "fps_build_started_idx")
   @@index([lastSeenAt], map: "fps_last_seen_idx")
   @@map("frontend_performance_sessions")
+}
+
+enum OperatorOutboundSendStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  UNKNOWN
+}
+
+enum OperatorOutboundDeliveryMode {
+  REMOTE
+  DIRECT
+}
+
+// Idempotency records are retained without automatic deletion. Archival must
+// preserve the unique scope/key tombstone; deleting rows would permit resends.
+model OperatorOutboundSend {
+  id               String                       @id @default(uuid()) @db.VarChar(191)
+  instance         String                       @db.VarChar(191)
+  userId           Int                          @map("user_id")
+  clientId         Int                          @map("client_id")
+  idempotencyKey   String                       @map("idempotency_key") @db.VarChar(191)
+  payloadHash      String                       @map("payload_hash") @db.Char(64)
+  payload          Json
+  messageId        Int                          @unique @map("message_id")
+  deliveryMode     OperatorOutboundDeliveryMode @map("delivery_mode")
+  status           OperatorOutboundSendStatus   @default(PENDING)
+  remoteJobId      String?                      @map("remote_job_id") @db.VarChar(191)
+  providerOutcome  Json?                        @map("provider_outcome")
+  notificationPending Boolean                  @default(false) @map("notification_pending")
+  attemptStartedAt DateTime?                    @map("attempt_started_at")
+  attemptCount     Int                          @default(0) @map("attempt_count")
+  nextAttemptAt    DateTime                     @default(now()) @map("next_attempt_at")
+  lockedBy         String?                      @map("locked_by") @db.VarChar(191)
+  lockedUntil      DateTime?                    @map("locked_until")
+  error            String?                      @db.Text
+  createdAt        DateTime                     @default(now()) @map("created_at")
+  updatedAt        DateTime                     @updatedAt @map("updated_at")
+  completedAt      DateTime?                    @map("completed_at")
+  message          WppMessage                   @relation(fields: [messageId], references: [id], onDelete: Restrict)
+
+  @@unique([instance, userId, idempotencyKey], map: "operator_outbound_scope_key")
+  @@index([status, nextAttemptAt])
+  @@index([status, lockedUntil])
+  @@index([notificationPending, nextAttemptAt])
+  @@map("operator_outbound_send")
+}
+
+// Reactions are keyed by provider identity rather than local message IDs. This
+// preserves events arriving before their target and supports both chat domains.
+// Empty emoji values are retained tombstones; deleting them can resurrect old events.
+model MessageReaction {
+  id              String   @id @default(uuid()) @db.VarChar(191)
+  instance        String   @db.VarChar(191)
+  clientId        Int      @map("client_id")
+  targetMessageId String   @map("target_message_id") @db.VarChar(255)
+  actorId         String   @map("actor_id") @db.VarChar(191)
+  fromMe          Boolean  @map("from_me")
+  emoji           String   @db.VarChar(64)
+  reactedAt       DateTime @map("reacted_at") @db.DateTime(3)
+  receivedAt      DateTime @default(now()) @map("received_at") @db.DateTime(3)
+  sourceEventId   String?  @map("source_event_id") @db.VarChar(191)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([instance, clientId, targetMessageId, actorId], map: "message_reaction_scope_target_actor")
+  @@map("message_reactions")
 }
 
 model FrontendPerformanceSample {

@@ -177,6 +177,8 @@ export interface CustomerProfileSummaryBatchRequest {
 }
 
 export interface WppMessage {
+	reactions?: Array<{ actorId: string; emoji: string; fromMe: boolean; reactedAt: string }>;
+	reactionsUpdatedAt?: string | null;
 	id: number;
 	instance: string;
 	wwebjsId: string | null;
@@ -250,7 +252,7 @@ export interface WppWallet {
 }
 
 // Enums
-export type WppMessageStatus = "PENDING" | "SENT" | "RECEIVED" | "READ" | "DOWNLOADED" | "ERROR" | "REVOKED";
+export type WppMessageStatus = "PENDING" | "SENT" | "RECEIVED" | "READ" | "DOWNLOADED" | "ERROR" | "REVOKED" | "UNKNOWN";
 
 export enum WppChatType {
 	RECEPTIVE = "RECEPTIVE",

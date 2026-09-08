@@ -126,7 +126,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 					headers: { "Content-Type": "application/x-www-form-urlencoded" }
 				});
 			} catch (mediaError: any) {
-				if (!("publicFileUrl" in options)) {
+				if (options.preventAutomaticRetry || !("publicFileUrl" in options)) {
 					throw mediaError;
 				}
 

@@ -10,6 +10,8 @@ import remoteInboundEventInboxService, {
 	RemoteInboundMessagePayload
 } from "./remote-inbound-event-inbox.service";
 import { RemoteInboundEventInbox } from "@prisma/client";
+import prismaService from "./prisma.service";
+import messageReactionsService from "./message-reactions.service";
 
 class RemoteClientService {
 	private getRemoteClient(clientId: number): RemoteWhatsappClient {
@@ -37,6 +39,13 @@ class RemoteClientService {
 		if (event.type === "message-received") {
 			return remoteInboundEventInboxService.enqueue(clientId, event.message, idempotencyKey);
 		}
+		if (event.type === "message-reaction") {
+			// Callback acceptance depends on storage, not a runtime that may be restarting.
+			const registered = await prismaService.wppClient.findFirst({ where: { id: clientId, type: "REMOTE" } });
+			if (!registered) throw new NotFoundError("Remote reaction client not found");
+			await messageReactionsService.receive(registered, event, process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] !== "false");
+			return;
+		}
 
 		const client = this.getRemoteClient(clientId);
 		switch (event.type) {
@@ -58,9 +67,6 @@ class RemoteClientService {
 				break;
 			case "message-edited":
 				await client.handleMessageEdited(event.message);
-				break;
-			case "message-reaction":
-				await client.handleMessageReaction(event);
 				break;
 			case "message-revoked":
 				await client.handleMessageRevoked(event);

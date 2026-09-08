@@ -4,6 +4,9 @@ import { BadRequestError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import upload from "../middlewares/multer.middleware";
 import { createUploadTraceLogger, resolveUploadTraceId } from "../utils/file-upload-trace";
+import messageReactionsService from "../services/message-reactions.service";
+import whatsappService from "../services/whatsapp.service";
+import { MessageReactionError, positiveReactionId } from "../utils/message-reaction";
 
 class InternalChatsController {
 	constructor(public readonly router: Router) {
@@ -36,6 +39,7 @@ class InternalChatsController {
 
 		// Edita uma mensagem de chat interno
 		this.router.put("/api/internal/messages/:id", isAuthenticated, this.editInternalMessage);
+		this.router.post("/api/internal/messages/:id/reaction", isAuthenticated, this.sendReaction);
 
 		// Atualiza grupo interno
 		this.router.put("/api/internal/groups/:id", isAuthenticated, this.updateInternalGroup);
@@ -54,6 +58,20 @@ class InternalChatsController {
 		this.router.patch("/api/internal/chat/:id/mark-as-read", isAuthenticated, this.markChatAsRead);
 
 		this.router.get("/api/internal/monitor/chats", isAuthenticated, this.getInternalChatsMonitor);
+	}
+
+	private async sendReaction(req: Request, res: Response) {
+		try {
+			const data = await messageReactionsService.sendInternal(req.session, positiveReactionId(req.params["id"]),
+				req.body?.emoji, (id) => whatsappService.getClient(id));
+			res.status(200).send({ message: "Reaction confirmed.", data });
+		} catch (error) {
+			if (error instanceof MessageReactionError) {
+				res.status(error.statusCode).send({ message: error.message, code: error.code });
+				return;
+			}
+			throw error;
+		}
 	}
 
 	private async startInternalChat(req: Request, res: Response) {

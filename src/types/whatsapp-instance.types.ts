@@ -4,6 +4,8 @@ import { TemplateVariables } from "./whatsapp-api.types";
 
 interface BaseSendMessageOptions {
 	to: string;
+	/** Durable caller owns recovery; do not retry an ambiguous provider dispatch. */
+	preventAutomaticRetry?: boolean;
 	quotedId?: string | null;
 	mentions?: Mentions;
 }
@@ -30,6 +32,25 @@ export interface EditMessageOptions {
 	messageId: string;
 	text: string;
 	mentions?: Mentions | null;
+}
+
+export interface SendReactionOptions {
+	to: string;
+	messageId: string;
+	emoji: string;
+	isGroup?: boolean;
+}
+
+export interface SendReactionResult {
+	contractVersion: 1;
+	status: "SENT";
+	targetMessageId: string;
+	reaction: string;
+	removed: boolean;
+	fromMe: true;
+	actorId?: string;
+	timestamp: number;
+	reactionId: string;
 }
 
 export interface SendTemplateOptions extends BaseSendMessageOptions {

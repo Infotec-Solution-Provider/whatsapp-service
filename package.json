@@ -26,6 +26,8 @@
 		"test:legacy-message-encoding": "ts-node src/services/messages-local-encoding.test.ts",
 		"test:parameters": "ts-node src/services/parameters.service.test.ts",
 		"test:edit-message-id": "ts-node src/utils/resolve-edit-message-id.test.ts",
+		"test:operator-send": "ts-node src/utils/operator-send-request.test.ts && ts-node src/utils/operator-send-delivery.test.ts && ts-node src/utils/remote-send-file-options.test.ts && ts-node src/utils/operator-quoted-message.test.ts && ts-node src/services/operator-outbound.test.ts",
+		"test:reactions": "ts-node src/utils/message-reaction.test.ts && ts-node src/services/message-reactions.repository.test.ts && ts-node src/services/message-reactions.service.test.ts",
 		"test:pipeline-events": "ts-node src/utils/pipeline-trigger-source.test.ts",
 		"test:public-api": "ts-node src/utils/public-message-direction.test.ts",
 		"test:frontend-performance": "ts-node src/services/frontend-performance.service.test.ts",

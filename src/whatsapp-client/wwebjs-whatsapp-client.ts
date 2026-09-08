@@ -24,6 +24,9 @@ import MessageQueue from "../utils/message-queue";
 import ProcessingLogger from "../utils/processing-logger";
 import WhatsappClient from "./whatsapp-client";
 import parametersService from "../services/parameters.service";
+import type { SendReactionOptions, SendReactionResult } from "../types/whatsapp-instance.types";
+import messageReactionsService from "../services/message-reactions.service";
+import { MessageReactionError } from "../utils/message-reaction";
 
 const LEGACY_INTERNAL_GROUP_WHATSAPP_SYNC_DEFAULT = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] === "true";
 
@@ -394,7 +397,25 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		}
 	}
 
-	private handleMessageReaction(_reaction: WAWebJS.Reaction) {}
+	private handleMessageReaction(reaction: WAWebJS.Reaction) {
+		const remote = reaction.msgId.remote;
+		void messageReactionsService.receive(this, {
+			type: "message-reaction", clientId: this.id, targetMessageId: reaction.msgId._serialized,
+			reaction: reaction.reaction, removed: !reaction.reaction, actorId: reaction.senderId,
+			fromMe: reaction.id.fromMe, timestamp: reaction.timestamp, reactionId: reaction.id._serialized,
+			isGroup: remote.endsWith("@g.us"), groupId: remote.endsWith("@g.us") ? remote : null,
+		}, LEGACY_INTERNAL_GROUP_WHATSAPP_SYNC_DEFAULT).catch((error) => Logger.error("[WWEBJS] Reaction processing failed", error));
+	}
+
+	public async sendReaction(options: SendReactionOptions): Promise<SendReactionResult> {
+		const message = await this.wwebjs.getMessageById(options.messageId);
+		if (!message || message.id._serialized !== options.messageId) throw new MessageReactionError("Mensagem não encontrada no provedor.", 404);
+		const timestamp = Date.now();
+		try { await message.react(options.emoji); }
+		catch { throw new MessageReactionError("Resultado da reação incerto; não repetir automaticamente.", 502, "REACTION_DELIVERY_UNKNOWN"); }
+		return { contractVersion: 1, status: "SENT", targetMessageId: options.messageId, reaction: options.emoji,
+			removed: options.emoji === "", fromMe: true, timestamp, reactionId: randomUUID() };
+	}
 
 	private handleMessageRevoked({ id }: WAWebJS.Message) {
 		this.log("info", "Message revoked! " + id._serialized);
@@ -449,7 +470,7 @@ class WWEBJSWhatsappClient implements WhatsappClient {
 		// Enfileira a mensagem para envio sequencial com persistência
 		return this.messageQueue.enqueue(this.instance, this.id, chatId, id, payload, isGroup, async () => {
 			return await this.executeSendMessage(to, options, isGroup, process, id);
-		});
+		}, options.preventAutomaticRetry ? { maxRetries: 0 } : {});
 	}
 
 	private async executeSendMessage(

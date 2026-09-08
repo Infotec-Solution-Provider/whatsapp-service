@@ -192,6 +192,10 @@ export interface MessageReactionEvent {
 	removed: boolean;
 	isGroup: boolean;
 	groupId: string | null;
+	actorId?: string;
+	fromMe?: boolean;
+	timestamp?: number;
+	reactionId?: string;
 }
 
 export interface MessageRevokedEvent {

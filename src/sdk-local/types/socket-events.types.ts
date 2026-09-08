@@ -281,6 +281,10 @@ export interface WppMessageStatusEventData {
 export interface WppMessageReactionEventData {
 	messageId: number;
 	reaction: string;
+	messageType?: "wpp" | "internal";
+	clientId?: number;
+	reactions?: Array<{ actorId: string; emoji: string; fromMe: boolean; reactedAt: string }>;
+	reactionsUpdatedAt?: string | null;
 }
 export interface InternalChatStartedEventData {
 	chat: InternalChat & {

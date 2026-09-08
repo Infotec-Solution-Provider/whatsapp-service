@@ -46,8 +46,11 @@ import remoteInboundEventInboxService from "./services/remote-inbound-event-inbo
 import remoteClientService from "./services/remote-client.service";
 import pipelineEnrollmentOutboxService from "./services/pipeline-enrollment-outbox.service";
 import frontendPerformanceService from "./services/frontend-performance.service";
+import operatorOutboundService from "./services/operator-outbound.service";
+import operatorSendService from "./services/operator-send.service";
 
 whatsappService.buildClients();
+operatorSendService.configureWorker();
 internalWhatsappMessageQueueService.setProcessHandler({
 	process: (item) => internalChatsService.processQueuedWppGroupMessage(item)
 });
@@ -124,6 +127,7 @@ const server = app.listen(serverPort, () => {
 	wabaWebhookQueueService.startProcessor();
 	messageQueueService.startWorker();
 	internalWhatsappMessageQueueService.startWorker();
+	operatorOutboundService.startWorker();
 	remoteInboundEventInboxService.startWorker();
 	pipelineEnrollmentOutboxService.startWorker();
 	remoteSessionMonitorRoutine.start();
@@ -153,6 +157,7 @@ const shutdown = async (signal: string): Promise<void> => {
 	remoteInboundEventInboxService.stopWorker();
 	pipelineEnrollmentOutboxService.stopWorker();
 	internalWhatsappMessageQueueService.stopWorker();
+	operatorOutboundService.stopWorker();
 	messageQueueService.stopWorker();
 	gupshupWebhookQueueService.stopProcessor();
 	wabaWebhookQueueService.stopProcessor();

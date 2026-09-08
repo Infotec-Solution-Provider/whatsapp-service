@@ -1,6 +1,11 @@
 import { WppMessageStatus } from "./whatsapp.types";
 
 export interface InternalMessage {
+	clientId?: number | null;
+	wwebjsId?: string | null;
+	wwebjsIdStanza?: string | null;
+	reactions?: Array<{ actorId: string; emoji: string; fromMe: boolean; reactedAt: string }>;
+	reactionsUpdatedAt?: string | null;
 	id: number;
 	instance: string;
 	from: string;

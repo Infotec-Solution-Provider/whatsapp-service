@@ -15,6 +15,7 @@ import whatsappService, { SendTemplateData } from "./whatsapp.service";
 import parametersService from "./parameters.service";
 import contactsService from "./contacts.service";
 import { withPublicMessageDirection } from "../utils/public-message-direction";
+import messageReactionsService from "./message-reactions.service";
 
 interface InpulseResult {
 	CODIGO: number;
@@ -285,7 +286,7 @@ class ChatsService {
 			}
 		}
 
-		return { chats, messages };
+		return { chats, messages: await messageReactionsService.hydrate(session.instance, messages) };
 	}
 
 	public async getChatMessagesPage(session: SessionData, chatId: number, limit: number, beforeId: number | null) {
@@ -339,8 +340,8 @@ class ChatsService {
 		}
 
 		return {
-			messages: messages.map(withPublicMessageDirection),
-			quotedMessages: quotedMessages.map(withPublicMessageDirection),
+			messages: (await messageReactionsService.hydrate(session.instance, messages)).map(withPublicMessageDirection),
+			quotedMessages: (await messageReactionsService.hydrate(session.instance, quotedMessages)).map(withPublicMessageDirection),
 			nextCursor: hasMore && messages.length ? messages[0]!.id : null
 		};
 	}
@@ -441,7 +442,7 @@ class ChatsService {
 			messageCount: messages.length
 		});
 
-		return { chats, messages };
+		return { chats, messages: await messageReactionsService.hydrate(session.instance, messages) };
 	}
 
 	public async getChats(filters: ChatsFilters) {
@@ -536,13 +537,14 @@ class ChatsService {
 			return null;
 		}
 
-		const messages = chat.contactId
+		const rawMessages = chat.contactId
 			? await prismaService.wppMessage.findMany({
 					where: { contactId: chat.contactId },
 					orderBy: { timestamp: "asc" }
 				})
 			: [];
 
+		const messages = await messageReactionsService.hydrate(chat.instance, rawMessages);
 		if (chat.contact?.customerId) {
 			try {
 				const customerRes = await instancesService.executeQuery<Customer[]>(

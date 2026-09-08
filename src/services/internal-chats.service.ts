@@ -30,6 +30,7 @@ import internalWhatsappMessageQueueService, {
 	InternalWhatsappQueueProcessResult
 } from "./internal-whatsapp-message-queue.service";
 import parametersService from "./parameters.service";
+import messageReactionsService from "./message-reactions.service";
 
 const LEGACY_INTERNAL_GROUP_WHATSAPP_SYNC_DEFAULT = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] === "true";
 
@@ -349,7 +350,7 @@ class InternalChatsService {
 			messageCount: messages.length
 		});
 
-		return { chats, messages };
+		return { chats, messages: await messageReactionsService.hydrate(session.instance, messages, "internal") };
 	}
 
 	public async getInternalChatMessagesPage(
@@ -392,8 +393,8 @@ class InternalChatsService {
 			: [];
 
 		return {
-			messages,
-			quotedMessages,
+			messages: await messageReactionsService.hydrate(session.instance, messages, "internal"),
+			quotedMessages: await messageReactionsService.hydrate(session.instance, quotedMessages, "internal"),
 			nextCursor: hasMore && messages.length ? messages[0]!.id : null
 		};
 	}
@@ -426,7 +427,7 @@ class InternalChatsService {
 			);
 		});
 
-		return { chats, messages };
+		return { chats, messages: await messageReactionsService.hydrate(session.instance, messages, "internal") };
 	}
 
 	public async getInternalGroups(session: SessionData) {
@@ -1410,6 +1411,7 @@ class InternalChatsService {
 		const room = `${chat.instance}:internal-chat:${chat.id}` as SocketServerInternalChatRoom;
 		await socketService.emit(SocketEventType.WppMessageReaction, room as unknown as SocketServerChatRoom, {
 			messageId: message.id,
+			messageType: "internal",
 			reaction
 		});
 	}

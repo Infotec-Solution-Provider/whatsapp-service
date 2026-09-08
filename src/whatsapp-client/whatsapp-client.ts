@@ -1,6 +1,6 @@
 import { TemplateMessage } from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
-import { EditMessageOptions, SendMessageOptions, SendTemplateOptions, WhatsappGroup } from "../types/whatsapp-instance.types";
+import { EditMessageOptions, SendMessageOptions, SendTemplateOptions, SendReactionOptions, SendReactionResult, WhatsappGroup } from "../types/whatsapp-instance.types";
 import { RemoteMessageJobResponse } from "../types/remote-client.types";
 
 /**
@@ -67,6 +67,8 @@ abstract class WhatsappClient {
 		idempotencyKey: string
 	): Promise<RemoteMessageJobResponse>;
 	public getMessageJob?(jobId: string): Promise<RemoteMessageJobResponse>;
+	/** Optional provider capability; no fallback to a plain chat message. */
+	public sendReaction?(options: SendReactionOptions): Promise<SendReactionResult>;
 
 	/**
 	 * Edits a previously sent message.

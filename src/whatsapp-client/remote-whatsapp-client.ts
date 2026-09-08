@@ -19,6 +19,8 @@ import {
 	SendFileType,
 	SendMessageOptions,
 	SendTemplateOptions,
+	SendReactionOptions,
+	SendReactionResult,
 	WhatsappGroup
 } from "../types/whatsapp-instance.types";
 import ProcessingLogger from "../utils/processing-logger";
@@ -28,6 +30,9 @@ import { Prisma, WppMessageStatus } from "@prisma/client";
 import { Logger } from "@in.pulse-crm/utils";
 import axios from "axios";
 import parametersService from "../services/parameters.service";
+import { buildRemoteSendFileOptions } from "../utils/remote-send-file-options";
+import messageReactionsService from "../services/message-reactions.service";
+import { MessageReactionError } from "../utils/message-reaction";
 
 const LEGACY_INTERNAL_GROUP_WHATSAPP_SYNC_DEFAULT = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] !== "false";
 
@@ -320,32 +325,22 @@ class RemoteWhatsappClient implements WhatsappClient {
 	}
 
 	public async handleMessageReaction(event: MessageReactionEvent) {
-		if (event.isGroup) {
-			if (
-				!event.groupId ||
-				!(await parametersService.isInternalGroupWhatsappSyncEnabled(
-					this.instance,
-					LEGACY_INTERNAL_GROUP_WHATSAPP_SYNC_DEFAULT
-				))
-			) {
-				return;
+		await messageReactionsService.receive(this, event, LEGACY_INTERNAL_GROUP_WHATSAPP_SYNC_DEFAULT);
+	}
+
+	public async sendReaction(options: SendReactionOptions): Promise<SendReactionResult> {
+		try {
+			const response = await axios.post<SendReactionResult>(`${this.clientUrl}/api/send-reaction`, options, { timeout: 30_000 });
+			return response.data;
+		} catch (error) {
+			const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+			if (status && [400, 404, 409, 501, 503].includes(status)) {
+				throw new MessageReactionError(
+					status === 404 ? "Mensagem não localizada no provedor, ou versão remota sem suporte a reações." :
+					status === 503 ? "Canal indisponível antes de enviar a reação." : "O provedor não permitiu reagir a esta mensagem.", status);
 			}
-			await internalChatsService.receiveMessageReaction(event.groupId, event.targetMessageId, event.reaction);
-			return;
+			throw new MessageReactionError("Resultado da reação incerto; não repetir automaticamente.", 502, "REACTION_DELIVERY_UNKNOWN");
 		}
-
-		const message = await prismaService.wppMessage.findFirst({
-			where: { OR: [{ wwebjsIdStanza: event.targetMessageId }, { wwebjsId: event.targetMessageId }] }
-		});
-		if (!message?.chatId) {
-			return;
-		}
-
-		const room: SocketServerChatRoom = `${message.instance}:chat:${message.chatId}`;
-		await socketService.emit(SocketEventType.WppMessageReaction, room, {
-			messageId: message.id,
-			reaction: event.reaction
-		});
 	}
 
 	public async handleMessageRevoked(event: MessageRevokedEvent) {
@@ -426,23 +421,6 @@ class RemoteWhatsappClient implements WhatsappClient {
 		return false;
 	}
 
-	private getSendFileType(props: SendMessageOptions): SendFileType {
-		if ("file" in props && props.file) {
-			const mimeType = props.file.mime_type;
-			if (mimeType.startsWith("image/") && !props.sendAsDocument) {
-				return "image";
-			} else if (mimeType.startsWith("video/") && !props.sendAsDocument) {
-				return "video";
-			} else if (mimeType.startsWith("audio/") && !props.sendAsAudio) {
-				return "audio";
-			} else {
-				return "document";
-			}
-		}
-		// Default to document if file is present but type is undetermined
-		return "document";
-	}
-
 	private buildRemoteMessageOptions(props: SendMessageOptions, isGroup: boolean): RemoteSendMessageOptions {
 		return {
 			text: props.text || "",
@@ -450,14 +428,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 			quotedId: props.quotedId || null,
 			isGroup,
 			...(props.mentions ? { mentions: props.mentions } : {}),
-			...("file" in props && props.file
-				? {
-						file: props.file,
-						fileName: props.file.name,
-						fileType: this.getSendFileType(props),
-						fileUrl: props.publicFileUrl
-					}
-				: {})
+			...("file" in props && props.file ? buildRemoteSendFileOptions(props) : {})
 		};
 	}
 
