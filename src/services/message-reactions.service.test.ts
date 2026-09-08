@@ -83,6 +83,7 @@ function fixture() {
 				snapshots.set(`${reference.domain}:${reference.messageId}`, {
 					reactions: rows.filter((row) => row.emoji !== "").map((row) => ({
 						actorId: row.actorId, emoji: row.emoji, fromMe: row.fromMe, reactedAt: row.reactedAt.toISOString(),
+						...(row.internalUserId ? { internalUserId: row.internalUserId, internalUserName: row.internalUserName ?? null } : {}),
 					})),
 					reactionsUpdatedAt: rows.length ? new Date(Math.max(...rows.map((row) => row.reactedAt.getTime()))).toISOString() : null,
 				});
@@ -287,6 +288,34 @@ test("hydration does not copy reactions to a foreign tenant sharing the local me
 	assert.equal(hydrated[0]!.reactions.length, 1);
 	assert.deepEqual(hydrated[1]!.reactions, []);
 	assert.equal(hydrated[1]!.reactionsUpdatedAt, null);
+});
+
+test("WPP and synchronized groups expose only the authenticated sender in HTTP, socket and history", async () => {
+	for (const domain of ["wpp", "internal"] as const) {
+		const f = fixture();
+		const result = domain === "wpp"
+			? await f.service.sendWpp(session, 1, 7, "👍", f.getClient)
+			: await f.service.sendInternal(session, 7, "👍", f.getClient);
+		assert.equal(f.applied[0]!.internalUserId, session.userId);
+		assert.equal(result.reactions[0]!.internalUserName, session.name);
+		assert.equal(f.emitted[0]!.data.reactions[0]!.internalUserId, session.userId);
+		const history = await f.service.hydrate(session.instance, [{ id: 7, instance: session.instance, clientId: 1, wwebjsIdStanza: domain === "wpp" ? "MSG-A" : "GROUP-A" }], domain);
+		assert.equal(history[0]!.reactions[0]!.internalUserId, session.userId);
+	}
+});
+
+test("inbound own-device events cannot supply internal user identity", async () => {
+	const f = fixture();
+	const forged = { ...inbound({ fromMe: true }), internalUserId: 999, internalUserName: "Forged" };
+	await f.service.receive({ id: 1, instance: "tenant-a" }, forged);
+	assert.equal(f.applied[0]!.internalUserId, undefined);
+	assert.equal(f.applied[0]!.internalUserName, undefined);
+});
+
+test("serialized webhook reaction IDs match canonical receipt IDs", async () => {
+	const f = fixture();
+	await f.service.receive({ id: 1, instance: "tenant-a" }, inbound({ reactionId: "true_5511@c.us_REACTION-OUT" }));
+	assert.equal(f.applied[0]!.sourceEventId, "REACTION-OUT");
 });
 
 async function run(): Promise<void> {

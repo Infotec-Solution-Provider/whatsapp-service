@@ -22,6 +22,10 @@ export class MessageReactionsRepository {
 			targetMessageId: input.targetMessageId, actorId,
 		};
 		const where = { instance_clientId_targetMessageId_actorId: identity };
+		const attribution = {
+			internalUserId: input.fromMe ? input.internalUserId ?? null : null,
+			internalUserName: input.fromMe && input.internalUserId ? input.internalUserName ?? null : null,
+		};
 		const data = {
 			...identity, fromMe: input.fromMe, emoji: input.emoji, reactedAt: input.reactedAt,
 			receivedAt: input.receivedAt ?? new Date(), sourceEventId: input.sourceEventId ?? null,
@@ -29,7 +33,7 @@ export class MessageReactionsRepository {
 		let existing = await this.db.messageReaction.findUnique({ where });
 		if (!existing) {
 			try {
-				return { applied: true, reaction: await this.db.messageReaction.create({ data }) };
+				return { applied: true, reaction: await this.db.messageReaction.create({ data: { ...data, ...attribution } }) };
 			} catch (error) {
 				if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
 				// A concurrent first event won the unique key; compare timestamps below.
@@ -37,19 +41,36 @@ export class MessageReactionsRepository {
 				if (!existing) throw error;
 			}
 		}
-		if (!isNewerMessageReaction(input, existing)) return { applied: false, reaction: existing };
+		const sameEvent = input.fromMe && existing.fromMe && input.emoji === existing.emoji &&
+			!!data.sourceEventId && data.sourceEventId === existing.sourceEventId;
+		if (!isNewerMessageReaction(input, existing)) {
+			// A webhook can precede the HTTP receipt. Enrich only that exact event,
+			// without changing its timestamp or resurrecting a later removal.
+			if (sameEvent && attribution.internalUserId && existing.internalUserId === null) {
+				const enriched = await this.db.messageReaction.updateMany({
+					where: { ...identity, sourceEventId: data.sourceEventId, emoji: input.emoji, fromMe: true, internalUserId: null },
+					data: attribution,
+				});
+				return { applied: enriched.count === 1, reaction: await this.db.messageReaction.findUniqueOrThrow({ where }) };
+			}
+			return { applied: false, reaction: existing };
+		}
 		// The temporal predicate is evaluated by the UPDATE itself, not by a stale
 		// application snapshot. A later reaction racing this call cannot regress.
 		const updated = await this.db.messageReaction.updateMany({
 			where: {
 				...identity,
+				sourceEventId: existing.sourceEventId, emoji: existing.emoji,
 				OR: [
 					{ reactedAt: { lt: input.reactedAt } },
 					...(input.emoji === "" ? [{ reactedAt: input.reactedAt, emoji: { not: "" } }] : []),
 				],
 			},
-			data,
+			// Preserve attribution on an exact echo; a different device event clears it.
+			data: { ...data, ...(!sameEvent || attribution.internalUserId ? attribution : {}) },
 		});
+		// Recompute echo attribution if another event won after the read.
+		if (updated.count === 0) return this.apply(input);
 		return { applied: updated.count === 1, reaction: await this.db.messageReaction.findUniqueOrThrow({ where }) };
 	}
 
@@ -103,7 +124,11 @@ export class MessageReactionsRepository {
 			snapshots.set(messageReactionReferenceKey(reference), {
 				reactions: [...actors.values()].filter((row) => row.emoji !== "")
 					.sort((a, b) => a.reactedAt.getTime() - b.reactedAt.getTime() || a.actorId.localeCompare(b.actorId))
-					.map((row) => ({ actorId: row.actorId, emoji: row.emoji, fromMe: row.fromMe, reactedAt: row.reactedAt.toISOString() })),
+					.map((row) => ({
+						actorId: row.actorId, emoji: row.emoji, fromMe: row.fromMe, reactedAt: row.reactedAt.toISOString(),
+						...(row.sourceEventId ? { sourceEventId: row.sourceEventId } : {}),
+						...(row.fromMe && row.internalUserId ? { internalUserId: row.internalUserId, internalUserName: row.internalUserName } : {}),
+					})),
 				reactionsUpdatedAt: latest !== null ? new Date(latest).toISOString() : null,
 			});
 		}

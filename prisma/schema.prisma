@@ -1044,6 +1044,8 @@ model MessageReaction {
   reactedAt       DateTime @map("reacted_at") @db.DateTime(3)
   receivedAt      DateTime @default(now()) @map("received_at") @db.DateTime(3)
   sourceEventId   String?  @map("source_event_id") @db.VarChar(191)
+  internalUserId  Int?     @map("internal_user_id")
+  internalUserName String? @map("internal_user_name") @db.VarChar(191)
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 

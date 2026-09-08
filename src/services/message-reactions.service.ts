@@ -54,7 +54,7 @@ export class MessageReactionsService {
 		await this.repository.apply({
 			instance: client.instance, clientId: client.id, targetMessageId, actorId,
 			fromMe: event.fromMe === true, emoji, reactedAt: reactionTimestamp(event.timestamp),
-			sourceEventId: event.reactionId?.slice(0, 191) ?? null,
+			sourceEventId: event.reactionId ? canonicalReactionTarget(event.reactionId).slice(0, 191) : null,
 		});
 		const ids = [...new Set([event.targetMessageId, targetMessageId])];
 		if (event.isGroup) {
@@ -123,7 +123,9 @@ export class MessageReactionsService {
 		try {
 			await this.repository.apply({
 				instance: session.instance, clientId, targetMessageId: canonicalReactionTarget(providerId),
-				actorId: "self", fromMe: true, emoji, reactedAt: reactionTimestamp(receipt.timestamp), sourceEventId: receipt.reactionId,
+				actorId: "self", fromMe: true, emoji, reactedAt: reactionTimestamp(receipt.timestamp),
+				sourceEventId: canonicalReactionTarget(receipt.reactionId).slice(0, 191),
+				internalUserId: session.userId, internalUserName: session.name?.trim().slice(0, 191) || null,
 			});
 			data = await this.snapshot(message, domain, clientId);
 		} catch (error) {

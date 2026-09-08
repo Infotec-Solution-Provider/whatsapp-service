@@ -15,6 +15,9 @@ export interface ApplyMessageReactionInput extends MessageReactionScope {
 	reactedAt: Date;
 	receivedAt?: Date;
 	sourceEventId?: string | null;
+	/** Supplied only by the authenticated send flow, never by provider webhooks. */
+	internalUserId?: number | null;
+	internalUserName?: string | null;
 }
 
 export interface ApplyMessageReactionResult {
@@ -27,6 +30,9 @@ export interface ReactionView {
 	emoji: string;
 	fromMe: boolean;
 	reactedAt: string;
+	sourceEventId?: string;
+	internalUserId?: number;
+	internalUserName?: string | null;
 }
 
 export interface MessageReactionSnapshot {

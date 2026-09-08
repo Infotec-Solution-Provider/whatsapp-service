@@ -77,7 +77,7 @@ test("reaction arriving before its message persists and hydrates after reload", 
 	assert.equal((await f.repository.apply(event())).applied, true);
 	const snapshot = await f.repository.hydrate("tenant-a", [{ domain: "WPP", messageId: 55, clientId: 1, targetMessageIds: ["provider-message-a"] }]);
 	assert.deepEqual(snapshot.get("WPP:55"), {
-		reactions: [{ actorId: "551199999999@s.whatsapp.net", emoji: "👍", fromMe: false, reactedAt: new Date(1_000).toISOString() }],
+		reactions: [{ actorId: "551199999999@s.whatsapp.net", emoji: "👍", fromMe: false, reactedAt: new Date(1_000).toISOString(), sourceEventId: "reaction-event-1" }],
 		reactionsUpdatedAt: new Date(1_000).toISOString(),
 	});
 });
@@ -188,6 +188,85 @@ test("history hydration batches provider targets instead of querying per message
 	const snapshots = await f.repository.hydrate("tenant-a", references);
 	assert.equal(snapshots.size, 501);
 	assert.equal(f.queries(), 3);
+});
+
+test("authenticated operator survives exact provider echoes in either arrival order and history reload", async () => {
+	for (const echoFirst of [false, true]) {
+		const f = fixture();
+		const sent = event({ fromMe: true, internalUserId: 7, internalUserName: "Ana" });
+		const echo = event({ fromMe: true, reactedAt: new Date(1_100) });
+		await f.repository.apply(echoFirst ? echo : sent);
+		await f.repository.apply(echoFirst ? sent : echo);
+		const hydrated = await f.repository.hydrate("tenant-a", [{ domain: "WPP", messageId: 7, clientId: 1, targetMessageIds: [sent.targetMessageId] }]);
+		assert.equal(f.rows.length, 1);
+		assert.equal(hydrated.get("WPP:7")!.reactions[0]!.internalUserId, 7);
+		assert.equal(hydrated.get("WPP:7")!.reactions[0]!.internalUserName, "Ana");
+		assert.equal(f.rows[0]!.reactedAt.getTime(), 1_100);
+	}
+});
+
+test("receipt enriches an equal-time echo without changing the reaction timestamp", async () => {
+	const f = fixture();
+	await f.repository.apply(event({ fromMe: true }));
+	const result = await f.repository.apply(event({ fromMe: true, internalUserId: 7, internalUserName: "Ana" }));
+	assert.equal(result.applied, true);
+	assert.equal(result.reaction.internalUserId, 7);
+	assert.equal(result.reaction.reactedAt.getTime(), 1_000);
+});
+
+test("another operator replaces attribution and a device reaction clears it even with the same emoji", async () => {
+	const f = fixture();
+	await f.repository.apply(event({ fromMe: true, internalUserId: 7, internalUserName: "Ana" }));
+	await f.repository.apply(event({ fromMe: true, internalUserId: 8, internalUserName: "Bruno", sourceEventId: "second", reactedAt: new Date(2_000) }));
+	assert.equal(f.rows[0]!.internalUserId, 8);
+	assert.equal(f.rows[0]!.internalUserName, "Bruno");
+	await f.repository.apply(event({ fromMe: true, sourceEventId: "device", reactedAt: new Date(3_000) }));
+	assert.equal(f.rows[0]!.internalUserId, null);
+	assert.equal(f.rows[0]!.internalUserName, null);
+	await f.repository.apply(event({ fromMe: true, internalUserId: 7, internalUserName: "Ana" }));
+	assert.equal(f.rows[0]!.internalUserId, null);
+});
+
+test("a concurrent device removal cannot inherit attribution from a delayed HTTP receipt", async () => {
+	const f = fixture();
+	await f.repository.apply(event({ fromMe: true }));
+	f.beforeUpdate(async () => {
+		await f.repository.apply(event({ fromMe: true, emoji: "", sourceEventId: "removed", reactedAt: new Date(2_000) }));
+	});
+	const result = await f.repository.apply(event({ fromMe: true, internalUserId: 7, internalUserName: "Ana" }));
+	assert.equal(result.applied, false);
+	assert.equal(result.reaction.emoji, "");
+	assert.equal(result.reaction.internalUserId, null);
+});
+
+test("an echo racing attribution enrichment preserves the authenticated operator", async () => {
+	const f = fixture();
+	await f.repository.apply(event({ fromMe: true }));
+	f.beforeUpdate(async () => {
+		await f.repository.apply(event({ fromMe: true, internalUserId: 7, internalUserName: "Ana" }));
+	});
+	await f.repository.apply(event({ fromMe: true, reactedAt: new Date(1_100) }));
+	assert.equal(f.rows[0]!.internalUserId, 7);
+});
+
+test("a new echo and receipt racing to replace an older event retain the receipt author", async () => {
+	const f = fixture();
+	await f.repository.apply(event({ fromMe: true, sourceEventId: "old", internalUserId: 6 }));
+	f.beforeUpdate(async () => {
+		await f.repository.apply(event({ fromMe: true, sourceEventId: "new", reactedAt: new Date(2_000), internalUserId: 7, internalUserName: "Ana" }));
+	});
+	await f.repository.apply(event({ fromMe: true, sourceEventId: "new", reactedAt: new Date(2_100) }));
+	assert.equal(f.rows[0]!.internalUserId, 7);
+	assert.equal(f.rows[0]!.reactedAt.getTime(), 2_100);
+});
+
+test("external reactions cannot expose internal attribution and unknown event IDs are not guessed", async () => {
+	const f = fixture();
+	await f.repository.apply(event({ internalUserId: 7, internalUserName: "Ana" }));
+	assert.equal(f.rows[0]!.internalUserId, null);
+	await f.repository.apply(event({ fromMe: true, sourceEventId: null }));
+	await f.repository.apply(event({ fromMe: true, sourceEventId: null, internalUserId: 7 }));
+	assert.equal(f.rows[1]!.internalUserId, null);
 });
 
 async function run(): Promise<void> {
