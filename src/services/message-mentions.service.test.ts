@@ -19,8 +19,8 @@ function matches(row: Row, where: Row): boolean {
 function fixture() {
 	const contacts: Row[] = [];
 	const senders: Row[] = [];
-	const queries: Array<{ table: string; where: Row }> = [];
-	const fault = { table: null as "contacts" | "senders" | null };
+	const queries: Array<{ table: string; where: Row; select?: Row; by?: string[]; returned?: number }> = [];
+	const fault = { table: null as "contacts" | "senders" | "memberships" | null };
 	const db = {
 		wppContact: { findMany: async ({ where }: { where: Row }) => {
 			queries.push({ table: "contacts", where });
@@ -28,11 +28,23 @@ function fixture() {
 			return structuredClone(contacts.filter((contact) => matches(contact, where)));
 		} },
 		internalWhatsappSender: { findMany: async ({ where, select }: { where: Row; select: Row }) => {
-			queries.push({ table: "senders", where });
+			queries.push({ table: "senders", where, select });
 			if (fault.table === "senders") throw new Error("simulated scoped sender query failure");
-			return senders.filter((sender) => matches(sender, where)).map((sender) => ({
-				...structuredClone(sender), messages: sender["messages"].filter((message: Row) => matches(message, select["messages"].where)),
-			}));
+			return senders.filter((sender) => matches(sender, where)).map((sender) =>
+				Object.fromEntries(Object.keys(select).map((key) => [key, structuredClone(sender[key])])));
+		} },
+		internalMessage: { groupBy: async ({ where, by }: { where: Row; by: string[] }) => {
+			if (fault.table === "memberships") throw new Error("simulated membership query failure");
+			const groups = new Map<string, Row>();
+			for (const sender of senders) {
+				for (const message of sender["messages"]) {
+					const row = { ...message, whatsappSenderId: sender["id"] };
+					if (!matches(row, where)) continue;
+					groups.set(JSON.stringify(by.map((field) => row[field])), Object.fromEntries(by.map((field) => [field, row[field]])));
+				}
+			}
+			queries.push({ table: "memberships", where, by, returned: groups.size });
+			return [...groups.values()];
 		} },
 	};
 	return { service: new MessageMentionsService(db as unknown as PrismaClient), contacts, senders, queries, fault };
@@ -47,7 +59,7 @@ function contact(overrides: Row = {}): Row {
 }
 
 function sender(overrides: Row = {}): Row {
-	return { instance: "tenant-a", senderId: "123456@lid", displayName: "Nome manual", isManuallyNamed: true,
+	return { id: 1, instance: "tenant-a", senderId: "123456@lid", displayName: "Nome manual", isManuallyNamed: true,
 		messages: [{ instance: "tenant-a", internalChatId: 10 }], ...overrides };
 }
 
@@ -202,15 +214,39 @@ test("bulk history resolves in batches, not once per message, with a 500-message
 	const f = fixture(); f.contacts.push(contact()); f.senders.push(sender());
 	const messages = Array.from({ length: 200 }, (_, id) => message({ id, internalChatId: 10 }));
 	await f.service.hydrate("tenant-a", messages);
-	assert.equal(f.queries.length, 2);
+	assert.equal(f.queries.length, 3);
 	f.queries.length = 0;
 	const large = Array.from({ length: 501 }, (_, id) => message({ id, internalChatId: 10 }));
 	assert.equal((await f.service.hydrate("tenant-a", large)).length, 501);
-	assert.equal(f.queries.length, 4);
+	assert.equal(f.queries.length, 6);
+});
+
+test("sender names use grouped memberships without loading historical messages or crossing chat/tenant scope", async () => {
+	const f = fixture();
+	f.senders.push(sender({ messages: [
+		...Array.from({ length: 10_000 }, () => ({ instance: "tenant-a", internalChatId: 10 })),
+		{ instance: "tenant-a", internalChatId: 99 },
+		{ instance: "tenant-b", internalChatId: 20 },
+	] }));
+	f.senders.push(sender({ id: 2, senderId: "987654@lid", displayName: "Outro remetente",
+		messages: [{ instance: "tenant-a", internalChatId: 20 }] }));
+	const hydrated = await f.service.hydrate("tenant-a", [
+		message({ internalChatId: 10 }), message({ internalChatId: 20 }),
+		message({ internalChatId: 20, mentionMetadata: [{ id: "987654@lid" }] }),
+	]);
+	assert.deepEqual(hydrated.map((item) => item.mentionEntities![0]!.displayName),
+		["Nome manual", "Nome do provedor", "Outro remetente"]);
+	const senderQuery = f.queries.find((query) => query.table === "senders")!;
+	assert.equal(Object.hasOwn(senderQuery.select!, "messages"), false, "historical relation must not be materialized for name enrichment");
+	const memberships = f.queries.filter((query) => query.table === "memberships");
+	assert.equal(memberships.length, 1, "group memberships are queried per batch, not per sender or message");
+	assert.deepEqual(memberships[0]!.where, { instance: "tenant-a", whatsappSenderId: { in: [1, 2] }, internalChatId: { in: [10, 20] } });
+	assert.deepEqual(memberships[0]!.by, ["whatsappSenderId", "internalChatId"]);
+	assert.equal(memberships[0]!.returned, 2, "database output scales with unique sender/chat pairs, not historical messages");
 });
 
 test("lookup outages preserve typed stored metadata, legacy absence, tenant isolation and original body", async () => {
-	for (const table of ["contacts", "senders"] as const) {
+	for (const table of ["contacts", "senders", "memberships"] as const) {
 		const f = fixture(); f.contacts.push(contact()); f.senders.push(sender()); f.fault.table = table;
 		const raw = message({ internalChatId: 10 }); const before = JSON.stringify(raw);
 		const hydrated = await f.service.hydrate("tenant-a", [raw, message({ mentionMetadata: null }), message({ instance: "tenant-b" })]);

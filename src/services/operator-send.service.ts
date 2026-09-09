@@ -6,7 +6,6 @@ import type { Mentions, SendMessageOptions } from "../types/whatsapp-instance.ty
 import { deliverOperatorMessage } from "../utils/operator-send-delivery";
 import { resolveOperatorQuotedMessage } from "../utils/operator-quoted-message";
 import { hashOperatorSendRequest, normalizeOperatorSendRequest, OperatorSendRequestError } from "../utils/operator-send-request";
-import { readyMessagePipelineSource, type PipelineTriggerSource } from "../utils/pipeline-trigger-source";
 import operatorOutboundService from "./operator-outbound.service";
 import filesService from "./files.service";
 import messagesService from "./messages.service";
@@ -18,7 +17,6 @@ import { messageMentionPatch, operatorMentionEntities } from "../utils/message-m
 
 interface OperatorSendPayload {
 	options: SendMessageOptions;
-	pipelineSource?: PipelineTriggerSource;
 }
 
 class OperatorSendService {
@@ -35,23 +33,6 @@ class OperatorSendService {
 			onMessage: async (message) => {
 				await messagesService.syncMessageToLocal(message, true);
 				await messagesDistributionService.notifyMessage(null, message);
-			},
-			finalize: async (tx, message, rawPayload) => {
-				const { pipelineSource } = rawPayload as unknown as OperatorSendPayload;
-				if (!pipelineSource) return;
-				const contact = message.contactId
-					? await tx.wppContact.findUnique({ where: { id: message.contactId }, select: { customerId: true } })
-					: null;
-				await tx.pipelineEnrollmentOutbox.upsert({
-					where: { idempotencyKey: `pipeline-event:v1:${message.id}` },
-					update: {},
-					create: {
-						idempotencyKey: `pipeline-event:v1:${message.id}`,
-						instance: message.instance, messageId: message.id,
-						contactId: message.contactId, customerId: contact?.customerId ?? null,
-						...pipelineSource,
-					},
-				});
 			},
 		});
 	}
@@ -88,10 +69,8 @@ class OperatorSendService {
 		const quotedProviderId = request.quotedId ? resolveOperatorQuotedMessage({
 			instance: session.instance, clientId, contactId: request.contactId, clientType: registeredClient.type,
 		}, quoted) : null;
-		let pipelineSource: PipelineTriggerSource | undefined;
 		if (request.readyMessageId) {
 			await readyMessagesService.getReadyMessageForSend(session, request.readyMessageId);
-			pipelineSource = readyMessagePipelineSource(request.readyMessageId);
 		}
 		const text = `*${session.name}*: ${request.text}`;
 		const now = new Date();
@@ -125,7 +104,7 @@ class OperatorSendService {
 			Object.assign(message, { fileId: fileData.id, fileName: fileData.name, fileType: fileData.mime_type,
 				fileSize: String(fileData.size), type: getMessageType(fileData.mime_type, request.sendAsAudio, request.sendAsDocument) });
 		}
-		const payload: OperatorSendPayload = { options, ...(pipelineSource ? { pipelineSource } : {}) };
+		const payload: OperatorSendPayload = { options };
 		// JSON roundtrip freezes media metadata and options across remote retries.
 		const result = await operatorOutboundService.enqueue({
 			...scope, clientId, idempotencyKey: key, payloadHash, message,

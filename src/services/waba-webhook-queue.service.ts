@@ -55,7 +55,9 @@ class WABAWebhookQueueService {
 
 		this.isProcessing = true;
 		Logger.info("Starting WABA webhook queue processor");
-		this.processLoop();
+		void this.processLoop().catch((error) => {
+			Logger.error("WABA webhook queue processor stopped with an error", error as Error);
+		});
 	}
 
 	public stopProcessor(): void {
@@ -70,7 +72,9 @@ class WABAWebhookQueueService {
 					const item = await this.getNextPendingItem();
 					if (item) {
 						this.activeProcessing++;
-						this.processItem(item.id).finally(() => {
+						void this.processItem(item.id).catch((error) => {
+							Logger.error(`Error processing WABA webhook queue item ${item.id}`, error as Error);
+						}).finally(() => {
 							this.activeProcessing--;
 						});
 					}

@@ -36,7 +36,9 @@ class GupshupWebhookQueueService {
 
     this.isProcessing = true;
     Logger.info("Starting Gupshup webhook queue processor");
-    this.processLoop();
+    void this.processLoop().catch((error) => {
+      Logger.error("Gupshup webhook queue processor stopped with an error", error as Error);
+    });
   }
 
   /**
@@ -58,7 +60,9 @@ class GupshupWebhookQueueService {
           const item = await this.getNextPendingItem();
           if (item) {
             this.activeProcessing++;
-            this.processItem(item.id).finally(() => {
+            void this.processItem(item.id).catch((error) => {
+              Logger.error(`Error processing Gupshup webhook queue item ${item.id}`, error as Error);
+            }).finally(() => {
               this.activeProcessing--;
             });
           }

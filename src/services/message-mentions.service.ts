@@ -169,11 +169,27 @@ export class MessageMentionsService {
 			for (const ids of chunks(senderIds)) {
 				const found = await this.db.internalWhatsappSender.findMany({
 					where: { instance, senderId: { in: ids }, messages: { some: { instance, internalChatId: { in: allowedChats } } } },
-					select: { instance: true, senderId: true, displayName: true, isManuallyNamed: true,
-						messages: { where: { instance, internalChatId: { in: allowedChats } }, select: { internalChatId: true }, distinct: ["internalChatId"] },
-					},
+					select: { id: true, instance: true, senderId: true, displayName: true, isManuallyNamed: true },
 				});
-				for (const sender of found) if (sender.instance === instance) senders.set(sender.senderId, sender);
+				const scopedSenders = found.filter((sender) => sender.instance === instance);
+				if (!scopedSenders.length) continue;
+				// Prisma distinct materializes message history before deduplicating it.
+				// Group in SQL so only the sender/chat membership pairs leave the database.
+				const memberships = await this.db.internalMessage.groupBy({
+					by: ["whatsappSenderId", "internalChatId"],
+					where: { instance, whatsappSenderId: { in: scopedSenders.map((sender) => sender.id) },
+						internalChatId: { in: allowedChats } },
+				});
+				const messagesBySender = new Map<number, Array<{ internalChatId: number }>>();
+				for (const membership of memberships) {
+					if (membership.whatsappSenderId === null) continue;
+					const messages = messagesBySender.get(membership.whatsappSenderId) ?? [];
+					messages.push({ internalChatId: membership.internalChatId });
+					messagesBySender.set(membership.whatsappSenderId, messages);
+				}
+				for (const sender of scopedSenders) {
+					senders.set(sender.senderId, { ...sender, messages: messagesBySender.get(sender.id) ?? [] });
+				}
 			}
 		}
 

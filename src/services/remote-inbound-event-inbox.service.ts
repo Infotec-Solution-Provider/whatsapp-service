@@ -4,6 +4,7 @@ import { Prisma, RemoteInboundEventInbox, RemoteInboundEventInboxStatus } from "
 import { Logger } from "@in.pulse-crm/utils";
 import MessageDto from "../types/remote-client.types";
 import prismaService from "./prisma.service";
+import { resolveWorkerConcurrency } from "../utils/worker-concurrency";
 
 const DEFAULT_PROCESSING_INTERVAL_MS = 250;
 const DEFAULT_LOCK_DURATION_MS = 60_000;
@@ -99,7 +100,8 @@ export function assertRemoteInboundPayloadMatches(
 	}
 }
 
-class RemoteInboundEventInboxService {
+export class RemoteInboundEventInboxService {
+	private readonly concurrency = resolveWorkerConcurrency(process.env["REMOTE_INBOUND_EVENT_CONCURRENCY"]);
 	private readonly processingIntervalMs = Math.max(
 		50,
 		Number(process.env["REMOTE_INBOUND_EVENT_INTERVAL_MS"] || DEFAULT_PROCESSING_INTERVAL_MS)
@@ -235,9 +237,14 @@ class RemoteInboundEventInboxService {
 			const candidates = await prismaService.remoteInboundEventInbox.findMany({
 				where: { status: "PENDING", nextAttemptAt: { lte: now } },
 				orderBy: { createdAt: "asc" },
-				take: 20
+				take: this.concurrency,
+				select: { id: true }
 			});
-			await Promise.all(candidates.map((item) => this.claimAndProcess(item.id)));
+			// A failed claim must not release the loop guard while sibling jobs
+			// still hold payloads and leases. Drain this batch before admitting more.
+			const results = await Promise.allSettled(candidates.map((item) => this.claimAndProcess(item.id)));
+			const failed = results.find((result) => result.status === "rejected");
+			if (failed?.status === "rejected") throw failed.reason;
 		} finally {
 			this.processing = false;
 		}
