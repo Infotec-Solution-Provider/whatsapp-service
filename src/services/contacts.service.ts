@@ -325,99 +325,26 @@ class ContactsService {
 		sectorIds?: number[],
 		overwriteExisting = false
 	) {
-		const hasDDI = phone.startsWith("55");
-		const validPhone = hasDDI ? phone : "55" + phone;
-		const hasExtraDigit = validPhone.length === 13;
-		const validPhoneAlt = hasExtraDigit
-			? validPhone.slice(0, 4) + validPhone.slice(5)
-			: validPhone.slice(0, 4) + "9" + validPhone.slice(4);
-
-		const existingContact = await prismaService.wppContact.findFirst({
-			where: {
-				instance,
-				OR: [{ phone: validPhone }, { phone: validPhoneAlt }]
-			},
-			// include sectors - cast to any because Prisma client types must be regenerated after schema change
-			include: { sectors: true } as any
-		});
-
-		if (existingContact && !overwriteExisting) {
-			throw new ContactAlreadyExistsError(existingContact.id, existingContact.isDeleted);
+		const validPhone = this.normalizePhone(phone);
+		if (!validPhone) {
+			throw new BadRequestError("Informe o telefone do contato.");
 		}
-
-		if (existingContact?.isDeleted) {
-			throw new DeletedContactConflictError(existingContact.id);
-		}
-
-		if (existingContact && overwriteExisting) {
-			const cleanedSectorIds = [...new Set(sectorIds ?? [])];
-			const updated = await prismaService.wppContact.update({
-				where: { id: existingContact.id },
-				data: {
-					name,
-					customerId: customerId ?? null,
-					sectors: {
-						deleteMany: {},
-						create: cleanedSectorIds.map((sectorId) => ({ sectorId }))
-					}
-				} as any,
-				include: { sectors: true } as any
+		const phones = this.getPhoneAlternatives(validPhone);
+		const findExistingContact = async () => {
+			// Prefer the registered phone when legacy records have conflicting identities.
+			const byPhone = await prismaService.wppContact.findFirst({
+				where: { instance, phone: { in: phones } },
+				include: { sectors: true }
 			});
+			return byPhone ?? prismaService.wppContact.findFirst({
+				where: { instance, whatsappId: { in: phones } },
+				include: { sectors: true }
+			});
+		};
+		const existingContact = await findExistingContact();
 
-			await this.syncContactToLocal(updated);
-			await this.syncContactSectorsToLocal(updated.id, instance, cleanedSectorIds);
-			return updated;
-		}
-
-		// If contact exists and mapped to a customer, keep old behavior
-		if (existingContact && !!existingContact.customerId && existingContact.customerId !== -1 && customerId) {
-			const message = `Este número já está cadastrado no cliente de código ${existingContact.customerId}`;
-			throw new ConflictError(message);
-		}
-
-		// If contact exists, we must enforce sector rules
 		if (existingContact) {
-			const existingSectorIds = ((existingContact as any).sectors || []).map((s: any) => s.sectorId);
-
-			// If creating global (no sectorIds provided)
-			if (!sectorIds || sectorIds.length === 0) {
-				// If there are sectors linked already, it's a conflict (would create a global contact while it exists in other sectors)
-				if (existingSectorIds.length > 0) {
-					throw new ConflictError("Este número já está cadastrado em outro(s) setor(es)");
-				}
-
-				// Otherwise it's already global: update and return
-				const updated = await prismaService.wppContact.update({
-					where: { id: existingContact.id },
-					data: { name, customerId: customerId || null }
-				});
-				await this.syncContactToLocal(updated);
-				return updated;
-			}
-
-			// Creating with sectors: if existing is global -> conflict
-			if (existingSectorIds.length === 0) {
-				throw new ConflictError("Este número já está cadastrado globalmente");
-			}
-
-			// If existing sectors differ from requested sectors -> conflict
-			const requested = [...new Set(sectorIds)];
-			const missingInRequested = existingSectorIds.filter((id: number) => !requested.includes(id));
-			const extraInRequested = requested.filter((id: number) => !existingSectorIds.includes(id));
-
-			if (missingInRequested.length > 0 || extraInRequested.length > 0) {
-				throw new ConflictError("Este número já está cadastrado em outro(s) setor(es)");
-			}
-
-			// Sectors match: update name/customerId and return
-			const updated = await prismaService.wppContact.update({
-				where: { id: existingContact.id },
-				data: { name, customerId: customerId || null }
-			});
-
-			await this.syncContactToLocal(updated);
-
-			return updated;
+			return this.reuseContactForRegistration(existingContact, name, customerId, sectorIds, overwriteExisting);
 		}
 
 		// Contact does not exist: create new and optionally link sectors
@@ -436,11 +363,22 @@ class ContactsService {
 			};
 		}
 
-		const createdContact = await prismaService.wppContact.create({
-			data: createData,
-			// include sectors - cast to any because Prisma client types must be regenerated after schema change
-			include: { sectors: true } as any
-		});
+		let createdContact;
+		try {
+			createdContact = await prismaService.wppContact.create({
+				data: createData,
+				include: { sectors: true }
+			});
+		} catch (error) {
+			if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+				const concurrentContact = await findExistingContact();
+				if (concurrentContact) {
+					// A concurrently created record has not been reviewed for overwriting.
+					return this.reuseContactForRegistration(concurrentContact, name, customerId, sectorIds, false);
+				}
+			}
+			throw error;
+		}
 
 		await this.syncContactToLocal(createdContact);
 		if (sectorIds && sectorIds.length > 0) {
@@ -448,6 +386,69 @@ class ContactsService {
 		}
 
 		return createdContact;
+	}
+
+	private async reuseContactForRegistration(
+		contact: WppContact & { sectors: Array<{ sectorId: number }> },
+		name: string,
+		customerId: number | undefined,
+		sectorIds: number[] | undefined,
+		overwriteExisting: boolean
+	) {
+		const requestedSectors = [...new Set(sectorIds ?? [])];
+		const preservesSectors = sectorIds === undefined || (
+			requestedSectors.length === contact.sectors.length &&
+			contact.sectors.every(({ sectorId }) => requestedSectors.includes(sectorId))
+		);
+		const hasNoCustomer = contact.customerId === null || contact.customerId === 0 || contact.customerId === -1;
+		const canLinkCustomer = !contact.isDeleted && hasNoCustomer &&
+			customerId !== undefined && Number.isInteger(customerId) && customerId > 0 && preservesSectors;
+
+		if (!overwriteExisting && !canLinkCustomer) {
+			throw new ContactAlreadyExistsError(contact.id, contact.isDeleted);
+		}
+		if (contact.isDeleted) {
+			throw new DeletedContactConflictError(contact.id);
+		}
+
+		let updated;
+		try {
+			updated = await prismaService.wppContact.update({
+				where: {
+					id: contact.id,
+					instance: contact.instance,
+					isDeleted: false,
+					...(!overwriteExisting ? { customerId: contact.customerId } : {})
+				},
+				data: {
+					name,
+					customerId: customerId ?? null,
+					...(overwriteExisting ? {
+						sectors: {
+							deleteMany: {},
+							create: requestedSectors.map((sectorId) => ({ sectorId }))
+						}
+					} : {})
+				},
+				include: { sectors: true }
+			});
+		} catch (error) {
+			if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+				const current = await prismaService.wppContact.findFirst({
+					where: { id: contact.id, instance: contact.instance }
+				});
+				if (current) {
+					throw new ContactAlreadyExistsError(current.id, current.isDeleted);
+				}
+			}
+			throw error;
+		}
+
+		await this.syncContactToLocal(updated);
+		if (overwriteExisting) {
+			await this.syncContactSectorsToLocal(updated.id, contact.instance, requestedSectors);
+		}
+		return updated;
 	}
 
 	public async updateContact(contactId: number, data: Prisma.WppContactUpdateInput, sectorIds?: number[]) {

@@ -21,6 +21,7 @@
 		"sync:local:instance": "ts-node src/scripts/sync-local.ts",
 		"migration:panel": "ts-node src/scripts/migration-panel.ts",
 		"test:contact-identity": "ts-node src/utils/resolve-contact-identity.test.ts",
+		"test:contact-registration": "ts-node src/services/contact-registration.test.ts",
 		"test:functional-health": "ts-node src/services/wwebjs-health-check.service.test.ts && ts-node src/services/remote-session-stability.test.ts",
 		"test:remote-inbound": "ts-node src/services/remote-inbound-event-inbox.test.ts",
 		"test:internal-message-status": "ts-node src/services/internal-message-status.test.ts",

@@ -27,6 +27,7 @@ function matches(row: Row, where: Row = {}): boolean {
 				switch (operator) {
 					case "lte": return actual !== null && actual <= expected;
 					case "gt": return actual !== null && actual > expected;
+					case "not": return actual !== expected;
 					case "in": return expected.includes(actual);
 					case "notIn": return !expected.includes(actual);
 					default: throw new Error(`Unsupported mock predicate ${operator}`);
@@ -46,6 +47,7 @@ function applyData(row: Row, data: Row): void {
 class IsolatedDatabase {
 	state: State = { messages: [], jobs: [], nextMessageId: 1 };
 	failReceipt = false;
+	failTransactions = false;
 	beforeExpiredReadReturns: (() => Promise<void>) | null = null;
 	private tail = Promise.resolve();
 	constructor(readonly now: () => Date) {}
@@ -126,6 +128,7 @@ class IsolatedDatabase {
 		return {
 			wppMessage: delegate("messages"), operatorOutboundSend: delegate("jobs"),
 			$transaction: async (callback: (tx: Row) => Promise<unknown>) => this.locked(async () => {
+				if (this.failTransactions) throw new Prisma.PrismaClientKnownRequestError("Transaction already closed: expired", { code: "P2028", clientVersion: "test" });
 				const snapshot = structuredClone(this.state);
 				const result = await callback(this.api(snapshot));
 				this.state = snapshot;
@@ -218,6 +221,121 @@ test("restart before provider intent reclaims and sends once", async () => {
 	await f.worker().processOnce();
 	assert.equal(f.sends(), 1);
 	assert.equal(f.message()["status"], "SENT");
+});
+
+test("intent commits without an interactive transaction and preserves the first submission time", async () => {
+	const f = fixture();
+	const { job } = await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+	await f.repository.claim(job.id, "owner", f.now(), new Date(f.now().getTime() + 1_000));
+	f.db.failTransactions = true;
+	const firstStartedAt = f.now();
+	assert.equal(await f.repository.markAttemptStarted(job.id, "owner", firstStartedAt), true);
+	assert.equal(f.job()["attemptCount"], 1);
+	assert.deepEqual(f.job()["attemptStartedAt"], firstStartedAt);
+	f.advance(100);
+	assert.equal(await f.repository.markAttemptStarted(job.id, "owner", f.now()), true);
+	assert.equal(f.job()["attemptCount"], 2);
+	assert.deepEqual(f.job()["attemptStartedAt"], firstStartedAt);
+});
+
+test("expired or invalid ownership cannot record either a first or repeated intent", async () => {
+	for (const started of [false, true]) {
+		for (const invalid of ["expired", "token", "status", "missing"]) {
+			const f = fixture();
+			const { job } = await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+			await f.repository.claim(job.id, "owner", f.now(), new Date(f.now().getTime() + 1_000));
+			if (started) await f.repository.markAttemptStarted(job.id, "owner", f.now());
+			if (invalid === "expired") f.advance(1_000);
+			if (invalid === "token") f.job()["lockedBy"] = "new-owner";
+			if (invalid === "status") f.job()["status"] = "PENDING";
+			const before = structuredClone(f.job());
+			assert.equal(await f.repository.markAttemptStarted(invalid === "missing" ? "missing" : job.id, "owner", f.now()), false);
+			assert.deepEqual(f.job(), before);
+		}
+	}
+});
+
+test("ownership changed between intent checks prevents a stale worker from incrementing", async () => {
+	const f = fixture();
+	const { job } = await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+	await f.repository.claim(job.id, "owner", f.now(), new Date(f.now().getTime() + 1_000));
+	await f.repository.markAttemptStarted(job.id, "owner", f.now());
+	const firstStartedAt = f.job()["attemptStartedAt"];
+	const client = f.db.client();
+	const repository = new PrismaOperatorOutboundRepository({
+		operatorOutboundSend: {
+			updateMany: async (args: Prisma.OperatorOutboundSendUpdateManyArgs) => {
+				const result = await client.operatorOutboundSend.updateMany(args);
+				if (args.where?.attemptStartedAt === null) f.job()["lockedBy"] = "new-owner";
+				return result;
+			},
+		},
+	} as unknown as PrismaClient);
+	assert.equal(await repository.markAttemptStarted(job.id, "owner", f.now()), false);
+	assert.equal(f.job()["attemptCount"], 1);
+	assert.deepEqual(f.job()["attemptStartedAt"], firstStartedAt);
+	assert.equal(f.job()["lockedBy"], "new-owner");
+});
+
+test("database errors in either intent write propagate without trying another write", async () => {
+	for (const started of [false, true]) {
+		const f = fixture();
+		const { job } = await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+		await f.repository.claim(job.id, "owner", f.now(), new Date(f.now().getTime() + 1_000));
+		if (started) await f.repository.markAttemptStarted(job.id, "owner", f.now());
+		const before = structuredClone(f.job());
+		const client = f.db.client();
+		const failure = new Error("Database connection lost during intent update");
+		let writes = 0;
+		const repository = new PrismaOperatorOutboundRepository({
+			operatorOutboundSend: {
+				updateMany: async (args: Prisma.OperatorOutboundSendUpdateManyArgs) => {
+					writes++;
+					if (writes === (started ? 2 : 1)) throw failure;
+					return client.operatorOutboundSend.updateMany(args);
+				},
+			},
+		} as unknown as PrismaClient);
+		await assert.rejects(repository.markAttemptStarted(job.id, "owner", f.now()), (error: unknown) => error === failure);
+		assert.equal(writes, started ? 2 : 1);
+		assert.deepEqual(f.job(), before);
+	}
+});
+
+test("a failed intent write never dispatches and a later recovery sends only once", async () => {
+	const f = fixture();
+	await f.service.enqueue(input());
+	const mark = f.repository.markAttemptStarted.bind(f.repository);
+	const failure = new Error("Database unavailable before intent was written");
+	f.repository.markAttemptStarted = async () => { throw failure; };
+	await f.service.processOnce();
+	assert.equal(f.sends(), 0);
+	assert.equal(f.job()["attemptStartedAt"], null);
+	assert.equal(f.job()["attemptCount"], 0);
+	assert.deepEqual(f.errors, [failure]);
+	f.repository.markAttemptStarted = mark;
+	f.advance();
+	await f.worker().processOnce();
+	assert.equal(f.sends(), 1);
+	assert.equal(f.message()["status"], "SENT");
+});
+
+test("a lost response after persisting DIRECT intent blocks automatic dispatch on recovery", async () => {
+	const f = fixture();
+	await f.service.enqueue(input());
+	const mark = f.repository.markAttemptStarted.bind(f.repository);
+	const failure = new Error("Database response lost after intent committed");
+	f.repository.markAttemptStarted = async (...args) => { await mark(...args); throw failure; };
+	await f.service.processOnce();
+	assert.equal(f.sends(), 0);
+	assert.equal(f.job()["attemptCount"], 1);
+	assert.ok(f.job()["attemptStartedAt"]);
+	assert.deepEqual(f.errors, [failure]);
+	f.repository.markAttemptStarted = mark;
+	f.advance();
+	await f.worker().processOnce();
+	assert.equal(f.sends(), 0);
+	assert.equal(f.message()["status"], "UNKNOWN");
 });
 
 test("restart after DIRECT intent produces UNKNOWN without invoking provider again", async () => {
@@ -350,6 +468,7 @@ test("REMOTE lost submission response retries the same operation and then polls 
 	assert.equal(new Set(submitted).size, 1);
 	assert.deepEqual(remoteIds, [null, null, "remote-job-1"]);
 	assert.equal(f.job()["attemptStartedAt"].getTime(), firstAttemptAt);
+	assert.equal(f.job()["attemptCount"], 3);
 	assert.equal(f.message()["status"], "SENT");
 });
 

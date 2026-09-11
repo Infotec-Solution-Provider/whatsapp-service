@@ -232,8 +232,16 @@ class ContactsController {
 					req.session.instance,
 					error.contactId
 				);
+				const linkedCustomerId = existingContact?.customerId;
+				const customerName = existingContact?.customer?.RAZAO?.trim() ||
+					existingContact?.customer?.FANTASIA?.trim();
+				const message = existingContact
+					? linkedCustomerId && linkedCustomerId > 0
+						? `Este número já está cadastrado no cliente ${customerName ? `${customerName} (código ${linkedCustomerId})` : `de código ${linkedCustomerId}`}.`
+						: "Este número já está cadastrado e não está vinculado a um cliente."
+					: error.message;
 				res.status(409).send({
-					message: error.message,
+					message,
 					code: "CONTACT_ALREADY_EXISTS",
 					existingContact,
 					requiresSupervisorApproval

@@ -116,19 +116,23 @@ export default class PrismaOperatorOutboundRepository implements OperatorOutboun
 	}
 
 	async markAttemptStarted(id: string, token: string, now: Date): Promise<boolean> {
-		// attemptStartedAt records the FIRST submission, bounding retries by remote
-		// retention. The first write is fenced by the still-valid ownership lease.
-		return this.db.$transaction(async (tx) => {
-			const claimed = await tx.operatorOutboundSend.updateMany({
-				where: { id, status: "PROCESSING", lockedBy: token, lockedUntil: { gt: now } },
-				data: { attemptCount: { increment: 1 } },
-			});
-			if (claimed.count !== 1) return false;
-			await tx.operatorOutboundSend.updateMany({
-				where: { id, lockedBy: token, attemptStartedAt: null }, data: { attemptStartedAt: now },
-			});
-			return true;
+		const owned: Prisma.OperatorOutboundSendWhereInput = {
+			id, status: "PROCESSING", lockedBy: token, lockedUntil: { gt: now },
+		};
+		// Commit the first intent and counter together in one conditional write.
+		// No interactive transaction is needed for this single-row transition.
+		const first = await this.db.operatorOutboundSend.updateMany({
+			where: { ...owned, attemptStartedAt: null },
+			data: { attemptStartedAt: now, attemptCount: { increment: 1 } },
 		});
+		if (first.count === 1) return true;
+		// Preserve the FIRST submission time, which bounds remote idempotency.
+		// Recheck ownership in the write itself: recovery may have changed it.
+		const repeated = await this.db.operatorOutboundSend.updateMany({
+			where: { ...owned, attemptStartedAt: { not: null } },
+			data: { attemptCount: { increment: 1 } },
+		});
+		return repeated.count === 1;
 	}
 
 	async renew(id: string, token: string, now: Date, lockedUntil: Date): Promise<void> {
