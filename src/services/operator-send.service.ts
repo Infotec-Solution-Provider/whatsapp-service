@@ -14,6 +14,7 @@ import prismaService from "./prisma.service";
 import readyMessagesService from "./ready-messages.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
 import { messageMentionPatch, operatorMentionEntities } from "../utils/message-mention-persistence";
+import messagePresentationService from "./message-presentation.service";
 
 interface OperatorSendPayload {
 	options: SendMessageOptions;
@@ -39,7 +40,7 @@ class OperatorSendService {
 
 	async lookup(session: SessionData, clientId: number, key: string) {
 		const record = await operatorOutboundService.lookup({ instance: session.instance, userId: session.userId }, key);
-		return record?.job.clientId === clientId ? record.message : null;
+		return record?.job.clientId === clientId ? messagePresentationService.fromStored(record.message, record.job) : null;
 	}
 
 	async submit(session: SessionData, clientId: number, to: unknown, data: Record<string, unknown>, key: string, file?: Express.Multer.File) {

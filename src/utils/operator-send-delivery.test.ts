@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type CreateMessageDto from "../dtos/create-message.dto";
 import type { RemoteMessageJobResponse } from "../types/remote-client.types";
 import { deliverOperatorMessage, OperatorDeliveryClient, OperatorDeliveryInput } from "./operator-send-delivery";
+import { classifyWabaSendError, wabaPreparationError } from "./waba-send";
 
 async function main() {
 	const item: OperatorDeliveryInput = { id: "attempt-one", instance: "tenant", deliveryMode: "REMOTE", remoteJobId: null };
@@ -56,6 +57,20 @@ async function main() {
 	assert.equal(directCalls, 1);
 	assert.equal((await deliverOperatorMessage(item, options, { ...client, instance: "other" })).status, "PENDING");
 	assert.equal(directCalls, 1, "tenant mismatch must never reach provider");
+	const rejection = classifyWabaSendError({ response: { status: 400, data: { error: {
+		code: 100, message: "Invalid media attachment ID", fbtrace_id: "trace-rejection",
+	} } } });
+	client.sendMessage = async () => { throw rejection; };
+	assert.deepEqual(await deliverOperatorMessage({ ...item, deliveryMode: "DIRECT" }, options, client), {
+		status: "FAILED", error: rejection.message,
+	}, "official rejection retains the original safe cause and is a confirmed failure");
+	client.sendMessage = async () => { throw wabaPreparationError(new Error("upload unavailable")); };
+	assert.equal((await deliverOperatorMessage({ ...item, deliveryMode: "DIRECT" }, options, client)).status, "FAILED");
+	client.sendMessage = async () => { throw classifyWabaSendError({ code: "ETIMEDOUT" }); };
+	assert.equal((await deliverOperatorMessage({ ...item, deliveryMode: "DIRECT" }, options, client)).status, "UNKNOWN");
+	client.sendMessage = async () => { throw { deliveryStatus: "FAILED", message: "untrusted provider error" }; };
+	assert.equal((await deliverOperatorMessage({ ...item, deliveryMode: "DIRECT" }, options, client)).status, "UNKNOWN",
+		"untyped errors from other clients cannot opt into safe failure");
 	console.log("operator-send-delivery: response loss, same intent, scoped results, UNKNOWN and no fallback passed");
 }
 

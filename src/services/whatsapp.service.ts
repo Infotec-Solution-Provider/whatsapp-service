@@ -28,6 +28,7 @@ import prismaService from "./prisma.service";
 import contactsService from "./contacts.service";
 import { createUploadTraceLogger } from "../utils/file-upload-trace";
 import readyMessagesService from "./ready-messages.service";
+import { WabaDeliveryError } from "../utils/waba-send";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -406,9 +407,10 @@ class WhatsappService {
 			});
 			if (pendingMsg) {
 				try {
-					const errorMessage = await messagesService.updateMessage(pendingMsg.id, { status: "ERROR" });
+					const status = err instanceof WabaDeliveryError && err.deliveryStatus === "UNKNOWN" ? "UNKNOWN" : "ERROR";
+					const errorMessage = await messagesService.updateMessage(pendingMsg.id, { status });
 					await messagesDistributionService.notifyMessage(process, errorMessage);
-					process.log("Mensagem marcada como ERROR após falha no envio.", { messageId: pendingMsg.id });
+					process.log("Resultado da tentativa de envio registrado.", { messageId: pendingMsg.id, status });
 				} catch (statusErr) {
 					process.log("Falha ao marcar mensagem como ERROR.", sanitizeErrorMessage(statusErr));
 				}
@@ -743,9 +745,10 @@ class WhatsappService {
 		} catch (err) {
 			if (pendingMsg) {
 				try {
-					const errorMessage = await messagesService.updateMessage(pendingMsg.id, { status: "ERROR" });
+					const status = err instanceof WabaDeliveryError && err.deliveryStatus === "UNKNOWN" ? "UNKNOWN" : "ERROR";
+					const errorMessage = await messagesService.updateMessage(pendingMsg.id, { status });
 					await messagesDistributionService.notifyMessage(process, errorMessage);
-					process.log("Mensagem de bot marcada como ERROR após falha no envio.", { messageId: pendingMsg.id });
+					process.log("Resultado da tentativa de envio do bot registrado.", { messageId: pendingMsg.id, status });
 				} catch (statusErr) {
 					process.log("Falha ao marcar mensagem de bot como ERROR.", sanitizeErrorMessage(statusErr));
 				}

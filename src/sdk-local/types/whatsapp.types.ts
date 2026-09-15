@@ -195,6 +195,8 @@ export interface WppMessage {
 	body: string;
 	timestamp: string;
 	status: WppMessageStatus;
+	/** Delivery diagnostic for an explicitly rejected or unconfirmed operator send. */
+	sendError?: string | null;
 	isForwarded: boolean;
 	isEdited: boolean;
 	fileId: number | null;

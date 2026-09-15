@@ -131,7 +131,7 @@ class MessagesController {
 				res.setHeader("Location", `/api/whatsapp/${clientId}/message-attempts/${encodeURIComponent(idempotencyKey)}`);
 				res.setHeader("Retry-After", "2");
 				res.status(result.created ? 202 : 200).send({
-					message: "Message attempt persisted.", data: messagePresentationService.fromStored(result.message),
+					message: "Message attempt persisted.", data: messagePresentationService.fromStored(result.message, result.job),
 				});
 				return;
 			}

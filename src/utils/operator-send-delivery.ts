@@ -2,6 +2,7 @@ import type { WppMessage } from "@prisma/client";
 import type { SendMessageOptions } from "../types/whatsapp-instance.types";
 import type { RemoteMessageJobResponse } from "../types/remote-client.types";
 import type CreateMessageDto from "../dtos/create-message.dto";
+import { WabaDeliveryError } from "./waba-send";
 
 export interface OperatorDeliveryClient {
 	instance: string;
@@ -46,7 +47,10 @@ export async function deliverOperatorMessage(
 		try {
 			const result = await client.sendMessage({ ...options, preventAutomaticRetry: true }, false);
 			return { status: "SENT", result: operatorProviderResult(result) };
-		} catch {
+		} catch (error) {
+			if (error instanceof WabaDeliveryError) {
+				return { status: error.deliveryStatus, error: error.message };
+			}
 			return { status: "UNKNOWN", error: "Não foi possível confirmar o resultado do envio. Não reenviar automaticamente." };
 		}
 	}

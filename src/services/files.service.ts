@@ -53,12 +53,17 @@ class ExtendedFilesClient extends FilesClient {
 		return response.data.data;
 	}
 
-	public async getWabaMedia(fileId: number): Promise<string> {
+	public async getWabaMedia(fileId: number, rejectedMediaId?: string): Promise<string> {
 		const { data } = await this.ax.post<{ data: { mediaId: string } }>("/api/waba/get-media-id", {
 			fileId,
+			...(rejectedMediaId ? { rejectedMediaId } : {}),
 		});
 
-		return data.data.mediaId;
+		const mediaId = data?.data?.mediaId;
+		if (typeof mediaId !== "string" || !/^\d{1,255}$/.test(mediaId) || mediaId === rejectedMediaId) {
+			throw new Error("O serviço de arquivos não retornou um novo identificador válido de mídia WABA.");
+		}
+		return mediaId;
 	}
 }
 

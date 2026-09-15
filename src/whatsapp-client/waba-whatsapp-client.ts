@@ -1,5 +1,5 @@
 import { Logger } from "@in.pulse-crm/utils";
-import axios, { AxiosError } from "axios";
+import axios from "axios";
 import TemplateAdapter from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
 import filesService from "../services/files.service";
@@ -14,6 +14,7 @@ import {
 } from "../types/whatsapp-instance.types";
 import generateUID from "../utils/generate-uid";
 import ProcessingLogger from "../utils/processing-logger";
+import { classifyWabaSendError, sendWabaRequest, wabaPreparationError } from "../utils/waba-send";
 import WhatsappClient from "./whatsapp-client";
 
 interface GetTemplateVariablesProps {
@@ -54,6 +55,7 @@ class WABAWhatsappClient implements WhatsappClient {
 
 	public async sendMessage(options: SendMessageOptions): Promise<CreateMessageDto> {
 		const process = new ProcessingLogger(this.instance, "waba-send-message", generateUID(), options);
+		let dispatchStarted = false;
 
 		try {
 			process.log("Iniciando envio de mensagem...", options);
@@ -113,8 +115,21 @@ class WABAWhatsappClient implements WhatsappClient {
 				reqBody["text"] = { body: options.text };
 			}
 
-			process.log("Enviando mensagem a Graph API...", { url: reqUrl, body: reqBody, options: this.reqOptions });
-			const response = await axios.post(reqUrl, reqBody, this.reqOptions);
+			const media = msgType !== "text" && "fileId" in options ? {
+				type: msgType,
+				renew: async (rejection: import("../utils/waba-send").WabaDeliveryError) => {
+					const rejectedMediaId: string = reqBody[msgType].id;
+					process.log("Meta rejeitou a mídia. Renovando o anexo antes de uma única nova tentativa.", {
+						fileId: options.fileId, rejectedMediaId, error: rejection.message, details: rejection.details,
+					});
+					reqBody[msgType].id = await filesService.getWabaMedia(options.fileId, rejectedMediaId);
+				},
+			} : undefined;
+			const response = await sendWabaRequest(async () => {
+				process.log("Enviando mensagem a Graph API...", { url: reqUrl, body: structuredClone(reqBody) });
+				dispatchStarted = true;
+				return (await axios.post(reqUrl, reqBody, this.reqOptions)).data;
+			}, media);
 			process.log("Mensagem enviada com sucesso.", response.data);
 
 			const now = new Date();
@@ -128,22 +143,19 @@ class WABAWhatsappClient implements WhatsappClient {
 				timestamp: now.getTime().toString(),
 				sentAt: now,
 				type: msgType,
-				wabaId: response.data.messages[0].id
+				wabaId: response.id
 			};
 
 			process.log("Processo concluído com sucesso.");
 			process.success(dto);
 
 			return dto;
-		} catch (error: any) {
-			if (error instanceof AxiosError) {
-				Logger.error("Erro na requisição Axios:", error.response?.data || error.message);
-			} else {
-				Logger.error("Erro ao enviar mensagem via WABA:", error);
-			}
+		} catch (error) {
+			const failure = dispatchStarted ? classifyWabaSendError(error) : wabaPreparationError(error);
+			Logger.error("Erro ao enviar mensagem via WABA:", failure);
 			process.log("Falha ao enviar mensagem...");
-			process.failed(error);
-			throw error;
+			process.failed(failure);
+			throw failure;
 		}
 	}
 
