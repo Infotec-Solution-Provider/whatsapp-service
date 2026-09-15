@@ -48,6 +48,56 @@ async function main() {
 		client.getMessageJob = async () => response(status);
 		assert.equal((await deliverOperatorMessage({ ...item, remoteJobId: "remote-job" }, options, client)).status, status === "PROCESSING" ? "PENDING" : status);
 	}
+	const secret = "https://user:password@provider.example/send?token=private-message";
+	for (const remoteJobId of [null, "remote-job"]) {
+		let submissions = 0;
+		let lookups = 0;
+		let remoteResponse: unknown = response("SENT");
+		let requestFailure: unknown;
+		const guardedClient: OperatorDeliveryClient = {
+			...client,
+			submitMessageJob: async () => {
+				submissions++;
+				if (requestFailure) throw requestFailure;
+				return remoteResponse as RemoteMessageJobResponse;
+			},
+			getMessageJob: async () => {
+				lookups++;
+				if (requestFailure) throw requestFailure;
+				return remoteResponse as RemoteMessageJobResponse;
+			},
+		};
+		for (let status = 400; status < 500; status++) {
+			requestFailure = { code: "ERR_BAD_REQUEST", message: secret, response: { status, data: { error: secret } } };
+			const failure = await deliverOperatorMessage({ ...item, remoteJobId }, options, guardedClient);
+			assert.equal(failure.status, [408, 425, 429].includes(status) ? "PENDING" : "UNKNOWN", `HTTP ${status} on ${remoteJobId ? "lookup" : "submission"}`);
+			assert.ok(failure.error?.includes(`HTTP ${status}; ERR_BAD_REQUEST`));
+			assert.ok(!failure.error?.includes(secret), "request diagnostics never include provider messages or bodies");
+		}
+		for (const status of [500, 502, 503, 504]) {
+			requestFailure = { response: { status }, code: "ERR_BAD_RESPONSE" };
+			const failure = await deliverOperatorMessage({ ...item, remoteJobId }, options, guardedClient);
+			assert.equal(failure.status, "PENDING");
+			assert.ok(failure.error?.includes(`HTTP ${status}; ERR_BAD_RESPONSE`));
+		}
+		requestFailure = { code: "ETIMEDOUT", message: secret };
+		assert.deepEqual(await deliverOperatorMessage({ ...item, remoteJobId }, options, guardedClient), {
+			status: "PENDING", error: "Aguardando confirmação do serviço de mensagens (ETIMEDOUT).",
+		});
+		requestFailure = { code: secret, message: secret, response: { status: 700, data: secret } };
+		assert.deepEqual(await deliverOperatorMessage({ ...item, remoteJobId }, options, guardedClient), {
+			status: "PENDING", error: "Aguardando confirmação do serviço de mensagens.",
+		}, "unrecognized error codes and invalid HTTP statuses are omitted");
+		requestFailure = undefined;
+		for (const malformed of [null, undefined, "", "accepted", 1, false, [], {}]) {
+			remoteResponse = malformed;
+			assert.deepEqual(await deliverOperatorMessage({ ...item, remoteJobId }, options, guardedClient), {
+				status: "UNKNOWN", error: "Resposta de reconciliação inválida.",
+			}, "malformed successful responses must not keep resubmitting");
+		}
+		assert.equal(remoteJobId ? submissions : lookups, 0, "known jobs only use lookup; unknown job IDs only reuse submission");
+	}
+	assert.equal(directCalls, 0, "request failures and malformed remote responses never fall back to synchronous sending");
 	client.sendMessage = async (sendOptions) => {
 		directCalls++;
 		assert.equal(sendOptions.preventAutomaticRetry, true);

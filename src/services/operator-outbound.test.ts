@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { Prisma, PrismaClient } from "@prisma/client";
 import PrismaOperatorOutboundRepository from "./operator-outbound.repository";
 import { OperatorOutboundService } from "./operator-outbound.service";
+import { deliverOperatorMessage, type OperatorDeliveryClient } from "../utils/operator-send-delivery";
 import {
 	OperatorOutboundEnqueueInput,
 	OperatorOutboundHandler,
@@ -147,14 +148,17 @@ function input(overrides: Partial<OperatorOutboundEnqueueInput> = {}): OperatorO
 	};
 }
 
-function fixture(handler: Partial<OperatorOutboundHandler> = {}) {
+function fixture(
+	handler: Partial<OperatorOutboundHandler> = {},
+	serviceOptions: NonNullable<ConstructorParameters<typeof OperatorOutboundService>[1]> = { retryMs: 100 },
+) {
 	let clock = Date.now() + 1_000;
 	let sends = 0;
 	let notifications = 0;
 	const errors: unknown[] = [];
 	const db = new IsolatedDatabase(() => new Date(clock));
 	const repository = new PrismaOperatorOutboundRepository(db.client());
-	const options = { now: () => new Date(clock), lockMs: 1_000, retryMs: 100, onError: (error: unknown) => errors.push(error) };
+	const options = { now: () => new Date(clock), lockMs: 1_000, onError: (error: unknown) => errors.push(error), ...serviceOptions };
 	const configured: OperatorOutboundHandler = {
 		deliver: async () => { sends++; return { status: "SENT", result: { wwebjsId: "provider-message-1" } }; },
 		onMessage: async () => { notifications++; },
@@ -474,7 +478,7 @@ test("REMOTE lost submission response retries the same operation and then polls 
 
 test("REMOTE unknown submission stops before retention expires; unattempted old jobs may start", async () => {
 	let submissions = 0;
-	const f = fixture({ deliver: async () => { submissions++; throw new Error("no remote response"); } });
+	const f = fixture({ deliver: async () => { submissions++; throw new Error("no remote response"); } }, { retryMs: 100, maxRemotePendingAgeMs: 48 * 60 * 60 * 1_000 });
 	await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
 	f.advance(48 * 60 * 60 * 1_000);
 	await f.service.processOnce();
@@ -483,6 +487,213 @@ test("REMOTE unknown submission stops before retention expires; unattempted old 
 	await f.service.processOnce();
 	assert.equal(submissions, 1);
 	assert.equal(f.message()["status"], "UNKNOWN");
+});
+
+test("REMOTE pending submissions and polling stop on the tenth call across worker restarts", async () => {
+	for (const acknowledgement of ["none", "first", "last"]) {
+		const operations: string[] = [];
+		const remoteIds: Array<string | null> = [];
+		const f = fixture({ deliver: async (item) => {
+			operations.push(item.id);
+			remoteIds.push(item.remoteJobId);
+			const acknowledged = acknowledgement === "first" || (acknowledgement === "last" && operations.length === 10);
+			return { status: "PENDING", ...(acknowledged ? { remoteJobId: "remote-pending" } : {}), error: "provider still processing" };
+		} });
+		await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+		const firstAttemptAt = f.now();
+		for (let attempt = 1; attempt <= 10; attempt++) {
+			await f.worker().processOnce();
+			assert.equal(operations.length, attempt);
+			assert.equal(f.job()["attemptCount"], attempt);
+			assert.deepEqual(f.job()["attemptStartedAt"], firstAttemptAt);
+			if (attempt < 10) {
+				assert.equal(f.job()["status"], "PENDING");
+				f.advance(f.job()["nextAttemptAt"].getTime() - f.now().getTime());
+			}
+		}
+		assert.equal(new Set(operations).size, 1, "all submissions/polls must use the original operation");
+		assert.deepEqual(remoteIds, [null, ...Array(9).fill(acknowledgement === "first" ? "remote-pending" : null)]);
+		assert.equal(f.job()["status"], "UNKNOWN");
+		assert.equal(f.message()["status"], "UNKNOWN");
+		assert.equal(f.job()["remoteJobId"], acknowledgement === "none" ? null : "remote-pending");
+		assert.match(f.job()["error"], /provider still processing/);
+		f.advance(24 * 60 * 60 * 1_000);
+		await f.worker().processOnce();
+		assert.equal(operations.length, 10, "terminal attempts must never return to delivery after restart");
+	}
+});
+
+test("REMOTE uses the default exponential backoff capped at thirty seconds", async () => {
+	let calls = 0;
+	const f = fixture({ deliver: async () => { calls++; return { status: "PENDING", remoteJobId: "remote-backoff" }; } }, {});
+	await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+	for (const delay of [2_000, 4_000, 8_000, 16_000, 30_000, 30_000]) {
+		await f.worker().processOnce();
+		assert.equal(f.job()["nextAttemptAt"].getTime() - f.now().getTime(), delay);
+		const before = calls;
+		f.advance(delay - 1);
+		await f.worker().processOnce();
+		assert.equal(calls, before, "a restarted worker must respect the persisted retry time");
+		f.advance(1);
+	}
+	assert.equal(calls, 6);
+});
+
+test("REMOTE already at its attempt limit stops without another provider call", async () => {
+	for (const attemptCount of [10, 24_973]) {
+		const f = fixture();
+		await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+		Object.assign(f.job(), { attemptCount, attemptStartedAt: f.now(), remoteJobId: "remote-existing", error: "saved provider timeout" });
+		await f.worker().processOnce();
+		assert.equal(f.sends(), 0);
+		assert.equal(f.job()["attemptCount"], attemptCount);
+		assert.equal(f.job()["status"], "UNKNOWN");
+		assert.equal(f.message()["status"], "UNKNOWN");
+		assert.equal(f.job()["remoteJobId"], "remote-existing");
+		assert.match(f.job()["error"], /saved provider timeout/);
+	}
+});
+
+test("REMOTE expires five minutes after first intent even with a saved job and unavailable preflight", async () => {
+	for (const remoteJobId of [null, "remote-existing"]) {
+		let preflights = 0;
+		const f = fixture({ preflight: async () => { preflights++; return false; } });
+		await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+		Object.assign(f.job(), { attemptCount: 1, attemptStartedAt: f.now(), remoteJobId });
+		f.advance(5 * 60 * 1_000);
+		await f.worker().processOnce();
+		assert.equal(f.sends(), 0);
+		assert.equal(preflights, 0, "expired attempts must not remain pending behind readiness checks");
+		assert.equal(f.job()["attemptCount"], 1);
+		assert.equal(f.job()["status"], "UNKNOWN");
+		assert.equal(f.job()["remoteJobId"], remoteJobId);
+		assert.equal(f.message()["status"], "UNKNOWN");
+	}
+});
+
+test("a slow REMOTE pending response expires immediately and retains its receipt details", async () => {
+	let calls = 0;
+	const f = fixture({ deliver: async () => {
+		calls++;
+		f.advance(5 * 60 * 1_000);
+		return { status: "PENDING", remoteJobId: "remote-late", error: "still awaiting remote processing" };
+	} });
+	await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+	await f.service.processOnce();
+	assert.equal(calls, 1);
+	assert.equal(f.job()["attemptCount"], 1);
+	assert.equal(f.job()["status"], "UNKNOWN");
+	assert.equal(f.job()["remoteJobId"], "remote-late");
+	assert.equal(f.job()["providerOutcome"].remoteJobId, "remote-late");
+	assert.match(f.job()["error"], /still awaiting remote processing/);
+	f.advance();
+	await f.worker().processOnce();
+	assert.equal(calls, 1);
+});
+
+test("REMOTE confirmed responses on the last call and beyond the time window remain SENT", async () => {
+	for (const crossesTimeLimit of [false, true]) {
+		let calls = 0;
+		const f = fixture({ deliver: async () => {
+			calls++;
+			if (crossesTimeLimit) f.advance(2);
+			return { status: "SENT", remoteJobId: "remote-confirmed", result: { wwebjsId: "confirmed-on-last-call" } };
+		} });
+		await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+		Object.assign(f.job(), { attemptCount: 9, attemptStartedAt: f.now(), remoteJobId: "remote-confirmed" });
+		if (crossesTimeLimit) f.advance(5 * 60 * 1_000 - 1);
+		await f.service.processOnce();
+		assert.equal(calls, 1);
+		assert.equal(f.job()["attemptCount"], 10);
+		assert.equal(f.job()["status"], "SENT");
+		assert.equal(f.message()["status"], "SENT");
+		assert.equal(f.message()["wwebjsId"], "confirmed-on-last-call");
+	}
+});
+
+test("REMOTE stopping at its limit preserves an already READ message", async () => {
+	const f = fixture();
+	await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+	Object.assign(f.job(), { attemptCount: 10, attemptStartedAt: f.now(), remoteJobId: "remote-read" });
+	f.message()["status"] = "READ";
+	await f.worker().processOnce();
+	assert.equal(f.sends(), 0);
+	assert.equal(f.job()["providerOutcome"].status, "UNKNOWN");
+	assert.equal(f.job()["status"], "SENT");
+	assert.equal(f.message()["status"], "READ");
+});
+
+test("saved REMOTE outcomes finalize despite expired attempt count and age", async () => {
+	for (const status of ["SENT", "FAILED"] as const) {
+		let preflights = 0;
+		const f = fixture({ preflight: async () => { preflights++; return false; } });
+		const { job } = await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+		await f.repository.claim(job.id, "worker-before-restart", f.now(), new Date(f.now().getTime() + 1_000));
+		Object.assign(f.job(), { attemptCount: 24_973, attemptStartedAt: f.now(), remoteJobId: "remote-receipt" });
+		await f.repository.recordOutcome(job.id, "worker-before-restart", { status, result: { wwebjsId: "durable-receipt" }, ...(status === "FAILED" ? { error: "explicit rejection" } : {}) });
+		f.advance(24 * 60 * 60 * 1_000);
+		await f.worker().processOnce();
+		assert.equal(f.sends(), 0);
+		assert.equal(preflights, 0);
+		assert.equal(f.job()["attemptCount"], 24_973);
+		assert.equal(f.job()["status"], status);
+		assert.equal(f.message()["status"], status === "FAILED" ? "ERROR" : "SENT");
+		assert.equal(f.message()["wwebjsId"], "durable-receipt");
+	}
+});
+
+test("failure to persist the terminal REMOTE outcome cannot permit another call after restart", async () => {
+	let calls = 0;
+	const f = fixture({ deliver: async () => { calls++; return { status: "PENDING", remoteJobId: "remote-existing" }; } });
+	await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+	Object.assign(f.job(), { attemptCount: 9, attemptStartedAt: f.now(), remoteJobId: "remote-existing" });
+	f.db.failReceipt = true;
+	await f.service.processOnce();
+	assert.equal(calls, 1);
+	assert.equal(f.job()["attemptCount"], 10);
+	assert.equal(f.job()["status"], "PROCESSING");
+	assert.equal(f.job()["providerOutcome"], null);
+	assert.equal(f.errors.length, 1);
+	f.db.failReceipt = false;
+	f.advance();
+	await f.worker().processOnce();
+	assert.equal(calls, 1, "the persisted attempt budget must survive a missing terminal receipt");
+	assert.equal(f.job()["attemptCount"], 10);
+	assert.equal(f.job()["status"], "UNKNOWN");
+	assert.equal(f.message()["status"], "UNKNOWN");
+});
+
+test("real delivery adapter terminates HTTP 404 immediately and persistent HTTP 503 within its attempt budget", async () => {
+	for (const status of [404, 503]) {
+		for (const remoteJobId of [null, "remote-existing"]) {
+			let submissions = 0;
+			let lookups = 0;
+			const keys = new Set<string>();
+			const client: OperatorDeliveryClient = {
+				instance: "tenant-a",
+				sendMessage: async () => assert.fail("remote reconciliation must not fall back to direct sending"),
+				submitMessageJob: async (_options, _isGroup, key) => { submissions++; keys.add(key); throw { response: { status } }; },
+				getMessageJob: async (id) => { lookups++; assert.equal(id, remoteJobId); throw { response: { status } }; },
+			};
+			const f = fixture({ deliver: (item) => deliverOperatorMessage(item, { to: "551199999999", text: "hello" }, client) });
+			const { job } = await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+			f.job()["remoteJobId"] = remoteJobId;
+			const maximumCalls = status === 404 ? 1 : 10;
+			for (let attempt = 1; attempt <= maximumCalls; attempt++) {
+				await f.worker().processOnce();
+				assert.equal(submissions + lookups, attempt);
+				if (attempt < maximumCalls) f.advance(f.job()["nextAttemptAt"].getTime() - f.now().getTime());
+			}
+			assert.equal(f.job()["status"], "UNKNOWN");
+			assert.equal(f.message()["status"], "UNKNOWN");
+			assert.match(f.job()["error"], new RegExp(`HTTP ${status}`));
+			assert.equal(remoteJobId ? submissions : lookups, 0);
+			if (!remoteJobId) assert.deepEqual([...keys], [`operator-outbound:v1:${job.id}`]);
+			f.advance(24 * 60 * 60 * 1_000);
+			await f.worker().processOnce();
+			assert.equal(submissions + lookups, maximumCalls);
+		}
+	}
 });
 
 test("missing/oversized idempotency keys fail before persistence", async () => {

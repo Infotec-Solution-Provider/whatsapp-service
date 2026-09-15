@@ -20,6 +20,8 @@ interface OperatorOutboundServiceOptions {
 	lockMs?: number;
 	retryMs?: number;
 	concurrency?: number;
+	maxRemoteAttempts?: number;
+	maxRemotePendingAgeMs?: number;
 	/** Must remain below the remote provider's shortest idempotency retention. */
 	maxUnacknowledgedRemoteAgeMs?: number;
 	onError?: (error: unknown) => void;
@@ -34,6 +36,8 @@ export class OperatorOutboundService {
 	private readonly lockMs: number;
 	private readonly retryMs: number;
 	private readonly concurrency: number;
+	private readonly maxRemoteAttempts: number;
+	private readonly maxRemotePendingAgeMs: number;
 	private readonly maxUnacknowledgedRemoteAgeMs: number;
 	private readonly onError: (error: unknown) => void;
 
@@ -44,6 +48,8 @@ export class OperatorOutboundService {
 		this.retryMs = options.retryMs ?? 2_000;
 		const configuredConcurrency = options.concurrency ?? Number(process.env["OPERATOR_OUTBOUND_CONCURRENCY"] ?? 4);
 		this.concurrency = Math.min(8, Math.max(1, Math.floor(Number.isFinite(configuredConcurrency) ? configuredConcurrency : 4)));
+		this.maxRemoteAttempts = options.maxRemoteAttempts ?? 10;
+		this.maxRemotePendingAgeMs = options.maxRemotePendingAgeMs ?? 5 * 60 * 1_000;
 		this.maxUnacknowledgedRemoteAgeMs = options.maxUnacknowledgedRemoteAgeMs ?? 23 * 60 * 60 * 1_000;
 		this.onError = options.onError ?? ((error) => Logger.error("[OperatorOutbound] Processing failed", error as Error));
 	}
@@ -98,8 +104,10 @@ export class OperatorOutboundService {
 			heartbeat = this.heartbeat(id, token);
 			if (!item.providerOutcome) {
 				let outcome: OperatorOutboundDeliveryResult;
-				if (this.remoteSubmissionExpired(item)) {
-					outcome = { status: "UNKNOWN", error: "Não foi possível confirmar o envio dentro da janela segura de idempotência do provedor." };
+				let attemptedItem = item;
+				const stopped = this.remoteRetryLimit(item);
+				if (stopped) {
+					outcome = stopped;
 				} else {
 					if (this.handler.preflight && !await this.handler.preflight(item)) {
 						await this.repository.deferBeforeAttempt(id, token, new Date(this.now().getTime() + this.retryMs));
@@ -107,7 +115,9 @@ export class OperatorOutboundService {
 					}
 					// Commit intent BEFORE entering the provider. A restart between these
 					// operations is deliberately UNKNOWN for a non-idempotent provider.
-					if (!await this.repository.markAttemptStarted(id, token, this.now())) return;
+					const attemptTime = this.now();
+					if (!await this.repository.markAttemptStarted(id, token, attemptTime)) return;
+					attemptedItem = { ...item, attemptCount: item.attemptCount + 1, attemptStartedAt: item.attemptStartedAt ?? attemptTime };
 					try {
 						outcome = await this.handler.deliver(item);
 					} catch (error) {
@@ -121,8 +131,18 @@ export class OperatorOutboundService {
 					if (item.deliveryMode === "DIRECT") {
 						outcome = { ...outcome, status: "UNKNOWN", error: outcome.error ?? "O provedor não confirmou o resultado do envio." };
 					} else {
-						await this.repository.defer(id, token, outcome, new Date(this.now().getTime() + this.retryMs));
-						return;
+						// Recheck after the call: the final allowed attempt or a slow
+						// response must not schedule yet another remote request.
+						const exhausted = this.remoteRetryLimit({
+							...attemptedItem, remoteJobId: outcome.remoteJobId ?? item.remoteJobId,
+							error: outcome.error ?? item.error,
+						});
+						if (exhausted) {
+							outcome = exhausted;
+						} else {
+							await this.repository.defer(id, token, outcome, new Date(this.now().getTime() + this.remoteRetryDelay(attemptedItem.attemptCount)));
+							return;
+						}
 					}
 				}
 				// Durable provider receipt precedes local finalization and notification.
@@ -137,9 +157,28 @@ export class OperatorOutboundService {
 		}
 	}
 
-	private remoteSubmissionExpired(item: OperatorOutboundItem): boolean {
-		return item.deliveryMode === "REMOTE" && !item.remoteJobId && item.attemptStartedAt !== null
-			&& this.now().getTime() - item.attemptStartedAt.getTime() >= this.maxUnacknowledgedRemoteAgeMs;
+	private remoteRetryLimit(item: OperatorOutboundItem): OperatorOutboundDeliveryResult | null {
+		if (item.deliveryMode !== "REMOTE") return null;
+		const age = item.attemptStartedAt === null ? 0 : this.now().getTime() - item.attemptStartedAt.getTime();
+		let reason: string;
+		if (item.attemptCount >= this.maxRemoteAttempts) {
+			reason = "Limite de tentativas de confirmação do envio atingido.";
+		} else if (item.attemptStartedAt !== null && age >= this.maxRemotePendingAgeMs) {
+			reason = "Prazo de confirmação do envio esgotado.";
+		} else if (!item.remoteJobId && item.attemptStartedAt !== null && age >= this.maxUnacknowledgedRemoteAgeMs) {
+			reason = "Não foi possível confirmar o envio dentro da janela segura de idempotência do provedor.";
+		} else {
+			return null;
+		}
+		return {
+			status: "UNKNOWN",
+			...(item.remoteJobId ? { remoteJobId: item.remoteJobId } : {}),
+			error: `${reason} Reenvio automático bloqueado.${item.error ? ` Último erro: ${item.error}` : ""}`.slice(0, 4_000),
+		};
+	}
+
+	private remoteRetryDelay(attemptCount: number): number {
+		return Math.min(30_000, this.retryMs * 2 ** Math.min(10, Math.max(0, attemptCount - 1)));
 	}
 
 	private async runBounded(ids: string[], process: (id: string) => Promise<void>): Promise<void> {
