@@ -37,8 +37,8 @@ import gupshupWebhookQueueService from "./services/gupshup-webhook-queue.service
 import messageQueueService from "./services/message-queue.service";
 import wabaWebhookQueueService from "./services/waba-webhook-queue.service";
 import whatsappService from "./services/whatsapp.service";
-import wwwebjsHealthCheckService from "./services/wwebjs-health-check.service";
 import remoteSessionMonitorRoutine from "./routines/remote-session-monitor.routine";
+import remoteSessionMonitorService from "./services/remote-session-monitor.service";
 import internalWhatsappMessageQueueService from "./services/internal-whatsapp-message-queue.service";
 import internalChatsService from "./services/internal-chats.service";
 import remoteInboundEventInboxService from "./services/remote-inbound-event-inbox.service";
@@ -132,7 +132,7 @@ const server = app.listen(serverPort, () => {
 
 	if (healthCheckEnabled) {
 		cron.schedule(healthCheckCron, () => {
-			wwwebjsHealthCheckService.runHealthCheck().catch((err) => {
+			remoteSessionMonitorService.runScheduledFunctionalChecks().catch((err) => {
 				Logger.error(`[WwebjsHealthCheck] Unhandled error in health check: ${err?.message}`);
 			});
 		});

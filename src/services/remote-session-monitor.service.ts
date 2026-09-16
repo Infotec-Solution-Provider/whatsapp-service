@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Logger } from "@in.pulse-crm/utils";
 import { SessionData, SocketEventType, SocketServerAdminRoom } from "../sdk-local";
 import { WppClientType } from "@prisma/client";
 import axios, { AxiosError } from "axios";
@@ -222,6 +223,42 @@ class RemoteSessionMonitorService {
 		return wwebjsHealthCheckService.runHealthCheck({
 			clientId,
 			remoteClientUrl: client.remoteClientUrl!
+		});
+	}
+
+	/** Run the scheduled functional check against every configured remote API. */
+	public async runScheduledFunctionalChecks(): Promise<void> {
+		const clients = await prismaService.wppClient.findMany({
+			where: { type: WppClientType.REMOTE, isActive: true, remoteClientUrl: { not: null } },
+			select: { remoteClientUrl: true }
+		});
+		const urls = [...new Set(
+			clients
+				.map((client) => client.remoteClientUrl)
+				.filter((url): url is string => !!url && url.trim().length > 0)
+		)];
+		if (urls.length === 0) {
+			Logger.warning("[WwebjsHealthCheck] No active remote client URL is configured");
+			return;
+		}
+
+		const checks = await Promise.allSettled(
+			urls.map((remoteClientUrl) => wwebjsHealthCheckService.runHealthCheck({ remoteClientUrl }))
+		);
+		checks.forEach((check, index) => {
+			if (check.status === "rejected") {
+				Logger.error(
+					`[WwebjsHealthCheck] Scheduled check failed for ${urls[index]}: ${check.reason instanceof Error ? check.reason.message : String(check.reason)}`
+				);
+				return;
+			}
+			const counts = check.value.reduce<Record<string, number>>((result, item) => {
+				result[item.receiveStatus] = (result[item.receiveStatus] || 0) + 1;
+				return result;
+			}, {});
+			Logger.info(
+				`[WwebjsHealthCheck] Scheduled check completed for ${urls[index]} (${check.value.length} session result(s)): ${JSON.stringify(counts)}`
+			);
 		});
 	}
 
