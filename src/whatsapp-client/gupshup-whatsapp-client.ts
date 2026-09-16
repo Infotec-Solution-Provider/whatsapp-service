@@ -58,7 +58,7 @@ class GupshupWhatsappClient implements WhatsappClient {
 	}
 
 	public async sendMessage(options: SendMessageOptions): Promise<CreateMessageDto> {
-		const logger = new ProcessingLogger(this.instance, "gs-send-message", randomUUID(), options);
+		const logger = new ProcessingLogger(this.instance, "gs-send-message", options.traceId || randomUUID(), options);
 
 		logger.log("[Gupshup] Iniciando envio de mensagem.");
 		try {

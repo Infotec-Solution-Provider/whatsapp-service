@@ -12,6 +12,8 @@ import { resolveOperatorIdempotencyKey } from "../utils/operator-send-request";
 import { createUploadTraceLogger, resolveUploadTraceId } from "../utils/file-upload-trace";
 import messageReactionsService from "../services/message-reactions.service";
 import messagePresentationService from "../services/message-presentation.service";
+import messageSendTrace, { markMessageSendStage } from "../middlewares/message-send-trace.middleware";
+import ProcessingLogger from "../utils/processing-logger";
 import { MessageReactionError, positiveReactionId } from "../utils/message-reaction";
 
 class MessagesController {
@@ -19,7 +21,9 @@ class MessagesController {
 		this.router.get("/api/whatsapp/messages/export", publicBiRateLimit, isAuthenticated, this.exportMessages);
 		this.router.get("/api/whatsapp/messages/:id", this.getMessageById);
 		this.router.patch("/api/whatsapp/messages/mark-as-read", isAuthenticated, this.readContactMessages);
-		this.router.post("/api/whatsapp/:clientId/messages", isAuthenticated, upload.single("file"), this.sendMessage);
+		this.router.post("/api/whatsapp/:clientId/messages", messageSendTrace, isAuthenticated,
+			(_req, res, next) => { markMessageSendStage(res, "multipart"); next(); },
+			upload.single("file"), this.sendMessage);
 		this.router.get("/api/whatsapp/:clientId/message-attempts/:idempotencyKey", isAuthenticated, this.getSendAttempt);
 		this.router.post("/api/internal/whatsapp/chats/:chatId/agent-message", onlyLocal, this.createAgentMessage);
 		this.router.post("/api/internal/whatsapp/chats/:chatId/agent-send-message", onlyLocal, this.sendAgentMessage);
@@ -119,15 +123,25 @@ class MessagesController {
 	}
 
 	private async sendMessage(req: Request, res: Response) {
-		const traceId = resolveUploadTraceId(req.body.traceId, req.headers["x-upload-trace-id"]);
+		const traceId = resolveUploadTraceId(res.locals["messageSendTraceId"], req.body?.traceId, req.headers["x-upload-trace-id"]);
 		const trace = createUploadTraceLogger("whatsapp-service.controller.messages", traceId);
+		let process: ProcessingLogger | undefined;
+		markMessageSendStage(res, "controller");
 		try {
 			const clientId = Number(req.params["clientId"]);
 			const { to, ...data } = req.body;
 			const file = req.file;
 			const idempotencyKey = resolveOperatorIdempotencyKey(req.headers["idempotency-key"], data.idempotencyKey);
 			if (idempotencyKey) {
-				const result = await operatorSendService.submit(req.session, clientId, to, { ...data, traceId }, idempotencyKey, file);
+				process = new ProcessingLogger(req.session.instance, "operator-send-request", idempotencyKey, {
+					clientId, chatId: data.chatId, contactId: data.contactId, userId: req.session.userId,
+				});
+				const result = await operatorSendService.submit(req.session, clientId, to, { ...data, traceId }, idempotencyKey, file,
+					(stage) => { markMessageSendStage(res, stage); process?.log(stage); });
+				const receipt = { messageId: result.message.id, status: result.message.status, created: result.created };
+				markMessageSendStage(res, "persisted", receipt);
+				// SUCCESS means the request was persisted, not delivered by the provider.
+				process.success(receipt);
 				res.setHeader("Location", `/api/whatsapp/${clientId}/message-attempts/${encodeURIComponent(idempotencyKey)}`);
 				res.setHeader("Retry-After", "2");
 				res.status(result.created ? 202 : 200).send({
@@ -173,6 +187,7 @@ class MessagesController {
 				data: messagePresentationService.fromStored(message)
 			});
 		} catch (error) {
+			process?.failed(sanitizeErrorMessage(error));
 			trace.error("request.failed", error, {
 				clientId: req.params["clientId"],
 				to: req.body.to,

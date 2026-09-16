@@ -3,6 +3,8 @@ import { TemplateMessage } from "../adapters/template.adapter";
 import { TemplateVariables } from "./whatsapp-api.types";
 
 interface BaseSendMessageOptions {
+	/** Correlates an operator attempt with provider processing logs. */
+	traceId?: string;
 	to: string;
 	/** Durable caller owns recovery; do not retry an ambiguous provider dispatch. */
 	preventAutomaticRetry?: boolean;

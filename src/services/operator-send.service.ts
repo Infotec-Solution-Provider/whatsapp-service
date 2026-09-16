@@ -43,12 +43,15 @@ class OperatorSendService {
 		return record?.job.clientId === clientId ? messagePresentationService.fromStored(record.message, record.job) : null;
 	}
 
-	async submit(session: SessionData, clientId: number, to: unknown, data: Record<string, unknown>, key: string, file?: Express.Multer.File) {
+	async submit(session: SessionData, clientId: number, to: unknown, data: Record<string, unknown>, key: string, file?: Express.Multer.File,
+		onStage: (stage: string) => void = () => undefined) {
+		onStage("validation");
 		const request = normalizeOperatorSendRequest(clientId, to, data, file);
 		const payloadHash = hashOperatorSendRequest(request);
 		const scope = { instance: session.instance, userId: session.userId };
 		// Replays must work even if a channel, attachment or quoted message is no
 		// longer available. A key is bound to its original content and channel.
+		onStage("attempt.lookup");
 		const existing = await operatorOutboundService.lookup(scope, key);
 		if (existing) {
 			if (existing.job.payloadHash !== payloadHash || existing.job.clientId !== clientId) {
@@ -56,6 +59,7 @@ class OperatorSendService {
 			}
 			return { ...existing, created: false };
 		}
+		onStage("destination.lookup");
 		const [registeredClient, contact, chat, quoted] = await Promise.all([
 			prismaService.wppClient.findFirst({ where: { id: clientId, instance: session.instance, isActive: true } }),
 			prismaService.wppContact.findFirst({ where: { id: request.contactId, instance: session.instance } }),
@@ -67,10 +71,12 @@ class OperatorSendService {
 		if (!contact || (request.chatId && (!chat || chat.contactId !== request.contactId))) {
 			throw new OperatorSendRequestError("Contato ou conversa inválidos nesta instância.");
 		}
+		onStage("quoted.validation");
 		const quotedProviderId = request.quotedId ? resolveOperatorQuotedMessage({
 			instance: session.instance, clientId, contactId: request.contactId, clientType: registeredClient.type,
 		}, quoted) : null;
 		if (request.readyMessageId) {
+			onStage("ready-message.validation");
 			await readyMessagesService.getReadyMessageForSend(session, request.readyMessageId);
 		}
 		const text = `*${session.name}*: ${request.text}`;
@@ -83,9 +89,10 @@ class OperatorSendService {
 			isForwarded: request.isForwarded,
 			...messageMentionPatch({ mentionEntities: operatorMentionEntities(request.mentions) }),
 		};
-		let options: SendMessageOptions = { to: request.to, text };
+		let options: SendMessageOptions = { to: request.to, text, traceId: key };
 		if (request.mentions.length) options.mentions = request.mentions as Mentions;
 		if (quotedProviderId) options.quotedId = quotedProviderId;
+		onStage("file.prepare");
 		let fileData = request.fileId ? await filesService.fetchFileMetadata(request.fileId) : null;
 		if (file && request.file) {
 			fileData = await filesService.uploadFile({
@@ -107,6 +114,7 @@ class OperatorSendService {
 		}
 		const payload: OperatorSendPayload = { options };
 		// JSON roundtrip freezes media metadata and options across remote retries.
+		onStage("persist");
 		const result = await operatorOutboundService.enqueue({
 			...scope, clientId, idempotencyKey: key, payloadHash, message,
 			payload: JSON.parse(JSON.stringify(payload)) as Prisma.InputJsonObject,
