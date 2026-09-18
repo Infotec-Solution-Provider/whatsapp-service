@@ -345,14 +345,6 @@ class InternalChatsService {
 			}
 		>;
 
-		Logger.debug("[InternalChats] Chats loaded for member", {
-			instance: session.instance,
-			userId: session.userId,
-			sectorId: session.sectorId,
-			chatCount: chats.length,
-			messageCount: messages.length
-		});
-
 		return { chats, messages: await messagePresentationService.hydrate(session.instance, messages, "internal") };
 	}
 
@@ -1265,10 +1257,6 @@ class InternalChatsService {
 		msg: CreateMessageDto,
 		authorName: string | null = null
 	) {
-		Logger.debug(
-			`Recebendo mensagem de grupo WhatsApp. Grupo ID: ${groupId}, Autor: ${authorName || msg.from}`,
-			msg
-		);
 		const cleanGroupId = groupId.replace(/[/:]/g, "-");
 		const process = new ProcessingLogger(
 			msg.instance,

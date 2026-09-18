@@ -39,8 +39,6 @@ class MonitorService {
 
 		// Verificar se a busca local está ativa
 		const useLocalSearch = params["monitor:use_local_search"] === "true";
-		Logger.debug(`Buscando dados da monitoria usando método ${useLocalSearch ? "local" : "padrão"}`, { params, useLocalSearch });
-
 		if (useLocalSearch) {
 			return this.searchMonitorDataInternalLocal(session, input);
 		}

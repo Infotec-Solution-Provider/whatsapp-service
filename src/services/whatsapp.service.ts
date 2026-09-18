@@ -514,22 +514,10 @@ class WhatsappService {
 			}
 		}
 
-		Logger.debug(`[agent-send] Agent message resolution context for chat ${chatId}`, {
-			agentId,
-			providedClientId,
-			resolvedClientId,
-			resolvedFrom,
-			sectorDefaultClientId: chat.sector?.defaultClientId ?? null,
-			contactId: chat.contact.id,
-			textLength: text.length,
-		});
-
 		if (resolvedClientId === null) {
 			Logger.error(`[agent-send] No clientId available to send agent message for chat ${chatId}`);
 			throw new BadRequestError("Client do WhatsApp não encontrado para envio do agente.");
 		}
-
-		Logger.info(`[agent-send] Sending agent ${agentId} message on chat ${chatId} using client ${resolvedClientId} (${resolvedFrom})`);
 
 		return this.sendBotMessage(contactAddress, resolvedClientId, {
 			chat,
@@ -632,14 +620,6 @@ class WhatsappService {
 		const text = data.text ?? "";
 
 		process.log("Iniciando o envio da mensagem.");
-		Logger.info(`[send-bot-message] Starting outbound send for chat ${data.chat.id} using client ${clientId}`);
-		Logger.debug(`[send-bot-message] Outbound payload`, {
-			chatId: data.chat.id,
-			contactId: data.chat.contactId,
-			agentId: data.agentId ?? null,
-			quotedId: data.quotedId ?? null,
-			textLength: text.length,
-		});
 		try {
 			process.log("Obtendo client do whatsapp...");
 			const client = this.getClient(clientId);
@@ -731,13 +711,6 @@ class WhatsappService {
 							: null
 			});
 			process.log("Mensagem salva no banco de dados.", savedMsg);
-			Logger.info(`[send-bot-message] Outbound send completed for chat ${data.chat.id}`);
-			Logger.debug(`[send-bot-message] Outbound send summary`, {
-				messageId: savedMsg.id,
-				agentId: data.agentId ?? null,
-				clientId,
-			});
-
 			messagesDistributionService.notifyMessage(process, savedMsg);
 			process.success(savedMsg);
 

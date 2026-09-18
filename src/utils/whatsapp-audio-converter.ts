@@ -99,7 +99,6 @@ class WhatsappAudioConverter {
 			};
 		} finally {
 			if (process.env["KEEP_TEMP_AUDIO"] !== "true") {
-				Logger.debug("Removing temp audio files", { tmpInPath, tmpOutPath });
 				await this.safeUnlink(tmpInPath);
 				await this.safeUnlink(tmpOutPath);
 			}
