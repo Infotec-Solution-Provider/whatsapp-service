@@ -35,6 +35,7 @@
 		"test:mentions": "ts-node src/utils/message-mention-metadata.test.ts && ts-node src/utils/message-mention-persistence.test.ts && ts-node src/services/message-mentions.service.test.ts && ts-node src/services/message-mentions-flow.test.ts",
 		"test:pipeline-events": "ts-node src/services/pipeline-enrollment-disabled.test.ts",
 		"test:resource-pressure": "ts-node src/services/durable-worker-concurrency.test.ts && ts-node src/services/webhook-worker-errors.test.ts && node --test scripts/capture-resource-incident.test.cjs",
+		"test:database-incidents": "ts-node src/utils/database-incident-log.test.ts",
 		"test:public-api": "ts-node src/utils/public-message-direction.test.ts",
 		"test:contact-action-requests:mysql": "node scripts/smoke-contact-action-requests.js",
 		"fix:messages:chat-contact": "ts-node src/routines/fix-messages-chat-contact.routine.ts",

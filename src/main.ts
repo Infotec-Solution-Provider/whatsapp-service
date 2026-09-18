@@ -45,6 +45,7 @@ import remoteInboundEventInboxService from "./services/remote-inbound-event-inbo
 import remoteClientService from "./services/remote-client.service";
 import operatorOutboundService from "./services/operator-outbound.service";
 import operatorSendService from "./services/operator-send.service";
+import { flushDatabaseIncidentLog, recordDatabaseIncident } from "./utils/database-incident-log";
 
 whatsappService.buildClients();
 operatorSendService.configureWorker();
@@ -105,7 +106,8 @@ app.get("/flows", (_req, res) => {
 	res.sendFile("index.html", { root: "public" });
 });
 
-app.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
+app.use((err: Error, req: Request, _res: Response, next: NextFunction) => {
+	recordDatabaseIncident(err, { source: "http", operation: `${req.method} ${req.path}` });
 	console.error(err);
 	next(err);
 });
@@ -114,6 +116,13 @@ app.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
 app.use(handleRequestError);
 
 const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;
+
+process.on("unhandledRejection", (reason) => {
+	recordDatabaseIncident(reason, { source: "unhandled-rejection" });
+});
+process.on("uncaughtExceptionMonitor", (error, origin) => {
+	recordDatabaseIncident(error, { source: "uncaught-exception", operation: origin });
+});
 
 const server = app.listen(serverPort, () => {
 	registerAllSteps();
@@ -161,6 +170,11 @@ const shutdown = async (signal: string): Promise<void> => {
 	]);
 	const timeout = new Promise<void>((resolve) => setTimeout(resolve, 30_000));
 	await Promise.race([graceful, timeout]);
+	// Do not discard a just-recorded P2024 while PM2 is restarting this process.
+	await Promise.race([
+		flushDatabaseIncidentLog(),
+		new Promise<void>((resolve) => setTimeout(resolve, 1_000)),
+	]);
 	process.exit(0);
 };
 

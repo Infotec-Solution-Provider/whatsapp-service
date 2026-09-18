@@ -1,16 +1,27 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { recordDatabaseIncident } from "../utils/database-incident-log";
 
 const databaseUrl = process.env["WHATSAPP_DATABASE_URL"];
+const prismaLog = [{ emit: "event", level: "error" }] as [{ emit: "event"; level: "error" }];
+type PrismaEventOptions = Prisma.PrismaClientOptions & { log: typeof prismaLog };
 
-const prismaService = databaseUrl
-	? new PrismaClient({
+const options: PrismaEventOptions = databaseUrl
+	? {
+		log: prismaLog,
 		datasources: {
 			db: {
 				url: databaseUrl
 			}
 		}
-	})
-	: new PrismaClient();
+	}
+	: { log: prismaLog };
+const prismaService = new PrismaClient<PrismaEventOptions>(options);
+
+// This listener runs even when the caller catches the Prisma exception and
+// the normal ProcessLog write cannot reach MySQL.
+prismaService.$on("error", (event) => {
+	recordDatabaseIncident(event, { source: "prisma-engine", operation: event.target });
+});
 
 export default prismaService;
 
