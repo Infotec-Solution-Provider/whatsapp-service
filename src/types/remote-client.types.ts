@@ -13,6 +13,8 @@ export interface RemoteMessageJobResponse {
 	attempts: number;
 	createdAt: string;
 	updatedAt: string;
+	confirmationStatus?: "NOT_APPLICABLE" | "VERIFYING" | "TIMED_OUT";
+	confirmationDeadlineAt?: string | null;
 	created?: boolean;
 }
 

@@ -93,7 +93,16 @@ export async function deliverOperatorMessage(
 			}
 		}
 		if (job.status === "FAILED") return { status: "FAILED", remoteJobId, error: "O provedor confirmou falha no envio." };
-		if (job.status === "UNKNOWN") return { status: "UNKNOWN", remoteJobId, error: "Resultado do envio incerto; não reenviar automaticamente." };
+		if (job.status === "UNKNOWN") {
+			return {
+				status: "UNKNOWN",
+				remoteJobId,
+				error:
+					job.confirmationStatus === "TIMED_OUT"
+						? "Não foi possível confirmar o envio em dois minutos. A mensagem pode já ter chegado."
+						: "Verificando envio. Não reenviar automaticamente.",
+			};
+		}
 		if (job.status === "PENDING" || job.status === "PROCESSING") return { status: "PENDING", remoteJobId };
 		return { status: "UNKNOWN", remoteJobId, error: "Estado remoto não reconhecido." };
 	} catch (error) {
