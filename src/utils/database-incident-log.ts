@@ -1,5 +1,6 @@
 import { appendFile, mkdir, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { captureDatabaseIncident } from "./database-incident-capture";
 
 export interface DatabaseIncidentContext {
 	source: string;
@@ -46,6 +47,7 @@ export function databaseIncidentDetails(error: unknown): { code: string | null; 
 	const rawMessage = messages.join(" | ");
 	const code = codes.find((value) => /^P(?:1000|1001|1002|1008|1017|2024|2028|2037)$/i.test(value))
 		?? rawMessage.match(/\bP(?:1000|1001|1002|1008|1017|2024|2028|2037)\b/i)?.[0]
+		?? (/Transaction API error:.*Transaction already closed/is.test(rawMessage) ? "P2028" : null)
 		?? null;
 	const message = redact(rawMessage);
 	const databaseFailure =
@@ -115,6 +117,7 @@ export function flushDatabaseIncidentLog(): Promise<void> {
 export function recordDatabaseIncident(error: unknown, context: DatabaseIncidentContext): boolean {
 	const details = databaseIncidentDetails(error);
 	if (!details) return false;
+	captureDatabaseIncident({ code: details.code, source: context.source });
 	const now = Date.now();
 	const fingerprint = `${context.source}|${context.operation ?? ""}|${details.code ?? ""}|${details.message}`;
 	const previous = recent.get(fingerprint);

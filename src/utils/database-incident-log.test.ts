@@ -11,6 +11,9 @@ const poolTimeout = databaseIncidentDetails({
 assert.equal(poolTimeout?.code, "P2024");
 assert.match(poolTimeout?.message ?? "", /connection pool/);
 assert.equal(databaseIncidentDetails(new Error("invalid request payload")), null);
+assert.equal(databaseIncidentDetails({
+	message: "Invalid `tx.wppMessage.create()` invocation:\nTransaction API error: Transaction already closed: A query cannot be executed on an expired transaction.",
+})?.code, "P2028");
 
 void (async () => {
 	const directory = await mkdtemp(join(tmpdir(), "whatsapp-db-incident-"));
