@@ -4,6 +4,7 @@ import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import onlyLocal from "../middlewares/only-local.middleware";
 import publicBiRateLimit from "../middlewares/public-bi-rate-limit.middleware";
+import chatUserPreferencesService, { ChatPreferenceType } from "../services/chat-user-preferences.service";
 
 class ChatsController {
 	constructor(public readonly router: Router) {
@@ -37,6 +38,7 @@ class ChatsController {
 		this.router.post("/api/whatsapp/chats", isAuthenticated, this.startChatByContactId);
 		this.router.get("/api/whatsapp/session/monitor", isAuthenticated, this.getChatsMonitor);
 		this.router.post("/api/whatsapp/chats/:id/transfer", isAuthenticated, this.transferAttendance);
+		this.router.patch("/api/whatsapp/chat-preferences/:type/:id", isAuthenticated, this.updateChatPreference);
 	}
 
 	private async getPublicConversations(req: Request, res: Response) {
@@ -47,7 +49,8 @@ class ChatsController {
 		const parseOptionalPositiveInt = (value: unknown, field: string) => {
 			if (value === undefined || value === "") return undefined;
 			const parsed = Number(value);
-			if (!Number.isInteger(parsed) || parsed <= 0) throw new BadRequestError(`${field} must be a positive integer!`);
+			if (!Number.isInteger(parsed) || parsed <= 0)
+				throw new BadRequestError(`${field} must be a positive integer!`);
 			return parsed;
 		};
 		const parseDate = (value: unknown, field: string) => {
@@ -96,6 +99,23 @@ class ChatsController {
 			message: "Chats retrieved successfully!",
 			data
 		});
+	}
+
+	private async updateChatPreference(req: Request, res: Response) {
+		const type = req.params["type"];
+		const action = req.body?.action;
+		if (type !== "wpp" && type !== "internal") throw new BadRequestError("Invalid chat type!");
+		if (!["pin", "unpin", "read", "unread"].includes(action)) {
+			throw new BadRequestError("Invalid chat preference action!");
+		}
+
+		const data = await chatUserPreferencesService.update(
+			req.session,
+			type as ChatPreferenceType,
+			Number(req.params["id"]),
+			action
+		);
+		res.status(200).send({ message: "Chat preference updated successfully!", data });
 	}
 
 	private async getChatsMonitor(req: Request, res: Response) {

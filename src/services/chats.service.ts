@@ -16,6 +16,7 @@ import parametersService from "./parameters.service";
 import contactsService from "./contacts.service";
 import { withPublicMessageDirection } from "../utils/public-message-direction";
 import messagePresentationService from "./message-presentation.service";
+import chatUserPreferencesService from "./chat-user-preferences.service";
 
 interface InpulseResult {
 	CODIGO: number;
@@ -155,6 +156,11 @@ class ChatsService {
 
 			foundChats.push(...foundAdminChats);
 		}
+		const preferences = await chatUserPreferencesService.getMap(
+			session,
+			foundChats.map((chat) => chat.id),
+			"wpp"
+		);
 
 		const chats: Array<
 			WppChat & {
@@ -162,6 +168,7 @@ class ChatsService {
 				contact: WppContact | null;
 				lastMessage?: WppMessage | null;
 				isUnread?: boolean;
+				isPinned?: boolean;
 			}
 		> = [];
 		const contactIds = foundChats
@@ -238,11 +245,14 @@ class ChatsService {
 
 			const contactId = contact?.id;
 			const lastMessage = contactId ? lastMessageByContact.get(contactId) || null : null;
+			const preference = preferences.get(`wpp:${foundChat.id}`);
 			chats.push({
 				...chat,
 				customer,
 				contact: contact || null,
-				...(!includeMessages ? { lastMessage, isUnread: !!contactId && unreadContactIds.has(contactId) } : {})
+				isPinned: preference?.isPinned ?? false,
+				...(!includeMessages ? { lastMessage, isUnread: !!contactId && unreadContactIds.has(contactId) } : {}),
+				...(preference?.isMarkedUnread ? { isUnread: true } : {})
 			});
 		}
 
@@ -256,12 +266,17 @@ class ChatsService {
 			}
 		}
 
-		const presentedLastMessages = await messagePresentationService.hydrate(session.instance,
-			chats.flatMap((chat) => chat.lastMessage ? [chat.lastMessage] : []));
+		const presentedLastMessages = await messagePresentationService.hydrate(
+			session.instance,
+			chats.flatMap((chat) => (chat.lastMessage ? [chat.lastMessage] : []))
+		);
 		const lastMessagesById = new Map(presentedLastMessages.map((message) => [message.id, message]));
 		return {
-			chats: chats.map((chat) => ({ ...chat, ...(chat.lastMessage ? { lastMessage: lastMessagesById.get(chat.lastMessage.id) } : {}) })),
-			messages: await messagePresentationService.hydrate(session.instance, messages),
+			chats: chats.map((chat) => ({
+				...chat,
+				...(chat.lastMessage ? { lastMessage: lastMessagesById.get(chat.lastMessage.id) } : {})
+			})),
+			messages: await messagePresentationService.hydrate(session.instance, messages)
 		};
 	}
 
@@ -316,8 +331,12 @@ class ChatsService {
 		}
 
 		return {
-			messages: (await messagePresentationService.hydrate(session.instance, messages)).map(withPublicMessageDirection),
-			quotedMessages: (await messagePresentationService.hydrate(session.instance, quotedMessages)).map(withPublicMessageDirection),
+			messages: (await messagePresentationService.hydrate(session.instance, messages)).map(
+				withPublicMessageDirection
+			),
+			quotedMessages: (await messagePresentationService.hydrate(session.instance, quotedMessages)).map(
+				withPublicMessageDirection
+			),
 			nextCursor: hasMore && messages.length ? messages[0]!.id : null
 		};
 	}
@@ -450,7 +469,7 @@ class ChatsService {
 							...(filters.startedFrom ? { gte: filters.startedFrom } : {}),
 							...(filters.startedTo ? { lte: filters.startedTo } : {})
 						}
-				  }
+					}
 				: {}),
 			...(filters.search
 				? {
@@ -461,7 +480,7 @@ class ChatsService {
 								{ whatsappId: { contains: filters.search } }
 							]
 						}
-				  }
+					}
 				: {})
 		};
 

@@ -31,6 +31,7 @@ import internalWhatsappMessageQueueService, {
 } from "./internal-whatsapp-message-queue.service";
 import parametersService from "./parameters.service";
 import messagePresentationService from "./message-presentation.service";
+import chatUserPreferencesService from "./chat-user-preferences.service";
 import { messageMentionPatch, operatorMentionEntities } from "../utils/message-mention-persistence";
 import { mentionMetadataToPrisma } from "../utils/message-mention-metadata";
 
@@ -283,6 +284,7 @@ class InternalChatsService {
 		});
 
 		const chatIds = result.map((chat) => chat.id);
+		const preferences = await chatUserPreferencesService.getMap(session, chatIds, "internal");
 		const messages: InternalMessage[] =
 			includeMessages && chatIds.length
 				? await prismaService.internalMessage.findMany({
@@ -316,7 +318,11 @@ class InternalChatsService {
 			const summaryMessages = ids.size
 				? await prismaService.internalMessage.findMany({ where: { id: { in: [...ids] } } })
 				: [];
-			const presentedSummaries = await messagePresentationService.hydrate(session.instance, summaryMessages, "internal");
+			const presentedSummaries = await messagePresentationService.hydrate(
+				session.instance,
+				summaryMessages,
+				"internal"
+			);
 			const lastIds = new Set(lastGroups.map((group) => group._max.id));
 			const inboundIds = new Set(latestInboundGroups.map((group) => group._max.id));
 			for (const message of presentedSummaries) {
@@ -326,16 +332,26 @@ class InternalChatsService {
 		}
 
 		const chats = result.map((chat) => {
-			if (includeMessages) return chat;
+			const preference = preferences.get(`internal:${chat.id}`);
+			if (includeMessages) {
+				return {
+					...chat,
+					isPinned: preference?.isPinned ?? false,
+					...(preference?.isMarkedUnread ? { isUnread: true } : {})
+				};
+			}
 			const participant = chat.participants.find((item) => item.userId === session.userId);
 			const latestInbound = latestInboundByChat.get(chat.id);
 			const lastReadAt = participant?.lastReadAt?.getTime() ?? 0;
-			const isUnread = !!latestInbound && Number(latestInbound.timestamp) > lastReadAt;
+			const isUnread =
+				(Boolean(latestInbound) && Number(latestInbound!.timestamp) > lastReadAt) ||
+				Boolean(preference?.isMarkedUnread);
 
 			return {
 				...chat,
 				lastMessage: lastMessageByChat.get(chat.id) || null,
-				isUnread
+				isUnread,
+				isPinned: preference?.isPinned ?? false
 			};
 		}) as unknown as Array<
 			InternalChat & {
@@ -781,7 +797,11 @@ class InternalChatsService {
 				`Emitindo evento de mensagem interna via socket para a sala: ${session.instance}:internal-chat:${data.chatId}`
 			);
 			const room = `${session.instance}:internal-chat:${data.chatId}` as SocketServerInternalChatRoom;
-			const [presentedMessage] = await messagePresentationService.hydrate(session.instance, [savedMsg], "internal");
+			const [presentedMessage] = await messagePresentationService.hydrate(
+				session.instance,
+				[savedMsg],
+				"internal"
+			);
 			await socketService.emit(SocketEventType.InternalMessage, room, {
 				message: presentedMessage!
 			});
@@ -910,11 +930,24 @@ class InternalChatsService {
 		}
 	}
 
-	public async updateMessage(id: number, data: Omit<Partial<InternalMessage>, "mentionEntities"> & { mentionMetadata?: unknown; mentionEntities?: unknown }) {
-		const previous = data.body !== undefined
-			? await prismaService.internalMessage.findUnique({ where: { id }, select: { body: true } })
-			: null;
-		const { mentionEntities: _entities, mentionMetadata: _metadata, reactions: _reactions, reactionsUpdatedAt: _reactionAt, ...persistable } = data;
+	public async updateMessage(
+		id: number,
+		data: Omit<Partial<InternalMessage>, "mentionEntities"> & {
+			mentionMetadata?: unknown;
+			mentionEntities?: unknown;
+		}
+	) {
+		const previous =
+			data.body !== undefined
+				? await prismaService.internalMessage.findUnique({ where: { id }, select: { body: true } })
+				: null;
+		const {
+			mentionEntities: _entities,
+			mentionMetadata: _metadata,
+			reactions: _reactions,
+			reactionsUpdatedAt: _reactionAt,
+			...persistable
+		} = data;
 		return await prismaService.internalMessage.update({
 			where: { id },
 			data: { ...persistable, ...messageMentionPatch(data, previous ?? undefined) }
@@ -1032,14 +1065,20 @@ class InternalChatsService {
 			// Emite evento via socket para notificar os participantes do chat
 			if (updatedMsg.internalChatId) {
 				const room: SocketServerInternalChatRoom = `${session.instance}:internal-chat:${updatedMsg.internalChatId}`;
-				const [presentedMessage] = await messagePresentationService.hydrate(session.instance, [updatedMsg], "internal");
+				const [presentedMessage] = await messagePresentationService.hydrate(
+					session.instance,
+					[updatedMsg],
+					"internal"
+				);
 
 				// Notifica sobre a edição da mensagem
 				socketService.emit(SocketEventType.InternalMessageEdit, room, {
 					chatId: updatedMsg.internalChatId,
 					internalMessageId: updatedMsg.id,
 					newText: updatedMsg.body,
-					...(presentedMessage?.mentionEntities !== undefined ? { mentionEntities: presentedMessage.mentionEntities } : {})
+					...(presentedMessage?.mentionEntities !== undefined
+						? { mentionEntities: presentedMessage.mentionEntities }
+						: {})
 				});
 				process.log("Notificação via socket enviada.", room);
 			} else {
@@ -1076,6 +1115,19 @@ class InternalChatsService {
 				}
 			}
 		});
+		await chatUserPreferencesService.markRead(
+			{
+				instance: (
+					await prismaService.internalChat.findUniqueOrThrow({
+						where: { id: chatId },
+						select: { instance: true }
+					})
+				).instance,
+				userId
+			},
+			"internal",
+			chatId
+		);
 	}
 
 	public async forwardWppMessagesToInternal(
@@ -1130,7 +1182,9 @@ class InternalChatsService {
 						from: `user:${session.userId}`,
 						type: originalMsg.type,
 						body: messageBody,
-						mentionMetadata: mentionMetadataToPrisma(originalMsg.mentionMetadata ?? originalMsg.mentionEntities),
+						mentionMetadata: mentionMetadataToPrisma(
+							originalMsg.mentionMetadata ?? originalMsg.mentionEntities
+						),
 						timestamp: Date.now().toString(),
 						status: "RECEIVED",
 						isForwarded: true,
@@ -1153,7 +1207,11 @@ class InternalChatsService {
 					);
 
 					const room: SocketServerInternalChatRoom = `${session.instance}:internal-chat:${chatId}`;
-					const [presentedMessage] = await messagePresentationService.hydrate(session.instance, [savedInternalMsg], "internal");
+					const [presentedMessage] = await messagePresentationService.hydrate(
+						session.instance,
+						[savedInternalMsg],
+						"internal"
+					);
 					await socketService.emit(SocketEventType.InternalMessage, room, {
 						message: presentedMessage!
 					});
@@ -1327,7 +1385,7 @@ class InternalChatsService {
 		groupId: string,
 		msgId: string,
 		newText: string,
-		options: { mentionEntities?: unknown; instance?: string; clientId?: number } = {},
+		options: { mentionEntities?: unknown; instance?: string; clientId?: number } = {}
 	) {
 		const cleanGroupId = groupId.replace(/[/:]/g, "-");
 		const cleanMsgId = msgId.replace(/[/:]/g, "-");
@@ -1343,9 +1401,12 @@ class InternalChatsService {
 				`Recebendo edição de mensagem de grupo WhatsApp. Grupo ID: ${groupId}, Mensagem Stanza ID: ${msgId}`
 			);
 
-			const chat = await prismaService.internalChat.findFirst({ where: {
-				wppGroupId: groupId, ...(options.instance !== undefined ? { instance: options.instance } : {}),
-			} });
+			const chat = await prismaService.internalChat.findFirst({
+				where: {
+					wppGroupId: groupId,
+					...(options.instance !== undefined ? { instance: options.instance } : {})
+				}
+			});
 
 			if (!chat) {
 				process.log(`Chat interno não encontrado para grupo ${groupId}. Ignorando edição.`);
@@ -1355,9 +1416,10 @@ class InternalChatsService {
 
 			const message = await prismaService.internalMessage.findFirst({
 				where: {
-					instance: chat.instance, internalChatId: chat.id,
+					instance: chat.instance,
+					internalChatId: chat.id,
 					...(options.clientId !== undefined ? { clientId: options.clientId } : {}),
-					OR: [{ wwebjsIdStanza: msgId }, { wwebjsId: msgId }],
+					OR: [{ wwebjsIdStanza: msgId }, { wwebjsId: msgId }]
 				}
 			});
 
@@ -1367,17 +1429,24 @@ class InternalChatsService {
 			}
 
 			const updatedMsg = await this.updateMessage(message.id, {
-				body: newText, isEdited: true,
-				...(options.mentionEntities !== undefined ? { mentionEntities: options.mentionEntities } : {}),
+				body: newText,
+				isEdited: true,
+				...(options.mentionEntities !== undefined ? { mentionEntities: options.mentionEntities } : {})
 			});
-			const [presentedMessage] = await messagePresentationService.hydrate(chat.instance, [updatedMsg], "internal");
+			const [presentedMessage] = await messagePresentationService.hydrate(
+				chat.instance,
+				[updatedMsg],
+				"internal"
+			);
 
 			const room: SocketServerInternalChatRoom = `${chat.instance}:internal-chat:${chat.id}`;
 			await socketService.emit(SocketEventType.InternalMessageEdit, room, {
 				chatId: chat.id,
 				internalMessageId: updatedMsg.id,
 				newText: updatedMsg.body,
-				...(presentedMessage?.mentionEntities !== undefined ? { mentionEntities: presentedMessage.mentionEntities } : {})
+				...(presentedMessage?.mentionEntities !== undefined
+					? { mentionEntities: presentedMessage.mentionEntities }
+					: {})
 			});
 
 			process.success(`Edição de mensagem recebida e processada com sucesso`);

@@ -21,13 +21,29 @@ class MessagesController {
 		this.router.get("/api/whatsapp/messages/export", publicBiRateLimit, isAuthenticated, this.exportMessages);
 		this.router.get("/api/whatsapp/messages/:id", this.getMessageById);
 		this.router.patch("/api/whatsapp/messages/mark-as-read", isAuthenticated, this.readContactMessages);
-		this.router.post("/api/whatsapp/:clientId/messages", messageSendTrace, isAuthenticated,
-			(_req, res, next) => { markMessageSendStage(res, "multipart"); next(); },
-			upload.single("file"), this.sendMessage);
-		this.router.get("/api/whatsapp/:clientId/message-attempts/:idempotencyKey", isAuthenticated, this.getSendAttempt);
+		this.router.post(
+			"/api/whatsapp/:clientId/messages",
+			messageSendTrace,
+			isAuthenticated,
+			(_req, res, next) => {
+				markMessageSendStage(res, "multipart");
+				next();
+			},
+			upload.single("file"),
+			this.sendMessage
+		);
+		this.router.get(
+			"/api/whatsapp/:clientId/message-attempts/:idempotencyKey",
+			isAuthenticated,
+			this.getSendAttempt
+		);
 		this.router.post("/api/internal/whatsapp/chats/:chatId/agent-message", onlyLocal, this.createAgentMessage);
 		this.router.post("/api/internal/whatsapp/chats/:chatId/agent-send-message", onlyLocal, this.sendAgentMessage);
-		this.router.post("/api/internal/whatsapp/chats/:chatId/agent-template-message", onlyLocal, this.createAgentTemplateMessage);
+		this.router.post(
+			"/api/internal/whatsapp/chats/:chatId/agent-template-message",
+			onlyLocal,
+			this.createAgentTemplateMessage
+		);
 		this.router.post("/api/whatsapp/:clientId/messages/forward", isAuthenticated, this.forwardMessages.bind(this));
 		this.router.get("/api/whatsapp/messages", publicBiRateLimit, isAuthenticated, this.fetchMessages);
 
@@ -37,8 +53,13 @@ class MessagesController {
 
 	private async sendReaction(req: Request, res: Response) {
 		try {
-			const data = await messageReactionsService.sendWpp(req.session, positiveReactionId(req.params["clientId"]),
-				positiveReactionId(req.params["id"]), req.body?.emoji, (id) => whatsappService.getClient(id));
+			const data = await messageReactionsService.sendWpp(
+				req.session,
+				positiveReactionId(req.params["clientId"]),
+				positiveReactionId(req.params["id"]),
+				req.body?.emoji,
+				(id) => whatsappService.getClient(id)
+			);
 			res.status(200).send({ message: "Reaction confirmed.", data });
 		} catch (error) {
 			if (error instanceof MessageReactionError) {
@@ -114,7 +135,11 @@ class MessagesController {
 			throw new BadRequestError("Contact ID is required!");
 		}
 
-		const updatedData = await messagesService.markContactMessagesAsRead(req.session.instance, contactId);
+		const updatedData = await messagesService.markContactMessagesAsRead(
+			req.session.instance,
+			contactId,
+			req.session.userId
+		);
 
 		res.status(200).send({
 			message: "Messages marked as read successfully!",
@@ -123,7 +148,11 @@ class MessagesController {
 	}
 
 	private async sendMessage(req: Request, res: Response) {
-		const traceId = resolveUploadTraceId(res.locals["messageSendTraceId"], req.body?.traceId, req.headers["x-upload-trace-id"]);
+		const traceId = resolveUploadTraceId(
+			res.locals["messageSendTraceId"],
+			req.body?.traceId,
+			req.headers["x-upload-trace-id"]
+		);
 		const trace = createUploadTraceLogger("whatsapp-service.controller.messages", traceId);
 		let process: ProcessingLogger | undefined;
 		markMessageSendStage(res, "controller");
@@ -134,18 +163,39 @@ class MessagesController {
 			const idempotencyKey = resolveOperatorIdempotencyKey(req.headers["idempotency-key"], data.idempotencyKey);
 			if (idempotencyKey) {
 				process = new ProcessingLogger(req.session.instance, "operator-send-request", idempotencyKey, {
-					clientId, chatId: data.chatId, contactId: data.contactId, userId: req.session.userId,
+					clientId,
+					chatId: data.chatId,
+					contactId: data.contactId,
+					userId: req.session.userId
 				});
-				const result = await operatorSendService.submit(req.session, clientId, to, { ...data, traceId }, idempotencyKey, file,
-					(stage) => { markMessageSendStage(res, stage); process?.log(stage); });
-				const receipt = { messageId: result.message.id, status: result.message.status, created: result.created };
+				const result = await operatorSendService.submit(
+					req.session,
+					clientId,
+					to,
+					{ ...data, traceId },
+					idempotencyKey,
+					file,
+					(stage) => {
+						markMessageSendStage(res, stage);
+						process?.log(stage);
+					}
+				);
+				const receipt = {
+					messageId: result.message.id,
+					status: result.message.status,
+					created: result.created
+				};
 				markMessageSendStage(res, "persisted", receipt);
 				// SUCCESS means the request was persisted, not delivered by the provider.
 				process.success(receipt);
-				res.setHeader("Location", `/api/whatsapp/${clientId}/message-attempts/${encodeURIComponent(idempotencyKey)}`);
+				res.setHeader(
+					"Location",
+					`/api/whatsapp/${clientId}/message-attempts/${encodeURIComponent(idempotencyKey)}`
+				);
 				res.setHeader("Retry-After", "2");
 				res.status(result.created ? 202 : 200).send({
-					message: "Message attempt persisted.", data: messagePresentationService.fromStored(result.message, result.job),
+					message: "Message attempt persisted.",
+					data: messagePresentationService.fromStored(result.message, result.job)
 				});
 				return;
 			}
@@ -156,7 +206,7 @@ class MessagesController {
 				fileId: data.fileId,
 				fileName: file?.originalname,
 				fileSize: file?.size,
-				fileType: file?.mimetype,
+				fileType: file?.mimetype
 			});
 
 			if (file) {
@@ -165,21 +215,21 @@ class MessagesController {
 			data.traceId = traceId;
 
 			// Convert string boolean values to actual booleans
-			if (typeof data.sendAsDocument === 'string') {
-				data.sendAsDocument = data.sendAsDocument === 'true';
+			if (typeof data.sendAsDocument === "string") {
+				data.sendAsDocument = data.sendAsDocument === "true";
 			}
-			if (typeof data.sendAsAudio === 'string') {
-				data.sendAsAudio = data.sendAsAudio === 'true';
+			if (typeof data.sendAsAudio === "string") {
+				data.sendAsAudio = data.sendAsAudio === "true";
 			}
-			if (typeof data.isForwarded === 'string') {
-				data.isForwarded = data.isForwarded === 'true';
+			if (typeof data.isForwarded === "string") {
+				data.isForwarded = data.isForwarded === "true";
 			}
 
 			const message = await whatsappService.sendMessage(req.session, clientId, to, data);
 			trace.info("request.completed", {
 				messageId: message.id,
 				status: message.status,
-				fileId: message.fileId,
+				fileId: message.fileId
 			});
 
 			res.status(201).send({
@@ -191,7 +241,7 @@ class MessagesController {
 			trace.error("request.failed", error, {
 				clientId: req.params["clientId"],
 				to: req.body.to,
-				hasFile: !!req.file,
+				hasFile: !!req.file
 			});
 			const statusCode = (error as { statusCode?: number })?.statusCode;
 			res.status(statusCode === 400 || statusCode === 409 ? statusCode : 500).send({
@@ -204,7 +254,12 @@ class MessagesController {
 	private async getSendAttempt(req: Request, res: Response) {
 		const clientId = Number(req.params["clientId"]);
 		const key = req.params["idempotencyKey"];
-		if (!Number.isSafeInteger(clientId) || clientId <= 0 || typeof key !== "string" || !/^[A-Za-z0-9:_-]{8,128}$/.test(key)) {
+		if (
+			!Number.isSafeInteger(clientId) ||
+			clientId <= 0 ||
+			typeof key !== "string" ||
+			!/^[A-Za-z0-9:_-]{8,128}$/.test(key)
+		) {
 			res.status(400).send({ message: "Invalid send attempt." });
 			return;
 		}
@@ -213,7 +268,10 @@ class MessagesController {
 			res.status(404).send({ message: "Send attempt not found." });
 			return;
 		}
-		res.status(200).send({ message: "Send attempt retrieved.", data: messagePresentationService.fromStored(message) });
+		res.status(200).send({
+			message: "Send attempt retrieved.",
+			data: messagePresentationService.fromStored(message)
+		});
 	}
 
 	private async createAgentMessage(req: Request, res: Response) {
@@ -236,7 +294,7 @@ class MessagesController {
 
 		res.status(201).send({
 			message: "Message created successfully!",
-			data: message,
+			data: message
 		});
 	}
 
@@ -260,12 +318,12 @@ class MessagesController {
 			chatId,
 			text.trim(),
 			Number(agentId),
-			typeof clientId === "number" && Number.isInteger(clientId) && clientId > 0 ? clientId : null,
+			typeof clientId === "number" && Number.isInteger(clientId) && clientId > 0 ? clientId : null
 		);
 
 		res.status(201).send({
 			message: "Message sent successfully!",
-			data: message,
+			data: message
 		});
 	}
 
@@ -289,12 +347,12 @@ class MessagesController {
 			chatId,
 			Number(agentId),
 			templateName.trim(),
-			typeof templateLanguage === "string" && templateLanguage.trim() ? templateLanguage.trim() : null,
+			typeof templateLanguage === "string" && templateLanguage.trim() ? templateLanguage.trim() : null
 		);
 
 		res.status(201).send({
 			message: "Message created successfully!",
-			data: message,
+			data: message
 		});
 	}
 	private async forwardMessages(req: Request, res: Response) {
@@ -338,7 +396,7 @@ class MessagesController {
 		const { minDate, maxDate, userId, chatId, contactId } = req.query;
 
 		const hasDateFilters = minDate && maxDate;
-		const hasChatFilter = chatId|| contactId;
+		const hasChatFilter = chatId || contactId;
 
 		if (!hasDateFilters && !hasChatFilter) {
 			throw new BadRequestError("Min and Max date are required for multi-chats report!");

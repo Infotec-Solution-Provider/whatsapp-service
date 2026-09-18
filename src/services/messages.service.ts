@@ -13,6 +13,7 @@ import { safeEncode } from "../utils/safe-encode";
 import { withPublicMessageDirection } from "../utils/public-message-direction";
 import { messageMentionPatch, operatorMentionEntities } from "../utils/message-mention-persistence";
 import messageMentionsService from "./message-mentions.service";
+import chatUserPreferencesService from "./chat-user-preferences.service";
 
 interface FetchMessagesFilter {
 	minDate?: string;
@@ -204,12 +205,18 @@ class MessagesService {
 		}
 	}
 
-	public async updateMessage(id: number, data: Partial<WppMessage> & { mentionEntities?: unknown }, strictLocalSync = false) {
+	public async updateMessage(
+		id: number,
+		data: Partial<WppMessage> & { mentionEntities?: unknown },
+		strictLocalSync = false
+	) {
 		const { contactId, chatId, clientId, ...rest } = this.getPersistableMessageFields(
 			data as Record<string, unknown>
 		) as Partial<WppMessage>;
-		const previous = data.body !== undefined && data.mentionEntities === undefined && data.mentionMetadata === undefined
-			? await prismaService.wppMessage.findUnique({ where: { id }, select: { body: true } }) : undefined;
+		const previous =
+			data.body !== undefined && data.mentionEntities === undefined && data.mentionMetadata === undefined
+				? await prismaService.wppMessage.findUnique({ where: { id }, select: { body: true } })
+				: undefined;
 		const updateData: any = { ...rest, ...messageMentionPatch(data, previous ?? undefined) };
 
 		if (typeof contactId === "number" && contactId > 0) {
@@ -225,14 +232,16 @@ class MessagesService {
 		}
 
 		const message = await prismaService.wppMessage.update({
-			where: { id }, data: updateData, include: { WppChat: true },
+			where: { id },
+			data: updateData,
+			include: { WppChat: true }
 		});
 
 		await this.syncMessageToLocal(message, strictLocalSync);
 		return message;
 	}
 
-	public async markContactMessagesAsRead(instance: string, contactId: number) {
+	public async markContactMessagesAsRead(instance: string, contactId: number, userId?: number) {
 		await prismaService.wppMessage.updateMany({
 			where: {
 				OR: [
@@ -270,7 +279,10 @@ class MessagesService {
 					);
 					return;
 				} catch (retryErr) {
-					console.error("[markContactMessagesAsRead] Erro ao sincronizar mensagens locais após criar tabelas:", retryErr);
+					console.error(
+						"[markContactMessagesAsRead] Erro ao sincronizar mensagens locais após criar tabelas:",
+						retryErr
+					);
 					return;
 				}
 			}
@@ -287,6 +299,7 @@ class MessagesService {
 		});
 
 		if (chat) {
+			if (userId) await chatUserPreferencesService.markRead({ instance, userId }, "wpp", chat.id);
 			const room: SocketServerChatRoom = `${instance}:chat:${chat.id}`;
 			socketService.emit(SocketEventType.WppContactMessagesRead, room, {
 				contactId
@@ -321,12 +334,12 @@ class MessagesService {
 			const chats = await prismaService.wppChat.findMany({
 				where: {
 					instance: session.instance,
-					userId: filters.userId,
+					userId: filters.userId
 				}
 			});
 
 			const contactIds: number[] = [];
-			chats.forEach(chat => {
+			chats.forEach((chat) => {
 				if (chat.contactId) {
 					contactIds.push(chat.contactId);
 				}
@@ -340,8 +353,8 @@ class MessagesService {
 						lte: maxDate
 					},
 					contactId: {
-						in: contactIds,
-					},
+						in: contactIds
+					}
 				},
 				include: {
 					WppContact: true
@@ -354,7 +367,7 @@ class MessagesService {
 			const messages = await prismaService.wppMessage.findMany({
 				where: {
 					instance: session.instance,
-					chatId: filters.chatId,
+					chatId: filters.chatId
 				},
 				include: {
 					WppContact: true
@@ -367,7 +380,7 @@ class MessagesService {
 			const messages = await prismaService.wppMessage.findMany({
 				where: {
 					instance: session.instance,
-					contactId: filters.contactId,
+					contactId: filters.contactId
 				},
 				include: {
 					WppContact: true
@@ -383,7 +396,7 @@ class MessagesService {
 				sentAt: {
 					gte: minDate,
 					lte: maxDate
-				},
+				}
 			},
 			include: {
 				WppContact: true

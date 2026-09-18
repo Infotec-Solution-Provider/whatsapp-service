@@ -107,38 +107,38 @@ model WppContact {
 }
 
 model WppMessage {
-  id               Int              @id @default(autoincrement())
-  instance         String           @map("instance")
-  wwebjsId         String?          @unique @map("wwebjs_id")
-  wwebjsIdStanza   String?          @unique @map("wwebjs_id_stanza")
-  wabaId           String?          @unique @map("waba_id")
-  gupshupId        String?          @unique @map("gupshup_id")
-  gupshupRequestId String?          @map("gupshup_request_id")
+  id               Int                   @id @default(autoincrement())
+  instance         String                @map("instance")
+  wwebjsId         String?               @unique @map("wwebjs_id")
+  wwebjsIdStanza   String?               @unique @map("wwebjs_id_stanza")
+  wabaId           String?               @unique @map("waba_id")
+  gupshupId        String?               @unique @map("gupshup_id")
+  gupshupRequestId String?               @map("gupshup_request_id")
   from             String
   to               String
   type             String
-  quotedId         Int?             @map("quoted_id")
-  chatId           Int?             @map("chat_id")
-  contactId        Int?             @map("contact_id")
-  isForwarded      Boolean          @default(false) @map("is_forwarded")
-  isEdited         Boolean          @default(false) @map("is_edited")
-  body             String           @db.Text
-  mentionMetadata  Json?            @map("mention_metadata")
+  quotedId         Int?                  @map("quoted_id")
+  chatId           Int?                  @map("chat_id")
+  contactId        Int?                  @map("contact_id")
+  isForwarded      Boolean               @default(false) @map("is_forwarded")
+  isEdited         Boolean               @default(false) @map("is_edited")
+  body             String                @db.Text
+  mentionMetadata  Json?                 @map("mention_metadata")
   timestamp        String
-  statusTimestamp  String?          @map("status_timestamp")
-  sentAt           DateTime         @map("sent_at")
+  statusTimestamp  String?               @map("status_timestamp")
+  sentAt           DateTime              @map("sent_at")
   status           WppMessageStatus
-  fileId           Int?             @map("file_id")
-  fileName         String?          @map("file_name")
-  fileType         String?          @map("file_type")
-  fileSize         String?          @map("file_size")
-  userId           Int?             @map("user_id")
-  agentId          Int?             @map("agent_id")
-  billingCategory  String?          @map("billing_category")
-  clientId         Int?             @map("client_id")
-  WppChat          WppChat?         @relation(fields: [chatId], references: [id])
-  WppContact       WppContact?      @relation(fields: [contactId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  client           WppClient?       @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  fileId           Int?                  @map("file_id")
+  fileName         String?               @map("file_name")
+  fileType         String?               @map("file_type")
+  fileSize         String?               @map("file_size")
+  userId           Int?                  @map("user_id")
+  agentId          Int?                  @map("agent_id")
+  billingCategory  String?               @map("billing_category")
+  clientId         Int?                  @map("client_id")
+  WppChat          WppChat?              @relation(fields: [chatId], references: [id])
+  WppContact       WppContact?           @relation(fields: [contactId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  client           WppClient?            @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   operatorOutbound OperatorOutboundSend?
 
   @@index([from, to, chatId])
@@ -269,6 +269,22 @@ model InternalChatMember {
 
   @@id([internalChatId, userId])
   @@map("internal_chat_members")
+}
+
+model ChatUserPreference {
+  id             Int      @id @default(autoincrement())
+  instance       String
+  userId         Int      @map("user_id")
+  chatType       String   @map("chat_type")
+  chatId         Int      @map("chat_id")
+  isPinned       Boolean  @default(false) @map("is_pinned")
+  isMarkedUnread Boolean  @default(false) @map("is_marked_unread")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([instance, userId, chatType, chatId])
+  @@index([instance, userId, isPinned], map: "chat_user_preferences_pin_idx")
+  @@map("chat_user_preferences")
 }
 
 model InternalMention {
@@ -957,21 +973,21 @@ model ProcessLog {
 }
 
 model FrontendPerformanceSession {
-  id                  Int                         @id @default(autoincrement())
-  instance            String                      @db.VarChar(191)
-  userId              Int                         @map("user_id")
-  sessionId           String                      @map("session_id") @db.VarChar(36)
-  buildId             String                      @map("build_id") @db.VarChar(64)
-  deviceClass         String                      @map("device_class") @db.VarChar(16)
-  browser             String                      @db.VarChar(64)
-  hardwareConcurrency Int?                        @map("hardware_concurrency")
-  deviceMemoryGb      Float?                      @map("device_memory_gb")
-  effectiveType       String?                     @map("effective_type") @db.VarChar(16)
-  viewportWidth       Int                         @map("viewport_width")
-  viewportHeight      Int                         @map("viewport_height")
-  startedAt           DateTime                    @map("started_at")
-  lastSeenAt          DateTime                    @map("last_seen_at")
-  createdAt           DateTime                    @default(now()) @map("created_at")
+  id                  Int                               @id @default(autoincrement())
+  instance            String                            @db.VarChar(191)
+  userId              Int                               @map("user_id")
+  sessionId           String                            @map("session_id") @db.VarChar(36)
+  buildId             String                            @map("build_id") @db.VarChar(64)
+  deviceClass         String                            @map("device_class") @db.VarChar(16)
+  browser             String                            @db.VarChar(64)
+  hardwareConcurrency Int?                              @map("hardware_concurrency")
+  deviceMemoryGb      Float?                            @map("device_memory_gb")
+  effectiveType       String?                           @map("effective_type") @db.VarChar(16)
+  viewportWidth       Int                               @map("viewport_width")
+  viewportHeight      Int                               @map("viewport_height")
+  startedAt           DateTime                          @map("started_at")
+  lastSeenAt          DateTime                          @map("last_seen_at")
+  createdAt           DateTime                          @default(now()) @map("created_at")
   samples             FrontendPerformanceSample[]
   batchReceipts       FrontendPerformanceBatchReceipt[]
 
@@ -999,29 +1015,29 @@ enum OperatorOutboundDeliveryMode {
 // Idempotency records are retained without automatic deletion. Archival must
 // preserve the unique scope/key tombstone; deleting rows would permit resends.
 model OperatorOutboundSend {
-  id               String                       @id @default(uuid()) @db.VarChar(191)
-  instance         String                       @db.VarChar(191)
-  userId           Int                          @map("user_id")
-  clientId         Int                          @map("client_id")
-  idempotencyKey   String                       @map("idempotency_key") @db.VarChar(191)
-  payloadHash      String                       @map("payload_hash") @db.Char(64)
-  payload          Json
-  messageId        Int                          @unique @map("message_id")
-  deliveryMode     OperatorOutboundDeliveryMode @map("delivery_mode")
-  status           OperatorOutboundSendStatus   @default(PENDING)
-  remoteJobId      String?                      @map("remote_job_id") @db.VarChar(191)
-  providerOutcome  Json?                        @map("provider_outcome")
-  notificationPending Boolean                  @default(false) @map("notification_pending")
-  attemptStartedAt DateTime?                    @map("attempt_started_at")
-  attemptCount     Int                          @default(0) @map("attempt_count")
-  nextAttemptAt    DateTime                     @default(now()) @map("next_attempt_at")
-  lockedBy         String?                      @map("locked_by") @db.VarChar(191)
-  lockedUntil      DateTime?                    @map("locked_until")
-  error            String?                      @db.Text
-  createdAt        DateTime                     @default(now()) @map("created_at")
-  updatedAt        DateTime                     @updatedAt @map("updated_at")
-  completedAt      DateTime?                    @map("completed_at")
-  message          WppMessage                   @relation(fields: [messageId], references: [id], onDelete: Restrict)
+  id                  String                       @id @default(uuid()) @db.VarChar(191)
+  instance            String                       @db.VarChar(191)
+  userId              Int                          @map("user_id")
+  clientId            Int                          @map("client_id")
+  idempotencyKey      String                       @map("idempotency_key") @db.VarChar(191)
+  payloadHash         String                       @map("payload_hash") @db.Char(64)
+  payload             Json
+  messageId           Int                          @unique @map("message_id")
+  deliveryMode        OperatorOutboundDeliveryMode @map("delivery_mode")
+  status              OperatorOutboundSendStatus   @default(PENDING)
+  remoteJobId         String?                      @map("remote_job_id") @db.VarChar(191)
+  providerOutcome     Json?                        @map("provider_outcome")
+  notificationPending Boolean                      @default(false) @map("notification_pending")
+  attemptStartedAt    DateTime?                    @map("attempt_started_at")
+  attemptCount        Int                          @default(0) @map("attempt_count")
+  nextAttemptAt       DateTime                     @default(now()) @map("next_attempt_at")
+  lockedBy            String?                      @map("locked_by") @db.VarChar(191)
+  lockedUntil         DateTime?                    @map("locked_until")
+  error               String?                      @db.Text
+  createdAt           DateTime                     @default(now()) @map("created_at")
+  updatedAt           DateTime                     @updatedAt @map("updated_at")
+  completedAt         DateTime?                    @map("completed_at")
+  message             WppMessage                   @relation(fields: [messageId], references: [id], onDelete: Restrict)
 
   @@unique([instance, userId, idempotencyKey], map: "operator_outbound_scope_key")
   @@index([status, nextAttemptAt])
@@ -1034,45 +1050,45 @@ model OperatorOutboundSend {
 // preserves events arriving before their target and supports both chat domains.
 // Empty emoji values are retained tombstones; deleting them can resurrect old events.
 model MessageReaction {
-  id              String   @id @default(uuid()) @db.VarChar(191)
-  instance        String   @db.VarChar(191)
-  clientId        Int      @map("client_id")
-  targetMessageId String   @map("target_message_id") @db.VarChar(255)
-  actorId         String   @map("actor_id") @db.VarChar(191)
-  fromMe          Boolean  @map("from_me")
-  emoji           String   @db.VarChar(64)
-  reactedAt       DateTime @map("reacted_at") @db.DateTime(3)
-  receivedAt      DateTime @default(now()) @map("received_at") @db.DateTime(3)
-  sourceEventId   String?  @map("source_event_id") @db.VarChar(191)
-  internalUserId  Int?     @map("internal_user_id")
-  internalUserName String? @map("internal_user_name") @db.VarChar(191)
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id               String   @id @default(uuid()) @db.VarChar(191)
+  instance         String   @db.VarChar(191)
+  clientId         Int      @map("client_id")
+  targetMessageId  String   @map("target_message_id") @db.VarChar(255)
+  actorId          String   @map("actor_id") @db.VarChar(191)
+  fromMe           Boolean  @map("from_me")
+  emoji            String   @db.VarChar(64)
+  reactedAt        DateTime @map("reacted_at") @db.DateTime(3)
+  receivedAt       DateTime @default(now()) @map("received_at") @db.DateTime(3)
+  sourceEventId    String?  @map("source_event_id") @db.VarChar(191)
+  internalUserId   Int?     @map("internal_user_id")
+  internalUserName String?  @map("internal_user_name") @db.VarChar(191)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   @@unique([instance, clientId, targetMessageId, actorId], map: "message_reaction_scope_target_actor")
   @@map("message_reactions")
 }
 
 model FrontendPerformanceSample {
-  id         BigInt                     @id @default(autoincrement())
-  sessionId  Int                        @map("session_id")
-  batchId    String                     @map("batch_id") @db.VarChar(64)
-  sampleIndex Int                       @map("sample_index")
-  instance   String                     @db.VarChar(191)
-  name       String                     @db.VarChar(64)
-  value      Float
-  unit       String                     @db.VarChar(16)
-  route      String                     @db.VarChar(255)
-  tags       Json?
-  occurredAt DateTime                   @map("occurred_at")
-  createdAt  DateTime                   @default(now()) @map("created_at")
-  session    FrontendPerformanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id          BigInt                     @id @default(autoincrement())
+  sessionId   Int                        @map("session_id")
+  batchId     String                     @map("batch_id") @db.VarChar(64)
+  sampleIndex Int                        @map("sample_index")
+  instance    String                     @db.VarChar(191)
+  name        String                     @db.VarChar(64)
+  value       Float
+  unit        String                     @db.VarChar(16)
+  route       String                     @db.VarChar(255)
+  tags        Json?
+  occurredAt  DateTime                   @map("occurred_at")
+  createdAt   DateTime                   @default(now()) @map("created_at")
+  session     FrontendPerformanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
+  @@unique([sessionId, batchId, sampleIndex], map: "fpm_session_batch_sample_key")
   @@index([instance, occurredAt], map: "fpm_instance_occurred_idx")
   @@index([instance, name, occurredAt], map: "fpm_instance_name_occurred_idx")
   @@index([sessionId, occurredAt], map: "fpm_session_occurred_idx")
   @@index([occurredAt], map: "fpm_occurred_idx")
-  @@unique([sessionId, batchId, sampleIndex], map: "fpm_session_batch_sample_key")
   @@map("frontend_performance_samples")
 }
 
