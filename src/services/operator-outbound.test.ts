@@ -49,6 +49,7 @@ class IsolatedDatabase {
 	state: State = { messages: [], jobs: [], nextMessageId: 1 };
 	failReceipt = false;
 	failTransactions = false;
+	failJobCreate = false;
 	beforeExpiredReadReturns: (() => Promise<void>) | null = null;
 	private tail = Promise.resolve();
 	constructor(readonly now: () => Date) {}
@@ -93,8 +94,22 @@ class IsolatedDatabase {
 					}
 					return result;
 				},
-				create: (args: Row) => execute((state) => {
+				create: async (args: Row): Promise<Row> => {
+					if (table === "jobs" && args["data"].message?.create) {
+						const nested = async (state: State) => {
+							const snapshot = structuredClone(state);
+							const tx = this.api(snapshot);
+							const { message, ...data } = args["data"];
+							const created = await tx["wppMessage"].create({ data: message.create });
+							const job = await tx["operatorOutboundSend"].create({ ...args, data: { ...data, messageId: created.id } });
+							Object.assign(state, snapshot);
+							return job;
+						};
+						return transactionState ? nested(transactionState) : this.locked(() => nested(this.state));
+					}
+					return execute((state) => {
 					const data = structuredClone(args["data"]);
+					if (table === "jobs" && this.failJobCreate) throw new Error("Job insert failed");
 					if (table === "jobs" && state.jobs.some((job) => job["instance"] === data.instance && job["userId"] === data.userId && job["idempotencyKey"] === data.idempotencyKey)) {
 						throw new Prisma.PrismaClientKnownRequestError("Duplicate scope/key", { code: "P2002", clientVersion: "test" });
 					}
@@ -110,8 +125,9 @@ class IsolatedDatabase {
 						completedAt: null, notificationPending: false, ...data,
 					};
 					state[table].push(row);
-					return structuredClone(row);
-				}),
+					return read(state, row, args);
+					});
+				},
 				updateMany: (args: Row) => execute((state) => {
 					if (this.failReceipt && args["data"]?.providerOutcome) throw new Error("Database unavailable after provider accepted");
 					const rows = state[table].filter((row) => matches(row, args["where"]));
@@ -175,6 +191,31 @@ function fixture(
 
 const tests: Array<[string, () => Promise<void>]> = [];
 const test = (name: string, body: () => Promise<void>) => tests.push([name, body]);
+
+test("enqueue commits message and job without an interactive transaction", async () => {
+	const f = fixture();
+	f.db.failTransactions = true;
+	const result = await f.service.enqueue(input());
+	assert.equal(result.created, true);
+	assert.equal(result.job.messageId, result.message.id);
+	assert.equal(result.message.status, "PENDING");
+	assert.equal(f.db.state.jobs.length, 1);
+	assert.equal(f.db.state.messages.length, 1);
+	assert.equal(f.sends(), 0);
+});
+
+test("a failed nested job insert leaves no orphan message and permits the same key", async () => {
+	const f = fixture();
+	f.db.failJobCreate = true;
+	await assert.rejects(f.service.enqueue(input()), /Job insert failed/);
+	assert.equal(f.db.state.messages.length, 0);
+	assert.equal(f.db.state.jobs.length, 0);
+	assert.equal(f.sends(), 0);
+	f.db.failJobCreate = false;
+	const result = await f.service.enqueue(input());
+	assert.equal(result.created, true);
+	assert.equal(result.job.messageId, result.message.id);
+});
 
 test("concurrent duplicate requests commit one message/job and replay a lost HTTP response", async () => {
 	const f = fixture();

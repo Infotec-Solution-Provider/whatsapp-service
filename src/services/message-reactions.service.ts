@@ -1,11 +1,10 @@
-import type { PrismaClient } from "@prisma/client";
 import { Logger } from "@in.pulse-crm/utils";
 import type { SessionData, SocketServerChatRoom } from "../sdk-local";
 import { SocketEventType } from "../sdk-local";
 import type { MessageReactionEvent } from "../types/remote-client.types";
 import type WhatsappClient from "../whatsapp-client/whatsapp-client";
 import { canonicalReactionTarget, MessageReactionError, reactionActor, reactionEmoji, reactionTimestamp } from "../utils/message-reaction";
-import prismaService from "./prisma.service";
+import prismaService, { type DatabaseClient } from "./prisma.service";
 import messageReactionsRepository, { MessageReactionsRepository } from "./message-reactions.repository";
 import type { MessageReactionSnapshot } from "./message-reactions.types";
 import socketService from "./socket.service";
@@ -23,7 +22,7 @@ export interface MessageReactionUpdate extends MessageReactionSnapshot {
 
 export class MessageReactionsService {
 	constructor(
-		private readonly db: PrismaClient = prismaService,
+		private readonly db: DatabaseClient = prismaService,
 		private readonly repository: MessageReactionsRepository = messageReactionsRepository,
 		private readonly emit: (room: string, data: MessageReactionUpdate) => Promise<unknown> = (room, data) =>
 			socketService.emit(SocketEventType.WppMessageReaction, room as SocketServerChatRoom, data),

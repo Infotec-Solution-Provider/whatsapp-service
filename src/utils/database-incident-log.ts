@@ -47,6 +47,7 @@ export function databaseIncidentDetails(error: unknown): { code: string | null; 
 	const rawMessage = messages.join(" | ");
 	const code = codes.find((value) => /^P(?:1000|1001|1002|1008|1017|2024|2028|2037)$/i.test(value))
 		?? rawMessage.match(/\bP(?:1000|1001|1002|1008|1017|2024|2028|2037)\b/i)?.[0]
+		?? (/Timed out fetching a new connection from the connection pool/i.test(rawMessage) ? "P2024" : null)
 		?? (/Transaction API error:.*Transaction already closed/is.test(rawMessage) ? "P2028" : null)
 		?? null;
 	const message = redact(rawMessage);

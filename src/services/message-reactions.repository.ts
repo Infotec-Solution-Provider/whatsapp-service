@@ -1,5 +1,5 @@
-import { MessageReaction, Prisma, PrismaClient } from "@prisma/client";
-import prismaService from "./prisma.service";
+import { MessageReaction, Prisma } from "@prisma/client";
+import prismaService, { type DatabaseClient } from "./prisma.service";
 import {
 	ApplyMessageReactionInput,
 	ApplyMessageReactionResult,
@@ -13,7 +13,7 @@ import {
 export * from "./message-reactions.types";
 
 export class MessageReactionsRepository {
-	constructor(private readonly db: PrismaClient = prismaService) {}
+	constructor(private readonly db: DatabaseClient = prismaService) {}
 
 	async apply(input: ApplyMessageReactionInput): Promise<ApplyMessageReactionResult> {
 		const actorId = input.fromMe ? "self" : input.actorId;

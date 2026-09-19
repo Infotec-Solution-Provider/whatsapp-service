@@ -39,6 +39,9 @@ async function main(): Promise<void> {
 		const header = JSON.parse((await readFile(firstPath, "utf8")).trim());
 		assert.equal(header.type, "trigger");
 		assert.equal(header.code, "P2028");
+		assert.equal(typeof header.databaseOperations.enabled, "boolean");
+		assert.ok(Array.isArray(header.databaseOperations.operations));
+		assert.ok(Array.isArray(header.databaseOperations.active));
 		assert.equal(header.history.length, 60);
 		assert.equal(header.current.timeSinceLastSampleMs, 52_749);
 		assert.equal(header.history[59].timerDelayMs, 0);

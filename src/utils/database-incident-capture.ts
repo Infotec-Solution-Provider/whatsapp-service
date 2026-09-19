@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, open, readdir, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
+import { databaseOperationMetrics } from "./database-operation-metrics";
 
 const SAMPLE_MS = 5_000;
 const HISTORY_SAMPLES = 60;
@@ -78,6 +79,7 @@ export class DatabaseIncidentCapture {
 				pm2Id: this.options.pm2Id, code: trigger.code, source: trigger.source.slice(0, 120),
 				history: this.history.slice(),
 				current: { memory: process.memoryUsage(), timeSinceLastSampleMs: now - this.lastSample },
+				databaseOperations: databaseOperationMetrics.snapshot(),
 			});
 			const directory = resolve(this.options.directory);
 			await mkdir(directory, { recursive: true, mode: 0o700 });

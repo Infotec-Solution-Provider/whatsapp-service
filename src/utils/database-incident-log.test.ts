@@ -9,6 +9,7 @@ const poolTimeout = databaseIncidentDetails({
 	message: "Timed out fetching a new connection from the connection pool",
 });
 assert.equal(poolTimeout?.code, "P2024");
+assert.equal(databaseIncidentDetails({ message: "Timed out fetching a new connection from the connection pool. Current connection pool timeout: 10" })?.code, "P2024");
 assert.match(poolTimeout?.message ?? "", /connection pool/);
 assert.equal(databaseIncidentDetails(new Error("invalid request payload")), null);
 assert.equal(databaseIncidentDetails({

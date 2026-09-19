@@ -1,5 +1,5 @@
-import { Prisma, PrismaClient, WppMessage } from "@prisma/client";
-import prismaService from "./prisma.service";
+import { Prisma, WppMessage } from "@prisma/client";
+import prismaService, { type DatabaseClient } from "./prisma.service";
 import {
 	assertOperatorOutboundReplay,
 	OperatorOutboundDeliveryResult,
@@ -29,7 +29,7 @@ export function operatorOutboundProviderFields(result: Partial<WppMessage> | und
 }
 
 export default class PrismaOperatorOutboundRepository implements OperatorOutboundRepository {
-	constructor(private readonly db: PrismaClient = prismaService) {}
+	constructor(private readonly db: DatabaseClient = prismaService) {}
 
 	async lookup(scope: OperatorOutboundScope, key: string) {
 		const item = await this.db.operatorOutboundSend.findUnique({
@@ -48,19 +48,21 @@ export default class PrismaOperatorOutboundRepository implements OperatorOutboun
 			return { ...existing, created: false };
 		}
 		try {
-			return await this.db.$transaction(async (tx) => {
-				const message = await tx.wppMessage.create({
-					data: { ...input.message, instance: input.instance, userId: input.userId, clientId: input.clientId, status: "PENDING" },
-				});
-				const job = await tx.operatorOutboundSend.create({
-					data: {
-						instance: input.instance, userId: input.userId, clientId: input.clientId,
-						idempotencyKey: input.idempotencyKey, payloadHash: input.payloadHash,
-						payload: input.payload, messageId: message.id, deliveryMode: input.deliveryMode,
-					},
-				});
-				return { message, job, created: true };
+			// A nested write commits message + job atomically without an interactive
+			// transaction's callback/timeout between the two dependent inserts.
+			const { message, ...job } = await this.db.operatorOutboundSend.create({
+				data: {
+					instance: input.instance, userId: input.userId, clientId: input.clientId,
+					idempotencyKey: input.idempotencyKey, payloadHash: input.payloadHash,
+					payload: input.payload, deliveryMode: input.deliveryMode,
+					message: { create: {
+						...input.message, instance: input.instance, userId: input.userId,
+						clientId: input.clientId, status: "PENDING",
+					} },
+				},
+				include: { message: true },
 			});
+			return { message, job, created: true };
 		} catch (error) {
 			if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
 			// The losing transaction rolled back its message too; replay the winner.

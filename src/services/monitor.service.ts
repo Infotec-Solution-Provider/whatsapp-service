@@ -7,7 +7,6 @@ import instancesService from "./instances.service";
 import prismaService from "./prisma.service";
 import { safeDecode } from "../utils/safe-encode";
 import parametersService from "./parameters.service";
-import { Logger } from "@in.pulse-crm/utils";
 
 interface MonitorSearchInput {
 	page?: number;

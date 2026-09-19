@@ -8,7 +8,7 @@ import {
 	User,
 	WppMessageEventData
 } from "../sdk-local";
-import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import {
 	AutomaticResponseRule,
 	AutomaticResponseSchedule,

@@ -1,6 +1,5 @@
-import type { PrismaClient } from "@prisma/client";
 import { Logger } from "@in.pulse-crm/utils";
-import prismaService from "./prisma.service";
+import prismaService, { type DatabaseClient } from "./prisma.service";
 import {
 	MentionEntity,
 	mentionEntityIdentifiers,
@@ -44,7 +43,7 @@ function chunks<T>(values: T[]): T[][] {
 }
 
 export class MessageMentionsService {
-	constructor(private readonly db: PrismaClient = prismaService) {}
+	constructor(private readonly db: DatabaseClient = prismaService) {}
 
 	async hydrate<T extends MentionMessage>(instance: string, messages: T[]): Promise<Array<T & { mentionEntities?: MentionEntity[] }>> {
 		const hydrated: Array<T & { mentionEntities?: MentionEntity[] }> = [];
