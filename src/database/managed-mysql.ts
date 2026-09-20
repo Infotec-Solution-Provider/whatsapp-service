@@ -30,6 +30,12 @@ export function databaseErrorCode(error: unknown): string {
 		"Native Unicode unavailable; legacy profile needs validation": "TENANT_NATIVE_UNICODE_UNAVAILABLE",
 		"Tenant Unicode round-trip mismatch": "TENANT_TEXT_ROUND_TRIP_FAILED",
 		"Unknown text storage profile": "TENANT_TEXT_PROFILE_INVALID",
+		"Registry configuration required": "TENANT_CONNECTION_CONFIG_MISSING",
+		"Tenant destination not found": "TENANT_DESTINATION_NOT_FOUND",
+		"Tenant destination is ambiguous": "TENANT_DESTINATION_AMBIGUOUS",
+		"Tenant required; implemented phases: inspect, probe": "TENANT_ARGUMENTS_INVALID",
+		"Unknown argument": "TENANT_ARGUMENTS_INVALID",
+		"Invalid tenant connection timeout": "TENANT_CONNECT_TIMEOUT_INVALID",
 	};
 	if (Object.prototype.hasOwnProperty.call(known, message)) return known[message]!;
 	if (/^Invalid PROCESS_LOG_[A-Z_]+$/.test(message)) return "LOG_CONFIG_INVALID";
