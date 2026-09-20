@@ -8,6 +8,7 @@ import messagesService from "./messages.service";
 import prismaService from "./prisma.service";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import functionalHealthProbeRegistry from "./functional-health-probe-registry.service";
+import { isFunctionalHealthStatus } from "../utils/functional-health-status";
 
 interface ValidateEntryResultStatus {
 	type: "status";
@@ -163,6 +164,12 @@ class WABAService {
 				case "status":
 					logger.processName += "/status";
 					logger.log("Processando status WABA");
+					if (isFunctionalHealthStatus(client.id, validated.data.biz_opaque_callback_data)) {
+						const reason = "Webhook WABA de status de health-check ignorado";
+						logger.log(reason, { messageId: validated.data.id, status: validated.data.status, errors: validated.data.errors });
+						logger.success(reason);
+						return { ignored: true, reason };
+					}
 					const status = WABAMessageParser.parseStatus(validated.data);
 					await messagesDistributionService.processMessageStatus("waba", validated.data.id, status, {
 						statusTimestamp: validated.data.timestamp,

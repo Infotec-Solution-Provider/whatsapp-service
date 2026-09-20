@@ -29,6 +29,7 @@
 		"test:message-send-trace": "ts-node --files src/middlewares/message-send-trace.test.ts",
 		"test:contact-registration": "ts-node src/services/contact-registration.test.ts",
 		"test:functional-health": "ts-node src/services/wwebjs-health-check.service.test.ts && ts-node src/services/remote-session-stability.test.ts",
+		"test:waba-health-status": "ts-node src/services/waba-health-status.test.ts && ts-node src/whatsapp-client/waba-whatsapp-client.test.ts",
 		"test:remote-inbound": "ts-node src/services/remote-inbound-event-inbox.test.ts",
 		"test:internal-message-status": "ts-node src/services/internal-message-status.test.ts",
 		"test:legacy-message-encoding": "ts-node src/services/messages-local-encoding.test.ts",

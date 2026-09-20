@@ -26,6 +26,8 @@ export interface SendFileOptions extends BaseSendMessageOptions {
 
 export interface SendTextOptions extends BaseSendMessageOptions {
 	text: string;
+	/** Internal WABA correlation data echoed in status webhooks. */
+	wabaCallbackData?: string;
 }
 
 export type SendMessageOptions = SendTextOptions | SendFileOptions;

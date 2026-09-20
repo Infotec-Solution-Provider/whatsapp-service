@@ -522,7 +522,7 @@ model Notification {
   id          Int              @id @default(autoincrement())
   instance    String           @map("instance")
   title       String
-  description String
+  description String           @db.Text
   chatId      Int?             @map("chat_id")
   userId      Int?             @map("user_id") // 👈 Aqui é só ID, sem relação
   type        NotificationType

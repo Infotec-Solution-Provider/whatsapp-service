@@ -148,4 +148,6 @@ O CLI de tenants não oferece prepare/copy/cutover de dados de negócio ainda. R
 
 ## Validação local
 
+Diagnóstico de falhas de gravação: versões iniciais agrupavam erros controlados sob DATABASE_OPERATION_FAILED. A atualização identifica LOG_STORE_NOT_ACTIVE, DATABASE_ACQUIRE_TIMEOUT, DATABASE_QUERY_TIMEOUT, erros de configuração e códigos Prisma, incluindo storage/stage/pending no evento, sem imprimir URL/SQL/payload. Os contadores saved/failed/rejected são acumulados por processo; failed não representa contagem de mensagens WhatsApp perdidas. Para começar o diagnóstico, consultar no destino `SELECT DATABASE() AS banco, id, schema_version, state FROM process_log_store WHERE id = 1;` e conferir o modo efetivo de armazenamento do processo. Não alterar o marcador manualmente ou aumentar pools somente pelo contador de falhas.
+
 `npm run test:log-storage` e TypeScript. Testes reais opt-in: `RUN_MIGRATION_MYSQL_TESTS=true npm run test:log-storage:mysql`, com MySQL descartáveis em 127.0.0.1:13318 (8.x) e 127.0.0.1:13355 (5.5), root sem senha somente nesses containers locais. O teste cria bancos com prefixo migration_test e remove apenas esses bancos. Não apontar os testes para produção.

@@ -35,6 +35,7 @@ export type InteractiveMessageType = "button" | "list" | "product" | "product_li
 
 export interface WABAMessageStatusData {
 	id: string;
+	biz_opaque_callback_data?: string;
 	status: MessageStatus;
 	timestamp: string;
 	recipient_id: string;

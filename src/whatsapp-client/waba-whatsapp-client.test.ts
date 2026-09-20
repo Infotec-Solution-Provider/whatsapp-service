@@ -70,7 +70,10 @@ async function main() {
 		const text = await client.sendMessage({ to: options.to, text: "hello" });
 		assert.equal(text.wabaId, "wamid.text");
 		assert.equal(bodies[0].type, "text");
+		assert.equal("biz_opaque_callback_data" in bodies[0], false, "ordinary messages must remain unmarked");
 		assert.equal(uploads.length, 0);
+		await client.sendMessage({ to: options.to, text: "HEALTHPROBE:test", wabaCallbackData: "probe-callback" });
+		assert.equal(bodies[1].biz_opaque_callback_data, "probe-callback");
 		console.log("waba-whatsapp-client: real client media renewal, caption/type, upload failure, timeout and credential-free logs passed");
 	} finally {
 		for (const [id, cached] of previous) { if (cached) require.cache[id] = cached; else delete require.cache[id]; }

@@ -4,7 +4,33 @@ import mysql, { Pool, PoolConnection, PoolOptions, RowDataPacket } from "mysql2/
 /** Never pass driver errors/URLs to a logger: they can contain SQL and secrets. */
 export function databaseErrorCode(error: unknown): string {
 	const code = (error as { code?: unknown } | null)?.code;
-	return typeof code === "string" && /^(ER_[A-Z_]+|E[A-Z]+|PROTOCOL_[A-Z_]+)$/.test(code) ? code : "DATABASE_OPERATION_FAILED";
+	if (typeof code === "string" && /^(ER_[A-Z0-9_]+|E[A-Z]+|PROTOCOL_[A-Z_]+|P\d{4})$/.test(code)) return code;
+	// Only recognize controlled messages; never print the driver's message or configuration.
+	const message = error instanceof Error ? error.message : "";
+	const known: Record<string, string> = {
+		"Log store not active": "LOG_STORE_NOT_ACTIVE",
+		"Log write verification failed": "LOG_WRITE_VERIFICATION_FAILED",
+		"Log queue full": "LOG_QUEUE_FULL",
+		"Log writer stopped": "LOG_WRITER_STOPPED",
+		"Database acquisition timeout": "DATABASE_ACQUIRE_TIMEOUT",
+		"Database query timeout": "DATABASE_QUERY_TIMEOUT",
+		"Invalid database configuration": "DATABASE_CONFIG_INVALID",
+		"Unsupported database URL option": "DATABASE_URL_OPTION_UNSUPPORTED",
+		"Unsupported database TLS mode": "DATABASE_TLS_MODE_UNSUPPORTED",
+		"URI malformed": "DATABASE_URL_ENCODING_INVALID",
+		"LOGS_DATABASE_URL is required": "LOGS_DATABASE_URL_MISSING",
+		"Invalid PROCESS_LOG_POOL_SIZE": "LOG_POOL_SIZE_INVALID",
+		"Invalid PROCESS_LOG_MAX_PENDING": "LOG_MAX_PENDING_INVALID",
+		"Cleanup requires dedicated log storage": "LOG_CLEANUP_REQUIRES_DEDICATED",
+		"Invalid daily log cleanup schedule": "LOG_CLEANUP_SCHEDULE_INVALID",
+		"Invalid log cleanup timezone": "LOG_CLEANUP_TIMEZONE_INVALID",
+		"No connections available.": "DATABASE_POOL_BUSY",
+		"Queue limit reached.": "DATABASE_POOL_QUEUE_FULL",
+		"Pool is closed.": "DATABASE_POOL_CLOSED",
+	};
+	if (Object.prototype.hasOwnProperty.call(known, message)) return known[message]!;
+	if (/^Invalid PROCESS_LOG_[A-Z_]+$/.test(message)) return "LOG_CONFIG_INVALID";
+	return "DATABASE_OPERATION_FAILED";
 }
 
 export function mysqlOptions(raw: string, connectionLimit = 2): PoolOptions {

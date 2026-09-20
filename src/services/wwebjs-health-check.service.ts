@@ -14,6 +14,7 @@ import functionalHealthProbeRegistry, {
 	FUNCTIONAL_HEALTH_RESPONSE_PREFIX
 } from "./functional-health-probe-registry.service";
 import whatsappService from "./whatsapp.service";
+import { createFunctionalHealthCallbackData } from "../utils/functional-health-status";
 
 const OFFICIAL_CLIENT_ID = Number(
 	process.env["WWEBJS_HEALTH_OFFICIAL_CLIENT_ID"] || process.env["WWEBJS_HEALTH_CHECK_CLIENT_ID"] || "0"
@@ -223,7 +224,11 @@ export class WwebjsHealthCheckService {
 			requesterPhone: primaryInfo.phone,
 			expiresAt: deadline,
 			respond: async (to, id) => {
-				await officialClient.sendMessage({ to, text: `${FUNCTIONAL_HEALTH_RESPONSE_PREFIX}${id}` });
+				await officialClient.sendMessage({
+					to,
+					text: `${FUNCTIONAL_HEALTH_RESPONSE_PREFIX}${id}`,
+					wabaCallbackData: createFunctionalHealthCallbackData(officialClient.id, id)
+				});
 			}
 		});
 

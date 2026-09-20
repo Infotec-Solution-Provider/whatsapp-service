@@ -66,6 +66,9 @@ class WABAWhatsappClient implements WhatsappClient {
 				messaging_product: "whatsapp",
 				to: options.to
 			};
+			if ("wabaCallbackData" in options && options.wabaCallbackData) {
+				reqBody["biz_opaque_callback_data"] = options.wabaCallbackData;
+			}
 
 			let msgType = this.getSendMessageType(options);
 			process.log("Tipo de mensagem determinado: " + msgType);
