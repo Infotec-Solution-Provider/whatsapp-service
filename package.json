@@ -8,6 +8,7 @@
 		"dev": "ts-node-dev --transpile-only --respawn --ignore-watch node_modules --watch .env src/main.ts",
 		"dev:frontend": "node scripts/build-frontend.js --watch",
 		"start": "ts-node src/main.ts",
+		"build": "npx tsc && cp ./.env ./dist/.env",
 		"build:frontend": "node scripts/build-frontend.js",
 		"build:frontend:watch": "node scripts/build-frontend.js --watch",
 		"dev:instances": "cd ../instances-service && npm run dev",
