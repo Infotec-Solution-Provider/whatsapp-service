@@ -21,6 +21,7 @@
 		"sync:local": "ts-node src/scripts/sync-local.ts",
 		"sync:local:instance": "ts-node src/scripts/sync-local.ts",
 		"logs:migrate": "ts-node src/scripts/migrate-logs.ts",
+		"logs:diagnose": "ts-node src/scripts/diagnose-logs.ts",
 		"tenant:migrate": "ts-node src/scripts/tenant-migrate.ts",
 		"test:log-storage": "ts-node src/logs/logs.test.ts",
 		"test:log-storage:mysql": "ts-node src/logs/logs.mysql.test.ts",

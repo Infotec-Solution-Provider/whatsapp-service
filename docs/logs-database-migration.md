@@ -146,6 +146,34 @@ Conexões novas usam UTC e modo estrito de sessão para impedir truncamento sile
 
 O CLI de tenants não oferece prepare/copy/cutover de dados de negócio ainda. Repositórios transacionais, compatibilidade completa dos índices, captura de alterações, roteamento de APIs/jobs e consumidores dos demais serviços permanecem etapas do plano. Não interpretar o sucesso do probe como migração concluída ou elegibilidade de todo o domínio.
 
+## Diagnóstico da gravação no PM2
+
+O comando de migração usa pools de uma conexão e não valida `PROCESS_LOG_POOL_SIZE`/`PROCESS_LOG_MAX_PENDING` nas fases prepare/copy/activate. Por isso, tabelas criadas e marcador ACTIVE comprovam a preparação do destino, mas não comprovam que o writer da aplicação aceita a configuração. O writer aceita pool de 1 a 10 e pendências de 1 a 100; `16`/`256` são rejeitados antes de conectar. Os padrões são `2`/`20`. O parâmetro `connection_limit` da URL não substitui `PROCESS_LOG_POOL_SIZE`.
+
+No startup, o componente `process-logs` imprime `starting` com `diagnosticsVersion:2`, PID, cwd e caminho do módulo; depois `configured` com modo, limites e destino dedicado sem credenciais. Grava e relê **um registro sintético** `process-logs-probe` pelo mesmo writer e publica `startup-probe` com `verified`, ID e código de falha. Esse registro fica sujeito à retenção de sucesso. Não há fallback automático para o banco original.
+
+Os erros vão para stderr com etapa e código, limitados a um evento a cada 30 segundos **por etapa/código**. A cada minuto, stdout recebe `status` com contadores acumulados por processo (`requested`, `saved`, `failed`, `rejected`, `pending`), última gravação e última falha histórica. O probe também conta nesses totais. Se `requested` permanecer em 1 depois do probe, nenhum outro registro chegou ao writer; conferir se os fluxos chegam a `ProcessingLogger.success()` ou `.failed()`. Ausência de `starting` após restart exige conferir build/script e os arquivos de saída/erro do processo.
+
+Diagnóstico avulso, no diretório do serviço:
+
+```bash
+npm run logs:diagnose
+npm run logs:diagnose -- --write-probe
+```
+
+O primeiro apenas consulta identidade, marcador e último ID/data; o segundo também grava e relê **um registro sintético**. Não ativa o destino, copia histórico nem executa limpeza. Falhas retornam código de saída 1 e códigos sanitizados, sem SQL, payload ou credenciais.
+
+Para o PM2 cujo cwd é `/home/inpulse/htdocs/inpulse.infotecrs.inf.br/whatsapp/dist`, depois de compilar/publicar esta versão:
+
+```bash
+cd /home/inpulse/htdocs/inpulse.infotecrs.inf.br/whatsapp/dist
+node scripts/diagnose-logs.js --write-probe
+pm2 restart 13 --update-env
+pm2 logs 13 --lines 100
+```
+
+O diagnóstico avulso usa o ambiente do shell e o `.env` desse cwd; não herda automaticamente o ambiente guardado pelo PM2. Comparar com `configured` e `startup-probe` do próprio processo. Variáveis injetadas no PM2 precisam ser ajustadas no ambiente/ecosystem que o inicia. O script `npm run build` copia o `.env` da raiz para `dist/.env`: manter a configuração correta na origem dessa cópia antes de compilar. Não é necessário repetir a migração para aplicar este diagnóstico.
+
 ## Validação local
 
 Diagnóstico de falhas de gravação: versões iniciais agrupavam erros controlados sob DATABASE_OPERATION_FAILED. A atualização identifica LOG_STORE_NOT_ACTIVE, DATABASE_ACQUIRE_TIMEOUT, DATABASE_QUERY_TIMEOUT, erros de configuração e códigos Prisma, incluindo storage/stage/pending no evento, sem imprimir URL/SQL/payload. Os contadores saved/failed/rejected são acumulados por processo; failed não representa contagem de mensagens WhatsApp perdidas. Para começar o diagnóstico, consultar no destino `SELECT DATABASE() AS banco, id, schema_version, state FROM process_log_store WHERE id = 1;` e conferir o modo efetivo de armazenamento do processo. Não alterar o marcador manualmente ou aumentar pools somente pelo contador de falhas.
