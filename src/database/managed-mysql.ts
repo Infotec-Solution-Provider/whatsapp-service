@@ -27,6 +27,9 @@ export function databaseErrorCode(error: unknown): string {
 		"No connections available.": "DATABASE_POOL_BUSY",
 		"Queue limit reached.": "DATABASE_POOL_QUEUE_FULL",
 		"Pool is closed.": "DATABASE_POOL_CLOSED",
+		"Native Unicode unavailable; legacy profile needs validation": "TENANT_NATIVE_UNICODE_UNAVAILABLE",
+		"Tenant Unicode round-trip mismatch": "TENANT_TEXT_ROUND_TRIP_FAILED",
+		"Unknown text storage profile": "TENANT_TEXT_PROFILE_INVALID",
 	};
 	if (Object.prototype.hasOwnProperty.call(known, message)) return known[message]!;
 	if (/^Invalid PROCESS_LOG_[A-Z_]+$/.test(message)) return "LOG_CONFIG_INVALID";

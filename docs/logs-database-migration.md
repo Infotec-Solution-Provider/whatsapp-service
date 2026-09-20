@@ -136,11 +136,16 @@ O comando bloqueia novas escritas dedicadas com estado PAUSED, compara registros
 ```bash
 npm run tenant:migrate -- --tenant NOME --phase inspect
 npm run tenant:migrate -- --tenant NOME --phase probe
+npm run tenant:migrate -- --tenant karsten --phase probe --text-profile percent-encoded-v1
 ```
 
 Usar `INSTANCES_DATABASE_URL` para resolver `clients_servers` ou `TENANT_DATABASE_URL` para um destino direto. No segundo caso o nome informado é apenas o rótulo do relatório: conferir a identidade retornada. Nenhuma credencial é impressa.
 
-`inspect` lê metadados; `probe` cria uma tabela temporária privada da conexão com dados sintéticos e confere texto e bytes UTF-8, sem alterar tabelas do ERP. Testado em MySQL 5.5.62 com default latin1 e conexão utf8mb4. Não usar o novo codec em campos legados sem identificar seu perfil: vazio/NULL são preservados, escapes inválidos interrompem a conversão e não se aplica decode automaticamente a `%20` nativo.
+`inspect` lê versão e estrutura de todas as tabelas `wpp_*` visíveis ao usuário: colunas, índices, referências (inclusive de tabelas externas para wpp_*) e nomes/eventos de triggers. Não lê payloads nem faz contagens integrais. Ausência de metadados pode refletir permissões; não prova ausência de objetos. A conexão inicial usa `utf8` para permitir a inspeção de servidores anteriores a 5.5.3.
+
+`probe` cria uma tabela temporária privada da conexão com dados sintéticos e confere conteúdo lógico e bytes, sem alterar tabelas do ERP. O perfil padrão `utf8mb4-native-v1` exige suporte detectado e abre uma nova conexão com o codec utf8mb4 do driver. Apenas SET NAMES não basta para mudar o encoder do mysql2. O perfil explícito `percent-encoded-v1` usa encodeURIComponent/decodeURIComponent e armazenamento ASCII em tabela utf8; preserva NULL, vazio, emojis e percentuais literais. Não há fallback silencioso e escapes inválidos interrompem a conversão.
+
+Karsten informou MySQL **5.5.0-m2-community** em KSASGR/crm_sgr e decidiu preservar encodeURIComponent das mensagens. Este servidor é anterior ao utf8mb4 e não está homologado pela validação anterior em 5.5.62. A nova inspeção e ambos os probes foram verificados localmente em 5.5.62, inclusive com pacote de 1 MiB; falta executar o probe codificado no servidor exato. Não aplicar o perfil automaticamente a todos os campos ou decodificar `%20` de texto central nativo. `readyForCutover` continua false mesmo após sucesso do probe.
 
 Conexões novas usam UTC e modo estrito de sessão para impedir truncamento silencioso. Valores são enviados como parâmetros preparados, testados também com NO_BACKSLASH_ESCAPES. Isso não modifica os defaults globais, as tabelas existentes ou os pools legados do instances-service.
 
