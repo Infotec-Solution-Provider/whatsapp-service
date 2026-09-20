@@ -149,11 +149,11 @@ Se ambas estiverem ausentes, o comando falha antes de conectar; versões iniciai
 
 `probe` cria uma tabela temporária privada da conexão com dados sintéticos e confere conteúdo lógico e bytes, sem alterar tabelas do ERP. O perfil padrão `utf8mb4-native-v1` exige suporte detectado e abre uma nova conexão com o codec utf8mb4 do driver. Apenas SET NAMES não basta para mudar o encoder do mysql2. O perfil explícito `percent-encoded-v1` usa encodeURIComponent/decodeURIComponent e armazenamento ASCII em tabela utf8; preserva NULL, vazio, emojis e percentuais literais. Não há fallback silencioso e escapes inválidos interrompem a conversão.
 
-Karsten informou MySQL **5.5.0-m2-community** em KSASGR/crm_sgr e decidiu preservar encodeURIComponent das mensagens. Este servidor é anterior ao utf8mb4 e não está homologado pela validação anterior em 5.5.62. A nova inspeção e ambos os probes foram verificados localmente em 5.5.62, inclusive com pacote de 1 MiB; falta executar o probe codificado no servidor exato. Não aplicar o perfil automaticamente a todos os campos ou decodificar `%20` de texto central nativo. `readyForCutover` continua false mesmo após sucesso do probe.
+Karsten informou MySQL **5.5.0-m2-community** em KSASGR/crm_sgr e decidiu preservar encodeURIComponent das mensagens. O usuário executou o probe codificado no servidor exato com `textRoundTripPassed: true`. Não aplicar o perfil automaticamente a todos os campos ou decodificar `%20` de texto central nativo. `readyForCutover` continua false mesmo após sucesso do probe.
 
 Conexões novas usam UTC e modo estrito de sessão para impedir truncamento silencioso. Valores são enviados como parâmetros preparados, testados também com NO_BACKSLASH_ESCAPES. Isso não modifica os defaults globais, as tabelas existentes ou os pools legados do instances-service.
 
-O CLI de tenants não oferece prepare/copy/cutover de dados de negócio ainda. Repositórios transacionais, compatibilidade completa dos índices, captura de alterações, roteamento de APIs/jobs e consumidores dos demais serviços permanecem etapas do plano. Não interpretar o sucesso do probe como migração concluída ou elegibilidade de todo o domínio.
+O CLI agora oferece `prepare` para a estrutura básica das wpp_* do Karsten, com simulação padrão e aplicação explícita/retomável. Consultar [comandos e limites da preparação](tenant-prepare-karsten.md). Não oferece copy/cutover de dados de negócio ainda. Repositórios transacionais, compatibilidade completa dos índices, captura de alterações, roteamento de APIs/jobs e consumidores dos demais serviços permanecem etapas do plano. Não interpretar o sucesso do probe ou prepare como migração concluída ou elegibilidade de todo o domínio.
 
 ## Diagnóstico da gravação no PM2
 

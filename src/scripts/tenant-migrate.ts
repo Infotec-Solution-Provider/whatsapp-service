@@ -3,11 +3,13 @@ import { createPool, PoolOptions, RowDataPacket } from "mysql2/promise";
 import { acquire, databaseErrorCode, mysqlOptions, sql } from "../database/managed-mysql";
 import { inspectTenantDatabase, probeTenantText } from "../tenant-migration/inspect";
 import { TextProfile } from "../tenant-migration/encoding";
+import { prepareTenant, TenantPrepareError } from "../tenant-migration/prepare";
 
 // Only fixed labels and boolean presence; never print URLs or driver messages/SQL.
 const diagnostic = {
 	component: "tenant-migration", diagnosticsVersion: 2, stage: "arguments",
 	connectTimeoutMs: 10000,
+	step: "",
 	cwd: process.cwd(), module: __filename,
 	configuration: {
 		tenantDatabaseUrlPresent: Boolean(process.env["TENANT_DATABASE_URL"]),
@@ -17,9 +19,22 @@ const diagnostic = {
 
 async function main() {
 	const args = process.argv.slice(2);
-	if (args.includes("--help")) { console.log("tenant:migrate --tenant NAME --phase inspect|probe [--text-profile utf8mb4-native-v1|percent-encoded-v1] [--connect-timeout-ms 10000]\nConnection and acquisition timeout: 1000..30000 ms, default 10000; administrative CLI only. Query deadlines are unchanged.\nUses INSTANCES_DATABASE_URL registry, or TENANT_DATABASE_URL for a directly managed destination. inspect reads metadata of existing wpp_* tables, columns, indexes, foreign keys and triggers visible to the database user, without reading payloads. Inspection starts with utf8 for servers older than 5.5.3. probe writes synthetic data only to a temporary connection-private table; native utf8mb4 is the default and never falls back silently. No data copy or cutover is available yet."); return; }
+	if (args.includes("--help")) { console.log(`tenant:migrate --tenant NAME --phase inspect|probe|prepare
+  [--text-profile utf8mb4-native-v1|percent-encoded-v1] [--connect-timeout-ms 10000]
+prepare requires --text-profile percent-encoded-v1 --expected-hostname HOST --expected-database DB.
+prepare defaults to --dry-run (metadata and planned DDL only).
+Apply with --apply --writers-quiesced after pausing all writers of destination wpp_* including legacy sync.
+  [--ddl-timeout-ms 600000] (1000..3600000, administrative DDL only)
+Connection/acquisition timeout: 1000..30000 ms. Ordinary query deadlines are unchanged.
+Uses INSTANCES_DATABASE_URL registry, or TENANT_DATABASE_URL for a directly managed destination.
+inspect reads wpp_* metadata visible to the database user. Bootstrap uses utf8 for servers older than 5.5.3.
+probe writes synthetic data only to a temporary private table. No silent text-profile fallback.
+prepare validates the legacy core schema, widens contacts.name, allows NULL phone, adds nullable domain/epoch-ms fields,
+and records resumable DDL in wpp_tenant_prepare. It can block table access on old MySQL; use a maintenance window.
+No source database is opened, no existing business row is updated/deleted, and no copy or cutover is available yet.`); return; }
 	let tenant = "", phase = "inspect";
 	let profile: TextProfile = "utf8mb4-native-v1";
+	let expectedHostname = "", expectedDatabase = "", apply = false, dryRun = false, writersQuiesced = false, ddlTimeoutMs = 600000;
 	for (let i = 0; i < args.length; i++) {
 		if (args[i] === "--tenant") tenant = args[++i] || "";
 		else if (args[i] === "--phase") phase = args[++i] || "";
@@ -35,9 +50,27 @@ async function main() {
 				throw new Error("Invalid tenant connection timeout");
 			diagnostic.connectTimeoutMs = value;
 		}
+		else if (args[i] === "--expected-hostname") expectedHostname = args[++i] || "";
+		else if (args[i] === "--expected-database") expectedDatabase = args[++i] || "";
+		else if (args[i] === "--apply") apply = true;
+		else if (args[i] === "--dry-run") dryRun = true;
+		else if (args[i] === "--writers-quiesced") writersQuiesced = true;
+		else if (args[i] === "--ddl-timeout-ms") {
+			const raw = args[++i] || "";
+			ddlTimeoutMs = Number(raw);
+			if (!/^\d+$/.test(raw) || !Number.isSafeInteger(ddlTimeoutMs) || ddlTimeoutMs < 1000 || ddlTimeoutMs > 3600000)
+				throw new TenantPrepareError("TENANT_DDL_TIMEOUT_INVALID");
+		}
 		else throw new Error("Unknown argument");
 	}
-	if (!tenant || tenant.length > 191 || !["inspect", "probe"].includes(phase)) throw new Error("Tenant required; implemented phases: inspect, probe");
+	if (!tenant || tenant.length > 191 || !["inspect", "probe", "prepare"].includes(phase) || (apply && dryRun)
+		|| (phase !== "prepare" && (apply || dryRun || writersQuiesced || expectedHostname || expectedDatabase || args.includes("--ddl-timeout-ms"))))
+		throw new TenantPrepareError("TENANT_ARGUMENTS_INVALID");
+	if (phase === "prepare") {
+		if (profile !== "percent-encoded-v1") throw new TenantPrepareError("TENANT_PREPARE_PROFILE_UNSUPPORTED");
+		if (!expectedHostname || !expectedDatabase) throw new TenantPrepareError("TENANT_PREPARE_IDENTITY_REQUIRED");
+		if (apply && !writersQuiesced) throw new TenantPrepareError("TENANT_PREPARE_QUIESCENCE_REQUIRED");
+	}
 	diagnostic.stage = "configuration";
 	let targetOptions: PoolOptions;
 	// Metadata is inspected through utf8 before attempting a native utf8mb4 probe.
@@ -67,6 +100,17 @@ async function main() {
 		diagnostic.stage = "target-connect";
 		const connection = await acquire(target, diagnostic.connectTimeoutMs);
 		try {
+			if (phase === "prepare") {
+				const result = await prepareTenant(connection, {
+					tenant, profile, expectedHostname, expectedDatabase, apply, writersQuiesced, ddlTimeoutMs,
+					progress: (stage, step) => {
+						diagnostic.stage = stage; diagnostic.step = step ?? "";
+						if (apply) console.error(JSON.stringify({ component: diagnostic.component, stage, step: diagnostic.step }));
+					},
+				});
+				console.log(JSON.stringify({ tenant, phase, connectTimeoutMs: diagnostic.connectTimeoutMs, ...result }, null, 2));
+				return;
+			}
 			diagnostic.stage = "target-inspect";
 			const inspection = await inspectTenantDatabase(connection);
 			if (phase === "probe") {
@@ -96,15 +140,26 @@ async function main() {
 }
 
 if (require.main === module) void main().catch(error => {
-	const code = databaseErrorCode(error);
+	const code = error instanceof TenantPrepareError ? error.diagnosticCode : databaseErrorCode(error);
 	const details: Record<string, string> = {
 		TENANT_CONNECTION_CONFIG_MISSING: "Set TENANT_DATABASE_URL for the tenant destination, or INSTANCES_DATABASE_URL for the registry, in the command's effective environment.",
 		TENANT_DESTINATION_NOT_FOUND: "No matching tenant was found in the configured registry.",
 		TENANT_DESTINATION_AMBIGUOUS: "More than one destination matched the tenant; no destination was selected.",
-		TENANT_ARGUMENTS_INVALID: "Use --tenant NAME --phase inspect|probe; see --help.",
+		TENANT_ARGUMENTS_INVALID: "Use --tenant NAME --phase inspect|probe|prepare; see --help. Do not combine --dry-run with --apply.",
 		TENANT_CONNECT_TIMEOUT_INVALID: "Use --connect-timeout-ms with an integer between 1000 and 30000 (default 10000).",
+		TENANT_DDL_TIMEOUT_INVALID: "Use --ddl-timeout-ms between 1000 and 3600000 (default 600000).",
+		TENANT_PREPARE_PROFILE_UNSUPPORTED: "This prepare version requires explicit --text-profile percent-encoded-v1.",
+		TENANT_PREPARE_IDENTITY_REQUIRED: "Specify --expected-hostname and --expected-database from the reviewed destination inventory.",
+		TENANT_PREPARE_IDENTITY_MISMATCH: "Connected destination differs from the expected identity; no schema change was applied.",
+		TENANT_PREPARE_QUIESCENCE_REQUIRED: "Pause destination wpp_* writers including legacy sync, then pass --apply --writers-quiesced in the maintenance window.",
+		TENANT_PREPARE_BUSY: "Another prepare owns the destination lock; no schema change was applied by this process.",
+		TENANT_PREPARE_SCHEMA_CONFLICT: "Destination metadata differs from the supported contract; review the reported blockers before changing schema.",
+		TENANT_PREPARE_JOURNAL_CONFLICT: "Journal belongs to another tenant, target or manifest, or has an unsupported state. No automatic overwrite.",
+		TENANT_PREPARE_SCHEMA_DRIFT: "A previously prepared structure has changed. Review it before proceeding; no automatic repair.",
+		TENANT_PREPARE_VERIFY_FAILED: "Schema verification failed after DDL. Some changes may already be committed; inspect before resuming.",
 	};
 	console.error(JSON.stringify({ ...diagnostic, error: code,
-		detail: details[code] ?? "Tenant preflight failed at the reported stage; no runtime routing was changed" }));
+		...(error instanceof TenantPrepareError ? { blockers: error.blockers } : {}),
+		detail: details[code] ?? "Tenant operation failed at the reported stage; no runtime routing was changed. For prepare, DDL may already have committed: inspect/dry-run before resuming, never assume rollback." }));
 	process.exitCode = 1;
 });
