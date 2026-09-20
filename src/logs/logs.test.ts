@@ -52,6 +52,10 @@ test("text profiles preserve null, empty, accents, emojis, literal percent escap
 });
 
 test("migration requires explicit offline final verification; URLs never enable multiple statements or downgrade TLS", () => {
+	assert.throws(() => parseLogsMigrationArgs(["--phase", "activate-empty"]));
+	assert.throws(() => parseLogsMigrationArgs(["--phase", "activate-empty", "--writers-quiesced"]));
+	assert.throws(() => parseLogsMigrationArgs(["--phase", "copy", "--discard-copied-history"]));
+	assert.equal(parseLogsMigrationArgs(["--phase", "activate-empty", "--writers-quiesced", "--discard-copied-history"]).phase, "activate-empty");
 	assert.throws(() => parseLogsMigrationArgs(["--phase", "activate"]));
 	assert.equal(parseLogsMigrationArgs(["--phase", "activate", "--source-quiesced"]).quiesced, true);
 	assert.throws(() => parseLogsMigrationArgs(["--phase", "drop"]));

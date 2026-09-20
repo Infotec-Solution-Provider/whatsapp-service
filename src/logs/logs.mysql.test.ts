@@ -8,8 +8,65 @@ import { copyLogStore, lockLogStore, prepareLogStore, rollbackLogStore, verifyLo
 import { LOG_COLUMNS, LOG_FIELDS_SQL, LOGS_DDL } from "./schema";
 import { ProcessLogsService } from "./service";
 import { inspectTenantDatabase, probeTenantText } from "../tenant-migration/inspect";
+import { activateEmptyLogStore } from "./activate-empty";
 
 const enabled = process.env["RUN_MIGRATION_MYSQL_TESTS"] === "true";
+
+test("fresh activation removes only an inactive destination copy, resumes and reserves IDs for rollback", { skip: !enabled }, async () => {
+	const admin = await mysql.createConnection({ host: "127.0.0.1", port: 13318, user: "root" });
+	const suffix = `${process.pid}_${Date.now()}`;
+	const sourceName = `migration_fresh_source_${suffix}`, targetName = `migration_fresh_target_${suffix}`;
+	await admin.query(`CREATE DATABASE \`${sourceName}\``); await admin.query(`CREATE DATABASE \`${targetName}\``);
+	const sourcePool = createManagedPool(`mysql://root@127.0.0.1:13318/${sourceName}`, 1);
+	const targetUrl = `mysql://root@127.0.0.1:13318/${targetName}`;
+	const targetPool = createManagedPool(targetUrl, 2);
+	const source = await acquire(sourcePool), target = await acquire(targetPool);
+	const options = { batchSize: 2, maxBatches: 100, maxBytes: 1048576, full: false };
+	try {
+		await sql(source, LOGS_DDL[1]);
+		for (const id of [10, 20, 100]) await sql(source, `INSERT INTO process_logs (${LOG_FIELDS_SQL}) VALUES (${LOG_COLUMNS.map(() => "?").join(",")})`, [id, "tenant", "old", `p${id}`, "SUCCESS", "2026-09-01 00:00:00", "2026-09-01 00:00:00", 0, "histórico 😀", null, null, null, "[]", "2026-09-01 00:00:00"]);
+		await sql(source, "ALTER TABLE process_logs AUTO_INCREMENT = 2000");
+		const original = await sql<RowDataPacket[]>(source, `SELECT ${LOG_FIELDS_SQL} FROM process_logs ORDER BY id`);
+		await lockLogStore(target); await prepareLogStore(source, target);
+		await copyLogStore(source, target, { ...options, maxBatches: 1 });
+		const limitedUser = `fresh_no_alter_${process.pid}`;
+		await admin.query(`CREATE USER '${limitedUser}'@'%' IDENTIFIED BY 'local-test-only'`);
+		const limitedPool = createManagedPool(`mysql://${limitedUser}:local-test-only@127.0.0.1:13318/${targetName}`, 1);
+		try {
+			await admin.query(`GRANT SELECT, INSERT, UPDATE, DELETE, CREATE ON \`${targetName}\`.* TO '${limitedUser}'@'%'`);
+			const limited = await acquire(limitedPool);
+			try { await assert.rejects(activateEmptyLogStore(source, limited, options), { code: "ER_TABLEACCESS_DENIED_ERROR" }); }
+			finally { limited.destroy(); }
+			assert.equal((await sql<RowDataPacket[]>(target, "SELECT id FROM process_logs")).length, 2);
+			assert.equal((await sql<RowDataPacket[]>(target, "SELECT state FROM process_log_store"))[0]?.["state"], "COPYING");
+		} finally { await limitedPool.end(); await admin.query(`DROP USER '${limitedUser}'@'%'`); }
+		const key = await sql<RowDataPacket[]>(target, "SELECT source_identity FROM process_log_copy_state WHERE id = 1");
+		await sql(target, "UPDATE process_log_copy_state SET source_identity = 'wrong' WHERE id = 1");
+		await assert.rejects(activateEmptyLogStore(source, target, options), /matching/);
+		assert.equal((await sql<RowDataPacket[]>(target, "SELECT id FROM process_logs")).length, 2);
+		await sql(target, "UPDATE process_log_copy_state SET source_identity = ? WHERE id = 1", [key[0]?.["source_identity"]]);
+		const partial = await activateEmptyLogStore(source, target, { ...options, batchSize: 1, maxBatches: 1 });
+		assert.equal(partial.complete, false); assert.equal(partial.deleted, 1);
+		assert.equal((await sql<RowDataPacket[]>(target, "SELECT state FROM process_log_store"))[0]?.["state"], "RESETTING");
+		await assert.rejects(copyLogStore(source, target, options), /copy mode/);
+		const activated = await activateEmptyLogStore(source, target, options);
+		assert.equal(activated.activated, true); assert.equal(activated.nextId, 2000);
+		assert.equal((await sql<RowDataPacket[]>(target, "SELECT id FROM process_logs")).length, 0);
+		assert.deepEqual(await sql<RowDataPacket[]>(source, `SELECT ${LOG_FIELDS_SQL} FROM process_logs ORDER BY id`), original);
+		const runtime = new ProcessLogsService(readLogsConfig({ PROCESS_LOG_STORAGE: "dedicated", LOGS_DATABASE_URL: targetUrl }));
+		const now = new Date();
+		runtime.save({ instance: "tenant", processName: "fresh", processId: "new", status: "SUCCESS", startTime: now, endTime: now, duration: 0, input: "novo 😀", output: "", error: "null", errorMessage: "", logEntries: "[]" });
+		await runtime.stop(); assert.equal(runtime.metrics.saved, 1);
+		const fresh = await sql<RowDataPacket[]>(target, "SELECT id FROM process_logs"); assert.equal(fresh[0]?.["id"], 2000);
+		await assert.rejects(activateEmptyLogStore(source, target, options), /never-activated/);
+		assert.equal((await sql<RowDataPacket[]>(target, "SELECT id FROM process_logs")).length, 1);
+		assert.equal((await rollbackLogStore(source, target, options)).copied, 1);
+		assert.equal((await sql<RowDataPacket[]>(source, "SELECT id FROM process_logs ORDER BY id")).length, 4);
+	} finally {
+		source.destroy(); target.destroy(); await sourcePool.end(); await targetPool.end();
+		await admin.query(`DROP DATABASE \`${sourceName}\``); await admin.query(`DROP DATABASE \`${targetName}\``); await admin.end();
+	}
+});
 
 test("real MySQL: restartable log migration, content verification, gated writes and bounded daily retention", { skip: !enabled }, async () => {
 	const admin = await mysql.createConnection({ host: "127.0.0.1", port: 13318, user: "root" });

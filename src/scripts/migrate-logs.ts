@@ -3,15 +3,17 @@ import { acquire, createManagedPool, databaseErrorCode, sql } from "../database/
 import { assertSeparateDatabases, copyLogStore, CopyOptions, lockLogStore, prepareLogStore, rollbackLogStore, verifyLogStore } from "../logs/migrate";
 import { cleanProcessLogs } from "../logs/cleanup";
 import { readLogsConfig } from "../logs/config";
+import { activateEmptyLogStore } from "../logs/activate-empty";
 
 export function parseLogsMigrationArgs(args: string[]) {
-	let phase = "inspect", quiesced = false, allQuiesced = false;
+	let phase = "inspect", quiesced = false, allQuiesced = false, discardCopiedHistory = false;
 	const limits: CopyOptions = { batchSize: 100, maxBatches: 1000, maxBytes: 4 * 1024 * 1024, full: false };
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
 		if (arg === "--phase") phase = args[++i] || "";
 		else if (arg === "--source-quiesced") quiesced = true;
 		else if (arg === "--writers-quiesced") allQuiesced = true;
+		else if (arg === "--discard-copied-history") discardCopiedHistory = true;
 		else if (arg === "--full") limits.full = true;
 		else if (["--batch-size", "--max-batches", "--max-bytes"].includes(arg || "")) {
 			const raw = args[++i] || "";
@@ -21,15 +23,17 @@ export function parseLogsMigrationArgs(args: string[]) {
 			if (arg === "--max-bytes") limits.maxBytes = Number(raw);
 		} else throw new Error("Unknown logs migration argument");
 	}
-	if (!["inspect", "prepare", "copy", "verify", "activate", "rollback", "cleanup-preview"].includes(phase)) throw new Error("Unknown logs migration phase");
+	if (!["inspect", "prepare", "copy", "verify", "activate", "activate-empty", "rollback", "cleanup-preview"].includes(phase)) throw new Error("Unknown logs migration phase");
 	if (["verify", "activate"].includes(phase) && !quiesced) throw new Error("Stop and drain ALL source log writers, then use --source-quiesced");
 	if (phase === "rollback" && !allQuiesced) throw new Error("Stop and drain BOTH source and dedicated writers, then use --writers-quiesced");
+	if (phase === "activate-empty" && (!allQuiesced || !discardCopiedHistory)) throw new Error("Stop ALL writers; activate-empty requires --writers-quiesced --discard-copied-history and deletes copied destination logs only");
+	if (discardCopiedHistory && phase !== "activate-empty") throw new Error("--discard-copied-history is only valid with activate-empty");
 	return { phase, quiesced, limits };
 }
 
 async function main() {
 	if (process.argv.includes("--help")) {
-		console.log("logs:migrate --phase inspect|prepare|copy|verify|activate|rollback|cleanup-preview [--full] [--source-quiesced] [--writers-quiesced] [--batch-size 100] [--max-batches 1000] [--max-bytes 4194304]\nUses WHATSAPP_DATABASE_URL and LOGS_DATABASE_URL; never deletes source rows. verify/activate require all source writers stopped. rollback requires BOTH writers stopped. Flags are operator attestations, not automatic process fencing. No live cutover is performed."); return;
+		console.log("logs:migrate --phase inspect|prepare|copy|verify|activate|activate-empty|rollback|cleanup-preview [--full] [--source-quiesced] [--writers-quiesced] [--discard-copied-history] [--batch-size 100] [--max-batches 1000] [--max-bytes 4194304]\nUses WHATSAPP_DATABASE_URL and LOGS_DATABASE_URL; never deletes source rows. verify/activate require all source writers stopped. rollback requires BOTH writers stopped. activate-empty requires --writers-quiesced --discard-copied-history, ALTER permission on target process_logs, and a never-activated target. Flags are operator attestations, not automatic process fencing. No live cutover is performed."); return;
 	}
 	const options = parseLogsMigrationArgs(process.argv.slice(2));
 	if (!process.env["WHATSAPP_DATABASE_URL"] || !process.env["LOGS_DATABASE_URL"]) throw new Error("Database configuration required");
@@ -48,6 +52,7 @@ async function main() {
 			await lockLogStore(target);
 			if (options.phase === "prepare") { await prepareLogStore(source, target); console.log('{"prepared":true}'); }
 			if (options.phase === "copy") console.log(JSON.stringify(await copyLogStore(source, target, options.limits)));
+			if (options.phase === "activate-empty") console.log(JSON.stringify(await activateEmptyLogStore(source, target, options.limits)));
 			if (options.phase === "rollback") console.log(JSON.stringify(await rollbackLogStore(source, target, options.limits)));
 			if (["verify", "activate"].includes(options.phase)) {
 				console.log(JSON.stringify(await verifyLogStore(source, target, options.limits)));

@@ -26,6 +26,35 @@ Os lotes alternam categorias e têm pausa. Logs de auditoria da limpeza vão ao 
 
 ## Sequência de implantação
 
+**Decisão atual: começar sem histórico.** O usuário já executou prepare/copy, mas não activate. Usar o procedimento abaixo no lugar da sequência de cópia/conferência histórica. A sequência antiga permanece documentada somente como alternativa.
+
+### Começar vazio após uma cópia parcial
+
+1. Publicar a versão que inclui a fase `activate-empty` e conferir `npm run logs:migrate -- --help`. Manter `PROCESS_LOG_STORAGE=legacy` e a limpeza desligada até a janela de virada.
+2. No destino configurado em `LOGS_DATABASE_URL`, conferir `SELECT state FROM process_log_store WHERE id = 1;`: espera-se COPYING. Conferir origem/destino com `--phase inspect`. Estados ACTIVE, PAUSED e ROLLED_BACK são recusados pelo novo comando; ele não serve para limpar um banco dedicado já em uso.
+3. O usuário do migrador precisa também de ALTER **somente na tabela process_logs do destino**, para reservar os próximos IDs acima do histórico que permanecerá na origem. Como administrador, adaptar o host ao mesmo usado no CREATE USER:
+
+```sql
+GRANT ALTER ON `inpulse-logs`.`process_logs`
+  TO 'inpulse_logs'@'APP_SERVER_IP';
+```
+
+4. Na janela de manutenção, parar e drenar TODOS os gravadores e interromper qualquer comando de cópia em andamento. Executar, com as URLs de origem/destino corretas:
+
+```bash
+npm run logs:migrate -- --phase activate-empty --writers-quiesced --discard-copied-history --batch-size 500
+```
+
+O comando exclui **apenas process_logs do destino preparado**, em lotes, conservando integralmente os registros da origem. Exige origem registrada correspondente e lock de manutenção; usa RESETTING durante a limpeza para impedir retomada acidental da cópia. A permissão ALTER é exercitada antes da primeira exclusão. Não usa TRUNCATE nem reinicia IDs em 1, pois isso causaria colisões em um eventual retorno.
+
+Se retornar `complete:false`, repetir exatamente o comando, mantendo os gravadores parados. Só seguir quando retornar `complete:true` e `activated:true`. A sequência de IDs começa acima da origem, embora a tabela esteja vazia. O processo também funciona com uma tabela preparada ainda vazia. Não executar copy, verify ou activate tradicionais depois desta decisão, pois eles exigem/conferem histórico.
+
+5. Iniciar TODOS os gravadores com `PROCESS_LOG_STORAGE=dedicated` e `PROCESS_LOG_CLEANUP_ENABLED=false`. Conferir logs novos e então habilitar a limpeza diária conforme a política escolhida. O histórico antigo continua no banco operacional; eventual retirada dele é uma etapa separada.
+
+6. Em caso de erro ou resposta perdida, conferir estado e presença de linhas antes de agir. RESETTING permite retomar o mesmo comando; ACTIVE já concluiu a ativação e não deve ser limpo novamente. Nunca alterar o marcador manualmente para contornar a recusa. O comando rollback documentado adiante também suporta a ativação sem histórico e devolve apenas os novos registros ausentes na origem.
+
+### Alternativa: conservar o histórico no destino
+
 Telemetria foi adiada pelo usuário e não participa desta implantação. Não remover suas tabelas. A fundação transacional do instances-service ainda não está conectada aos domínios operacionais e não precisa ser ativada para separar os logs.
 
 É possível publicar primeiro o código com `PROCESS_LOG_STORAGE=legacy` e `PROCESS_LOG_CLEANUP_ENABLED=false`. Isso conserva o destino atual; os limites/sanitização do novo logger já se aplicam. A ativação dedicada só deve ocorrer depois do ensaio com backup restaurado e volume representativo. Falhas/saturação da gravação de logs são contabilizadas e podem descartar eventos; não há spool durável de logs.
