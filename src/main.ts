@@ -46,6 +46,7 @@ import remoteClientService from "./services/remote-client.service";
 import operatorOutboundService from "./services/operator-outbound.service";
 import operatorSendService from "./services/operator-send.service";
 import { flushDatabaseIncidentLog, recordDatabaseIncident } from "./utils/database-incident-log";
+import processLogs from "./logs/service";
 
 whatsappService.buildClients();
 operatorSendService.configureWorker();
@@ -133,6 +134,7 @@ const server = app.listen(serverPort, () => {
 	operatorOutboundService.startWorker();
 	remoteInboundEventInboxService.startWorker();
 	remoteSessionMonitorRoutine.start();
+	processLogs.start();
 	Logger.info("Server listening on port " + serverPort);
 
 	// Wwebjs session health check
@@ -170,6 +172,11 @@ const shutdown = async (signal: string): Promise<void> => {
 	]);
 	const timeout = new Promise<void>((resolve) => setTimeout(resolve, 30_000));
 	await Promise.race([graceful, timeout]);
+	// Workers may emit their final log while draining; close logging afterwards.
+	await Promise.race([
+		processLogs.stop().catch(() => console.error("[ProcessLogs] Shutdown incomplete")),
+		new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+	]);
 	// Do not discard a just-recorded P2024 while PM2 is restarting this process.
 	await Promise.race([
 		flushDatabaseIncidentLog(),

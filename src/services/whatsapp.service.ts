@@ -482,15 +482,10 @@ class WhatsappService {
 			throw new BadRequestError("Contato sem identificador WhatsApp para envio.");
 		}
 
-		let resolvedFrom: "provided" | "last-message" | "sector-default" | "none" = "none";
 		let resolvedClientId =
 			typeof providedClientId === "number" && Number.isInteger(providedClientId) && providedClientId > 0
 				? providedClientId
 				: null;
-
-		if (resolvedClientId !== null) {
-			resolvedFrom = "provided";
-		}
 
 		if (resolvedClientId === null) {
 			const latestChatMessage = await prismaService.wppMessage.findFirst({
@@ -502,16 +497,10 @@ class WhatsappService {
 			});
 
 			resolvedClientId = latestChatMessage?.clientId ?? null;
-			if (resolvedClientId !== null) {
-				resolvedFrom = "last-message";
-			}
 		}
 
 		if (resolvedClientId === null) {
 			resolvedClientId = chat.sector?.defaultClientId ?? null;
-			if (resolvedClientId !== null) {
-				resolvedFrom = "sector-default";
-			}
 		}
 
 		if (resolvedClientId === null) {

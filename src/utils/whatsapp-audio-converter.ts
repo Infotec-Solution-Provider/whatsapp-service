@@ -3,7 +3,6 @@ import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { randomUUID } from "crypto";
-import { Logger } from "@in.pulse-crm/utils";
 
 export interface WhatsappConvertedAudio {
 	buffer: Buffer;
