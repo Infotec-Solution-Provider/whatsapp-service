@@ -8,7 +8,9 @@ export const rowKey = (entity: Entity, row: DataRow) => keys(entity).map(k => St
 export const rowCursor = (entity: Entity, row: DataRow): Cursor => [Number(row[keys(entity)[0]!]), Number(row[keys(entity)[1]!] ?? -1)];
 export class DataAccess {
 	maxReadBytes = 4 * 1024 * 1024;
-	constructor(readonly connection: PoolConnection, readonly source: boolean, readonly tenant: string, readonly timeoutMs: number, readonly progress: (query: string) => void) {}
+	constructor(readonly connection: PoolConnection, readonly source: boolean, readonly tenant: string, readonly timeoutMs: number, readonly progress: (query: string) => void,
+		private readonly targetTables: Partial<Record<Entity, string>> = {}) {}
+	table(entity: Entity): string { return this.source ? entity : this.targetTables[entity] ?? tables[entity]; }
 	query<T>(name: string, statement: string, values: unknown[] = []): Promise<T> {
 		this.progress(`${this.source ? "source" : "target"}-${name}`);
 		return sql<T>(this.connection, statement, values, this.timeoutMs);
@@ -20,13 +22,13 @@ export class DataAccess {
 			return `${this.source && field === "mention_metadata" ? `CAST(${column} AS CHAR CHARACTER SET utf8mb4)` : column} AS ${quote(field)}`;
 		}).join(",");
 	}
-	from(entity: Entity): string { return `${quote(this.source ? entity : tables[entity])} s`; }
+	from(entity: Entity): string { return `${quote(this.table(entity))} s`; }
 	private sizes(entity: Entity): string {
 		return [...keys(entity).map(k => `${this.column(entity, k)} AS ${quote(k)}`), `(${fields(entity).map(f => `COALESCE(OCTET_LENGTH(${this.column(entity, f)}),0)`).join("+")} + 1024) AS __row_bytes`].join(",");
 	}
 	scope(entity: Entity): { join: string; where: string; values: unknown[] } {
 		const association = entity === "contacts_sectors";
-		const join = association ? ` JOIN ${quote(this.source ? "contacts" : "wpp_contacts")} p ON p.id = ${this.column(entity, "contact_id")}` : "";
+		const join = association ? ` JOIN ${quote(this.table("contacts"))} p ON p.id = ${this.column(entity, "contact_id")}` : "";
 		const alias = association ? "p" : "s";
 		return { join, where: `${alias}.instance = ? AND BINARY ${alias}.instance = BINARY ?`, values: [this.tenant, this.tenant] };
 	}

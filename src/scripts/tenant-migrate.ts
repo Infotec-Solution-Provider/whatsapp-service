@@ -5,11 +5,12 @@ import { inspectTenantDatabase, probeTenantText } from "../tenant-migration/insp
 import { TextProfile } from "../tenant-migration/encoding";
 import { prepareTenant, TenantPrepareError } from "../tenant-migration/prepare";
 import { migrateTenantData } from "../tenant-migration/data-migrate";
+import { rebuildTenant } from "../tenant-migration/rebuild";
 import { TenantDataError } from "../tenant-migration/data-contract";
 
 // Only fixed labels and boolean presence; never print URLs or driver messages/SQL.
 const diagnostic = {
-	component: "tenant-migration", diagnosticsVersion: 3, stage: "arguments",
+	component: "tenant-migration", diagnosticsVersion: 4, stage: "arguments",
 	connectTimeoutMs: 10000,
 	queryTimeoutMs: 3000, ddlTimeoutMs: 600000,
 	query: "",
@@ -24,7 +25,7 @@ const diagnostic = {
 
 async function main() {
 	const args = process.argv.slice(2);
-	if (args.includes("--help")) { console.log(`tenant:migrate --tenant NAME --phase inspect|probe|prepare|copy|verify
+	if (args.includes("--help")) { console.log(`tenant:migrate --tenant NAME --phase inspect|probe|prepare|copy|verify|rebuild
   [--text-profile utf8mb4-native-v1|percent-encoded-v1] [--connect-timeout-ms 10000]
 prepare requires --text-profile percent-encoded-v1 --expected-hostname HOST --expected-database DB.
 prepare defaults to --dry-run (metadata and planned DDL only).
@@ -46,7 +47,11 @@ copy/verify use TENANT_MIGRATION_SOURCE_URL, falling back to WHATSAPP_DATABASE_U
 Queries use --query-timeout-ms 30000. Both phases require the prepared destination identity/profile.
 Keep source and target writers paused throughout a run, including between resumptions. Use a NEW run-id after writes resume.
 Identity/unique-key collisions still block. Use a new run-id after upgrading from the conflict-only copy contract.
-No row deletion, provider send, or runtime cutover is implemented.`); return; }
+rebuild defaults to metadata/count preview; --apply replaces SIX tenant tables from the central source using persistent shadows.
+It preserves source references as-is, verifies counts/checksums, renames together and DROPS the old tenant tables after success.
+Includes wpp_last_messages projection. Source stays read-only; no runtime routing or provider sends.
+rebuild defaults: batch-size 500, max-batches 10000, max-duration-seconds 3600, query-timeout-ms 120000.
+Never reuse a copy/verify run-id for rebuild. Pause both writers throughout loading, resumption and replacement.`); return; }
 	let tenant = "", phase = "inspect";
 	let profile: TextProfile = "utf8mb4-native-v1";
 	let expectedHostname = "", expectedDatabase = "", apply = false, dryRun = false, writersQuiesced = false, ddlTimeoutMs = 600000, queryTimeoutMs = 30000;
@@ -96,8 +101,14 @@ No row deletion, provider send, or runtime cutover is implemented.`); return; }
 		}
 		else throw new Error("Unknown argument");
 	}
-	const dataPhase = phase === "copy" || phase === "verify";
-	if (!tenant || tenant.length > 191 || !["inspect", "probe", "prepare", "copy", "verify"].includes(phase) || (apply && dryRun)
+	const dataPhase = phase === "copy" || phase === "verify" || phase === "rebuild";
+	if (phase === "rebuild") {
+		if (!args.includes("--batch-size")) batchSize = 500;
+		if (!args.includes("--max-batches")) maxBatches = 10000;
+		if (!args.includes("--max-duration-seconds")) maxDurationSeconds = 3600;
+		if (!args.includes("--query-timeout-ms")) queryTimeoutMs = 120000;
+	}
+	if (!tenant || tenant.length > 191 || !["inspect", "probe", "prepare", "copy", "verify", "rebuild"].includes(phase) || (apply && dryRun)
 		|| (phase !== "prepare" && !dataPhase && (apply || dryRun || writersQuiesced || expectedHostname || expectedDatabase || args.includes("--ddl-timeout-ms") || args.includes("--query-timeout-ms")))
 		|| (!dataPhase && ["--run-id", "--legacy-timezone", "--expected-source-hostname", "--expected-source-database", "--batch-size", "--max-batches", "--max-duration-seconds"].some(flag => args.includes(flag))))
 		throw new TenantPrepareError("TENANT_ARGUMENTS_INVALID");
@@ -141,7 +152,7 @@ No row deletion, provider send, or runtime cutover is implemented.`); return; }
 		diagnostic.stage = "target-connect";
 		const connection = await acquire(target, diagnostic.connectTimeoutMs, diagnostic.queryTimeoutMs);
 		try {
-			if (phase === "copy" || phase === "verify") {
+			if (phase === "copy" || phase === "verify" || phase === "rebuild") {
 				const rawSource = process.env["TENANT_MIGRATION_SOURCE_URL"] || process.env["WHATSAPP_DATABASE_URL"];
 				if (!rawSource) throw new TenantDataError("TENANT_SOURCE_URL_MISSING");
 				let sourceUrl: URL;
@@ -153,13 +164,14 @@ No row deletion, provider send, or runtime cutover is implemented.`); return; }
 					diagnostic.stage = "source-connect";
 					const source = await acquire(sourcePool, diagnostic.connectTimeoutMs, diagnostic.queryTimeoutMs);
 					try {
-						const result = await migrateTenantData(source, connection, { tenant, profile, expectedHostname, expectedDatabase, apply, writersQuiesced, ddlTimeoutMs, queryTimeoutMs,
-							phase, runId, legacyTimezone, expectedSourceHostname, expectedSourceDatabase, batchSize, maxBatches, maxDurationSeconds,
-							progress: (stage, step, query) => {
+						const options = { tenant, profile, expectedHostname, expectedDatabase, apply, writersQuiesced, ddlTimeoutMs, queryTimeoutMs,
+							runId, legacyTimezone, expectedSourceHostname, expectedSourceDatabase, batchSize, maxBatches, maxDurationSeconds,
+							progress: (stage: string, step?: string, query?: string) => {
 								diagnostic.stage = stage; diagnostic.step = step ?? ""; diagnostic.query = query ?? "";
-								if (stage === "data-page-complete") console.error(JSON.stringify({ component: diagnostic.component, stage, entity: step }));
+								if (stage === "data-page-complete" || (stage.startsWith("rebuild-") && !query && !["rebuild-copy", "rebuild-commit"].includes(stage))) console.error(JSON.stringify({ component: diagnostic.component, stage, entity: step }));
 							},
-						});
+						};
+						const result = phase === "rebuild" ? await rebuildTenant(source, connection, { ...options, phase }) : await migrateTenantData(source, connection, { ...options, phase });
 						console.log(JSON.stringify({ tenant, ...result }, null, 2));
 						if (result.status === "CONFLICT") process.exitCode = 2;
 					} finally { source.destroy(); }
@@ -211,7 +223,7 @@ if (require.main === module) void main().catch(error => {
 		TENANT_CONNECTION_CONFIG_MISSING: "Set TENANT_DATABASE_URL for the tenant destination, or INSTANCES_DATABASE_URL for the registry, in the command's effective environment.",
 		TENANT_DESTINATION_NOT_FOUND: "No matching tenant was found in the configured registry.",
 		TENANT_DESTINATION_AMBIGUOUS: "More than one destination matched the tenant; no destination was selected.",
-		TENANT_ARGUMENTS_INVALID: "Use --tenant NAME --phase inspect|probe|prepare|copy|verify; see --help. Do not combine --dry-run with --apply.",
+		TENANT_ARGUMENTS_INVALID: "Use --tenant NAME --phase inspect|probe|prepare|copy|verify|rebuild; see --help. Do not combine --dry-run with --apply.",
 		TENANT_CONNECT_TIMEOUT_INVALID: "Use --connect-timeout-ms with an integer between 1000 and 30000 (default 10000).",
 		TENANT_DDL_TIMEOUT_INVALID: "Use --ddl-timeout-ms between 1000 and 3600000 (default 600000).",
 		TENANT_QUERY_TIMEOUT_INVALID: "Use --query-timeout-ms between 1000 and 120000 (default 30000, prepare only).",
@@ -230,6 +242,11 @@ if (require.main === module) void main().catch(error => {
 		TENANT_LEGACY_TIMEZONE_UNRESOLVED: "No timezone was selected; inspect sample overlap, date scores and database identities. Confirm the legacy writer timezone before using an explicit override.",
 		TENANT_COPY_BINDING_CONFLICT: "Run-id belongs to a different source/target/tenant/timezone/contract. Do not overwrite its journal.",
 		TENANT_COPY_AUDIT_SCHEMA_CONFLICT: "Destination audit table differs from the required transactional structure. Inspect before resuming; do not discard previous audit records.",
+		TENANT_REBUILD_TABLE_STATE_INVALID: "Rebuild table names/markers do not match a complete pre/post-swap state. Nothing further is dropped. Inspect the rebuild journal and table inventory.",
+		TENANT_REBUILD_TABLE_COLLISION: "Private table names already exist without a matching rebuild receipt. No automatic overwrite.",
+		TENANT_REBUILD_CHECKSUM_MISMATCH: "Loaded row count or checksum differs. Replacement/cleanup is blocked; source remains unchanged.",
+		TENANT_REBUILD_DEPENDENCY_CONFLICT: "A rebuild table has incompatible structure or visible references/triggers. Replacement requires preserving those dependencies.",
+		TENANT_REBUILD_JOURNAL_INVALID: "Rebuild journal schema or stored checkpoint is incompatible. Do not remove it to force replacement.",
 		TENANT_DATA_BUSY: "Prepare/copy/verify is already holding the destination lock. Wait for that operation to finish.",
 		TENANT_UNIQUE_KEY_CONFLICT: "Incoming IDs collide with a destination unique key; review the reported IDs/columns. No automatic overwrite.",
 		TENANT_DATA_LIMIT_INVALID: "Use batch-size 1..500, max-batches 1..10000 and max-duration-seconds 1..3600.",

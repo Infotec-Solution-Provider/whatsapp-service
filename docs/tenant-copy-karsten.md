@@ -1,5 +1,10 @@
 # Cópia e conferência do Karsten
 
+**Estratégia atual do piloto:** o usuário autorizou descartar os dados antigos
+do tenant e reconstruir a partir do central. Usar o [rebuild rápido](tenant-rebuild-karsten.md).
+O fluxo abaixo continua disponível para reconciliação conservadora, mas não é
+mais o caminho indicado para esta reconstrução.
+
 Disponíveis: `--phase copy` e `--phase verify`, para `contacts`, `chats`,
 `messages`, `schedules` e `contacts_sectors`, nas estruturas `wpp_*` já preparadas.
 O usuário confirmou PREPARED em produção em 21/09. Não repetir prepare nem apagar

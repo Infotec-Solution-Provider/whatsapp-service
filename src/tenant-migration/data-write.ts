@@ -27,10 +27,18 @@ export async function writeRows(target: DataAccess, entity: Entity, inserts: Dat
 	const columns = fields(entity);
 	// Conservative byte batching, even when the configured row batch is large.
 	let batch: DataRow[] = [];
-	const insertSql = (size: number) => `INSERT INTO ${quote(tables[entity])} (${columns.map(quote).join(",")}) VALUES ${Array.from({ length: size }, () => `(${columns.map(() => "?").join(",")})`).join(",")}`;
+	const prefix = `INSERT INTO ${quote(target.table(entity))} (${columns.map(quote).join(",")}) VALUES `;
+	const tuple = `(${columns.map(() => "?").join(",")})`;
+	const baseBytes = statementBytes(prefix, []);
+	let batchBytes = baseBytes;
+	const insertSql = (size: number) => prefix + Array.from({ length: size }, () => tuple).join(",");
 	const insertValues = (rows: DataRow[]) => rows.flatMap(row => columns.map(c => row[c]));
 	for (const row of inserts) {
-		if (batch.length && statementBytes(insertSql(batch.length + 1), insertValues([...batch, row])) > budget) { await execute(insertSql(batch.length), insertValues(batch)); batch = []; }
+		const rowBytes = statementBytes(tuple, columns.map(c => row[c])) - 1024;
+		if (batch.length && batchBytes + 1 + rowBytes > budget) {
+			await execute(insertSql(batch.length), insertValues(batch)); batch = []; batchBytes = baseBytes;
+		}
+		batchBytes += rowBytes + (batch.length ? 1 : 0);
 		batch.push(row);
 	}
 	if (batch.length) await execute(insertSql(batch.length), insertValues(batch));
@@ -39,7 +47,7 @@ export async function writeRows(target: DataAccess, entity: Entity, inserts: Dat
 	for (const column of [...new Set(updates.flatMap(e => e.columns))]) {
 		if (!columns.includes(column) || [...keys(entity), "instance", "original_id"].includes(column)) throw new TenantDataError("TENANT_IDENTITY_UPDATE_FORBIDDEN", { entity, column });
 		let group: DataRow[] = [];
-		const statement = (size: number) => `UPDATE ${quote(tables[entity])} SET ${quote(column)} = CASE id ${Array.from({ length: size }, () => "WHEN ? THEN ?").join(" ")} ELSE ${quote(column)} END WHERE instance = ? AND BINARY instance = BINARY ? AND id IN (${Array.from({ length: size }, () => "?").join(",")})`;
+		const statement = (size: number) => `UPDATE ${quote(target.table(entity))} SET ${quote(column)} = CASE id ${Array.from({ length: size }, () => "WHEN ? THEN ?").join(" ")} ELSE ${quote(column)} END WHERE instance = ? AND BINARY instance = BINARY ? AND id IN (${Array.from({ length: size }, () => "?").join(",")})`;
 		const values = (rows: DataRow[]) => [...rows.flatMap(row => [row["id"], row[column]]), target.tenant, target.tenant, ...rows.map(row => row["id"])];
 		for (const item of updates.filter(e => e.columns.includes(column))) {
 			if (group.length && statementBytes(statement(group.length + 1), values([...group, item.row])) > budget) { await execute(statement(group.length), values(group)); group = []; }
