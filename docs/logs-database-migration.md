@@ -153,7 +153,7 @@ Karsten informou MySQL **5.5.0-m2-community** em KSASGR/crm_sgr e decidiu preser
 
 Conexões novas usam UTC e modo estrito de sessão para impedir truncamento silencioso. Valores são enviados como parâmetros preparados, testados também com NO_BACKSLASH_ESCAPES. Isso não modifica os defaults globais, as tabelas existentes ou os pools legados do instances-service.
 
-O CLI agora oferece `prepare` para a estrutura básica das wpp_* do Karsten, com simulação padrão e aplicação explícita/retomável. Consultar [comandos e limites da preparação](tenant-prepare-karsten.md). Não oferece copy/cutover de dados de negócio ainda. Repositórios transacionais, compatibilidade completa dos índices, captura de alterações, roteamento de APIs/jobs e consumidores dos demais serviços permanecem etapas do plano. Não interpretar o sucesso do probe ou prepare como migração concluída ou elegibilidade de todo o domínio.
+O CLI oferece `prepare` e agora `copy`/`verify` para a estrutura básica das wpp_* do Karsten. Consultar [preparação](tenant-prepare-karsten.md) e [cópia/conferência retomáveis](tenant-copy-karsten.md). Cutover, repositórios de runtime, compatibilidade completa dos índices, captura de alterações, roteamento de APIs/jobs e consumidores dos demais serviços permanecem etapas do plano. Não interpretar sucesso dessas fases como elegibilidade de todo o domínio.
 
 ## Diagnóstico da gravação no PM2
 

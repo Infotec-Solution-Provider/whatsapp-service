@@ -6,6 +6,10 @@ em 20/09/2026 (KSASGR / crm_sgr / MySQL 5.5.0-m2-community).
 Não conecta ao banco central, copia registros, altera roteamento ou libera cutover.
 Não é uma migration do Prisma; não execute `prisma migrate deploy` no tenant.
 
+Após PREPARED, usar [cópia e conferência do Karsten](tenant-copy-karsten.md).
+Copy/verify já estão implementados para o núcleo preparado, com retomada; a
+aplicação continua no banco central até uma futura implementação de cutover.
+
 ## Executar
 
 Publique esta versão do whatsapp-service e compile na raiz `whatsapp` do servidor:
