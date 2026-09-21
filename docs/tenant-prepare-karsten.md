@@ -46,9 +46,15 @@ O lock do migrador exclui outra preparação no mesmo banco, mas não impede esc
 que desconheçam esse lock. O ALTER pode reconstruir tabelas e bloquear acessos no
 MySQL antigo: reservar tempo/espaço no destino. DDL tem prazo de 10 minutos por
 comando, configurável com `--ddl-timeout-ms` entre 1000 e 3600000. Conexão mantém
-10 segundos; consultas normais mantêm seu limite anterior de 3 segundos.
+10 segundos. Consultas administrativas de prepare (incluindo sessão, catálogo,
+identidade, metadados, probe e journal) têm prazo de **30 segundos por consulta**,
+configurável com `--query-timeout-ms` entre 1000 e 120000. Os limites de consultas
+do runtime, inspect e probe avulsos permanecem inalterados.
 
-Progresso vai para stderr. Conclusão em stdout: `status: "PREPARED"`,
+Progresso vai para stderr, com etapa, tabela e rótulo da consulta, sem SQL nem dados.
+Diagnósticos versão 3 mostram queryTimeoutMs e ddlTimeoutMs separadamente.
+Conferência final e gravação de recibo também têm etapas distintas.
+Conclusão em stdout: `status: "PREPARED"`,
 `schemaChangesRequired: false` e **`readyForCutover: false`**. Repetir a simulação
 deve produzir `planned: []`. Após conclusão e conferência, os gravadores legados
 podem ser retomados: nenhuma troca de autoridade ocorreu. A próxima cópia ainda
@@ -112,6 +118,23 @@ terminado no servidor. Não apague o journal nem assuma rollback. Confira a
 operação no servidor e execute novamente o dry-run; depois de resolver a falha,
 o mesmo comando de aplicação retoma a preparação. Não há retry automático.
 
+No incidente recebido em 20/09, `prepare-verify / wpp_messages` expirou com
+`PROTOCOL_SEQUENCE_TIMEOUT`. Nessa versão o ALTER tinha prazo próprio, mas a
+conferência e o recibo ainda usavam 3000 ms. O diagnóstico antigo não distingue
+qual dessas consultas expirou nem explica a demora no servidor. Corrigido o prazo
+administrativo sem mudar o contrato/hash do journal. Depois de publicar e compilar
+essa correção, executar o dry-run e, na janela com gravadores pausados, retomar:
+
+```bash
+node ./dist/scripts/tenant-migrate.js --tenant karsten --phase prepare --text-profile percent-encoded-v1 --expected-hostname KSASGR --expected-database crm_sgr --dry-run --query-timeout-ms 30000
+node ./dist/scripts/tenant-migrate.js --tenant karsten --phase prepare --text-profile percent-encoded-v1 --expected-hostname KSASGR --expected-database crm_sgr --apply --writers-quiesced --query-timeout-ms 30000
+```
+
+Se retornar `TENANT_PREPARE_BUSY`, a sessão anterior ainda pode estar terminando
+no servidor; verificar a operação e aguardar sua conclusão, sem apagar journal
+nem forçar liberação do lock. A retomada mantém o mesmo contrato e só aplica
+ALTERs ainda necessários. Um recibo STARTED não exige repetir um ALTER concluído.
+
 Triggers e FKs visíveis nas tabelas envolvidas bloqueiam a preparação automática
 para revisão. Uma conta sem acesso a esses metadados não comprova sua ausência.
 Use uma conta administrativa com visibilidade das dependências e permissões de
@@ -133,6 +156,14 @@ telefone NULL e milissegundos. Defaults/índices personalizados sobre campos
 modificados são recusados antes de alteração. Sem suíte nova
 permanente. O prepare ainda não foi executado no MySQL 5.5.0-m2 de produção;
 o probe de texto nessa versão foi aprovado pelo usuário.
+
+Correção do prazo: ensaio descartável 5.5.62 reproduziu timeout de metadados após
+ALTER real, com recibo STARTED e operação schema-tables identificada. A retomada
+com 30 s suportou consultas de metadados/journal acima de 3 s e não repetiu o
+ALTER de mensagens. Confirmados hash inalterado, valores preservados, repetição
+sem ALTER, limites da opção do CLI e preservação do erro original quando a
+limpeza da tabela temporária encontra uma conexão já encerrada. Não houve
+validação dessa correção em produção pelo agente.
 
 Referência: [MySQL 5.5 Reference Manual](https://downloads.mysql.com/docs/refman-5.5-en.pdf),
 seções ALTER TABLE, commits implícitos e funções GET_LOCK/RELEASE_LOCK.

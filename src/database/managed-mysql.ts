@@ -66,7 +66,7 @@ export function createManagedPool(raw: string, limit = 2, queueLimit = 0): Pool 
 }
 
 /** Finite acquisition and query deadlines. A timed-out session is never reused. */
-export async function acquire(pool: Pool, timeoutMs = 3000): Promise<PoolConnection> {
+export async function acquire(pool: Pool, timeoutMs = 3000, sessionQueryTimeoutMs = 3000): Promise<PoolConnection> {
 	const connection = await new Promise<PoolConnection>((resolve, reject) => {
 		let settled = false;
 		const timer = setTimeout(() => { settled = true; reject(new Error("Database acquisition timeout")); }, timeoutMs);
@@ -76,8 +76,8 @@ export async function acquire(pool: Pool, timeoutMs = 3000): Promise<PoolConnect
 		}, error => { if (!settled) { settled = true; clearTimeout(timer); reject(error); } });
 	});
 	// Enforce failure instead of silent truncation, independently of server defaults.
-	await sql(connection, "SET SESSION sql_mode = CONCAT_WS(',', @@SESSION.sql_mode, 'STRICT_ALL_TABLES')");
-	await sql(connection, "SET SESSION time_zone = '+00:00'");
+	await sql(connection, "SET SESSION sql_mode = CONCAT_WS(',', @@SESSION.sql_mode, 'STRICT_ALL_TABLES')", [], sessionQueryTimeoutMs);
+	await sql(connection, "SET SESSION time_zone = '+00:00'", [], sessionQueryTimeoutMs);
 	return connection;
 }
 
@@ -96,8 +96,8 @@ export async function sql<T>(connection: PoolConnection, statement: string, valu
 	finally { if (timer) clearTimeout(timer); }
 }
 
-export async function databaseIdentity(connection: PoolConnection): Promise<{ hostname: string; port: number; database_name: string; version: string }> {
-	const rows = await sql<RowDataPacket[]>(connection, "SELECT @@hostname AS hostname, @@port AS port, DATABASE() AS database_name, @@version AS version");
+export async function databaseIdentity(connection: PoolConnection, timeoutMs = 3000): Promise<{ hostname: string; port: number; database_name: string; version: string }> {
+	const rows = await sql<RowDataPacket[]>(connection, "SELECT @@hostname AS hostname, @@port AS port, DATABASE() AS database_name, @@version AS version", [], timeoutMs);
 	const row = rows[0]!;
 	if (!row["database_name"]) throw new Error("No database selected");
 	return { hostname: String(row["hostname"]), port: Number(row["port"]), database_name: String(row["database_name"]), version: String(row["version"]) };

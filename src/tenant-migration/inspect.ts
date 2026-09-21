@@ -24,17 +24,27 @@ export async function inspectTenantDatabase(connection: PoolConnection) {
 }
 
 /** Opt-in test on a connection-private temporary table; never touches ERP tables. */
-export async function probeTenantText(connection: PoolConnection, profile: TextProfile = "utf8mb4-native-v1"): Promise<void> {
+export async function probeTenantText(connection: PoolConnection, profile: TextProfile = "utf8mb4-native-v1", timeoutMs = 3000, onQuery?: (query: string) => void): Promise<void> {
 	if (profile !== "utf8mb4-native-v1" && profile !== "percent-encoded-v1") throw new Error("Unknown text storage profile");
 	const samples = [null, "", "Ação São João ç €", "👩🏽‍💻 😀", "日本語 中文", "literal %20 %25", "https://example.test/a%20b", "line\nquote'\"\\", "e\u0301", JSON.stringify({ emoji: "😀", empty: "", nil: null })];
 	const stored = samples.map(value => encodeTenantText(value, profile));
 	const charset = profile === "utf8mb4-native-v1" ? "utf8mb4 COLLATE=utf8mb4_unicode_ci" : "utf8 COLLATE=utf8_general_ci";
-	await sql(connection, `CREATE TEMPORARY TABLE inpulse_migration_text_probe (id INT PRIMARY KEY, value LONGTEXT NULL) ENGINE=InnoDB DEFAULT CHARSET=${charset}`);
+	onQuery?.("probe-create");
+	await sql(connection, `CREATE TEMPORARY TABLE inpulse_migration_text_probe (id INT PRIMARY KEY, value LONGTEXT NULL) ENGINE=InnoDB DEFAULT CHARSET=${charset}`, [], timeoutMs);
+	let verified = false;
 	try {
-		for (let i = 0; i < stored.length; i++) await sql(connection, "INSERT INTO inpulse_migration_text_probe (id, value) VALUES (?, ?)", [i, stored[i]]);
-		const rows = await sql<RowDataPacket[]>(connection, "SELECT id, value, HEX(value) AS hex_value FROM inpulse_migration_text_probe ORDER BY id");
+		onQuery?.("probe-insert");
+		for (let i = 0; i < stored.length; i++) await sql(connection, "INSERT INTO inpulse_migration_text_probe (id, value) VALUES (?, ?)", [i, stored[i]], timeoutMs);
+		onQuery?.("probe-select");
+		const rows = await sql<RowDataPacket[]>(connection, "SELECT id, value, HEX(value) AS hex_value FROM inpulse_migration_text_probe ORDER BY id", [], timeoutMs);
 		if (rows.length !== samples.length || rows.some((row, index) =>
 			row["value"] !== stored[index] || decodeTenantText(row["value"], profile) !== samples[index] ||
 			row["hex_value"] !== (stored[index] === null ? null : Buffer.from(stored[index]!, "utf8").toString("hex").toUpperCase()))) throw new Error("Tenant Unicode round-trip mismatch");
-	} finally { await sql(connection, "DROP TEMPORARY TABLE IF EXISTS inpulse_migration_text_probe"); }
+		verified = true;
+	} finally {
+		// Do not replace the original timeout with cleanup on an already destroyed connection.
+		if (verified) onQuery?.("probe-drop");
+		try { await sql(connection, "DROP TEMPORARY TABLE IF EXISTS inpulse_migration_text_probe", [], timeoutMs); }
+		catch (error) { if (verified) throw error; }
+	}
 }

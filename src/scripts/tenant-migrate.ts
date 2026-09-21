@@ -7,8 +7,10 @@ import { prepareTenant, TenantPrepareError } from "../tenant-migration/prepare";
 
 // Only fixed labels and boolean presence; never print URLs or driver messages/SQL.
 const diagnostic = {
-	component: "tenant-migration", diagnosticsVersion: 2, stage: "arguments",
+	component: "tenant-migration", diagnosticsVersion: 3, stage: "arguments",
 	connectTimeoutMs: 10000,
+	queryTimeoutMs: 3000, ddlTimeoutMs: 600000,
+	query: "",
 	step: "",
 	cwd: process.cwd(), module: __filename,
 	configuration: {
@@ -25,7 +27,8 @@ prepare requires --text-profile percent-encoded-v1 --expected-hostname HOST --ex
 prepare defaults to --dry-run (metadata and planned DDL only).
 Apply with --apply --writers-quiesced after pausing all writers of destination wpp_* including legacy sync.
   [--ddl-timeout-ms 600000] (1000..3600000, administrative DDL only)
-Connection/acquisition timeout: 1000..30000 ms. Ordinary query deadlines are unchanged.
+  [--query-timeout-ms 30000] (1000..120000, prepare queries including verification/journal)
+Connection/acquisition timeout: 1000..30000 ms. Runtime query deadlines are unchanged.
 Uses INSTANCES_DATABASE_URL registry, or TENANT_DATABASE_URL for a directly managed destination.
 inspect reads wpp_* metadata visible to the database user. Bootstrap uses utf8 for servers older than 5.5.3.
 probe writes synthetic data only to a temporary private table. No silent text-profile fallback.
@@ -34,7 +37,7 @@ and records resumable DDL in wpp_tenant_prepare. It can block table access on ol
 No source database is opened, no existing business row is updated/deleted, and no copy or cutover is available yet.`); return; }
 	let tenant = "", phase = "inspect";
 	let profile: TextProfile = "utf8mb4-native-v1";
-	let expectedHostname = "", expectedDatabase = "", apply = false, dryRun = false, writersQuiesced = false, ddlTimeoutMs = 600000;
+	let expectedHostname = "", expectedDatabase = "", apply = false, dryRun = false, writersQuiesced = false, ddlTimeoutMs = 600000, queryTimeoutMs = 30000;
 	for (let i = 0; i < args.length; i++) {
 		if (args[i] === "--tenant") tenant = args[++i] || "";
 		else if (args[i] === "--phase") phase = args[++i] || "";
@@ -61,12 +64,20 @@ No source database is opened, no existing business row is updated/deleted, and n
 			if (!/^\d+$/.test(raw) || !Number.isSafeInteger(ddlTimeoutMs) || ddlTimeoutMs < 1000 || ddlTimeoutMs > 3600000)
 				throw new TenantPrepareError("TENANT_DDL_TIMEOUT_INVALID");
 		}
+		else if (args[i] === "--query-timeout-ms") {
+			const raw = args[++i] || "";
+			queryTimeoutMs = Number(raw);
+			if (!/^\d+$/.test(raw) || !Number.isSafeInteger(queryTimeoutMs) || queryTimeoutMs < 1000 || queryTimeoutMs > 120000)
+				throw new TenantPrepareError("TENANT_QUERY_TIMEOUT_INVALID");
+		}
 		else throw new Error("Unknown argument");
 	}
 	if (!tenant || tenant.length > 191 || !["inspect", "probe", "prepare"].includes(phase) || (apply && dryRun)
-		|| (phase !== "prepare" && (apply || dryRun || writersQuiesced || expectedHostname || expectedDatabase || args.includes("--ddl-timeout-ms"))))
+		|| (phase !== "prepare" && (apply || dryRun || writersQuiesced || expectedHostname || expectedDatabase || args.includes("--ddl-timeout-ms") || args.includes("--query-timeout-ms"))))
 		throw new TenantPrepareError("TENANT_ARGUMENTS_INVALID");
 	if (phase === "prepare") {
+		diagnostic.queryTimeoutMs = queryTimeoutMs;
+		diagnostic.ddlTimeoutMs = ddlTimeoutMs;
 		if (profile !== "percent-encoded-v1") throw new TenantPrepareError("TENANT_PREPARE_PROFILE_UNSUPPORTED");
 		if (!expectedHostname || !expectedDatabase) throw new TenantPrepareError("TENANT_PREPARE_IDENTITY_REQUIRED");
 		if (apply && !writersQuiesced) throw new TenantPrepareError("TENANT_PREPARE_QUIESCENCE_REQUIRED");
@@ -82,10 +93,10 @@ No source database is opened, no existing business row is updated/deleted, and n
 		const registry = createPool({ ...mysqlOptions(process.env["INSTANCES_DATABASE_URL"], 1), connectTimeout: diagnostic.connectTimeoutMs });
 		try {
 			diagnostic.stage = "registry-connect";
-			const connection = await acquire(registry, diagnostic.connectTimeoutMs);
+			const connection = await acquire(registry, diagnostic.connectTimeoutMs, diagnostic.queryTimeoutMs);
 			try {
 				diagnostic.stage = "registry-lookup";
-				const rows = await sql<RowDataPacket[]>(connection, "SELECT host, port, username, password, `database` FROM clients_servers WHERE instance_name = ?", [tenant]);
+				const rows = await sql<RowDataPacket[]>(connection, "SELECT host, port, username, password, `database` FROM clients_servers WHERE instance_name = ?", [tenant], diagnostic.queryTimeoutMs);
 				if (rows.length === 0) throw new Error("Tenant destination not found");
 				if (rows.length !== 1) throw new Error("Tenant destination is ambiguous");
 				const row = rows[0]!;
@@ -98,14 +109,14 @@ No source database is opened, no existing business row is updated/deleted, and n
 	const target = createPool(targetOptions);
 	try {
 		diagnostic.stage = "target-connect";
-		const connection = await acquire(target, diagnostic.connectTimeoutMs);
+		const connection = await acquire(target, diagnostic.connectTimeoutMs, diagnostic.queryTimeoutMs);
 		try {
 			if (phase === "prepare") {
 				const result = await prepareTenant(connection, {
-					tenant, profile, expectedHostname, expectedDatabase, apply, writersQuiesced, ddlTimeoutMs,
-					progress: (stage, step) => {
-						diagnostic.stage = stage; diagnostic.step = step ?? "";
-						if (apply) console.error(JSON.stringify({ component: diagnostic.component, stage, step: diagnostic.step }));
+					tenant, profile, expectedHostname, expectedDatabase, apply, writersQuiesced, ddlTimeoutMs, queryTimeoutMs,
+					progress: (stage, step, query) => {
+						diagnostic.stage = stage; diagnostic.step = step ?? ""; diagnostic.query = query ?? "";
+						if (apply) console.error(JSON.stringify({ component: diagnostic.component, stage, step: diagnostic.step, query: diagnostic.query }));
 					},
 				});
 				console.log(JSON.stringify({ tenant, phase, connectTimeoutMs: diagnostic.connectTimeoutMs, ...result }, null, 2));
@@ -148,6 +159,7 @@ if (require.main === module) void main().catch(error => {
 		TENANT_ARGUMENTS_INVALID: "Use --tenant NAME --phase inspect|probe|prepare; see --help. Do not combine --dry-run with --apply.",
 		TENANT_CONNECT_TIMEOUT_INVALID: "Use --connect-timeout-ms with an integer between 1000 and 30000 (default 10000).",
 		TENANT_DDL_TIMEOUT_INVALID: "Use --ddl-timeout-ms between 1000 and 3600000 (default 600000).",
+		TENANT_QUERY_TIMEOUT_INVALID: "Use --query-timeout-ms between 1000 and 120000 (default 30000, prepare only).",
 		TENANT_PREPARE_PROFILE_UNSUPPORTED: "This prepare version requires explicit --text-profile percent-encoded-v1.",
 		TENANT_PREPARE_IDENTITY_REQUIRED: "Specify --expected-hostname and --expected-database from the reviewed destination inventory.",
 		TENANT_PREPARE_IDENTITY_MISMATCH: "Connected destination differs from the expected identity; no schema change was applied.",
