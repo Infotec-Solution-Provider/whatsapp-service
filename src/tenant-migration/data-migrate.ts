@@ -51,7 +51,10 @@ export async function migrateTenantData(sourceConnection: PoolConnection, target
 			await source.query("shape", `SELECT ${source.select(entity)} FROM ${source.from(entity)} LIMIT 0`);
 		}
 		progress("data-timezone");
-		const timezone = await resolveLegacyTimezone(source, target, options.legacyTimezone);
+		const timezone = await resolveLegacyTimezone(source, target, options.legacyTimezone).catch(error => {
+			if (error instanceof TenantDataError) throw new TenantDataError(error.diagnosticCode, { ...error.context, sourceIdentity, targetIdentity });
+			throw error;
+		});
 		const packets = await Promise.all([source.query<DataRow[]>("packet", "SELECT @@max_allowed_packet AS bytes"), target.query<DataRow[]>("packet", "SELECT @@max_allowed_packet AS bytes")]);
 		const budget = Math.min(524288, ...packets.map(rows => Math.floor(Number(rows[0]?.["bytes"]) / 2)));
 		if (!Number.isSafeInteger(budget) || budget < 16384) throw new TenantDataError("TENANT_PACKET_BUDGET_INVALID");

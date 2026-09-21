@@ -226,7 +226,7 @@ if (require.main === module) void main().catch(error => {
 		TENANT_DATA_CONFIRMATION_REQUIRED: "Persistent copy/verify requires --run-id, expected source identity and --writers-quiesced for BOTH databases. Run a dry-run first.",
 		TENANT_SOURCE_URL_MISSING: "Set TENANT_MIGRATION_SOURCE_URL (prefer a SELECT-only account) or WHATSAPP_DATABASE_URL for the central source.",
 		TENANT_DATA_NOT_PREPARED: "Destination must have a matching PREPARED journal and complete core structure.",
-		TENANT_LEGACY_TIMEZONE_UNRESOLVED: "No timezone was selected; inspect the sample scores. Confirm the legacy writer timezone before using an explicit override.",
+		TENANT_LEGACY_TIMEZONE_UNRESOLVED: "No timezone was selected; inspect sample overlap, date scores and database identities. Confirm the legacy writer timezone before using an explicit override.",
 		TENANT_COPY_BINDING_CONFLICT: "Run-id belongs to a different source/target/tenant/timezone/contract. Do not overwrite its journal.",
 		TENANT_DATA_BUSY: "Prepare/copy/verify is already holding the destination lock. Wait for that operation to finish.",
 		TENANT_UNIQUE_KEY_CONFLICT: "Incoming IDs collide with a destination unique key; review the reported IDs/columns. No automatic overwrite.",

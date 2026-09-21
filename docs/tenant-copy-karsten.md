@@ -38,14 +38,28 @@ limites para ampliar a prévia. Dry-run não retoma checkpoints antigos.
 
 ## 2. Fuso das datas antigas
 
-O usuário não sabe o fuso do sincronizador antigo. `--legacy-timezone auto`
-compara até 100 mensagens já existentes, por ID, com a origem; exige pelo menos
+`--legacy-timezone auto` consulta os 100 menores e os 100 maiores IDs do tenant
+no destino e busca seus correspondentes na origem. IDs presentes nas duas
+extremidades contam uma única vez (até 200 mensagens distintas). Exige pelo menos
 três pares válidos e concordância integral em apenas uma opção: UTC ou
-America/Sao_Paulo. O resultado mostra `timezone.timezone`, método e contagens.
-Nenhum horário é alterado por essa identificação.
+America/Sao_Paulo. Divergências antigas não são descartadas quando há pares recentes.
+O resultado mostra `timezone.timezone`, método, pontuações e `sample`: quantidades
+por extremidade, IDs distintos, IDs encontrados na origem, ausentes e pares com
+datas NULL. Nenhum horário é alterado por essa identificação.
+
+Em 21/09, o primeiro dry-run de produção retornou `observations:0` usando somente
+os 100 menores IDs. Isso não determina o fuso nem prova ausência de IDs comuns
+em todas as tabelas. O usuário depois forneceu o par ID `3022374`: destino
+`2026-09-21 04:38:07`, origem `2026-09-21 07:38:07`, timestamp `1789976287000`
+(07:38:07 UTC), compatível com America/Sao_Paulo nessa mensagem. A amostragem
+ampliada ainda precisa ser executada em produção para conferir outros pares.
 
 Sem evidência suficiente, com horários misturados ou diferenças não explicadas,
 o comando para com `TENANT_LEGACY_TIMEZONE_UNRESOLVED`. Não escolhe fuso por padrão.
+O erro inclui as identidades dos bancos e um motivo: `NO_TARGET_SAMPLE`,
+`NO_OVERLAP_IN_SAMPLE`, `INSUFFICIENT_DATED_PAIRS` ou `INCONSISTENT_DATES`.
+`SAMPLE_CHANGED` indica que a mesma data mudou entre as duas leituras; repetir
+com os gravadores pausados. Ausência na amostra não prova ausência em toda a tabela.
 Uma opção explícita, como `--legacy-timezone America/Sao_Paulo`, só deve ser usada
 depois de confirmar o fuso real. Todo registro existente ainda terá suas datas
 comparadas durante a cópia/conferência; o resultado da amostra não dispensa isso.
@@ -162,3 +176,9 @@ reduzida por bytes, INSERTs divididos, payload grande recusado antes da leitura,
 retomada após COMMIT real sem ACK, checkpoints e repetição idempotente. Comparados
 os registros da origem antes/depois. Sem nova suíte permanente. Nenhum copy/verify
 de produção foi executado pelo agente.
+
+Correção da amostragem validada com TypeScript e ensaio descartável em memória:
+histórico antigo sem correspondência e pares recentes válidos, deduplicação,
+amostra vazia/sem sobreposição, datas NULL, UTC, fusos misturados, horário sem
+correspondência e alteração entre leituras. Esse ensaio não consultou produção
+nem repetiu a integração MySQL descrita acima. Contratos de prepare/copy preservados.
