@@ -5,7 +5,8 @@ import { prepareTenant, PrepareOptions } from "./prepare";
 import { inspectWppSchema } from "./inspect-wpp-schema";
 import { manifestHash } from "./prepare-contract";
 import { DataAccess, rowCursor, rowKey, validateRow } from "./data-access";
-import { compareRow, dataContractHash, DataRow, entities, mapRow, TenantDataError } from "./data-contract";
+import { compareRow, dataContractHash, DataRow, entities, mapRow, planCopyUpdate, TenantDataError } from "./data-contract";
+import { auditSql, auditUpdates, AuditedUpdate, checkDataAudit } from "./data-audit";
 import { checkDataJournal, DataJournal, emptyCheckpoint, journalSql } from "./data-journal";
 import { resolveLegacyTimezone } from "./data-timezone";
 import { checkTargetUniqueKeys, checkUniquePage, writeRows } from "./data-write";
@@ -46,6 +47,7 @@ export async function migrateTenantData(sourceConnection: PoolConnection, target
 		if (binding.length !== 1 || binding[0]?.["state"] !== "PREPARED" || binding[0]?.["tenant"] !== options.tenant || binding[0]?.["manifest_hash"] !== manifestHash || binding[0]?.["target_fingerprint"] !== fingerprint) throw new TenantDataError("TENANT_DATA_NOT_PREPARED");
 		const schema = await inspectWppSchema(targetConnection, timeout);
 		const journalExists = checkDataJournal(schema);
+		const auditExists = checkDataAudit(schema);
 		for (const entity of entities) {
 			progress("source-schema", entity);
 			await source.query("shape", `SELECT ${source.select(entity)} FROM ${source.from(entity)} LIMIT 0`);
@@ -66,8 +68,10 @@ export async function migrateTenantData(sourceConnection: PoolConnection, target
 		const orphans = await target.query<DataRow[]>("orphan-associations", "SELECT s.contact_id,s.sector_id FROM wpp_contact_sectors s LEFT JOIN wpp_contacts p ON p.id=s.contact_id WHERE p.id IS NULL LIMIT 1");
 		if (orphans.length) throw new TenantDataError("TENANT_TARGET_ORPHAN_ASSOCIATION", { key: rowKey("contacts_sectors", orphans[0]!) });
 		if (options.apply && !journalExists) await sql(targetConnection, journalSql, [], options.ddlTimeoutMs);
+		if (options.apply && options.phase === "copy" && !auditExists) await sql(targetConnection, auditSql, [], options.ddlTimeoutMs);
+		const reconciliation = { rowsThisInvocation: 0, byEntity: {} as Record<string, number>, samples: [] as { entity: string; key: string; columns: string[] }[] };
 		const report = { phase: options.phase, runId: options.runId, entities, sourceIdentity, targetIdentity, timezone, packetBudgetBytes: budget, dataContractHash, readyForCutover: false,
-			mode: options.apply ? "apply" : "dry-run", queryTimeoutMs: timeout, resumeRequiresSameMaintenanceWindow: true };
+			mode: options.apply ? "apply" : "dry-run", conflictPolicy: "source-wins", reconciliation, queryTimeoutMs: timeout, resumeRequiresSameMaintenanceWindow: true };
 		const checkpoints: Record<string, unknown> = {};
 		let batches = 0; const started = Date.now();
 		for (const direction of options.phase === "verify" ? ["forward", "reverse"] : ["forward"]) {
@@ -88,7 +92,7 @@ export async function migrateTenantData(sourceConnection: PoolConnection, target
 						if (options.apply) { await target.query("begin", "START TRANSACTION"); transaction = true; }
 						const other = direction === "forward" ? await target.matching(entity, page, options.apply && options.phase === "copy") : await source.matching(entity, page);
 						const byKey = new Map(other.map(row => [rowKey(entity, row), row]));
-						const inserts: DataRow[] = [], enrichments: { row: DataRow; columns: string[] }[] = [];
+						const inserts: DataRow[] = [], updates: AuditedUpdate[] = [];
 						const conflicts: { entity: string; key: string; columns: string[]; reason: string }[] = [];
 						for (const row of page) {
 							const key = rowKey(entity, row), found = byKey.get(key);
@@ -101,18 +105,24 @@ export async function migrateTenantData(sourceConnection: PoolConnection, target
 								else conflicts.push({ entity, key, columns: [], reason: "MISSING_TARGET_ROW" });
 								continue;
 							}
-							const difference = compareRow(entity, expected, actual, options.phase === "copy");
-							if (difference.conflicts.length) conflicts.push({ entity, key, columns: difference.conflicts, reason: "CONTENT_CONFLICT" });
-							else if (difference.enrich.length) enrichments.push({ row: expected, columns: difference.enrich });
+							if (options.phase === "copy") {
+								const update = planCopyUpdate(entity, expected, actual);
+								if (update.conflicts.length) conflicts.push({ entity, key, columns: update.conflicts, reason: "IDENTITY_CONFLICT" });
+								else if (update.columns.length) updates.push({ row: expected, before: actual, columns: update.columns });
+							} else {
+								const difference = compareRow(entity, expected, actual, false);
+								if (difference.conflicts.length) conflicts.push({ entity, key, columns: difference.conflicts, reason: "CONTENT_CONFLICT" });
+							}
 						}
 						if (conflicts.length) {
 							if (transaction) { await target.query("rollback", "ROLLBACK"); transaction = false; }
 							return { ...report, status: "CONFLICT", complete: false, checkpoints, conflicts: conflicts.slice(0, 20), conflictsInPage: conflicts.length };
 						}
-						if (options.phase === "copy") await checkTargetUniqueKeys(target, entity, inserts, budget);
+						if (options.phase === "copy") await checkTargetUniqueKeys(target, entity, [...inserts, ...updates.map(u => u.row)], budget);
 						if (options.apply && options.phase === "copy") {
 							progress("data-write", entity);
-							await writeRows(target, entity, inserts, enrichments, budget);
+							await auditUpdates(target, entity, updates, options.runId, bindingHash, budget);
+							await writeRows(target, entity, inserts, updates, budget);
 							// Read back before committing the same transaction and checkpoint.
 							const saved = new Map((await target.matching(entity, page)).map(row => [rowKey(entity, row), row]));
 							for (const original of page) {
@@ -120,11 +130,17 @@ export async function migrateTenantData(sourceConnection: PoolConnection, target
 								if (!actual || compareRow(entity, mapRow(entity, original, timezone.timezone), actual, false).conflicts.length) throw new TenantDataError("TENANT_COPY_READBACK_FAILED", { entity, key });
 							}
 						}
-						const next = { cursor: page.length ? rowCursor(entity, page[page.length - 1]!) : point.cursor, scanned: point.scanned + page.length, inserted: point.inserted + inserts.length, enriched: point.enriched + enrichments.length, done: fetched.exhausted };
+						const next = { cursor: page.length ? rowCursor(entity, page[page.length - 1]!) : point.cursor, scanned: point.scanned + page.length, inserted: point.inserted + inserts.length, updated: point.updated + updates.length, done: fetched.exhausted };
 						if (options.apply) {
 							await journal.save(options.phase, entity, direction, next);
 							progress("data-commit", entity);
 							await target.query("commit", "COMMIT"); transaction = false;
+						}
+						reconciliation.rowsThisInvocation += updates.length;
+						reconciliation.byEntity[entity] = (reconciliation.byEntity[entity] ?? 0) + updates.length;
+						for (const update of updates) {
+							if (reconciliation.samples.length >= 20) break;
+							reconciliation.samples.push({ entity, key: rowKey(entity, update.row), columns: update.columns });
 						}
 						point = next; checkpoints[label] = point; batches++;
 						progress("data-page-complete", entity);

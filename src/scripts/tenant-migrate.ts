@@ -37,7 +37,7 @@ inspect reads wpp_* metadata visible to the database user. Bootstrap uses utf8 f
 probe writes synthetic data only to a temporary private table. No silent text-profile fallback.
 prepare validates the legacy core schema, widens contacts.name, allows NULL phone, adds nullable domain/epoch-ms fields,
 and records resumable DDL in wpp_tenant_prepare. It can block table access on old MySQL; use a maintenance window.
-copy defaults to dry-run; use --apply --writers-quiesced to insert missing rows and fill NULL extension fields.
+copy defaults to dry-run; source content wins. --apply --writers-quiesced inserts missing rows and audits/reconciles changed destination fields.
 verify defaults to persistent checkpoints (business data read-only); use --dry-run for a nonpersistent preview.
 copy/verify use TENANT_MIGRATION_SOURCE_URL, falling back to WHATSAPP_DATABASE_URL (source SELECT only).
   --run-id NAME --legacy-timezone auto|UTC|America/Sao_Paulo
@@ -45,7 +45,8 @@ copy/verify use TENANT_MIGRATION_SOURCE_URL, falling back to WHATSAPP_DATABASE_U
   --batch-size 100 --max-batches 1000 --max-duration-seconds 300
 Queries use --query-timeout-ms 30000. Both phases require the prepared destination identity/profile.
 Keep source and target writers paused throughout a run, including between resumptions. Use a NEW run-id after writes resume.
-No row deletion, legacy conflict overwrite, provider send, or runtime cutover is implemented.`); return; }
+Identity/unique-key collisions still block. Use a new run-id after upgrading from the conflict-only copy contract.
+No row deletion, provider send, or runtime cutover is implemented.`); return; }
 	let tenant = "", phase = "inspect";
 	let profile: TextProfile = "utf8mb4-native-v1";
 	let expectedHostname = "", expectedDatabase = "", apply = false, dryRun = false, writersQuiesced = false, ddlTimeoutMs = 600000, queryTimeoutMs = 30000;
@@ -228,6 +229,7 @@ if (require.main === module) void main().catch(error => {
 		TENANT_DATA_NOT_PREPARED: "Destination must have a matching PREPARED journal and complete core structure.",
 		TENANT_LEGACY_TIMEZONE_UNRESOLVED: "No timezone was selected; inspect sample overlap, date scores and database identities. Confirm the legacy writer timezone before using an explicit override.",
 		TENANT_COPY_BINDING_CONFLICT: "Run-id belongs to a different source/target/tenant/timezone/contract. Do not overwrite its journal.",
+		TENANT_COPY_AUDIT_SCHEMA_CONFLICT: "Destination audit table differs from the required transactional structure. Inspect before resuming; do not discard previous audit records.",
 		TENANT_DATA_BUSY: "Prepare/copy/verify is already holding the destination lock. Wait for that operation to finish.",
 		TENANT_UNIQUE_KEY_CONFLICT: "Incoming IDs collide with a destination unique key; review the reported IDs/columns. No automatic overwrite.",
 		TENANT_DATA_LIMIT_INVALID: "Use batch-size 1..500, max-batches 1..10000 and max-duration-seconds 1..3600.",

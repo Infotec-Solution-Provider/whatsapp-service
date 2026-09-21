@@ -5,10 +5,18 @@ Disponíveis: `--phase copy` e `--phase verify`, para `contacts`, `chats`,
 O usuário confirmou PREPARED em produção em 21/09. Não repetir prepare nem apagar
 seu journal. O contrato/hash dessa preparação permanece inalterado.
 
-O banco central é somente leitura. A cópia insere registros ausentes e preenche
-apenas os campos novos que ainda estejam NULL. Campos antigos divergentes e
-campos novos já preenchidos com outro valor geram conflito; não são sobrescritos.
-Nenhum DELETE, TRUNCATE, REPLACE, envio de mensagem ou ativação de runtime ocorre.
+O banco central é somente leitura e **é a fonte de verdade**, conforme decisão do
+usuário em 21/09. A cópia insere registros ausentes e atualiza campos divergentes
+do mesmo registro no destino com os valores centrais, inclusive NULL. Preserva
+encoding, fuso legado e milissegundos pelo mapeamento existente. Antes de atualizar,
+guarda os valores anteriores em `wpp_tenant_copy_audit`, na mesma transação da
+alteração e do checkpoint. Nenhum DELETE, TRUNCATE, REPLACE, envio de mensagem ou
+ativação de runtime ocorre. Identidade/tenant divergentes e colisões entre IDs
+distintos continuam bloqueando: não há renumeração nem fusão de registros.
+
+Esta política substitui o bloqueio de qualquer divergência de conteúdo. O contrato
+de **copy** mudou; usar um **novo run-id** se já aplicou uma versão anterior.
+O contrato de **prepare** não mudou: não repetir prepare nem apagar seus journals.
 
 ## 1. Publicar, compilar e simular
 
@@ -93,9 +101,16 @@ Resultados:
 | `CONFLICT` | Conferir entity/key/columns/reason; a página conflitante não foi aplicada |
 | Erro em stderr | Conferir etapa/consulta/código; não apagar journal nem presumir rollback após perda de conexão |
 
-O relatório contém checkpoints e contadores por entidade. `inserted` contabiliza
-linhas novas, `enriched` linhas com extensões preenchidas; na simulação são ações
-previstas. Progresso por página sai em stderr. Conflitos retornados em stdout
+O relatório contém `conflictPolicy: "source-wins"`, checkpoints e contadores por
+entidade. `inserted` contabiliza linhas novas e `updated` linhas existentes
+reconciliadas, incluindo extensões preenchidas; na simulação são ações previstas.
+A coluna interna `enriched` do journal continua armazenando o contador de updates
+para preservar sua estrutura, mas o JSON agora usa `updated`.
+`reconciliation.rowsThisInvocation` e `byEntity` contam apenas as páginas desta
+invocação; `samples` mostra até 20 IDs e campos, sem conteúdos. Os checkpoints
+contêm os acumulados do run-id, incluindo páginas retomadas. No dry-run tudo é
+prévia, sem gravação de auditoria, alterações ou checkpoints.
+Progresso por página sai em stderr. Conflitos retornados em stdout
 usam exit code 2; erros de validação/driver usam exit code 1. `INCOMPLETE` usa
 exit code 0, portanto automações precisam conferir `complete`, não apenas o código.
 
@@ -166,6 +181,42 @@ negócio, projeção `wpp_last_messages`, índices novos de runtime, leitores/gr
 da aplicação, retorno após novas escritas locais e cutover. COPIED/VERIFIED não
 substituem essas etapas. O banco central continua sendo a autoridade.
 
+## Reconciliação e valores anteriores
+
+Exemplo real recebido: chat 229909 encerrado no central, mas aberto no Karsten.
+`copy` passa a planejar/aplicar o encerramento do central com a data convertida
+para o fuso confirmado, em vez de bloquear por CONTENT_CONFLICT. Isso vale para
+conteúdo dos campos mapeados de contatos, chats, mensagens e agendamentos.
+`id`, `instance` e `chats.original_id` não são corrigidos automaticamente; uma
+divergência gera IDENTITY_CONFLICT. Chaves de associações também não são trocadas.
+Chaves únicas que já pertencem a outro ID exigem revisão, mesmo com origem soberana.
+Registros exclusivos do destino são preservados e continuam aparecendo em verify.
+
+`verify` continua somente conferência: divergências de conteúdo geram conflito,
+sem reparo automático nessa fase. Se necessário, executar novamente copy e verify
+com um novo run-id após resolver a causa e estabelecer uma nova pausa contínua.
+
+O CLI cria `wpp_tenant_copy_audit` somente em copy aplicado. Cada registro guarda
+run-id, entidade, chave, vínculo da execução e um JSON em base64, dividido em partes
+para respeitar o packet de 1 MiB. O JSON contém `before` (campos mapeados anteriores),
+`after` (valores novos dos campos alterados) e `columns`. Para reconstruir, ler por
+run-id/entidade/chave ordenando `part`, conferir a quantidade `parts`, concatenar
+`payload`, decodificar base64 para UTF-8 e interpretar JSON. Base64 é representação,
+não criptografia; o conteúdo permanece no banco do tenant, sem impressão no CLI.
+Não usar GROUP_CONCAT sem considerar seus limites de truncamento.
+
+A auditoria é evidência para revisão/restauração; não há comando de restauração
+automática. Inserts novos são contabilizados no checkpoint; a auditoria guarda
+updates. Uma falha na página desfaz auditoria, updates e checkpoint juntos. Depois
+de COMMIT sem resposta, retomar pelo journal com o mesmo run-id e a mesma pausa;
+nunca apagar registros de auditoria para forçar replay.
+
+A rotina atual de encerramento confirma primeiro no central e depois sincroniza
+o tenant. Uma falha intermediária pode deixar a cópia antiga; a repetição já
+encontra o chat encerrado e retorna antes de ressincronizá-lo. Esse mecanismo foi
+identificado no código, mas não comprova a causa histórica do chat 229909. A rotina
+de sync de produção não foi alterada nesta entrega.
+
 ## Validação local
 
 TypeScript e ensaio descartável com origem MySQL 8, conta somente SELECT, e
@@ -176,6 +227,14 @@ reduzida por bytes, INSERTs divididos, payload grande recusado antes da leitura,
 retomada após COMMIT real sem ACK, checkpoints e repetição idempotente. Comparados
 os registros da origem antes/depois. Sem nova suíte permanente. Nenhum copy/verify
 de produção foi executado pelo agente.
+
+Política source-wins: TypeScript e ensaio descartável com origem MySQL 8.0.46
+(conta SELECT-only) e destino 5.5.62/latin1/packet 1 MiB. Validados dry-run sem
+mutação, reconciliação de campos antigos/novos, NULL, percent-encoding, datas e
+milissegundos, rollback conjunto com auditoria/checkpoint, COMMIT sem ACK e retomada,
+verify, idempotência, recusa de outro tenant/ID e colisão única, auditoria dividida
+em partes e igualdade integral dos dados da origem antes/depois. Sem nova suíte
+permanente; execução de produção depende do usuário.
 
 Correção da amostragem validada com TypeScript e ensaio descartável em memória:
 histórico antigo sem correspondência e pares recentes válidos, deduplicação,

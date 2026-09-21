@@ -6,8 +6,9 @@ const table = "wpp_tenant_copy_state";
 const types: Record<string, string> = { run_id: "varchar(64)", phase: "varchar(8)", entity: "varchar(32)", direction: "varchar(8)", binding_hash: "char(64)", cursor_a: "bigint(20)", cursor_b: "bigint(20)", scanned: "bigint(20)", inserted: "bigint(20)", enriched: "bigint(20)", state: "varchar(16)", updated_at: "datetime" };
 const primary = ["run_id", "phase", "entity", "direction"];
 export const journalSql = `CREATE TABLE ${table} (${Object.entries(types).map(([name, type]) => `\`${name}\` ${type}${/char/.test(type) ? " CHARACTER SET ascii COLLATE ascii_bin" : ""} NOT NULL`).join(",")}, PRIMARY KEY (${primary.map(k => `\`${k}\``).join(",")})) ENGINE=InnoDB DEFAULT CHARSET=ascii COLLATE=ascii_bin`;
-export interface Checkpoint { cursor: Cursor; scanned: number; inserted: number; enriched: number; done: boolean }
-export const emptyCheckpoint = (): Checkpoint => ({ cursor: [-2147483649, -2147483649], scanned: 0, inserted: 0, enriched: 0, done: false });
+// Keep the existing SQL column `enriched`; reports now call this source-authoritative update count `updated`.
+export interface Checkpoint { cursor: Cursor; scanned: number; inserted: number; updated: number; done: boolean }
+export const emptyCheckpoint = (): Checkpoint => ({ cursor: [-2147483649, -2147483649], scanned: 0, inserted: 0, updated: 0, done: false });
 export function checkDataJournal(schema: WppSchema): boolean {
 	const info = schema.tables.find(t => t["name"] === table); if (!info) return false;
 	const columns = schema.columns.filter(c => c["table_name"] === table), indexes = schema.indexes.filter(i => i["table_name"] === table);
@@ -32,11 +33,11 @@ export class DataJournal {
 		for (const field of ["cursor_a", "cursor_b", "scanned", "inserted", "enriched"]) {
 			const value = Number(row[field]); if (!Number.isSafeInteger(value) || value < (field.startsWith("cursor") ? -2147483649 : 0)) throw new TenantDataError("TENANT_COPY_CHECKPOINT_INVALID");
 		}
-		return { cursor: [Number(row["cursor_a"]), Number(row["cursor_b"])], scanned: Number(row["scanned"]), inserted: Number(row["inserted"]), enriched: Number(row["enriched"]), done: row["state"] === "DONE" };
+		return { cursor: [Number(row["cursor_a"]), Number(row["cursor_b"])], scanned: Number(row["scanned"]), inserted: Number(row["inserted"]), updated: Number(row["enriched"]), done: row["state"] === "DONE" };
 	}
 	async save(phase: string, entity: string, direction: string, point: Checkpoint): Promise<void> {
 		await this.target.query("journal-write", `INSERT INTO ${table} (run_id,phase,entity,direction,binding_hash,cursor_a,cursor_b,scanned,inserted,enriched,state,updated_at)
 			VALUES (?,?,?,?,?,?,?,?,?,?,?,UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE cursor_a=VALUES(cursor_a),cursor_b=VALUES(cursor_b),scanned=VALUES(scanned),inserted=VALUES(inserted),enriched=VALUES(enriched),state=VALUES(state),updated_at=VALUES(updated_at)`,
-			[this.runId, phase, entity, direction, this.binding, ...point.cursor, point.scanned, point.inserted, point.enriched, point.done ? "DONE" : "RUNNING"]);
+			[this.runId, phase, entity, direction, this.binding, ...point.cursor, point.scanned, point.inserted, point.updated, point.done ? "DONE" : "RUNNING"]);
 	}
 }

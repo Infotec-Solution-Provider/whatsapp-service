@@ -92,4 +92,11 @@ export function compareRow(entity: Entity, expected: DataRow, actual: DataRow, a
 	}
 	return { conflicts, enrich };
 }
-export const dataContractHash = createHash("sha256").update(JSON.stringify({ version: "core-copy-v1", json: "lossless-numeric-token-v1", manifestHash, tables, epochSources, encoded })).digest("hex");
+/** Source wins for content, never for the identity of a different target row. */
+export function planCopyUpdate(entity: Entity, expected: DataRow, actual: DataRow) {
+	const difference = compareRow(entity, expected, actual, true);
+	const identity = [...keys(entity), "instance", ...(entity === "chats" ? ["original_id"] : [])].filter(field => fields(entity).includes(field));
+	const conflicts = identity.filter(field => String(expected[field]) !== String(actual[field]));
+	return { conflicts, columns: [...difference.conflicts, ...difference.enrich] };
+}
+export const dataContractHash = createHash("sha256").update(JSON.stringify({ version: "core-copy-v2-source-wins-audited", json: "lossless-numeric-token-v1", manifestHash, tables, epochSources, encoded })).digest("hex");
