@@ -1,7 +1,6 @@
 import { Customer, CustomersClient, UsersClient } from "../sdk-local";
 import { Logger } from "@in.pulse-crm/utils";
 import { Prisma } from "@prisma/client";
-import chatsService from "./chats.service";
 import getCustomersClient from "./customers.service";
 import prismaService from "./prisma.service";
 import getUsersClient from "./users.service";
@@ -238,7 +237,10 @@ class ContactEnricher {
 		const customerIds = this.extractUniqueCustomerIds(contacts);
 
 		// Busca paralela de chats e clientes
-		const [chats, customersMap] = await Promise.all([this.fetchActiveChats(), this.fetchCustomers(customerIds)]);
+		const [chats, customersMap] = await Promise.all([
+			this.fetchActiveChats(contacts.map((contact) => contact.id)),
+			this.fetchCustomers(customerIds)
+		]);
 
 		const chatsMap = this.buildChatsMap(chats);
 
@@ -256,10 +258,14 @@ class ContactEnricher {
 		return Array.from(ids);
 	}
 
-	private async fetchActiveChats(): Promise<any[]> {
+	private async fetchActiveChats(contactIds: number[]): Promise<any[]> {
 		try {
-			const chats = await chatsService.getChats({ isFinished: "false" });
-			return Array.isArray(chats) ? chats : [];
+			return await prismaService.wppChat.findMany({
+				where: { instance: this.instance, isFinished: false, contactId: { in: contactIds } },
+				select: { contactId: true, userId: true },
+				// buildChatsMap keeps the last entry: newest active chat wins.
+				orderBy: { id: "asc" }
+			});
 		} catch {
 			return [];
 		}

@@ -3,6 +3,7 @@ import internalChatsService from "../services/internal-chats.service";
 import messagePresentationService from "../services/message-presentation.service";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
+import protectedRead from "../middlewares/protected-read";
 import upload from "../middlewares/multer.middleware";
 import { createUploadTraceLogger, resolveUploadTraceId } from "../utils/file-upload-trace";
 import messageReactionsService from "../services/message-reactions.service";
@@ -17,7 +18,7 @@ class InternalChatsController {
 		this.router.post("/api/internal/chats", isAuthenticated, upload.single("file"), this.startInternalChat);
 
 		// Obtem chats internos do usuário através da sessão
-		this.router.get("/api/internal/session/chats", isAuthenticated, this.getSessionInternalChats);
+		this.router.get("/api/internal/session/chats", isAuthenticated, protectedRead("internal-chats.session", this.getSessionInternalChats));
 
 		this.router.get("/api/internal/chats/:id/messages", isAuthenticated, this.getInternalChatMessages);
 
@@ -116,14 +117,14 @@ class InternalChatsController {
 			data
 		});
 	}
-	private async getSessionInternalChats(req: Request, res: Response) {
+	private async getSessionInternalChats(req: Request) {
 		const includeMessages = req.query["messages"] !== "false";
 		const data = await internalChatsService.getInternalChatsBySession(req.session, includeMessages);
 
-		res.status(200).send({
+		return {
 			message: "Internal chats retrieved successfully!",
 			data
-		});
+		};
 	}
 
 	private async getInternalChatMessages(req: Request, res: Response) {

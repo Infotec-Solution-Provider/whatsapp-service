@@ -1,6 +1,7 @@
 import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import isAdmin from "../middlewares/is-admin.middleware";
+import protectedRead from "../middlewares/protected-read";
 import onlyLocal from "../middlewares/only-local.middleware";
 import contactsService, {
 	ContactAlreadyExistsError,
@@ -13,11 +14,11 @@ import parametersService, { CONTACT_APPROVAL_PARAMETERS } from "../services/para
 
 class ContactsController {
 	constructor(public readonly router: Router) {
-		this.router.get("/api/whatsapp/customer/:id/contacts", isAuthenticated, this.getCustomerContacts);
-		this.router.get("/api/whatsapp/contacts/customer", isAuthenticated, this.getContactsWithCustomer);
+		this.router.get("/api/whatsapp/customer/:id/contacts", isAuthenticated, protectedRead("contacts.customer", this.getCustomerContacts));
+		this.router.get("/api/whatsapp/contacts/customer", isAuthenticated, protectedRead("contacts.search", this.getContactsWithCustomer));
 		this.router.post("/api/internal/whatsapp/contacts/customer", onlyLocal, this.getInternalContactsWithCustomer);
-		this.router.get("/api/whatsapp/contacts", isAuthenticated, this.getContacts);
-		this.router.get("/api/whatsapp/contacts/deleted", isAuthenticated, isAdmin, this.getDeletedContacts);
+		this.router.get("/api/whatsapp/contacts", isAuthenticated, protectedRead("contacts.list", this.getContacts));
+		this.router.get("/api/whatsapp/contacts/deleted", isAuthenticated, isAdmin, protectedRead("contacts.deleted", this.getDeletedContacts));
 		this.router.post("/api/whatsapp/customers/:id/contacts", isAuthenticated, this.createContact);
 		this.router.post("/api/whatsapp/contacts", isAuthenticated, this.createContact);
 		this.router.post("/api/whatsapp/contacts/:contactId/reactivate", isAuthenticated, this.reactivateContact);
@@ -43,25 +44,25 @@ class ContactsController {
 		});
 	}
 
-	private async getCustomerContacts(req: Request, res: Response) {
+	private async getCustomerContacts(req: Request) {
 		const data = await contactsService.getCustomerContacts(req.session.instance, Number(req.params["id"]));
 
-		res.status(200).send({
+		return {
 			message: "Chats retrieved successfully!",
 			data
-		});
+		};
 	}
 
-	private async getContacts(req: Request, res: Response) {
+	private async getContacts(req: Request) {
 		const data = await contactsService.getContacts(req.session.instance);
 
-		res.status(200).send({
+		return {
 			message: "Chats retrieved successfully!",
 			data
-		});
+		};
 	}
 
-	private async getContactsWithCustomer(req: Request, res: Response) {
+	private async getContactsWithCustomer(req: Request) {
 		const parseNumberList = (value: string | undefined) => {
 			if (!value) {
 				return null;
@@ -136,7 +137,7 @@ class ContactsController {
 			message: "Contacts retrieved successfully!",
 			...result
 		};
-		res.status(200).send(resBody);
+		return resBody;
 	}
 
 	private async getInternalContactsWithCustomer(req: Request, res: Response) {
@@ -257,7 +258,7 @@ class ContactsController {
 		});
 	}
 
-	private async getDeletedContacts(req: Request, res: Response) {
+	private async getDeletedContacts(req: Request) {
 		const page = Number(req.query["page"] ?? 1);
 		const perPage = Number(req.query["perPage"] ?? 20);
 		const result = await contactsService.getDeletedContacts(req.session.instance, page, perPage);
@@ -265,11 +266,11 @@ class ContactsController {
 		const contactSearchService = new ContactSearchService(token);
 		const data = await contactSearchService.enrichContacts(req.session.instance, result.contacts);
 
-		res.status(200).send({
+		return {
 			message: "Contatos desativados carregados com sucesso!",
 			data,
 			pagination: result.pagination
-		});
+		};
 	}
 
 	private async reactivateContact(req: Request, res: Response) {

@@ -257,7 +257,7 @@ class ChatsService {
 		}
 
 		if (session.instance === "vollo") {
-			for (const message of messages) {
+			for (const message of [...messages, ...chats.flatMap((chat) => chat.lastMessage ? [chat.lastMessage] : [])]) {
 				try {
 					message.body = decodeURIComponent(message.body);
 				} catch {

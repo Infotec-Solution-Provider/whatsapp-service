@@ -4,6 +4,7 @@ import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import onlyLocal from "../middlewares/only-local.middleware";
 import publicBiRateLimit from "../middlewares/public-bi-rate-limit.middleware";
+import protectedRead from "../middlewares/protected-read";
 import chatUserPreferencesService, { ChatPreferenceType } from "../services/chat-user-preferences.service";
 
 class ChatsController {
@@ -14,7 +15,7 @@ class ChatsController {
 			isAuthenticated,
 			this.getPublicConversations.bind(this)
 		);
-		this.router.get("/api/whatsapp/session/chats", isAuthenticated, this.getChatsBySession);
+		this.router.get("/api/whatsapp/session/chats", isAuthenticated, protectedRead("chats.session", this.getChatsBySession));
 		this.router.get("/api/whatsapp/chats/:id", isAuthenticated, this.getChatById.bind(this));
 		this.router.get("/api/whatsapp/chats/:id/messages", isAuthenticated, this.getChatMessages.bind(this));
 		this.router.get(
@@ -36,7 +37,7 @@ class ChatsController {
 		);
 		this.router.post("/api/whatsapp/chats/:id/finish", isAuthenticated, this.finishChatById);
 		this.router.post("/api/whatsapp/chats", isAuthenticated, this.startChatByContactId);
-		this.router.get("/api/whatsapp/session/monitor", isAuthenticated, this.getChatsMonitor);
+		this.router.get("/api/whatsapp/session/monitor", isAuthenticated, protectedRead("chats.monitor", this.getChatsMonitor));
 		this.router.post("/api/whatsapp/chats/:id/transfer", isAuthenticated, this.transferAttendance);
 		this.router.patch("/api/whatsapp/chat-preferences/:type/:id", isAuthenticated, this.updateChatPreference);
 	}
@@ -89,16 +90,16 @@ class ChatsController {
 		res.status(200).send({ message: "Conversations retrieved successfully!", data });
 	}
 
-	private async getChatsBySession(req: Request, res: Response) {
+	private async getChatsBySession(req: Request) {
 		const includeMessages = Boolean(req.query["messages"] === "true");
 		const includeContact = Boolean(req.query["contact"] === "true");
 
 		const data = await chatsService.getUserChatsBySession(req.session, includeMessages, includeContact);
 
-		res.status(200).send({
+		return {
 			message: "Chats retrieved successfully!",
 			data
-		});
+		};
 	}
 
 	private async updateChatPreference(req: Request, res: Response) {
@@ -118,13 +119,13 @@ class ChatsController {
 		res.status(200).send({ message: "Chat preference updated successfully!", data });
 	}
 
-	private async getChatsMonitor(req: Request, res: Response) {
+	private async getChatsMonitor(req: Request) {
 		const data = await chatsService.getChatsMonitor(req.session);
 
-		res.status(200).send({
+		return {
 			message: "Chats Monitor retrieved successfully!",
 			data
-		});
+		};
 	}
 	private async getChatById(req: Request, res: Response) {
 		return this.sendChatById(req, res);

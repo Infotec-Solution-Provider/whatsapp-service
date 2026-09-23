@@ -1,42 +1,43 @@
-import { Request, Response, Router } from "express";
+import { Request, Router } from "express";
 import monitorService from "../services/monitor.service";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
+import protectedRead from "../middlewares/protected-read";
 
 class MonitorController {
 	constructor(public readonly router: Router) {
 		this.router.get(
 			"/api/whatsapp/monitor",
 			isAuthenticated,
-			this.getMonitorData
+			protectedRead("monitor.legacy", this.getMonitorData)
 		);
 
 		this.router.post(
 			"/api/whatsapp/monitor/search",
 			isAuthenticated,
-			this.searchMonitorData
+			protectedRead("monitor.search", this.searchMonitorData)
 		);
 	}
 
-	private async getMonitorData(req: Request, res: Response) {
+	private async getMonitorData(req: Request) {
 		const responseData = await monitorService.getMonitorData(req.session);
 
-		res.status(200).send({
+		return {
 			message: "Monitor data retrieved successfully!",
 			data: responseData
-		});
+		};
 	}
 
-	private async searchMonitorData(req: Request, res: Response) {
+	private async searchMonitorData(req: Request) {
 		const result = await monitorService.searchMonitorData(req.session, {
 			page: req.body.page,
 			pageSize: req.body.pageSize,
 			filters: req.body.filters
 		});
 
-		res.status(200).send({
+		return {
 			message: "Monitor data retrieved successfully!",
 			data: result
-		});
+		};
 	}
 }
 
