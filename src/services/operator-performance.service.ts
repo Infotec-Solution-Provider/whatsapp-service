@@ -320,6 +320,9 @@ const TRIVIAL_POST_CLOSE_FOLLOW_UP_SQL_CONDITION = (
 
 const SYSTEM_OPERATOR_ID = -1;
 const SYSTEM_OPERATOR_NAME = "Sistema/Admin";
+
+// Finalizações sem autor (bots, rotinas) contam para o operador de sistema.
+const FINISHED_CHAT_OPERATOR_SQL = (alias: string) => `COALESCE(${alias}.finished_by, ${SYSTEM_OPERATOR_ID})`;
 const ALL_TIME_START = "2000-01-01";
 const ALL_TIME_END = "2099-12-31";
 const MAX_DAILY_SERIES_DAYS = 93;
@@ -808,14 +811,14 @@ class OperatorPerformanceService {
 			messageParams.push(endDate);
 		}
 
-		const finishedParams: Date[] = [];
+		const finishedParams: Array<string | Date> = [instance];
 		let finishedDateClause = "";
 		if (startDate) {
-			finishedDateClause += " AND h.DATAHORA_FIM >= ?";
+			finishedDateClause += " AND ch.finished_at >= ?";
 			finishedParams.push(startDate);
 		}
 		if (endDate) {
-			finishedDateClause += " AND h.DATAHORA_FIM <= ?";
+			finishedDateClause += " AND ch.finished_at <= ?";
 			finishedParams.push(endDate);
 		}
 
@@ -854,11 +857,13 @@ class OperatorPerformanceService {
 
 		const operatorMessageClause = buildInClause("COALESCE(msg.user_id, ch.user_id)", operatorIds);
 		const operatorFinishedClause = buildInClause("o.CODIGO", operatorIds);
+		const operatorChatFinishedClause = buildInClause(FINISHED_CHAT_OPERATOR_SQL("ch"), operatorIds);
 		const operatorResponseClause = buildInClause("COALESCE(response.user_id, ch.user_id)", operatorIds);
 		const operatorPendingClause = buildInClause("ch.user_id", operatorIds);
 
 		const sectorMessageClause = buildInClause("ch.sector_id", sectorIds);
 		const sectorFinishedClause = buildInClause("o.SETOR", sectorIds);
+		const sectorChatFinishedClause = buildInClause("ch.sector_id", sectorIds);
 		const sectorResponseClause = buildInClause("ch.sector_id", sectorIds);
 		const sectorPendingClause = buildInClause("ch.sector_id", sectorIds);
 		const salesOperatorClause = buildInClause("c.OPERADOR", operatorIds);
@@ -887,18 +892,18 @@ class OperatorPerformanceService {
 
 		const finishedChatsQuery = `
 			SELECT
-				o.CODIGO AS operatorId,
+				${FINISHED_CHAT_OPERATOR_SQL("ch")} AS operatorId,
 				COUNT(*) AS chatsFinishedCount,
-				AVG(TIMESTAMPDIFF(SECOND, h.DATAHORA_INICIO, h.DATAHORA_FIM)) AS averageHandlingSeconds
-			FROM historico_cli h
-			INNER JOIN operadores o
-				ON CAST(o.CODIGO AS CHAR) = h.OPERADOR OR o.LOGIN = h.OPERADOR OR o.NOME = h.OPERADOR
-			WHERE h.DATAHORA_INICIO IS NOT NULL
-				AND h.DATAHORA_FIM IS NOT NULL
+				AVG(TIMESTAMPDIFF(SECOND, ch.started_at, ch.finished_at)) AS averageHandlingSeconds
+			FROM chats ch
+			WHERE ch.instance = ?
+				AND ch.is_finished = 1
+				AND ch.started_at IS NOT NULL
+				AND ch.finished_at IS NOT NULL
 				${finishedDateClause}
-				${operatorFinishedClause}
-				${sectorFinishedClause}
-			GROUP BY o.CODIGO
+				${operatorChatFinishedClause}
+				${sectorChatFinishedClause}
+			GROUP BY operatorId
 		`;
 
 		const firstResponseQuery = `
@@ -1175,7 +1180,7 @@ class OperatorPerformanceService {
 			telephonyStatusRows,
 		] = await Promise.all([
 			prismaService.$queryRawUnsafe<OperatorMessagesAggregateRow[]>(messagesQuery, ...messageParams),
-			instancesService.executeQuery<OperatorFinishedChatsAggregateRow[]>(instance, finishedChatsQuery, finishedParams),
+			prismaService.$queryRawUnsafe<OperatorFinishedChatsAggregateRow[]>(finishedChatsQuery, ...finishedParams),
 			prismaService.$queryRawUnsafe<OperatorFirstResponseAggregateRow[]>(firstResponseQuery, ...responseParams),
 			prismaService.$queryRawUnsafe<OperatorPendingReturnsAggregateRow[]>(pendingReturnsQuery, ...pendingParams),
 			transferHistoryService.getOperatorTransferMetrics(instance, startDate, endDate, operatorIds, sectorIds),
@@ -1484,14 +1489,14 @@ class OperatorPerformanceService {
 		sectorIds: number[] | null
 	) {
 		const operatorMessageClause = buildInClause("COALESCE(msg.user_id, ch.user_id)", operatorIds);
-		const operatorFinishedClause = buildInClause("o.CODIGO", operatorIds);
+		const operatorFinishedClause = buildInClause(FINISHED_CHAT_OPERATOR_SQL("ch"), operatorIds);
 		const operatorResponseClause = buildInClause("COALESCE(response.user_id, ch.user_id)", operatorIds);
 		const operatorPendingClause = buildInClause("ch.user_id", operatorIds);
 		const sentOperatorClause = buildInClause("history.from_user_id", operatorIds);
 		const receivedOperatorClause = buildInClause("history.to_user_id", operatorIds);
 
 		const sectorMessageClause = buildInClause("ch.sector_id", sectorIds);
-		const sectorFinishedClause = buildInClause("o.SETOR", sectorIds);
+		const sectorFinishedClause = buildInClause("ch.sector_id", sectorIds);
 		const sectorResponseClause = buildInClause("ch.sector_id", sectorIds);
 		const sectorPendingClause = buildInClause("ch.sector_id", sectorIds);
 		const transferSectorClause = sectorIds?.length
@@ -1518,19 +1523,18 @@ class OperatorPerformanceService {
 
 		const finishedQuery = `
 			SELECT
-				DATE(h.DATAHORA_FIM) AS day,
+				DATE(ch.finished_at) AS day,
 				COUNT(*) AS chatsFinishedCount,
-				AVG(TIMESTAMPDIFF(SECOND, h.DATAHORA_INICIO, h.DATAHORA_FIM)) AS averageHandlingSeconds
-			FROM historico_cli h
-			INNER JOIN operadores o
-				ON CAST(o.CODIGO AS CHAR) = h.OPERADOR OR o.LOGIN = h.OPERADOR OR o.NOME = h.OPERADOR
-			WHERE h.DATAHORA_INICIO IS NOT NULL
-				AND h.DATAHORA_FIM IS NOT NULL
-				AND h.DATAHORA_FIM >= ?
-				AND h.DATAHORA_FIM <= ?
+				AVG(TIMESTAMPDIFF(SECOND, ch.started_at, ch.finished_at)) AS averageHandlingSeconds
+			FROM chats ch
+			WHERE ch.instance = ?
+				AND ch.is_finished = 1
+				AND ch.started_at IS NOT NULL
+				AND ch.finished_at >= ?
+				AND ch.finished_at <= ?
 				${operatorFinishedClause}
 				${sectorFinishedClause}
-			GROUP BY DATE(h.DATAHORA_FIM)
+			GROUP BY DATE(ch.finished_at)
 		`;
 
 		const firstResponseQuery = `
@@ -1688,7 +1692,7 @@ class OperatorPerformanceService {
 
 		const [messageRows, finishedRows, responseRows, pendingRows, transferRows] = await Promise.all([
 			prismaService.$queryRawUnsafe<DailyMetricsAggregateRow[]>(messagesQuery, instance, startDate, endDate),
-			instancesService.executeQuery<DailyMetricsAggregateRow[]>(instance, finishedQuery, [startDate, endDate]),
+			prismaService.$queryRawUnsafe<DailyMetricsAggregateRow[]>(finishedQuery, instance, startDate, endDate),
 			prismaService.$queryRawUnsafe<DailyMetricsAggregateRow[]>(firstResponseQuery, instance, startDate, endDate, instance, startDate, endDate),
 			prismaService.$queryRawUnsafe<DailyMetricsAggregateRow[]>(pendingQuery, instance, startDate, endDate, instance),
 			prismaService.$queryRawUnsafe<DailyMetricsAggregateRow[]>(
