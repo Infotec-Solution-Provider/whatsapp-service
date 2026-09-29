@@ -290,7 +290,25 @@ const CUSTOMER_MESSAGE_SQL_CONDITION = (alias: string) =>
 const RELEVANT_MESSAGE_SQL_CONDITION = (alias: string) =>
 	`(${OPERATION_MESSAGE_SQL_CONDITION(alias)} OR ${CUSTOMER_MESSAGE_SQL_CONDITION(alias)})`;
 
-const NORMALIZED_MESSAGE_BODY_SQL = (expression: string) => `TRIM(LOWER(COALESCE(${expression}, '')))`;
+// Base única das contagens de mensagens do painel (card, tabela por setor e "Mensagens por Operador").
+const OPERATOR_MESSAGES_SQL = (filterClauses: string) => `
+	SELECT
+		COALESCE(msg.user_id, ch.user_id) AS operatorId,
+		SUM(CASE WHEN ${RELEVANT_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS messagesCount,
+		SUM(CASE WHEN ${OPERATION_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS sentMessagesCount,
+		SUM(CASE WHEN ${CUSTOMER_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS receivedMessagesCount,
+		COUNT(DISTINCT ch.id) AS chatsHandledCount,
+		COUNT(DISTINCT msg.contact_id) AS contactsCount
+	FROM messages msg
+	LEFT JOIN chats ch ON ch.id = msg.chat_id
+	WHERE msg.instance = ?
+		AND ${RELEVANT_MESSAGE_SQL_CONDITION("msg")}
+		AND COALESCE(msg.user_id, ch.user_id) IS NOT NULL
+		${filterClauses}
+	GROUP BY operatorId
+`;
+
+const NORMALIZED_MESSAGE_BODY_SQL =(expression: string) => `TRIM(LOWER(COALESCE(${expression}, '')))`;
 
 const TRIVIAL_CUSTOMER_MESSAGE_SQL_CONDITION = (expression: string) =>
 	`(${NORMALIZED_MESSAGE_BODY_SQL(expression)} REGEXP '^(ok(ay)?|obg|obrigad[oa]s?|valeu|vlw|blz|beleza|bom[[:space:]]+dia|boa[[:space:]]+tarde|boa[[:space:]]+noite|certo|perfeito|show|joia|tmj|thanks?)[[:space:][:punct:]]*$')`;
@@ -321,8 +339,28 @@ const TRIVIAL_POST_CLOSE_FOLLOW_UP_SQL_CONDITION = (
 const SYSTEM_OPERATOR_ID = -1;
 const SYSTEM_OPERATOR_NAME = "Sistema/Admin";
 
+const EXCLUDED_OPERATOR_ID = 1;
+
 // Finalizações sem autor (bots, rotinas) contam para o operador de sistema.
 const FINISHED_CHAT_OPERATOR_SQL = (alias: string) => `COALESCE(${alias}.finished_by, ${SYSTEM_OPERATOR_ID})`;
+
+const excludeOperatorClause = (field: string) => ` AND COALESCE(${field}, 0) <> ${EXCLUDED_OPERATOR_ID}`;
+
+/**
+ * Regra única dos relatórios do painel: o operador de código 1 fica de fora e
+ * responsáveis de sistema (<= 0) ou sem cadastro em `operadores` são agrupados
+ * na linha "Sistema/Admin", para que os totais sejam sempre a soma das linhas.
+ */
+export const resolveDashboardOperatorId = (operatorId: number | null, registeredOperators: Map<number, unknown>) => {
+	if (operatorId == null || operatorId === EXCLUDED_OPERATOR_ID) return null;
+	return operatorId > 0 && registeredOperators.has(operatorId) ? operatorId : SYSTEM_OPERATOR_ID;
+};
+
+const mergeAverage = (currentAverage: number | null, currentWeight: number, average: number | null, weight: number) => {
+	if (average == null) return currentAverage;
+	if (currentAverage == null || currentWeight <= 0) return average;
+	return (currentAverage * currentWeight + average * weight) / (currentWeight + weight);
+};
 const ALL_TIME_START = "2000-01-01";
 const ALL_TIME_END = "2099-12-31";
 const MAX_DAILY_SERIES_DAYS = 93;
@@ -372,7 +410,7 @@ const normalizeDateTime = (value: string | Date | null | undefined) => {
 	return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
 };
 
-const parseBoundaryDate = (value: string | null | undefined, boundary: "start" | "end") => {
+export const parseBoundaryDate = (value: string | null | undefined, boundary: "start" | "end") => {
 	if (!value) return null;
 	const trimmed = String(value).trim();
 	if (!trimmed) return null;
@@ -416,9 +454,6 @@ const buildInClause = (field: string, ids: number[] | null) => {
 	if (!ids?.length) return "";
 	return ` AND ${field} IN (${ids.join(",")})`;
 };
-
-const isVisibleOperator = (operatorId: number, operatorsMap: Map<number, OperatorRow>) =>
-	operatorId === SYSTEM_OPERATOR_ID || operatorsMap.has(operatorId);
 
 const padDateUnit = (value: number) => String(value).padStart(2, "0");
 
@@ -871,24 +906,7 @@ class OperatorPerformanceService {
 		const schedulesOperatorClause = buildInClause("cc.OPERADOR", operatorIds);
 		const schedulesSectorClause = buildInClause("o.SETOR", sectorIds);
 
-		const messagesQuery = `
-			SELECT
-				COALESCE(msg.user_id, ch.user_id) AS operatorId,
-				SUM(CASE WHEN ${RELEVANT_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS messagesCount,
-				SUM(CASE WHEN ${OPERATION_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS sentMessagesCount,
-				SUM(CASE WHEN ${CUSTOMER_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS receivedMessagesCount,
-				COUNT(DISTINCT ch.id) AS chatsHandledCount,
-				COUNT(DISTINCT msg.contact_id) AS contactsCount
-			FROM messages msg
-			LEFT JOIN chats ch ON ch.id = msg.chat_id
-			WHERE msg.instance = ?
-				AND ${RELEVANT_MESSAGE_SQL_CONDITION("msg")}
-				AND COALESCE(msg.user_id, ch.user_id) IS NOT NULL
-				${messageDateClause}
-				${operatorMessageClause}
-				${sectorMessageClause}
-			GROUP BY operatorId
-		`;
+		const messagesQuery = OPERATOR_MESSAGES_SQL(`${messageDateClause}${operatorMessageClause}${sectorMessageClause}`);
 
 		const finishedChatsQuery = `
 			SELECT
@@ -1275,120 +1293,109 @@ class OperatorPerformanceService {
 			return row;
 		};
 
+		// Vários ids podem cair na mesma linha ("Sistema/Admin"), então as métricas são somadas.
+		const resolveRow = (rawOperatorId: bigint | number | string | null | undefined) => {
+			const operatorId = resolveDashboardOperatorId(toOperatorId(rawOperatorId), operatorsMap);
+			return operatorId == null ? null : ensureRow(operatorId);
+		};
+
+		// Estados (sessão, telefonia) só fazem sentido para o próprio operador cadastrado.
+		const resolveOwnRow = (operatorId: number) =>
+			resolveDashboardOperatorId(operatorId, operatorsMap) === operatorId ? ensureRow(operatorId) : null;
+
 		for (const row of messageRows) {
-			const operatorId = toOperatorId(row.operatorId);
-			if (operatorId == null) continue;
-			const target = ensureRow(operatorId);
-			target.sentMessagesCount = toNumber(row.sentMessagesCount);
-			target.receivedMessagesCount = toNumber(row.receivedMessagesCount);
+			const target = resolveRow(row.operatorId);
+			if (!target) continue;
+			target.sentMessagesCount += toNumber(row.sentMessagesCount);
+			target.receivedMessagesCount += toNumber(row.receivedMessagesCount);
 			target.messagesCount = target.sentMessagesCount + target.receivedMessagesCount;
-			target.contactsCount = toNumber(row.contactsCount);
-			target.chatsHandledCount = toNumber(row.chatsHandledCount);
+			target.contactsCount += toNumber(row.contactsCount);
+			target.chatsHandledCount += toNumber(row.chatsHandledCount);
 		}
 
 		for (const row of finishedRows) {
-			const operatorId = toOperatorId(row.operatorId);
-			if (operatorId == null) continue;
-			const target = ensureRow(operatorId);
-			target.chatsFinishedCount = toNumber(row.chatsFinishedCount);
-			target.averageHandlingSeconds = toAverageNumber(row.averageHandlingSeconds);
+			const target = resolveRow(row.operatorId);
+			if (!target) continue;
+			const chatsFinishedCount = toNumber(row.chatsFinishedCount);
+			target.averageHandlingSeconds = mergeAverage(
+				target.averageHandlingSeconds,
+				target.chatsFinishedCount,
+				toAverageNumber(row.averageHandlingSeconds),
+				chatsFinishedCount
+			);
+			target.chatsFinishedCount += chatsFinishedCount;
 		}
 
 		for (const row of responseRows) {
-			const operatorId = toOperatorId(row.operatorId);
-			if (operatorId == null) continue;
-			const target = ensureRow(operatorId);
-			target.respondedChatsCount = toNumber(row.respondedChatsCount);
-			target.averageFirstResponseSeconds = toAverageNumber(row.averageFirstResponseSeconds);
+			const target = resolveRow(row.operatorId);
+			if (!target) continue;
+			const respondedChatsCount = toNumber(row.respondedChatsCount);
+			target.averageFirstResponseSeconds = mergeAverage(
+				target.averageFirstResponseSeconds,
+				target.respondedChatsCount,
+				toAverageNumber(row.averageFirstResponseSeconds),
+				respondedChatsCount
+			);
+			target.respondedChatsCount += respondedChatsCount;
 		}
 
 		for (const row of pendingRows) {
-			const operatorId = toOperatorId(row.operatorId);
-			if (operatorId == null) continue;
-			const target = ensureRow(operatorId);
-			target.pendingReturnsCount = toNumber(row.pendingReturnsCount);
+			const target = resolveRow(row.operatorId);
+			if (!target) continue;
+			target.pendingReturnsCount += toNumber(row.pendingReturnsCount);
 		}
 
 		for (const row of transferRows) {
-			const operatorId = toOperatorId(row.operatorId);
-			if (operatorId == null) continue;
-			const target = ensureRow(operatorId);
-			target.transfersSentCount = toNumber(row.transfersSentCount);
-			target.transfersReceivedCount = toNumber(row.transfersReceivedCount);
+			const target = resolveRow(row.operatorId);
+			if (!target) continue;
+			target.transfersSentCount += toNumber(row.transfersSentCount);
+			target.transfersReceivedCount += toNumber(row.transfersReceivedCount);
 		}
 
-		for (const row of salesRows) {
-			const operatorId = toOperatorId(row.operatorId);
-			if (operatorId == null) continue;
+		const resolveCrmRow = (rawOperatorId: bigint | number | string | null | undefined) => {
+			const operatorId = toOperatorId(rawOperatorId);
+			if (operatorId == null) return null;
 			const operator = operatorsMap.get(operatorId);
-			if (!this.isOperatorAllowedByFilters(operatorId, operator, operatorIds, sectorIds)) {
-				continue;
-			}
+			if (!this.isOperatorAllowedByFilters(operatorId, operator, operatorIds, sectorIds)) return null;
+			return resolveRow(operatorId);
+		};
 
-			const target = ensureRow(operatorId);
-			target.crmSalesCount = toNumber(row.crmSalesCount);
-			target.crmRevenue = toNumber(row.crmRevenue);
-			target.crmAverageTicket = toAverageNumber(row.crmAverageTicket);
+		for (const row of salesRows) {
+			const target = resolveCrmRow(row.operatorId);
+			if (!target) continue;
+			target.crmSalesCount += toNumber(row.crmSalesCount);
+			target.crmRevenue += toNumber(row.crmRevenue);
+			target.crmAverageTicket = target.crmSalesCount > 0 ? target.crmRevenue / target.crmSalesCount : null;
 		}
 
 		for (const row of proposalsRows) {
-			const operatorId = toOperatorId(row.operatorId);
-			if (operatorId == null) continue;
-			const operator = operatorsMap.get(operatorId);
-			if (!this.isOperatorAllowedByFilters(operatorId, operator, operatorIds, sectorIds)) {
-				continue;
-			}
-
-			const target = ensureRow(operatorId);
-			target.crmConvertedProposals = toNumber(row.crmConvertedProposals);
+			const target = resolveCrmRow(row.operatorId);
+			if (!target) continue;
+			target.crmConvertedProposals += toNumber(row.crmConvertedProposals);
 		}
 
 		for (const row of upcomingSchedulesRows) {
-			const operatorId = toOperatorId(row.operatorId);
-			if (operatorId == null) continue;
-			const operator = operatorsMap.get(operatorId);
-			if (!this.isOperatorAllowedByFilters(operatorId, operator, operatorIds, sectorIds)) {
-				continue;
-			}
-
-			const target = ensureRow(operatorId);
-			target.crmUpcomingSchedulesCount = toNumber(row.crmUpcomingSchedulesCount);
+			const target = resolveCrmRow(row.operatorId);
+			if (!target) continue;
+			target.crmUpcomingSchedulesCount += toNumber(row.crmUpcomingSchedulesCount);
 		}
 
 		for (const row of ordersRows) {
-			const operatorId = toOperatorId(row.operatorId);
-			if (operatorId == null) continue;
-			const operator = operatorsMap.get(operatorId);
-			if (!this.isOperatorAllowedByFilters(operatorId, operator, operatorIds, sectorIds)) {
-				continue;
-			}
-
-			const target = ensureRow(operatorId);
-			target.ordersCount = toNumber(row.ordersCount);
+			const target = resolveCrmRow(row.operatorId);
+			if (!target) continue;
+			target.ordersCount += toNumber(row.ordersCount);
 		}
 
 		for (const row of callsRows) {
-			const operatorId = toOperatorId(row.operatorId);
-			if (operatorId == null) continue;
-			const operator = operatorsMap.get(operatorId);
-			if (!this.isOperatorAllowedByFilters(operatorId, operator, operatorIds, sectorIds)) {
-				continue;
-			}
-
-			const target = ensureRow(operatorId);
-			target.callsCount = toNumber(row.callsCount);
+			const target = resolveCrmRow(row.operatorId);
+			if (!target) continue;
+			target.callsCount += toNumber(row.callsCount);
 		}
 
 		for (const row of contactsResultRows) {
-			const operatorId = toOperatorId(row.operatorId);
-			if (operatorId == null) continue;
-			const operator = operatorsMap.get(operatorId);
-			if (!this.isOperatorAllowedByFilters(operatorId, operator, operatorIds, sectorIds)) {
-				continue;
-			}
-
-			const target = ensureRow(operatorId);
-			target.contactsResultCount = toNumber(row.contactsResultCount);
+			const target = resolveCrmRow(row.operatorId);
+			if (!target) continue;
+			target.contactsResultCount += toNumber(row.contactsResultCount);
 		}
 
 		for (const row of telephonyStatusRows) {
@@ -1399,7 +1406,8 @@ class OperatorPerformanceService {
 				continue;
 			}
 
-			const target = ensureRow(operatorId);
+			const target = resolveOwnRow(operatorId);
+			if (!target) continue;
 			target.telephonyStatusCode = row.statusCode ? String(row.statusCode).trim() || null : null;
 			target.telephonyStatusSince = normalizeDateTime(row.statusSince);
 		}
@@ -1410,8 +1418,9 @@ class OperatorPerformanceService {
 				continue;
 			}
 
-			const target = ensureRow(operatorId);
-			target.currentOpenChatsCount = currentOpenChatsCount;
+			const target = resolveRow(operatorId);
+			if (!target) continue;
+			target.currentOpenChatsCount += currentOpenChatsCount;
 		}
 
 		for (const [operatorId, sessionStatus] of operatorSessionStatuses.entries()) {
@@ -1420,7 +1429,8 @@ class OperatorPerformanceService {
 				continue;
 			}
 
-			const target = ensureRow(operatorId);
+			const target = resolveOwnRow(operatorId);
+			if (!target) continue;
 			target.isWhatsappOnline = sessionStatus.isWhatsappOnline;
 			target.whatsappStatus = sessionStatus.isWhatsappOnline ? "online" : "offline";
 			target.telephonyStatus = sessionStatus.telephonyStatus;
@@ -1433,7 +1443,7 @@ class OperatorPerformanceService {
 			row.occupancyStatus = this.resolveOccupancyStatus(row.isWhatsappOnline, row.currentOpenChatsCount);
 		}
 
-		const aggregatedOperatorPerformance = Array.from(rowsMap.values())
+		const operatorPerformance = Array.from(rowsMap.values())
 			.sort((left, right) => {
 				if (right.chatsFinishedCount !== left.chatsFinishedCount) {
 					return right.chatsFinishedCount - left.chatsFinishedCount;
@@ -1444,9 +1454,7 @@ class OperatorPerformanceService {
 				return left.userName.localeCompare(right.userName);
 			});
 
-		const operatorPerformance = aggregatedOperatorPerformance.filter((row) => isVisibleOperator(row.userId, operatorsMap));
-		const aggregatedSummary = this.buildSummary(aggregatedOperatorPerformance, startDate, endDate);
-		const visibleSummary = this.buildSummary(operatorPerformance, startDate, endDate);
+		const summary = this.buildSummary(operatorPerformance, startDate, endDate);
 
 		Logger.info(
 			`[OperatorPerformanceService] Period aggregation completed ${stringifyLogData({
@@ -1460,23 +1468,17 @@ class OperatorPerformanceService {
 				pendingRows: pendingRows.length,
 				transferRows: transferRows.length,
 				resolvedOperators: operatorsMap.size,
-				visibleOperators: operatorPerformance.length,
-				hiddenOperators: rowsMap.size - operatorPerformance.length,
-				aggregatedSummary: {
-					messagesCount: aggregatedSummary.messagesCount,
-					chatsFinishedCount: aggregatedSummary.chatsFinishedCount,
-					pendingReturnsCount: aggregatedSummary.pendingReturnsCount
-				},
-				visibleSummary: {
-					messagesCount: visibleSummary.messagesCount,
-					chatsFinishedCount: visibleSummary.chatsFinishedCount,
-					pendingReturnsCount: visibleSummary.pendingReturnsCount
+				operatorRows: operatorPerformance.length,
+				summary: {
+					messagesCount: summary.messagesCount,
+					chatsFinishedCount: summary.chatsFinishedCount,
+					pendingReturnsCount: summary.pendingReturnsCount
 				}
 			})}`
 		);
 
 		return {
-			summary: aggregatedSummary,
+			summary,
 			operatorPerformance
 		};
 	}
@@ -1488,12 +1490,20 @@ class OperatorPerformanceService {
 		operatorIds: number[] | null,
 		sectorIds: number[] | null
 	) {
-		const operatorMessageClause = buildInClause("COALESCE(msg.user_id, ch.user_id)", operatorIds);
-		const operatorFinishedClause = buildInClause(FINISHED_CHAT_OPERATOR_SQL("ch"), operatorIds);
-		const operatorResponseClause = buildInClause("COALESCE(response.user_id, ch.user_id)", operatorIds);
-		const operatorPendingClause = buildInClause("ch.user_id", operatorIds);
-		const sentOperatorClause = buildInClause("history.from_user_id", operatorIds);
-		const receivedOperatorClause = buildInClause("history.to_user_id", operatorIds);
+		// Mesma regra das linhas por operador: o código 1 fica fora da série diária.
+		const operatorMessageClause =
+			buildInClause("COALESCE(msg.user_id, ch.user_id)", operatorIds) +
+			excludeOperatorClause("COALESCE(msg.user_id, ch.user_id)");
+		const operatorFinishedClause =
+			buildInClause(FINISHED_CHAT_OPERATOR_SQL("ch"), operatorIds) + excludeOperatorClause(FINISHED_CHAT_OPERATOR_SQL("ch"));
+		const operatorResponseClause =
+			buildInClause("COALESCE(response.user_id, ch.user_id)", operatorIds) +
+			excludeOperatorClause("COALESCE(response.user_id, ch.user_id)");
+		const operatorPendingClause = buildInClause("ch.user_id", operatorIds) + excludeOperatorClause("ch.user_id");
+		const sentOperatorClause =
+			buildInClause("history.from_user_id", operatorIds) + excludeOperatorClause("history.from_user_id");
+		const receivedOperatorClause =
+			buildInClause("history.to_user_id", operatorIds) + excludeOperatorClause("history.to_user_id");
 
 		const sectorMessageClause = buildInClause("ch.sector_id", sectorIds);
 		const sectorFinishedClause = buildInClause("ch.sector_id", sectorIds);
@@ -1818,6 +1828,62 @@ class OperatorPerformanceService {
 				previousAverageHandlingSeconds: previous.averageHandlingSeconds
 			};
 		});
+	}
+
+	/**
+	 * Mensagens por operador com as mesmas regras do card "Mensagens" do painel,
+	 * para que "Mensagens por Operador" some exatamente o mesmo total.
+	 */
+	public async getMessagesPerOperator(instance: string, startDate: Date | null, endDate: Date | null) {
+		const params: Array<string | Date> = [instance];
+		let dateClause = "";
+		if (startDate) {
+			dateClause += " AND msg.sent_at >= ?";
+			params.push(startDate);
+		}
+		if (endDate) {
+			dateClause += " AND msg.sent_at <= ?";
+			params.push(endDate);
+		}
+
+		const rows = await prismaService.$queryRawUnsafe<OperatorMessagesAggregateRow[]>(
+			OPERATOR_MESSAGES_SQL(dateClause),
+			...params
+		);
+		const rawOperatorIds = rows
+			.map((row) => toOperatorId(row.operatorId))
+			.filter((id): id is number => id != null && id > 0);
+		const operatorsMap = await this.fetchOperators(instance, Array.from(new Set(rawOperatorIds)));
+		const rowsMap = new Map<number, OperatorPerformanceRow>();
+
+		for (const row of rows) {
+			const operatorId = resolveDashboardOperatorId(toOperatorId(row.operatorId), operatorsMap);
+			if (operatorId == null) continue;
+
+			let target = rowsMap.get(operatorId);
+			if (!target) {
+				target = this.createOperatorPerformanceRow(operatorId, operatorsMap.get(operatorId));
+				rowsMap.set(operatorId, target);
+			}
+			target.sentMessagesCount += toNumber(row.sentMessagesCount);
+			target.receivedMessagesCount += toNumber(row.receivedMessagesCount);
+			target.messagesCount = target.sentMessagesCount + target.receivedMessagesCount;
+			target.contactsCount += toNumber(row.contactsCount);
+			target.chatsHandledCount += toNumber(row.chatsHandledCount);
+		}
+
+		return Array.from(rowsMap.values()).map((row) => ({
+			userId: row.userId,
+			userName: row.userName,
+			userActive: row.userActive,
+			userType: row.userType,
+			userSector: row.userSector,
+			attendancesCount: row.chatsHandledCount,
+			messagesCount: row.messagesCount,
+			sentMessagesCount: row.sentMessagesCount,
+			receivedMessagesCount: row.receivedMessagesCount,
+			contactsCount: row.contactsCount
+		}));
 	}
 
 	public async getOperatorPerformanceDetails(

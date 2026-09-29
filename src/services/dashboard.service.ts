@@ -1,6 +1,7 @@
 import prismaService from "./prisma.service";
 import instancesService from "./instances.service";
 import { FETCH_CUSTOMERS_QUERY } from "./chats.service";
+import operatorPerformanceService, { parseBoundaryDate } from "./operator-performance.service";
 import { Prisma } from "@prisma/client";
 
 interface OperatorRow {
@@ -26,19 +27,6 @@ interface AwaitingResponseRow {
 	userId: number | null;
 	sectorId: number | null;
 	DATA_MENSAGEM_CLIENTE: Date | null;
-}
-
-interface UserMessages {
-	userId: number;
-	userName: string;
-	userActive: string | number | null;
-	userType: string | number | null;
-	userSector: string | null | undefined;
-	attendancesCount: number;
-	messagesCount: number;
-	sentMessagesCount: number;
-	receivedMessagesCount: number;
-	contactsCount: number;
 }
 
 interface MessagesPerContactRow {
@@ -95,17 +83,16 @@ const isCustomerMessage = (
 	return /^[0-9]/.test(from);
 };
 
-const parseDate = (value?: string | null): Date | null => {
+// "YYYY-MM-DD" vira início/fim do dia local, igual ao card de desempenho (não meia-noite UTC).
+const parseDate = (value: string | null | undefined, boundary: "start" | "end"): Date | null => {
 	if (!value) return null;
 	const trimmed = String(value).trim();
 	if (!trimmed) return null;
-	const asNumber = Number(trimmed);
-	if (!Number.isNaN(asNumber) && /^\d+$/.test(trimmed)) {
-		const dateFromNumber = new Date(asNumber);
+	if (/^\d+$/.test(trimmed)) {
+		const dateFromNumber = new Date(Number(trimmed));
 		return Number.isNaN(dateFromNumber.getTime()) ? null : dateFromNumber;
 	}
-	const parsed = new Date(trimmed);
-	return Number.isNaN(parsed.getTime()) ? null : parsed;
+	return parseBoundaryDate(trimmed, boundary);
 };
 
 class DashboardService {
@@ -145,8 +132,8 @@ class DashboardService {
 	private parseDateRange(dateFilter?: string | null) {
 		const [minRaw, maxRaw] = (dateFilter || "").split("_");
 		return {
-			minDate: parseDate(minRaw),
-			maxDate: parseDate(maxRaw)
+			minDate: parseDate(minRaw, "start"),
+			maxDate: parseDate(maxRaw, "end")
 		};
 	}
 
@@ -232,95 +219,9 @@ class DashboardService {
 
 	public async messagesPerUserService(instance: string, dateFilter?: string | null) {
 		const { minDate, maxDate } = this.parseDateRange(dateFilter);
+		const messagesPerUser = await operatorPerformanceService.getMessagesPerOperator(instance, minDate, maxDate);
 
-		const messages = await prismaService.wppMessage.findMany({
-			where: {
-				instance,
-				...(minDate || maxDate
-					? {
-						sentAt: {
-							...(minDate ? { gte: minDate } : {}),
-							...(maxDate ? { lte: maxDate } : {})
-						}
-					}
-					: {})
-			},
-			select: {
-				id: true,
-				userId: true,
-				contactId: true,
-				chatId: true,
-				from: true,
-				to: true,
-				WppChat: { select: { userId: true } }
-			}
-		});
-
-		const operatorIds = Array.from(
-			new Set(
-				messages
-					.map((message) => message.userId ?? message.WppChat?.userId)
-					.filter((id): id is number => typeof id === "number" && Number.isFinite(id) && id > 1)
-			)
-		);
-
-		const operatorsMap = await this.fetchOperators(instance, operatorIds);
-
-		const messagesPerUser = new Map<number, UserMessages>();
-		const contactsPerUser = new Map<number, Set<number>>();
-		const attendancesPerUser = new Map<number, Set<number>>();
-
-		for (const message of messages) {
-			const operatorId = message.userId ?? message.WppChat?.userId;
-			if (!operatorId || operatorId <= 1) continue;
-
-			const operator = operatorsMap.get(operatorId);
-			if (!operator) continue;
-
-			let userMessage = messagesPerUser.get(operatorId);
-			if (!userMessage) {
-				userMessage = {
-					userId: operator.CODIGO,
-					userName: operator.NOME,
-					userActive: operator.ATIVO,
-					userType: operator.NIVEL,
-					userSector: operator.SETOR_NOME || null,
-					attendancesCount: 0,
-					messagesCount: 0,
-					sentMessagesCount: 0,
-					receivedMessagesCount: 0,
-					contactsCount: 0
-				};
-				messagesPerUser.set(operatorId, userMessage);
-			}
-
-			if (isOperationalMessage(message.from, message.to, message.userId)) {
-				userMessage.messagesCount++;
-				userMessage.sentMessagesCount++;
-			} else if (isCustomerMessage(message.from, message.to, message.userId)) {
-				userMessage.messagesCount++;
-				userMessage.receivedMessagesCount++;
-			}
-
-			if (message.contactId) {
-				const userContacts = contactsPerUser.get(operatorId) || new Set<number>();
-				userContacts.add(message.contactId);
-				contactsPerUser.set(operatorId, userContacts);
-			}
-
-			if (message.chatId) {
-				const userAttendances = attendancesPerUser.get(operatorId) || new Set<number>();
-				userAttendances.add(message.chatId);
-				attendancesPerUser.set(operatorId, userAttendances);
-			}
-		}
-
-		messagesPerUser.forEach((userMessage, userId) => {
-			userMessage.contactsCount = contactsPerUser.get(userId)?.size || 0;
-			userMessage.attendancesCount = attendancesPerUser.get(userId)?.size || 0;
-		});
-
-		return { messagesPerUser: Array.from(messagesPerUser.values()) };
+		return { messagesPerUser };
 	}
 
 	public async messagesPerContactService(
@@ -449,8 +350,8 @@ class DashboardService {
 		MIN_DATE: string | null,
 		MAX_DATE: string | null
 	) {
-		const minDate = parseDate(MIN_DATE);
-		const maxDate = parseDate(MAX_DATE);
+		const minDate = parseDate(MIN_DATE, "start");
+		const maxDate = parseDate(MAX_DATE, "end");
 
 		const operatorIds = OPERADORES === "*" ? null : OPERADORES.split(",").map((id) => +id).filter(Boolean);
 		const sectorIds = SETORES === "*" ? null : SETORES.split(",").map((id) => +id).filter(Boolean);
@@ -459,8 +360,8 @@ class DashboardService {
 
 		if (minDate || maxDate) {
 			where.sentAt = {
-				...(minDate ? { gt: minDate } : {}),
-				...(maxDate ? { lt: maxDate } : {})
+				...(minDate ? { gte: minDate } : {}),
+				...(maxDate ? { lte: maxDate } : {})
 			};
 		}
 
