@@ -31,6 +31,7 @@ import { Logger } from "@in.pulse-crm/utils";
 import axios from "axios";
 import parametersService from "../services/parameters.service";
 import { buildRemoteSendFileOptions } from "../utils/remote-send-file-options";
+import { REMOTE_STATUS_RETRY_DELAYS_MS, shouldApplyRemoteStatus } from "../utils/remote-message-status";
 import messageReactionsService from "../services/message-reactions.service";
 import { MessageReactionError } from "../utils/message-reaction";
 
@@ -388,13 +389,30 @@ class RemoteWhatsappClient implements WhatsappClient {
 		});
 	}
 
-	public async handleMessageStatus(messageId: string, status: string) {
+	public async handleMessageStatus(messageId: string, status: string, attempt = 0): Promise<void> {
 		try {
-			const currentMessage = await prismaService.wppMessage.findUniqueOrThrow({
+			const currentMessage = await prismaService.wppMessage.findUnique({
 				where: {
 					wwebjsIdStanza: messageId
 				}
 			});
+
+			if (!currentMessage) {
+				// The receipt can arrive before the outbound job result links this provider id to the message.
+				const delay = REMOTE_STATUS_RETRY_DELAYS_MS[attempt];
+				if (delay !== undefined) {
+					setTimeout(() => void this.handleMessageStatus(messageId, status, attempt + 1), delay).unref();
+					return;
+				}
+				console.log(
+					`Não foi possível atualizar a mensagem de id: ${messageId} (status ${status}; mensagem não encontrada após ${attempt} novas tentativas)`
+				);
+				return;
+			}
+
+			if (!shouldApplyRemoteStatus(currentMessage.status, status)) {
+				return;
+			}
 
 			const message = await messagesService.updateMessage(currentMessage.id, {
 				status: status as WppMessageStatus
