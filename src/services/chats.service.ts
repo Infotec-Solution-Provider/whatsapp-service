@@ -17,6 +17,7 @@ import contactsService from "./contacts.service";
 import { withPublicMessageDirection } from "../utils/public-message-direction";
 import messagePresentationService from "./message-presentation.service";
 import chatUserPreferencesService from "./chat-user-preferences.service";
+import publicReportFieldsService from "./public-report-fields.service";
 
 interface InpulseResult {
 	CODIGO: number;
@@ -59,6 +60,8 @@ export interface PublicConversationsFilters {
 	search?: string;
 	startedFrom?: Date;
 	startedTo?: Date;
+	finishedFrom?: Date;
+	finishedTo?: Date;
 }
 
 interface SystemStartNewChatProps {
@@ -471,6 +474,14 @@ class ChatsService {
 						}
 					}
 				: {}),
+			...(filters.finishedFrom || filters.finishedTo
+				? {
+						finishedAt: {
+							...(filters.finishedFrom ? { gte: filters.finishedFrom } : {}),
+							...(filters.finishedTo ? { lte: filters.finishedTo } : {})
+						}
+					}
+				: {}),
 			...(filters.search
 				? {
 						contact: {
@@ -501,7 +512,7 @@ class ChatsService {
 		]);
 
 		return {
-			items,
+			items: await publicReportFieldsService.withConversationReport(session.instance, items),
 			pagination: {
 				page: filters.page,
 				limit: filters.limit,

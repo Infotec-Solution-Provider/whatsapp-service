@@ -6,6 +6,7 @@ import onlyLocal from "../middlewares/only-local.middleware";
 import publicBiRateLimit from "../middlewares/public-bi-rate-limit.middleware";
 import protectedRead from "../middlewares/protected-read";
 import chatUserPreferencesService, { ChatPreferenceType } from "../services/chat-user-preferences.service";
+import publicReportFieldsService from "../services/public-report-fields.service";
 
 class ChatsController {
 	constructor(public readonly router: Router) {
@@ -22,7 +23,7 @@ class ChatsController {
 			"/api/whatsapp/conversations/:id/messages",
 			publicBiRateLimit,
 			isAuthenticated,
-			this.getChatMessages.bind(this)
+			this.getPublicConversationMessages.bind(this)
 		);
 		this.router.get("/api/internal/whatsapp/chats/:id", onlyLocal, this.getInternalChatById.bind(this));
 		this.router.post(
@@ -74,6 +75,8 @@ class ChatsController {
 		const search = typeof req.query["search"] === "string" ? req.query["search"].trim().slice(0, 120) : "";
 		const startedFrom = parseDate(req.query["startedFrom"], "startedFrom");
 		const startedTo = parseDate(req.query["startedTo"], "startedTo");
+		const finishedFrom = parseDate(req.query["finishedFrom"], "finishedFrom");
+		const finishedTo = parseDate(req.query["finishedTo"], "finishedTo");
 		const filters: PublicConversationsFilters = {
 			page,
 			limit,
@@ -83,7 +86,9 @@ class ChatsController {
 			...(contactId === undefined ? {} : { contactId }),
 			...(search ? { search } : {}),
 			...(startedFrom === undefined ? {} : { startedFrom }),
-			...(startedTo === undefined ? {} : { startedTo })
+			...(startedTo === undefined ? {} : { startedTo }),
+			...(finishedFrom === undefined ? {} : { finishedFrom }),
+			...(finishedTo === undefined ? {} : { finishedTo })
 		};
 
 		const data = await chatsService.getPublicConversations(req.session, filters);
@@ -132,6 +137,25 @@ class ChatsController {
 	}
 
 	private async getChatMessages(req: Request, res: Response) {
+		const data = await this.fetchChatMessagesPage(req);
+
+		res.status(200).send({
+			message: "Chat messages retrieved successfully!",
+			data
+		});
+	}
+
+	private async getPublicConversationMessages(req: Request, res: Response) {
+		const data = await this.fetchChatMessagesPage(req);
+		const messages = await publicReportFieldsService.withMessageReport(req.session.instance, data.messages);
+
+		res.status(200).send({
+			message: "Chat messages retrieved successfully!",
+			data: { ...data, messages }
+		});
+	}
+
+	private async fetchChatMessagesPage(req: Request) {
 		const chatId = Number(req.params["id"]);
 		const limit = Math.min(Math.max(Math.trunc(Number(req.query["limit"])) || 50, 1), 100);
 		const beforeId = req.query["beforeId"] ? Number(req.query["beforeId"]) : null;
@@ -144,12 +168,7 @@ class ChatsController {
 			throw new BadRequestError("beforeId must be a positive integer!");
 		}
 
-		const data = await chatsService.getChatMessagesPage(req.session, chatId, limit, beforeId);
-
-		res.status(200).send({
-			message: "Chat messages retrieved successfully!",
-			data
-		});
+		return chatsService.getChatMessagesPage(req.session, chatId, limit, beforeId);
 	}
 
 	private async getInternalChatById(req: Request, res: Response) {

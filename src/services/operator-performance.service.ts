@@ -3,6 +3,12 @@ import authService from "./auth.service";
 import instancesService from "./instances.service";
 import prismaService from "./prisma.service";
 import transferHistoryService from "./transfer-history.service";
+import {
+	EXCLUDED_OPERATOR_ID,
+	resolveReportUserId,
+	SYSTEM_OPERATOR_ID,
+	SYSTEM_OPERATOR_NAME
+} from "../utils/report-rules";
 
 interface OperatorRow {
 	CODIGO: bigint | number | string;
@@ -336,25 +342,11 @@ const TRIVIAL_POST_CLOSE_FOLLOW_UP_SQL_CONDITION = (
 		)
 	)`;
 
-const SYSTEM_OPERATOR_ID = -1;
-const SYSTEM_OPERATOR_NAME = "Sistema/Admin";
-
-const EXCLUDED_OPERATOR_ID = 1;
 
 // Finalizações sem autor (bots, rotinas) contam para o operador de sistema.
 const FINISHED_CHAT_OPERATOR_SQL = (alias: string) => `COALESCE(${alias}.finished_by, ${SYSTEM_OPERATOR_ID})`;
 
 const excludeOperatorClause = (field: string) => ` AND COALESCE(${field}, 0) <> ${EXCLUDED_OPERATOR_ID}`;
-
-/**
- * Regra única dos relatórios do painel: o operador de código 1 fica de fora e
- * responsáveis de sistema (<= 0) ou sem cadastro em `operadores` são agrupados
- * na linha "Sistema/Admin", para que os totais sejam sempre a soma das linhas.
- */
-export const resolveDashboardOperatorId = (operatorId: number | null, registeredOperators: Map<number, unknown>) => {
-	if (operatorId == null || operatorId === EXCLUDED_OPERATOR_ID) return null;
-	return operatorId > 0 && registeredOperators.has(operatorId) ? operatorId : SYSTEM_OPERATOR_ID;
-};
 
 const mergeAverage = (currentAverage: number | null, currentWeight: number, average: number | null, weight: number) => {
 	if (average == null) return currentAverage;
@@ -1295,13 +1287,13 @@ class OperatorPerformanceService {
 
 		// Vários ids podem cair na mesma linha ("Sistema/Admin"), então as métricas são somadas.
 		const resolveRow = (rawOperatorId: bigint | number | string | null | undefined) => {
-			const operatorId = resolveDashboardOperatorId(toOperatorId(rawOperatorId), operatorsMap);
+			const operatorId = resolveReportUserId(toOperatorId(rawOperatorId), operatorsMap);
 			return operatorId == null ? null : ensureRow(operatorId);
 		};
 
 		// Estados (sessão, telefonia) só fazem sentido para o próprio operador cadastrado.
 		const resolveOwnRow = (operatorId: number) =>
-			resolveDashboardOperatorId(operatorId, operatorsMap) === operatorId ? ensureRow(operatorId) : null;
+			resolveReportUserId(operatorId, operatorsMap) === operatorId ? ensureRow(operatorId) : null;
 
 		for (const row of messageRows) {
 			const target = resolveRow(row.operatorId);
@@ -1831,6 +1823,22 @@ class OperatorPerformanceService {
 	}
 
 	/**
+	 * Monta o resolvedor da regra de operador dos relatórios para um lote de ids
+	 * (usado pelas rotas BI com uma única consulta ao cadastro de operadores).
+	 */
+	public async createReportUserResolver(instance: string, operatorIds: Array<number | null | undefined>) {
+		const candidates = Array.from(
+			new Set(
+				operatorIds.filter(
+					(id): id is number => typeof id === "number" && id > 0 && id !== EXCLUDED_OPERATOR_ID
+				)
+			)
+		);
+		const operatorsMap = await this.fetchOperators(instance, candidates);
+		return (operatorId: number | null | undefined) => resolveReportUserId(operatorId, operatorsMap);
+	}
+
+	/**
 	 * Mensagens por operador com as mesmas regras do card "Mensagens" do painel,
 	 * para que "Mensagens por Operador" some exatamente o mesmo total.
 	 */
@@ -1857,7 +1865,7 @@ class OperatorPerformanceService {
 		const rowsMap = new Map<number, OperatorPerformanceRow>();
 
 		for (const row of rows) {
-			const operatorId = resolveDashboardOperatorId(toOperatorId(row.operatorId), operatorsMap);
+			const operatorId = resolveReportUserId(toOperatorId(row.operatorId), operatorsMap);
 			if (operatorId == null) continue;
 
 			let target = rowsMap.get(operatorId);

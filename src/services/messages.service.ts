@@ -14,6 +14,7 @@ import { withPublicMessageDirection } from "../utils/public-message-direction";
 import { messageMentionPatch, operatorMentionEntities } from "../utils/message-mention-persistence";
 import messageMentionsService from "./message-mentions.service";
 import chatUserPreferencesService from "./chat-user-preferences.service";
+import publicReportFieldsService from "./public-report-fields.service";
 
 interface FetchMessagesFilter {
 	minDate?: string;
@@ -423,7 +424,10 @@ class MessagesService {
 		const items = page.slice(0, filters.limit);
 
 		return {
-			items: items.map(withPublicMessageDirection),
+			items: await publicReportFieldsService.withMessageReport(
+				session.instance,
+				items.map(withPublicMessageDirection)
+			),
 			pagination: {
 				limit: filters.limit,
 				nextCursor: hasMore && items.length ? items[items.length - 1]!.id : null,

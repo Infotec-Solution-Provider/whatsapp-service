@@ -2,6 +2,7 @@ import prismaService from "./prisma.service";
 import instancesService from "./instances.service";
 import { FETCH_CUSTOMERS_QUERY } from "./chats.service";
 import operatorPerformanceService, { parseBoundaryDate } from "./operator-performance.service";
+import { getReportMessageType } from "../utils/report-rules";
 import { Prisma } from "@prisma/client";
 
 interface OperatorRow {
@@ -47,41 +48,6 @@ const OPERATION_MESSAGE_SQL_CONDITION = (alias: string) =>
 
 const CUSTOMER_MESSAGE_SQL_CONDITION = (alias: string) =>
 	`(NOT ${SYSTEM_OR_THIRDPARTY_SQL_CONDITION(alias)} AND NOT ${OPERATION_MESSAGE_SQL_CONDITION(alias)} AND ${alias}.\`from\` REGEXP '^[0-9]')`;
-
-const isSystemOrThirdpartyMessage = (fromValue: string | null | undefined, toValue?: string | null | undefined) => {
-	const from = String(fromValue || "").toLowerCase();
-	const to = String(toValue || "").toLowerCase();
-	return (
-		from.startsWith("system") ||
-		to.startsWith("system") ||
-		from.startsWith("thirdparty:") ||
-		to.startsWith("thirdparty:") ||
-		from.startsWith("bot") ||
-		to.startsWith("bot")
-	);
-};
-
-const isOperationalMessage = (
-	fromValue: string | null | undefined,
-	toValue?: string | null | undefined,
-	userId?: number | null
-) => {
-	if (userId) return true;
-	if (isSystemOrThirdpartyMessage(fromValue, toValue)) return false;
-	const from = String(fromValue || "").toLowerCase();
-	return from.startsWith("me:") || from.startsWith("user:");
-};
-
-const isCustomerMessage = (
-	fromValue: string | null | undefined,
-	toValue?: string | null | undefined,
-	userId?: number | null
-) => {
-	if (isOperationalMessage(fromValue, toValue, userId)) return false;
-	if (isSystemOrThirdpartyMessage(fromValue, toValue)) return false;
-	const from = String(fromValue || "").trim();
-	return /^[0-9]/.test(from);
-};
 
 // "YYYY-MM-DD" vira início/fim do dia local, igual ao card de desempenho (não meia-noite UTC).
 const parseDate = (value: string | null | undefined, boundary: "start" | "end"): Date | null => {
@@ -434,10 +400,11 @@ class DashboardService {
 				receivedMessagesCount: 0
 			};
 
-			if (isOperationalMessage(message.from, message.to, message.userId)) {
+			const reportType = getReportMessageType(message);
+			if (reportType === "SENT") {
 				row.messagesCount++;
 				row.sentMessagesCount++;
-			} else if (isCustomerMessage(message.from, message.to, message.userId)) {
+			} else if (reportType === "RECEIVED") {
 				row.messagesCount++;
 				row.receivedMessagesCount++;
 			}
