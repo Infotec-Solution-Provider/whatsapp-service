@@ -2,7 +2,17 @@ import { BadRequestError } from "@rgranatodutra/http-errors";
 import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import publicBiRateLimit from "../middlewares/public-bi-rate-limit.middleware";
-import getUsersClient from "../services/users.service";
+import instancesService from "../services/instances.service";
+
+interface OperatorDirectoryRow {
+	CODIGO: number | string;
+	NOME: string;
+	NOME_EXIBICAO?: string | null;
+	SETOR: number | null;
+	NIVEL: string | null;
+	ATIVO: string | null;
+	DESATIVAR_EXIBICAO_WHATS?: number | string | boolean | null;
+}
 
 class PublicDirectoryController {
 	constructor(public readonly router: Router) {
@@ -28,27 +38,35 @@ class PublicDirectoryController {
 			throw new BadRequestError("active must be true or false!");
 		}
 
-		const usersClient = getUsersClient();
-		const token = String(req.headers["authorization"] || "").replace(/^Bearer\s+/i, "");
-		usersClient.setAuth(token);
-		const users = await usersClient.getUsers({
-			page: String(page),
-			perPage: String(limit),
-			sortBy: "CODIGO",
-			...(rawActive === undefined ? {} : { ATIVO: rawActive === "true" ? "SIM" : "NAO" })
-		});
-		const total = users.page.totalRows;
+		// Mesma base dos relatórios: todos os operadores do CRM, inclusive os ocultos no WhatsApp,
+		// para que todo `report.userId` das rotas BI tenha um usuário correspondente.
+		const where = rawActive === undefined ? "" : " WHERE ATIVO = ?";
+		const params = rawActive === undefined ? [] : [rawActive === "true" ? "SIM" : "NAO"];
+		const [countRows, rows] = await Promise.all([
+			instancesService.executeQuery<Array<{ total: number | string }>>(
+				req.session.instance,
+				`SELECT COUNT(*) AS total FROM operadores${where}`,
+				params
+			),
+			instancesService.executeQuery<OperatorDirectoryRow[]>(
+				req.session.instance,
+				`SELECT * FROM operadores${where} ORDER BY CODIGO LIMIT ${limit} OFFSET ${(page - 1) * limit}`,
+				params
+			)
+		]);
+		const total = Number(countRows[0]?.total ?? 0);
 
 		res.status(200).send({
 			message: "Users retrieved successfully!",
 			data: {
-				items: users.data.map((user) => ({
-					id: user.CODIGO,
+				items: rows.map((user) => ({
+					id: Number(user.CODIGO),
 					name: user.NOME,
-					displayName: user.NOME_EXIBICAO,
+					displayName: user.NOME_EXIBICAO ?? null,
 					sectorId: user.SETOR,
 					role: user.NIVEL,
-					active: user.ATIVO === "SIM"
+					active: user.ATIVO === "SIM",
+					visibleInWhatsapp: !Number(user.DESATIVAR_EXIBICAO_WHATS ?? 0)
 				})),
 				pagination: {
 					page,

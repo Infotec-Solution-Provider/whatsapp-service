@@ -75,6 +75,8 @@ Conversa:
 - `finishedByUserId`: quem finalizou; finalização automática (sem autor) conta como `-1`.
 - `cycleSeconds`: duração de `startedAt` a `finishedAt`, usada no "Ciclo do atendimento".
 
+`/users` lista todos os operadores considerados nos relatórios, inclusive os ocultos no WhatsApp (`visibleInWhatsapp: false`), então todo `report.userId` positivo tem um usuário correspondente.
+
 O painel usa dias no horário de Brasília: para um mês, filtre de `...T00:00:00-03:00` até `...T23:59:59.999-03:00`. "Pendências" é uma foto do momento da consulta e não tem campo equivalente.
 
 ## Uso recomendado
