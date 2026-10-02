@@ -66,6 +66,15 @@ const logRoute = (r: express.Router) => {
 };
 
 app.use(cors());
+
+// Respostas da API são dinâmicas e por usuário: sem ETag/304 e sem cache no navegador.
+// Evita o Chrome reaproveitar uma cópia em cache que não decodifica (ERR_CONTENT_DECODING_FAILED 304).
+app.set("etag", false);
+app.use("/api", (_req, res, next) => {
+	res.setHeader("Cache-Control", "no-store");
+	next();
+});
+
 app.use(express.json({ limit: "2gb" }));
 app.use(express.urlencoded({ extended: true, limit: "2gb" }));
 
