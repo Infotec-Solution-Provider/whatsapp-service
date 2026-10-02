@@ -1,7 +1,7 @@
 import { Customer, SessionData, SocketEventType, SocketServerMonitorRoom, SocketServerUserRoom } from "../sdk-local";
 import { Logger } from "@in.pulse-crm/utils";
 import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
-import { BadRequestError } from "@rgranatodutra/http-errors";
+import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
 import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
 import { CustomerSchedule } from "../message-flow/base/base.step";
 import ProcessingLogger from "../utils/processing-logger";
@@ -83,6 +83,14 @@ interface EnsureActiveChatForAgentProps {
 }
 
 export const FETCH_CUSTOMERS_QUERY = "SELECT * FROM clientes WHERE CODIGO IN (?)";
+const PUBLIC_CUSTOMERS_QUERY = "SELECT CODIGO, RAZAO, CPF_CNPJ, COD_ERP FROM clientes WHERE CODIGO IN (?)";
+
+interface PublicCustomerRow {
+	CODIGO: number | string;
+	RAZAO: string | null;
+	CPF_CNPJ: string | null;
+	COD_ERP: string | null;
+}
 const FETCH_RESULT_QUERY = "SELECT * FROM resultados WHERE CODIGO = ?";
 
 /**
@@ -512,7 +520,7 @@ class ChatsService {
 		]);
 
 		return {
-			items: await publicReportFieldsService.withConversationReport(session.instance, items),
+			items: await this.presentPublicConversations(session.instance, items),
 			pagination: {
 				page: filters.page,
 				limit: filters.limit,
@@ -522,6 +530,58 @@ class ChatsService {
 				hasPreviousPage: filters.page > 1
 			}
 		};
+	}
+
+	public async getPublicConversationById(session: SessionData, id: number) {
+		const chat = await prismaService.wppChat.findFirst({
+			where: { id, instance: session.instance },
+			include: {
+				contact: true,
+				sector: true,
+				_count: { select: { messages: true } }
+			}
+		});
+
+		if (!chat) throw new NotFoundError("Conversation not found!");
+
+		const [conversation] = await this.presentPublicConversations(session.instance, [chat]);
+		return conversation;
+	}
+
+	/** Itens das rotas BI de conversa: cliente do ERP no contato e campo `report`. */
+	private async presentPublicConversations<T extends WppChat & { contact: WppContact | null }>(
+		instance: string,
+		chats: T[]
+	) {
+		const customerIds = Array.from(
+			new Set(
+				chats
+					.map((chat) => chat.contact?.customerId)
+					.filter((id): id is number => typeof id === "number" && id > 0)
+			)
+		);
+		const customers = customerIds.length
+			? await instancesService.executeQuery<PublicCustomerRow[]>(instance, PUBLIC_CUSTOMERS_QUERY, [customerIds])
+			: [];
+		const customersById = new Map(
+			customers.map((row) => [
+				Number(row.CODIGO),
+				{
+					id: Number(row.CODIGO),
+					name: row.RAZAO || null,
+					cpfCnpj: row.CPF_CNPJ || null,
+					erpCode: row.COD_ERP || null
+				}
+			])
+		);
+		const presented = chats.map((chat) => ({
+			...chat,
+			contact: chat.contact
+				? { ...chat.contact, customer: customersById.get(chat.contact.customerId ?? 0) ?? null }
+				: null
+		}));
+
+		return publicReportFieldsService.withConversationReport(instance, presented);
 	}
 
 	public async getChatById(id: number) {
