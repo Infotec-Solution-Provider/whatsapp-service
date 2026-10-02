@@ -7,6 +7,21 @@ import publicBiRateLimit from "../middlewares/public-bi-rate-limit.middleware";
 import protectedRead from "../middlewares/protected-read";
 import chatUserPreferencesService, { ChatPreferenceType } from "../services/chat-user-preferences.service";
 import publicReportFieldsService from "../services/public-report-fields.service";
+import transferHistoryService from "../services/transfer-history.service";
+
+const parseOptionalPositiveInt = (value: unknown, field: string) => {
+	if (value === undefined || value === "") return undefined;
+	const parsed = Number(value);
+	if (!Number.isInteger(parsed) || parsed <= 0) throw new BadRequestError(`${field} must be a positive integer!`);
+	return parsed;
+};
+
+const parseDate = (value: unknown, field: string) => {
+	if (value === undefined || value === "") return undefined;
+	const parsed = new Date(String(value));
+	if (Number.isNaN(parsed.getTime())) throw new BadRequestError(`${field} must be a valid date!`);
+	return parsed;
+};
 
 class ChatsController {
 	constructor(public readonly router: Router) {
@@ -20,11 +35,18 @@ class ChatsController {
 		this.router.get("/api/whatsapp/chats/:id", isAuthenticated, this.getChatById.bind(this));
 		this.router.get("/api/whatsapp/chats/:id/messages", isAuthenticated, this.getChatMessages.bind(this));
 		this.router.get(
+			"/api/whatsapp/conversations/:id",
+			publicBiRateLimit,
+			isAuthenticated,
+			this.getPublicConversationById.bind(this)
+		);
+		this.router.get(
 			"/api/whatsapp/conversations/:id/messages",
 			publicBiRateLimit,
 			isAuthenticated,
 			this.getPublicConversationMessages.bind(this)
 		);
+		this.router.get("/api/whatsapp/transfers", publicBiRateLimit, isAuthenticated, this.getPublicTransfers.bind(this));
 		this.router.get("/api/internal/whatsapp/chats/:id", onlyLocal, this.getInternalChatById.bind(this));
 		this.router.post(
 			"/api/internal/whatsapp/chats/:id/agent-send-message",
@@ -47,19 +69,6 @@ class ChatsController {
 		const parsePositiveInt = (value: unknown, fallback: number) => {
 			const parsed = Number(value);
 			return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-		};
-		const parseOptionalPositiveInt = (value: unknown, field: string) => {
-			if (value === undefined || value === "") return undefined;
-			const parsed = Number(value);
-			if (!Number.isInteger(parsed) || parsed <= 0)
-				throw new BadRequestError(`${field} must be a positive integer!`);
-			return parsed;
-		};
-		const parseDate = (value: unknown, field: string) => {
-			if (value === undefined || value === "") return undefined;
-			const parsed = new Date(String(value));
-			if (Number.isNaN(parsed.getTime())) throw new BadRequestError(`${field} must be a valid date!`);
-			return parsed;
 		};
 		const rawIsFinished = req.query["isFinished"];
 
@@ -93,6 +102,42 @@ class ChatsController {
 
 		const data = await chatsService.getPublicConversations(req.session, filters);
 		res.status(200).send({ message: "Conversations retrieved successfully!", data });
+	}
+
+	private async getPublicConversationById(req: Request, res: Response) {
+		const id = parseOptionalPositiveInt(req.params["id"], "id");
+		if (id === undefined) throw new BadRequestError("id must be a positive integer!");
+
+		const data = await chatsService.getPublicConversationById(req.session, id);
+		res.status(200).send({ message: "Conversation retrieved successfully!", data });
+	}
+
+	private async getPublicTransfers(req: Request, res: Response) {
+		const rawLimit = req.query["limit"];
+		const limit = rawLimit === undefined || rawLimit === "" ? 100 : Number(rawLimit);
+		const conversationId = parseOptionalPositiveInt(req.query["conversationId"], "conversationId");
+		const afterId = parseOptionalPositiveInt(req.query["afterId"], "afterId");
+		const transferredFrom = parseDate(req.query["transferredFrom"], "transferredFrom");
+		const transferredTo = parseDate(req.query["transferredTo"], "transferredTo");
+
+		if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+			throw new BadRequestError("limit must be an integer between 1 and 100!");
+		}
+		if (conversationId === undefined && (!transferredFrom || !transferredTo)) {
+			throw new BadRequestError("transferredFrom and transferredTo are required without conversationId!");
+		}
+		if (transferredFrom && transferredTo && transferredFrom > transferredTo) {
+			throw new BadRequestError("transferredFrom must be before or equal to transferredTo!");
+		}
+
+		const data = await transferHistoryService.exportPublicTransfers(req.session.instance, {
+			limit,
+			...(conversationId === undefined ? {} : { conversationId }),
+			...(afterId === undefined ? {} : { afterId }),
+			...(transferredFrom === undefined ? {} : { transferredFrom }),
+			...(transferredTo === undefined ? {} : { transferredTo })
+		});
+		res.status(200).send({ message: "Transfers retrieved successfully!", data });
 	}
 
 	private async getChatsBySession(req: Request) {

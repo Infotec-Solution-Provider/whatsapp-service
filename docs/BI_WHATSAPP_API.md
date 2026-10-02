@@ -25,6 +25,9 @@ O login aceita até 10 tentativas por minuto para a mesma origem, tenant e usuá
 | Conversas | `GET /api/whatsapp/conversations?page=1&limit=100` |
 | Conversas de um contato | `GET /api/whatsapp/conversations?contactId=123` |
 | Conversas finalizadas no período | `GET /api/whatsapp/conversations?finishedFrom=2026-08-01T00:00:00-03:00&finishedTo=2026-08-31T23:59:59.999-03:00` |
+| Uma conversa | `GET /api/whatsapp/conversations/456` |
+| Transferências por período | `GET /api/whatsapp/transfers?transferredFrom=2026-08-01T00:00:00-03:00&transferredTo=2026-08-31T23:59:59.999-03:00&limit=100&afterId=999` |
+| Transferências de uma conversa | `GET /api/whatsapp/transfers?conversationId=456` |
 | Mensagens da conversa | `GET /api/whatsapp/conversations/456/messages?limit=100&beforeId=999` |
 | Mensagens por período | `GET /api/whatsapp/messages/export?sentFrom=2026-08-01T00:00:00Z&sentTo=2026-09-01T00:00:00Z&limit=100&afterId=999` |
 | Usuários | `GET /api/whatsapp/users?page=1&limit=100&active=true` |
@@ -32,7 +35,23 @@ O login aceita até 10 tentativas por minuto para a mesma origem, tenant e usuá
 
 Listagens retornam o envelope `{"message":"...","data":{...}}`. Conversas usam `data.items` e `data.pagination`. O filtro `contactId` é aplicado junto com o tenant do token. Conversas aceitam `startedFrom`/`startedTo` e `finishedFrom`/`finishedTo` (inclusivos).
 
-Na exportação por período, repita a chamada usando `data.pagination.nextCursor` como `afterId`. Termine quando `hasMore` for `false`. `sentFrom` e `sentTo` são inclusivos.
+Na exportação por período, repita a chamada usando `data.pagination.nextCursor` como `afterId`. Termine quando `hasMore` for `false`. `sentFrom` e `sentTo` são inclusivos. A rota de transferências pagina do mesmo jeito.
+
+Em conversas, `contact.customer` traz o cliente do CRM vinculado ao contato (`null` quando não há vínculo):
+
+```json
+{"contact":{"customerId":123,"customer":{"id":123,"name":"RAZÃO SOCIAL","cpfCnpj":"00000000000191","erpCode":"C0001"}}}
+```
+
+## Transferências
+
+Cada troca de responsável ou de setor de uma conversa gera um item:
+
+```json
+{"id":999,"conversationId":456,"fromUserId":10,"toUserId":20,"fromSectorId":1,"toSectorId":1,"initiatedByUserId":10,"source":"manual","transferredAt":"2026-08-10T14:00:00.000Z"}
+```
+
+`source` indica a origem: `manual` (operador), `auto-sector`, `auto-operator` (distribuição automática) e `bot-return-previous-operator`. O histórico existe a partir de 31/03/2026. Com o `userId` atual da conversa e esta lista, é possível reconstituir o responsável em qualquer momento: antes da primeira transferência, o responsável é o `fromUserId` dela.
 
 ## Direção, status e tipo
 

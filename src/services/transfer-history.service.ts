@@ -22,6 +22,14 @@ interface RecordTransferInput {
 	reason?: string | null;
 }
 
+export interface PublicTransferExportFilters {
+	limit: number;
+	conversationId?: number;
+	transferredFrom?: Date;
+	transferredTo?: Date;
+	afterId?: number;
+}
+
 export interface OperatorTransferAggregateRow {
 	operatorId: number | null;
 	transfersSentCount: bigint | number;
@@ -69,6 +77,48 @@ class TransferHistoryService {
 				error instanceof Error ? error : new Error(reason)
 			);
 		}
+	}
+
+	/** Transferências estruturadas para a rota BI, paginadas por cursor (id). */
+	public async exportPublicTransfers(instance: string, filters: PublicTransferExportFilters) {
+		const page = await prismaService.wppChatTransferHistory.findMany({
+			where: {
+				instance,
+				...(filters.conversationId === undefined ? {} : { chatId: filters.conversationId }),
+				...(filters.transferredFrom || filters.transferredTo
+					? {
+							transferredAt: {
+								...(filters.transferredFrom ? { gte: filters.transferredFrom } : {}),
+								...(filters.transferredTo ? { lte: filters.transferredTo } : {})
+							}
+						}
+					: {}),
+				...(filters.afterId === undefined ? {} : { id: { gt: filters.afterId } })
+			},
+			orderBy: { id: "asc" },
+			take: filters.limit + 1
+		});
+		const hasMore = page.length > filters.limit;
+		const items = page.slice(0, filters.limit);
+
+		return {
+			items: items.map((row) => ({
+				id: row.id,
+				conversationId: row.chatId,
+				fromUserId: row.fromUserId,
+				toUserId: row.toUserId,
+				fromSectorId: row.fromSectorId,
+				toSectorId: row.toSectorId,
+				initiatedByUserId: row.initiatedByUserId,
+				source: row.source,
+				transferredAt: row.transferredAt
+			})),
+			pagination: {
+				limit: filters.limit,
+				nextCursor: hasMore && items.length ? items[items.length - 1]!.id : null,
+				hasMore
+			}
+		};
 	}
 
 	public async getOperatorTransferMetrics(
