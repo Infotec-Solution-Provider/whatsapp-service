@@ -19,6 +19,7 @@ test("processingStartedAt keeps the FIRST claim across polls, retries and restar
 		const status = where["status"] as string | { in: string[] } | undefined;
 		if (typeof status === "string" && row.status !== status) return false;
 		if (status && typeof status === "object" && !status.in.includes(row.status)) return false;
+		if (typeof where["messageData"] === "string" && row.messageData !== where["messageData"]) return false;
 		return true;
 	});
 	require.cache[resolved] = {
@@ -109,10 +110,12 @@ test("processingStartedAt keeps the FIRST claim across polls, retries and restar
 	assert.equal(row.processingStartedAt?.getTime(), firstClaim!.getTime());
 	assert.ok(seen.every((value) => value?.getTime() === firstClaim!.getTime()));
 
-	assert.equal(await queue.reopenForManualRetry("q1", "{\"retryGeneration\":1}"), true);
+	assert.equal(await queue.reopenForManualRetry("q1", "{\"stale\":1}", "{\"retryGeneration\":1}"), false, "a stale payload snapshot never reopens");
+	assert.equal(row.status, "FAILED");
+	assert.equal(await queue.reopenForManualRetry("q1", "{\"outcome\":1}", "{\"retryGeneration\":1}"), true);
 	assert.deepEqual(
 		{ status: row.status, error: row.error, processedAt: row.processedAt, processingStartedAt: row.processingStartedAt, retryCount: row.retryCount },
 		{ status: "PENDING", error: null, processedAt: null, processingStartedAt: null, retryCount: 0 }
 	);
-	assert.equal(await queue.reopenForManualRetry("q1", "{}"), false, "an item in flight is never reopened");
+	assert.equal(await queue.reopenForManualRetry("q1", row.messageData, "{}"), false, "an item in flight is never reopened");
 });

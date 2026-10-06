@@ -27,6 +27,9 @@ const events: Array<{ type: string; data: Record<string, unknown> }> = [];
 const alerts: OpsAlertInput[] = [];
 const submitted: Array<{ key: string; text: string }> = [];
 let syncEnabled = true;
+let clientAvailable = true;
+let reopenFailure: Error | null = null;
+let beforeReopen: (() => void) | null = null;
 let nextJob: () => RemoteMessageJobResponse | Promise<RemoteMessageJobResponse> = () => job("PENDING");
 
 function job(status: RemoteMessageJobResponse["status"], extra: Partial<RemoteMessageJobResponse> = {}): RemoteMessageJobResponse {
@@ -110,13 +113,17 @@ before(() => {
 		emit: async (type: string, _room: string, data: Record<string, unknown>) => { events.push({ type, data }); }
 	});
 	stubDefault("./parameters.service", { isInternalGroupWhatsappSyncEnabled: async () => syncEnabled });
-	stub("./whatsapp.service", { __esModule: true, default: { getClient: () => client }, getMessageType: () => "chat" });
+	stub("./whatsapp.service", {
+		__esModule: true, default: { getClient: () => (clientAvailable ? client : undefined) }, getMessageType: () => "chat"
+	});
 	stubDefault("./internal-whatsapp-message-queue.service", {
 		enqueue: async () => "queue-1",
-		reopenForManualRetry: async (id: string, messageData: string) => {
+		reopenForManualRetry: async (id: string, expectedMessageData: string, messageData: string) => {
 			await Promise.resolve();
+			beforeReopen?.();
+			if (reopenFailure) throw reopenFailure;
 			const row = queue.get(id);
-			if (!row || !["FAILED", "UNKNOWN"].includes(row.status)) return false;
+			if (!row || !["FAILED", "UNKNOWN"].includes(row.status) || row.messageData !== expectedMessageData) return false;
 			Object.assign(row, {
 				status: "PENDING", error: null, lockedBy: null, lockedUntil: null, processedAt: null,
 				processingStartedAt: null, retryCount: 0, messageData
@@ -161,6 +168,9 @@ beforeEach(() => {
 	messages.clear(); chats.clear(); queue.clear();
 	events.length = 0; alerts.length = 0; submitted.length = 0;
 	syncEnabled = true;
+	clientAvailable = true;
+	reopenFailure = null;
+	beforeReopen = null;
 	chats.set(8, { id: 8, instance: "acme", wppGroupId: "group@g.us" });
 	messages.set(42, {
 		id: 42, instance: "acme", from: "user:12", internalChatId: 8, body: "Olá", status: "PENDING",
@@ -347,6 +357,36 @@ test("S3 slow in-flight send is logged and alerted once, persisting slowAlertedA
 	assert.equal(alerts.length, 1, "slow alert is not repeated on later polls");
 });
 
+test("S3 a send that turns slow between polls still logs one `slow` line at its terminal poll", async () => {
+	const { Logger } = require("@in.pulse-crm/utils") as typeof import("@in.pulse-crm/utils");
+	const lines: string[] = [];
+	const original = Logger.info;
+	Logger.info = ((message: string) => { lines.push(String(message)); }) as typeof Logger.info;
+	try {
+		for (const terminal of [
+			() => job("SENT", { result: { wwebjsId: "wa-1", wwebjsIdStanza: "st-1" } as RemoteMessageJobResponse["result"] }),
+			() => job("FAILED", { failureKind: "NOT_SENT" })
+		]) {
+			lines.length = 0;
+			alerts.length = 0;
+			messages.get(42)!.status = "PENDING";
+			messages.get(42)!.wwebjsId = null;
+			const row = queue.get("queue-1")!;
+			row.createdAt = new Date(Date.now() - 30_000);
+			row.messageData = JSON.stringify(basePayload({ remoteJobId: "job-1" }));
+			nextJob = terminal;
+			const result = await service.processQueuedWppGroupMessage(item());
+			const slowLines = lines.filter((line) => line.startsWith("[internal-wpp-send] slow "));
+			assert.equal(slowLines.length, 1, result.status);
+			assert.ok(!slowLines[0]!.includes("Olá"), "no message body in logs");
+			assert.ok((JSON.parse(result.messageData!) as InternalWhatsappQueuePayload).timing?.slowAlertedAt);
+			assert.deepEqual(alerts.map((alert) => alert.type), [result.status === "COMPLETED" ? "SEND_SLOW" : "SEND_FAILED"]);
+		}
+	} finally {
+		Logger.info = original;
+	}
+});
+
 test("S3 slow measurement restarts at a manual resend", async () => {
 	const row = queue.get("queue-1")!;
 	row.createdAt = new Date(Date.now() - 600_000);
@@ -451,11 +491,14 @@ test("S5 non-retryable states", async () => {
 		["status not ERROR", () => { messages.get(42)!.status = "RECEIVED"; }],
 		["already has a WhatsApp id", () => { messages.get(42)!.wwebjsId = "wa-1"; }],
 		["no queue row", () => { queue.clear(); }],
-		["queue row still in flight", () => { queue.get("queue-1")!.status = "PENDING"; }]
+		["queue row still in flight", () => { queue.get("queue-1")!.status = "PENDING"; }],
+		["chat re-linked to another group", () => { chats.get(8)!.wppGroupId = "other@g.us"; }],
+		["original client unavailable", () => { clientAvailable = false; }]
 	];
 	for (const [name, mutate] of cases) {
 		chats.get(8)!.wppGroupId = "group@g.us";
 		syncEnabled = true;
+		clientAvailable = true;
 		messages.get(42)!.wwebjsId = null;
 		queue.set("queue-1", { ...template });
 		failedState(notSent());
@@ -481,4 +524,49 @@ test("S5 concurrent resends: exactly one wins the atomic claim", async () => {
 	const results = await Promise.all([retryCode(session), retryCode(session)]);
 	assert.deepEqual(results.sort(), ["409:NOT_RETRYABLE", "OK"]);
 	assert.equal((JSON.parse(queue.get("queue-1")!.messageData) as InternalWhatsappQueuePayload).retryGeneration, 1);
+});
+
+test("S5 a failing reopen releases the claim so the message stays retryable", async () => {
+	failedState(notSent());
+	reopenFailure = new Error("db down");
+	await assert.rejects(service.retryWppGroupMessage(session, 42), /db down/);
+	assert.equal(messages.get(42)!.status, "ERROR");
+	assert.equal(queue.get("queue-1")!.status, "FAILED");
+	reopenFailure = null;
+	assert.equal(await retryCode(session), "OK");
+});
+
+test("S5 a stale queue snapshot never reopens (decisions are re-validated by the reopen)", async () => {
+	failedState(notSent());
+	// Another resend finished between this request's read and its reopen: payload changed.
+	beforeReopen = () => {
+		const row = queue.get("queue-1")!;
+		row.messageData = JSON.stringify(basePayload({ retryGeneration: 1, outcome: unknown() }));
+		beforeReopen = null;
+	};
+	assert.equal(await retryCode(session), "409:NOT_RETRYABLE");
+	assert.equal(messages.get(42)!.status, "ERROR", "claim released");
+	assert.equal(queue.get("queue-1")!.status, "FAILED");
+	assert.equal(await retryCode(session), "409:CONFIRMATION_REQUIRED", "the fresh outcome is the one that counts");
+});
+
+test("S5 the endpoint never overwrites a terminal status the worker wrote after the reopen", async () => {
+	failedState(notSent());
+	// The worker claims the reopened row and fails at once, before the endpoint notifies.
+	const original = prismaStub.internalMessage.findUnique;
+	prismaStub.internalMessage.findUnique = async (args) => {
+		const result = await original(args);
+		if (!args.include && queue.get("queue-1")!.status === "PENDING") {
+			messages.get(42)!.status = "ERROR";
+			return { ...messages.get(42)! };
+		}
+		return result;
+	};
+	try {
+		assert.deepEqual(await service.retryWppGroupMessage(session, 42), { id: 42, status: "PENDING" });
+	} finally {
+		prismaStub.internalMessage.findUnique = original;
+	}
+	assert.equal(messages.get(42)!.status, "ERROR");
+	assert.equal(lastStatusEvent()!["status"], "ERROR", "publishes the persisted status");
 });

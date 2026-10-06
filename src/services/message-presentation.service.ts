@@ -1,3 +1,4 @@
+import { Logger } from "@in.pulse-crm/utils";
 import messageMentionsService from "./message-mentions.service";
 import messageReactionsService from "./message-reactions.service";
 import type { MentionEntity } from "../utils/message-mention-metadata";
@@ -80,7 +81,13 @@ class MessagePresentationService {
 				select: { messageId: true, status: true, error: true },
 			}) : [],
 			// No query unless an internal message is in ERROR.
-			domain === "internal" ? internalRetryHints(instance, messages) : new Map<number, WhatsappRetryHint>(),
+			// Optional hint: a failed lookup degrades to "no hint" instead of breaking the listing.
+			domain === "internal"
+				? internalRetryHints(instance, messages).catch((error: unknown) => {
+					Logger.error(`[internal-wpp-send] retry hints unavailable: ${error instanceof Error ? error.message : String(error)}`);
+					return new Map<number, WhatsappRetryHint>();
+				})
+				: new Map<number, WhatsappRetryHint>(),
 		]);
 		const attemptsByMessage = new Map(attempts.map((attempt) => [attempt.messageId, attempt]));
 		return reactions.map((message, index) => {

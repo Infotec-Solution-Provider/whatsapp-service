@@ -108,11 +108,13 @@ class InternalWhatsappMessageQueueService {
 
 	/**
 	 * Re-opens a terminal item for a manual resend (new retry generation).
-	 * Conditional on the terminal status so it can never touch an item in flight.
+	 * Conditional on the terminal status so it can never touch an item in flight, and
+	 * on the payload the caller read so a stale snapshot (e.g. a request that stalled
+	 * past a whole earlier resend) cannot reopen with outdated retry decisions.
 	 */
-	public async reopenForManualRetry(id: string, messageData: string): Promise<boolean> {
+	public async reopenForManualRetry(id: string, expectedMessageData: string, messageData: string): Promise<boolean> {
 		const reopened = await prismaService.internalMessageProcessingQueue.updateMany({
-			where: { id, status: { in: ["FAILED", "UNKNOWN"] } },
+			where: { id, status: { in: ["FAILED", "UNKNOWN"] }, messageData: expectedMessageData },
 			data: {
 				status: "PENDING",
 				error: null,

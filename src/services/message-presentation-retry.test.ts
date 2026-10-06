@@ -5,6 +5,7 @@ test("internal hydrate attaches outcome-only resend hints to ERROR messages", as
 	const queries: Array<{ model: string; ids: number[] }> = [];
 	const linkedChats = new Set([1]);
 	const queueRows = new Map<number, string>();
+	let queueFailure: Error | null = null;
 	const previous = new Map<string, NodeModule | undefined>();
 	const stub = (path: string, value: unknown) => {
 		const resolved = require.resolve(path);
@@ -24,6 +25,7 @@ test("internal hydrate attaches outcome-only resend hints to ERROR messages", as
 		internalMessageProcessingQueue: {
 			findMany: async ({ where }: { where: { internalMessageId: { in: number[] } } }) => {
 				queries.push({ model: "queue", ids: where.internalMessageId.in });
+				if (queueFailure) throw queueFailure;
 				return where.internalMessageId.in
 					.filter((id) => queueRows.has(id))
 					.map((id) => ({ internalMessageId: id, messageData: queueRows.get(id)! }));
@@ -76,6 +78,17 @@ test("internal hydrate attaches outcome-only resend hints to ERROR messages", as
 		await presentation.hydrate("acme", many, "internal");
 		const sizes = queries.filter((query) => query.model === "queue").map((query) => query.ids.length);
 		assert.deepEqual(sizes, [100, 100, 30]);
+	});
+
+	await t.test("a failed hint lookup degrades to no hint instead of breaking the listing", async () => {
+		queueFailure = new Error("pool timeout");
+		try {
+			const result = await presentation.hydrate("acme", [message(10, "ERROR"), message(16, "RECEIVED")], "internal");
+			assert.deepEqual(result.map((item) => item.id), [10, 16]);
+			assert.ok(result.every((item) => !("whatsappRetry" in item)));
+		} finally {
+			queueFailure = null;
+		}
 	});
 
 	await t.test("wpp domain never computes internal hints", async () => {
