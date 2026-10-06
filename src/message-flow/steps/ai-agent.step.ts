@@ -1,7 +1,10 @@
 import axios from "axios";
 import { BaseStep, StepConfig, StepContext, StepResult } from "../base/base.step";
-
-const AI_API_URL = process.env["AI_API_URL"] || "http://localhost:8008";
+import {
+	buildAiAgentProcessPayload,
+	buildInternalServiceHeaders,
+	getAiAgentProcessMessageUrl
+} from "../../utils/ai-agent-request";
 
 export default class AiAgentStep extends BaseStep {
 	constructor(config: StepConfig) {
@@ -11,24 +14,28 @@ export default class AiAgentStep extends BaseStep {
 	public async execute(ctx: StepContext): Promise<StepResult> {
 		ctx.logger.log("Ativando agente de IA para o chat...");
 
-		const agentId: number | undefined = typeof this.config["agentId"] === "number"
+		const agentId: number | null = typeof this.config["agentId"] === "number"
 			? this.config["agentId"]
-			: undefined;
+			: null;
 
 		try {
-			await axios.post(
-				`${AI_API_URL}/api/ai/agents/process-message`,
-				{
-					chatId: ctx.message.chatId,
-					instance: this.instance,
-					contactId: ctx.contact.id,
+			const payload = buildAiAgentProcessPayload({
+				chatId: ctx.message.chatId,
+				instance: this.instance,
+				contact: {
+					id: ctx.contact.id,
 					customerId: ctx.contact.customerId ?? null,
-					phone: ctx.contact.phone,
-					clientId: ctx.message.clientId ?? null,
-					triggeredBy: "NEW_MESSAGE_NO_AGENT",
-					...(agentId !== undefined && { agentId })
+					phone: ctx.contact.phone
 				},
-				{ timeout: 30000 }
+				clientId: ctx.message.clientId ?? null,
+				agentId,
+				message: { id: ctx.message.id, body: ctx.message.body, type: ctx.message.type }
+			});
+
+			await axios.post(
+				getAiAgentProcessMessageUrl(),
+				payload,
+				{ timeout: 30000, headers: buildInternalServiceHeaders() }
 			);
 
 			ctx.logger.log("Agente de IA processou a mensagem com sucesso.");
