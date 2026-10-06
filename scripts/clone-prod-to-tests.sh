@@ -15,7 +15,16 @@
 #   CLONE_LOCAL_DB_PORT      porta local (padrão: 3306)
 #   CLONE_LOCAL_DB_USER      usuário local (obrigatória)
 #   CLONE_LOCAL_DB_PASSWORD  senha local (pode ser vazia, mas precisa estar definida)
-#   CLONE_LOCAL_DB_NAME      banco de destino (padrão: inpulse-whatsapp-tests)
+#   CLONE_LOCAL_DB_NAME      banco de destino (padrão: inpulse-whatsapp-tests; precisa terminar em -tests ou _tests)
+#   CLONE_ALLOW_ANY_TARGET   1 libera um banco de destino com nome fora do padrão -tests/_tests (opcional)
+#
+# Travas do destino: o import apaga e recria cada tabela do banco de destino
+# (--add-drop-table). Por isso o script se recusa a rodar quando o destino tem o
+# mesmo nome do banco de origem (sem diferenciar maiúsculas), quando o destino
+# está no mesmo servidor da origem (host:porta; localhost, 127.x e ::1 contam
+# como a mesma máquina) e, sem CLONE_ALLOW_ANY_TARGET=1, quando o nome do
+# destino não termina em -tests ou _tests. Essas checagens rodam antes de
+# qualquer conexão.
 #
 # Exemplo, sem deixar a senha no histórico do shell:
 #   read -rs CLONE_PROD_DB_PASSWORD && export CLONE_PROD_DB_PASSWORD
@@ -52,6 +61,41 @@ if (( ${#missing[@]} > 0 )); then
 fi
 LOCAL_PASS="${CLONE_LOCAL_DB_PASSWORD}"
 
+# ─── Travas do destino (o import roda DROP TABLE no banco de destino) ────────
+# Os nomes dos bancos entram no SQL e nos flags do mysqldump: só letras, números, _ e -.
+for name in "$PROD_DB" "$LOCAL_DB"; do
+  if [[ ! "$name" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    echo "[ERROR] Nome de banco inválido em CLONE_PROD_DB_NAME/CLONE_LOCAL_DB_NAME: use só letras, números, _ e -." >&2
+    exit 1
+  fi
+done
+
+to_lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# localhost, 127.x e ::1 apontam para a mesma máquina.
+normalize_host() {
+  local host
+  host="$(to_lower "$1")"
+  case "$host" in
+    localhost|127.*|::1|"[::1]") host="loopback" ;;
+  esac
+  printf '%s' "$host"
+}
+
+LOCAL_DB_LOWER="$(to_lower "$LOCAL_DB")"
+if [[ "$LOCAL_DB_LOWER" == "$(to_lower "$PROD_DB")" ]]; then
+  echo "[ERROR] O banco de destino ($LOCAL_DB) é o próprio banco de origem. O import apaga e recria as tabelas do destino; escolha outro CLONE_LOCAL_DB_NAME." >&2
+  exit 1
+fi
+if [[ "$(normalize_host "$LOCAL_HOST"):$LOCAL_PORT" == "$(normalize_host "$PROD_HOST"):$PROD_PORT" ]]; then
+  echo "[ERROR] O destino (CLONE_LOCAL_DB_HOST/PORT) aponta para o mesmo servidor da origem (CLONE_PROD_DB_HOST/PORT). O clone precisa ir para outro servidor MySQL." >&2
+  exit 1
+fi
+if [[ "$LOCAL_DB_LOWER" != *-tests && "$LOCAL_DB_LOWER" != *_tests && "${CLONE_ALLOW_ANY_TARGET:-}" != "1" ]]; then
+  echo "[ERROR] O banco de destino ($LOCAL_DB) não termina em -tests ou _tests. Para usar esse nome mesmo assim, defina CLONE_ALLOW_ANY_TARGET=1." >&2
+  exit 1
+fi
+
 # ─── Tabelas que terão schema mas NÃO terão dados ───────────────────────────
 # (tabelas pesadas: process_logs ~2GB, filas de webhook ~350MB+)
 SKIP_DATA_TABLES=(
@@ -64,8 +108,10 @@ SKIP_DATA_TABLES=(
 )
 
 # ─── Arquivos temporários ───────────────────────────────────────────────────
-DUMP_FILE="/tmp/inpulse-whatsapp-dump-$$.sql.gz"
-# Arquivos de opções do cliente MySQL com as credenciais (criados mais abaixo)
+# O dump fica num diretório criado com mktemp -d (nome imprevisível, permissão 700);
+# os arquivos de opções do cliente MySQL guardam as credenciais. Todos são criados mais abaixo.
+WORK_DIR=""
+DUMP_FILE=""
 PROD_CNF=""
 LOCAL_CNF=""
 
@@ -74,9 +120,12 @@ info()  { echo "[INFO]  $*"; }
 error() { echo "[ERROR] $*" >&2; }
 
 cleanup() {
-  if [[ -f "$DUMP_FILE" ]]; then
+  if [[ -n "${DUMP_FILE:-}" && -f "$DUMP_FILE" ]]; then
     info "Removendo arquivo temporário $DUMP_FILE..."
     rm -f "$DUMP_FILE"
+  fi
+  if [[ -n "${WORK_DIR:-}" && -d "$WORK_DIR" ]]; then
+    rmdir "$WORK_DIR" 2>/dev/null || true
   fi
   if [[ -n "${PROD_CNF:-}" ]]; then
     rm -f "$PROD_CNF"
@@ -122,6 +171,8 @@ PROD_CNF="$(mktemp)"
 LOCAL_CNF="$(mktemp)"
 write_client_cnf "$PROD_CNF" "$PROD_HOST" "$PROD_PORT" "$PROD_USER" "$PROD_PASS"
 write_client_cnf "$LOCAL_CNF" "$LOCAL_HOST" "$LOCAL_PORT" "$LOCAL_USER" "$LOCAL_PASS"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/inpulse-whatsapp-clone.XXXXXX")"
+DUMP_FILE="$WORK_DIR/dump.sql.gz"
 
 # ─── Montagem dos flags --ignore-table para a passagem de dados ──────────────
 IGNORE_FLAGS=()
