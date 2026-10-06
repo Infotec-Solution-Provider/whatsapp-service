@@ -65,6 +65,8 @@ export interface ChatPayload {
 	contactId: number;
 	systemMessage?: string;
 	priority?: WppChatPriority;
+	/** Agente de IA do step AI_AGENT (config.agentId); gravado no chat só na criação. */
+	agentId?: number | null;
 }
 
 /**

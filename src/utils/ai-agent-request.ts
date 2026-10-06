@@ -120,6 +120,35 @@ export function hasAiAgentChatId(chatId: number | null | undefined): chatId is n
 }
 
 /**
+ * Chave do contexto do MessageFlow em que o step AI_AGENT deixa o agente
+ * configurado no fluxo (config.agentId) para o chat que o fluxo vai criar.
+ */
+export const FLOW_AI_AGENT_CONTEXT_KEY = "flowAiAgentId";
+
+/** config.agentId do step AI_AGENT: inteiro positivo; qualquer outro valor = seleção automática (null). */
+export function resolveFlowAiAgentId(value: unknown): number | null {
+	return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+/**
+ * Leva ao chat criado pelo fluxo o agente escolhido no step AI_AGENT. Na
+ * criação do chat o step roda antes de a mensagem ser gravada no chat e não
+ * chama o ai-service; quem chama é a distribuição de mensagens, com
+ * agentId = chat.agentId. Sem o agente gravado no chat, um fluxo apontado para
+ * um agente específico cairia na seleção automática. Um agentId que o step
+ * final já tenha definido no payload prevalece.
+ */
+export function applyFlowAiAgentId<T extends { agentId?: number | null }>(payload: T | null, agentId: unknown): T | null {
+	const resolved = resolveFlowAiAgentId(agentId);
+
+	if (payload === null || resolved === null || payload.agentId !== undefined) {
+		return payload;
+	}
+
+	return { ...payload, agentId: resolved };
+}
+
+/**
  * Payload do process-message. Mantém os campos que o ai-service já lê e
  * acrescenta, quando houver, a mensagem que disparou a chamada (P21:
  * gatilho Palavra-chave): messageId, messageBody (aparado, até 2000

@@ -471,6 +471,11 @@ class MessagesDistributionService {
 		const result = await flow.getChatPayload(logger, contact, message);
 		const { systemMessage, ...chatData } = result;
 
+		if (typeof chatData.agentId === "number") {
+			// processAiAgentMessage envia chat.agentId: o agente do fluxo responde sem seleção automática.
+			logger.log(`Chat será criado com o agente de IA #${chatData.agentId} definido no fluxo.`);
+		}
+
 		const chat = await prismaService.wppChat.create({
 			data: {
 				...chatData,
@@ -596,7 +601,8 @@ class MessagesDistributionService {
 
 		try {
 			const flow = await this.getFlow(sector.instance, sector.id);
-			const data = await flow.getChatPayload(logger, contact, message);
+			// O agente do step AI_AGENT só é gravado na criação do chat; a transferência mantém o agent_id atual.
+			const { agentId: _flowAgentId, ...data } = await flow.getChatPayload(logger, contact, message);
 			const updatedChat = await prismaService.wppChat.update({
 				where: { id: chat.id },
 				data: { ...data, botId: null }
@@ -639,7 +645,8 @@ class MessagesDistributionService {
 
 		try {
 			const flow = await this.getFlow(sector.instance, sector.id);
-			const data = await flow.getChatPayload(logger, contact, message);
+			// O agente do step AI_AGENT só é gravado na criação do chat; a transferência mantém o agent_id atual.
+			const { agentId: _flowAgentId, ...data } = await flow.getChatPayload(logger, contact, message);
 
 			const updatedChat = await prismaService.wppChat.update({
 				where: { id: chat.id },

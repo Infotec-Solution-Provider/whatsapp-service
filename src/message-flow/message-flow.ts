@@ -1,6 +1,7 @@
 import ProcessingLogger from "../utils/processing-logger";
 
 import { WppContact, WppMessage } from "@prisma/client";
+import { applyFlowAiAgentId, FLOW_AI_AGENT_CONTEXT_KEY } from "../utils/ai-agent-request";
 import { BaseStep, ChatPayload, StepContext, StepResult } from "./base/base.step";
 
 export default class MessageFlow {
@@ -60,7 +61,9 @@ export default class MessageFlow {
 					logger.log("╔═══════════════════════════════════════════════════════════");
 					logger.log(`║ ✓ FLUXO FINALIZADO (${iterationCount} steps executados)`);
 					logger.log("╚═══════════════════════════════════════════════════════════");
-					return this.validateChat(result.chatData || null, logger);
+					// Agente escolhido por um step AI_AGENT anterior (fica no contexto, não no chatData do step final).
+					const chatData = applyFlowAiAgentId(result.chatData || null, context[FLOW_AI_AGENT_CONTEXT_KEY]);
+					return this.validateChat(chatData, logger);
 				}
 
 				context = { ...context, ...result.context };

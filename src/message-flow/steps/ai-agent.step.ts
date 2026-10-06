@@ -3,8 +3,10 @@ import { BaseStep, StepConfig, StepContext, StepResult } from "../base/base.step
 import {
 	buildAiAgentProcessPayload,
 	buildInternalServiceHeaders,
+	FLOW_AI_AGENT_CONTEXT_KEY,
 	getAiAgentProcessMessageUrl,
-	hasAiAgentChatId
+	hasAiAgentChatId,
+	resolveFlowAiAgentId
 } from "../../utils/ai-agent-request";
 
 export default class AiAgentStep extends BaseStep {
@@ -14,19 +16,28 @@ export default class AiAgentStep extends BaseStep {
 
 	public async execute(ctx: StepContext): Promise<StepResult> {
 		const chatId = ctx.message.chatId;
+		const configuredAgentId = this.config["agentId"];
+		const agentId = resolveFlowAiAgentId(configuredAgentId);
+
+		if (agentId === null && configuredAgentId !== undefined && configuredAgentId !== null) {
+			ctx.logger.log(`agentId inválido no step AI_AGENT (${String(configuredAgentId)}); a seleção do agente de IA fica automática.`);
+		}
+
+		// O agente do fluxo vai no contexto para o chat nascer com agent_id (MessageFlow → applyFlowAiAgentId).
+		const nextCtx: StepContext = agentId !== null ? { ...ctx, [FLOW_AI_AGENT_CONTEXT_KEY]: agentId } : ctx;
 
 		if (!hasAiAgentChatId(chatId)) {
 			// Chat ainda em criação: o ai-service recusaria a chamada (400) e a
 			// distribuição de mensagens aciona o agente depois de gravar a mensagem no chat.
-			ctx.logger.log("Mensagem ainda sem chat; o step não aciona o agente de IA (o acionamento fica com a distribuição de mensagens).");
-			return this.continueFlow(ctx);
+			ctx.logger.log(
+				agentId !== null
+					? `Mensagem ainda sem chat; o agente de IA #${agentId} do fluxo será gravado no chat e acionado pela distribuição de mensagens.`
+					: "Mensagem ainda sem chat; o step não aciona o agente de IA (o acionamento fica com a distribuição de mensagens)."
+			);
+			return this.continueFlow(nextCtx);
 		}
 
 		ctx.logger.log("Ativando agente de IA para o chat...");
-
-		const agentId: number | null = typeof this.config["agentId"] === "number"
-			? this.config["agentId"]
-			: null;
 
 		try {
 			const payload = buildAiAgentProcessPayload({
@@ -54,11 +65,12 @@ export default class AiAgentStep extends BaseStep {
 			ctx.logger.log(`Erro ao acionar agente de IA: ${msg}`);
 		}
 
-		return this.continueFlow(ctx);
+		return this.continueFlow(nextCtx);
 	}
 
 	private continueFlow(ctx: StepContext): StepResult {
-		// AI_AGENT step is terminal — does not assign chatData; returns current context
+		// AI_AGENT não finaliza o fluxo nem monta chatData: o agente configurado segue
+		// no contexto e o MessageFlow o copia para o chatData do step final.
 		return {
 			isFinal: false,
 			...(this.nextStepNumber !== undefined ? { nextStepNumber: this.nextStepNumber } : {}),

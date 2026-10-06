@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import {
 	AI_AGENT_MESSAGE_BODY_MAX,
 	AI_AGENT_MESSAGE_TYPE_MAX,
+	FLOW_AI_AGENT_CONTEXT_KEY,
 	INTERNAL_SERVICE_TOKEN_HEADER,
+	applyFlowAiAgentId,
 	buildAiAgentProcessPayload,
 	buildInternalServiceHeaders,
 	getAiAgentProcessMessageUrl,
 	getAiApiUrl,
 	hasAiAgentChatId,
+	resolveFlowAiAgentId,
 	summarizeAiAgentProcessPayload
 } from "./ai-agent-request";
 
@@ -133,6 +136,24 @@ for (const chatId of [null, undefined, 0, -5, 1.5, Number.NaN, Number.POSITIVE_I
 	assert.equal(hasAiAgentChatId(chatId), false, `chatId ${String(chatId)} não deve acionar o agente pelo step`);
 }
 
+// ─── Agente do step AI_AGENT gravado no chat criado pelo fluxo ──────────────
+// (sem chatId o step não chama o ai-service; a distribuição envia chat.agentId)
+assert.equal(FLOW_AI_AGENT_CONTEXT_KEY, "flowAiAgentId");
+assert.equal(resolveFlowAiAgentId(7), 7);
+for (const value of [undefined, null, 0, -1, 2.5, Number.NaN, "7", {}, true]) {
+	assert.equal(resolveFlowAiAgentId(value), null, `config.agentId ${String(value)} = seleção automática`);
+}
+
+type FlowChat = { instance: string; sectorId: number; contactId: number; userId: number; agentId?: number | null };
+const flowChat: FlowChat = { instance: "tenant", sectorId: 2, contactId: 45, userId: 10 };
+assert.deepEqual(applyFlowAiAgentId(flowChat, 7), { ...flowChat, agentId: 7 }, "o chat nasce com o agente do fluxo");
+assert.equal("agentId" in flowChat, false, "o payload original não é alterado");
+assert.equal(applyFlowAiAgentId(flowChat, undefined), flowChat, "sem agente no fluxo, payload intacto (seleção automática)");
+assert.equal("agentId" in (applyFlowAiAgentId(flowChat, "7") ?? {}), false, "agentId não numérico é ignorado");
+assert.equal(applyFlowAiAgentId(null, 7), null, "sem payload, a validação do fluxo continua recusando");
+assert.equal(applyFlowAiAgentId({ ...flowChat, agentId: 3 }, 7)?.agentId, 3, "agentId definido pelo step final prevalece");
+assert.equal(applyFlowAiAgentId({ ...flowChat, agentId: null }, 7)?.agentId, null, "agentId nulo explícito do step final prevalece");
+
 // ─── Resumo para log: sem o texto do cliente ────────────────────────────────
 const summary = summarizeAiAgentProcessPayload(
 	buildAiAgentProcessPayload({ ...base, message: { id: 3, body: "Meu CPF é 123", type: "chat" } })
@@ -143,4 +164,4 @@ assert.equal(summary.messageId, 3);
 assert.equal(JSON.stringify(summary).includes("CPF"), false);
 assert.equal(summarizeAiAgentProcessPayload(buildAiAgentProcessPayload(base)).messageBodyLength, 0);
 
-console.log("ai-agent-request: cabeçalho interno, URL do ai-service, payload do process-message e chatId do step passed");
+console.log("ai-agent-request: cabeçalho interno, URL do ai-service, payload do process-message, chatId e agente do step passed");
