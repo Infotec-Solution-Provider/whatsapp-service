@@ -47,6 +47,7 @@ import operatorOutboundService from "./services/operator-outbound.service";
 import operatorSendService from "./services/operator-send.service";
 import { flushDatabaseIncidentLog, recordDatabaseIncident } from "./utils/database-incident-log";
 import processLogs from "./logs/service";
+import { startOpsAlerts, stopOpsAlerts } from "./services/ops-alerts";
 
 whatsappService.buildClients();
 operatorSendService.configureWorker();
@@ -144,6 +145,7 @@ const server = app.listen(serverPort, () => {
 	remoteInboundEventInboxService.startWorker();
 	remoteSessionMonitorRoutine.start();
 	processLogs.start();
+	startOpsAlerts();
 	Logger.info("Server listening on port " + serverPort);
 
 	// Wwebjs session health check
@@ -172,6 +174,7 @@ const shutdown = async (signal: string): Promise<void> => {
 	messageQueueService.stopWorker();
 	gupshupWebhookQueueService.stopProcessor();
 	wabaWebhookQueueService.stopProcessor();
+	stopOpsAlerts();
 
 	const serverClosed = new Promise<void>((resolve) => server.close(() => resolve()));
 	const graceful = Promise.all([
