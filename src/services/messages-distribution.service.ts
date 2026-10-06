@@ -23,6 +23,12 @@ import MessageFlow from "../message-flow/message-flow";
 import MessageFlowFactory from "../message-flow/message-flow.factory";
 import ProcessingLogger from "../utils/processing-logger";
 import resolveContactIdentity from "../utils/resolve-contact-identity";
+import {
+	buildAiAgentProcessPayload,
+	buildInternalServiceHeaders,
+	getAiAgentProcessMessageUrl,
+	summarizeAiAgentProcessPayload
+} from "../utils/ai-agent-request";
 import chatsService from "./chats.service";
 import contactsService from "./contacts.service";
 import messageQueueService from "./message-queue.service";
@@ -246,9 +252,17 @@ class MessagesDistributionService {
 	}
 
 	/**
-	 * Processa agente de IA em um chat existente
+	 * Aciona o agente de IA (ai-service) para a mensagem recebida no chat.
+	 * `msg` é a mensagem já inserida no chat; o texto vai no payload para o
+	 * gatilho Palavra-chave, mas nunca no log.
 	 */
-	private async processAiAgentMessage(chat: WppChat, contact: WppContact, clientId: number | null, logger: ProcessingLogger) {
+	private async processAiAgentMessage(
+		chat: WppChat,
+		contact: WppContact,
+		clientId: number | null,
+		logger: ProcessingLogger,
+		msg?: WppMessage
+	) {
 		const rawAgentId = chat.agentId ?? null;
 
 		if (chat.botId && rawAgentId === null) {
@@ -267,31 +281,35 @@ class MessagesDistributionService {
 		} else {
 			logger.log(`Processando mensagem com seleção automática de agente de IA para o chat ${chat.id}`);
 		}
-		const AI_API_URL = process.env["AI_API_URL"] || "http://localhost:8008";
-		const requestPayload = {
+		const requestPayload = buildAiAgentProcessPayload({
 			chatId: chat.id,
 			instance: chat.instance,
-			contactId: contact.id,
-			customerId: contact.customerId ?? null,
-			phone: contact.phone,
+			contact: {
+				id: contact.id,
+				customerId: contact.customerId ?? null,
+				phone: contact.phone
+			},
 			clientId,
-			triggeredBy: "NEW_MESSAGE_NO_AGENT",
 			agentId,
-		};
+			message: msg ? { id: msg.id, body: msg.body, type: msg.type } : null
+		});
 
-		logger.debug("Acionando ai-service para processamento do agente de IA", requestPayload);
+		logger.debug(
+			"Acionando ai-service para processamento do agente de IA",
+			summarizeAiAgentProcessPayload(requestPayload)
+		);
 
 		try {
 			const axios = (await import("axios")).default;
 			const response = await axios.post(
-				`${AI_API_URL}/api/ai/agents/process-message`,
+				getAiAgentProcessMessageUrl(),
 				requestPayload,
-				{ timeout: 30000 }
+				{ timeout: 30000, headers: buildInternalServiceHeaders() }
 			);
 			logger.debug("Resposta recebida do ai-service para o agente de IA", response.data);
 		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
-			logger.log(`Erro ao acionar agente de IA: ${msg}`);
+			const errMsg = err instanceof Error ? err.message : String(err);
+			logger.log(`Erro ao acionar agente de IA: ${errMsg}`);
 		}
 	}
 
@@ -482,14 +500,19 @@ class MessagesDistributionService {
 			// 2. Busca chat existente
 			logger.log("Buscando chat para o contato.");
 			const currChat = await chatsService.getChatForContact(clientId, contact);
-			await this.checkAndSendAutoResponseMessage(instance, contact, currChat, logger);
+			// A resposta automática do setor tem precedência sobre o agente de IA na mesma mensagem.
+			const autoReplySent = await this.checkAndSendAutoResponseMessage(instance, contact, currChat, logger);
 
 			// 3. Processa mensagem em chat existente
 			if (currChat) {
 				logger.log("Chat anterior encontrado para o contato.", currChat);
 				await this.processBotMessage(currChat, contact, msg, logger);
 				const outputMessage = await this.insertAndNotify(logger, currChat, msg, false, strictLocalSync);
-				await this.processAiAgentMessage(currChat, contact, clientId, logger);
+				if (autoReplySent) {
+					logger.log("Resposta automática enviada; o agente de IA não será acionado nesta mensagem.");
+				} else {
+					await this.processAiAgentMessage(currChat, contact, clientId, logger, outputMessage);
+				}
 				return outputMessage;
 			}
 
@@ -523,7 +546,11 @@ class MessagesDistributionService {
 			logger.log("Chat criado com sucesso!", newChat);
 
 			const outputMsg = await this.insertAndNotify(logger, newChat, msg, true, strictLocalSync);
-			await this.processAiAgentMessage(newChat, contact, clientId, logger);
+			if (autoReplySent) {
+				logger.log("Resposta automática enviada; o agente de IA não será acionado nesta mensagem.");
+			} else {
+				await this.processAiAgentMessage(newChat, contact, clientId, logger, outputMsg);
+			}
 			return outputMsg;
 		} catch (err) {
 			const msg = sanitizeErrorMessage(err);
@@ -1035,12 +1062,18 @@ class MessagesDistributionService {
 		}
 	}
 
+	/**
+	 * Avalia e envia a resposta automática do setor.
+	 * @returns true somente quando a resposta automática foi de fato enviada nesta mensagem.
+	 */
 	private async checkAndSendAutoResponseMessage(
 		instance: string,
 		contact: WppContact,
 		currChat: WppChat | null,
 		logger: ProcessingLogger
-	) {
+	): Promise<boolean> {
+		let autoReplySent = false;
+
 		try {
 			type RuleWithIncludes = AutomaticResponseRule & { schedules: AutomaticResponseSchedule[] };
 
@@ -1065,7 +1098,7 @@ class MessagesDistributionService {
 
 			logger.log("[AutoResponse] Regras candidatas carregadas", { totalRules: rules.length });
 
-			if (!rules.length) return;
+			if (!rules.length) return false;
 
 			const toLocalInTZ = (d: Date, tz: string) => {
 				const fmt = new Intl.DateTimeFormat("en-CA", {
@@ -1186,7 +1219,7 @@ class MessagesDistributionService {
 
 			if (!applicable.length) {
 				logger.log("[AutoResponse] Nenhuma regra ativa no momento.", { contactId: contact.id });
-				return;
+				return false;
 			}
 
 			logger.log("[AutoResponse] Regras ativas encontradas", { totalActiveRules: applicable.length });
@@ -1225,7 +1258,7 @@ class MessagesDistributionService {
 						secondsSinceLastReply: secs,
 						contactId: contact.id
 					});
-					return;
+					return false;
 				}
 			}
 
@@ -1247,7 +1280,7 @@ class MessagesDistributionService {
 						secondsSinceLastRuleReply: secs,
 						cooldownSeconds: ruleToApply.cooldownSeconds
 					});
-					return;
+					return false;
 				}
 			}
 
@@ -1261,7 +1294,7 @@ class MessagesDistributionService {
 					chatId: currChat?.id || null,
 					sectorId: currChat?.sectorId || null
 				});
-				return;
+				return false;
 			}
 
 			logger.log("[AutoResponse] Enviando resposta automática", {
@@ -1278,7 +1311,7 @@ class MessagesDistributionService {
 					ruleId: ruleToApply.id,
 					contactId: contact.id
 				});
-				return;
+				return false;
 			}
 
 			// 7) Envia e atualiza "último envio"
@@ -1295,8 +1328,12 @@ class MessagesDistributionService {
 					ruleId: ruleToApply.id,
 					contactId: contact.id
 				});
-				return;
+				return false;
 			}
+
+			// A partir daqui o cliente já recebeu a resposta automática: mesmo que a
+			// atualização do controle falhe, o agente de IA não deve responder também.
+			autoReplySent = true;
 
 			await prismaService.wppContact.update({
 				where: { id: contact.id },
@@ -1308,13 +1345,18 @@ class MessagesDistributionService {
 				contactId: contact.id,
 				autoReplyMessageId: sentAutoReply.id
 			});
+
+			return true;
 		} catch (err) {
 			logger.log("[AutoResponse] Erro ao avaliar/enviar resposta automática", {
 				instance,
 				contactId: contact.id,
 				chatId: currChat?.id || null,
+				autoReplySent,
 				error: sanitizeErrorMessage(err)
 			});
+
+			return autoReplySent;
 		}
 	}
 }
