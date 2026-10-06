@@ -7,6 +7,7 @@ import { RemoteAuthBatch, RemoteSessionDirectoryItem, RemoteSessionInfo } from "
 import prismaService from "./prisma.service";
 import socketService from "./socket.service";
 import { calculateSessionStability } from "./remote-session-stability";
+import { pickClientSession } from "../utils/remote-session-directory";
 import wwebjsHealthCheckService from "./wwebjs-health-check.service";
 
 const REMOTE_TIMEOUT_MS = 5_000;
@@ -343,7 +344,7 @@ class RemoteSessionMonitorService {
 				"get",
 				"/api/sessions"
 			).catch(() => null);
-			const remoteSessionId = directory?.sessions?.find((item) => item.clientId === clientId)?.sessionId;
+			const remoteSessionId = pickClientSession(directory?.sessions, clientId)?.sessionId;
 			const pathPrefix = remoteSessionId ? `/api/sessions/${encodeURIComponent(remoteSessionId)}` : "/api";
 			const session = await this.remoteRequest<RemoteSessionInfo>(
 				client.remoteClientUrl,
@@ -410,7 +411,7 @@ class RemoteSessionMonitorService {
 			"get",
 			"/api/sessions"
 		).catch(() => null);
-		const sessionId = directory?.sessions?.find((item) => item.clientId === clientId)?.sessionId;
+		const sessionId = pickClientSession(directory?.sessions, clientId)?.sessionId;
 		return {
 			client,
 			pathPrefix: sessionId ? `/api/sessions/${encodeURIComponent(sessionId)}` : "/api"
@@ -437,7 +438,7 @@ class RemoteSessionMonitorService {
 			"get",
 			"/api/sessions"
 		);
-		const member = directory.sessions?.find((item) => item.clientId === client.id);
+		const member = pickClientSession(directory.sessions, client.id);
 		if (!member || member.monitorGroupId !== groupId) {
 			throw new RemoteSessionMonitorError(
 				403,
@@ -502,7 +503,10 @@ class RemoteSessionMonitorService {
 						"get",
 						"/api/sessions"
 					);
-					for (const item of response.sessions || []) byClientId.set(item.clientId, item);
+					for (const item of response.sessions || []) {
+						const current = byClientId.get(item.clientId);
+						byClientId.set(item.clientId, current ? pickClientSession([current, item])! : item);
+					}
 				} catch {
 					// Session monitoring remains available when an older remote does not expose the directory.
 				}

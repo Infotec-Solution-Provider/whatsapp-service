@@ -16,6 +16,38 @@ export interface RemoteMessageJobResponse {
 	confirmationStatus?: "NOT_APPLICABLE" | "VERIFYING" | "TIMED_OUT";
 	confirmationDeadlineAt?: string | null;
 	created?: boolean;
+	// Diagnostic fields added by newer wwebjs-api builds (contractVersion stays 1).
+	// All optional: older builds omit them and unknown fields are ignored.
+	firstAttemptAt?: string | null;
+	lastAttemptAt?: string | null;
+	nextAttemptAt?: string | null;
+	processingStartedAt?: string | null;
+	processedAt?: string | null;
+	sendDurationMs?: number | null;
+	sendSessionId?: string | null;
+	sendLibrary?: "BAILEYS" | "ZAPO" | null;
+	fallback?: boolean;
+	/** Only meaningful when status === "FAILED". NOT_SENT means the provider provably never received it. */
+	failureKind?: "NOT_SENT" | "ERROR" | null;
+	retry?: RemoteMessageJobRetry | null;
+}
+
+export interface RemoteMessageJobRetry {
+	reason: "CONNECTION_LOST";
+	count: number;
+	max: number;
+	deadlineAt: string;
+}
+
+/** Diagnostic subset of a remote job response, validated field by field (tolerant reader). */
+export interface RemoteMessageJobDiagnostics {
+	firstAttemptAt: string | null;
+	processedAt: string | null;
+	sendDurationMs: number | null;
+	sendSessionId: string | null;
+	sendLibrary: "BAILEYS" | "ZAPO" | null;
+	fallback: boolean | null;
+	failureKind: "NOT_SENT" | "ERROR" | null;
 }
 
 export interface MessageIdentity {
@@ -166,6 +198,9 @@ export interface RemoteSessionDirectoryItem {
 	monitorRole: "PRIMARY" | "SHADOW";
 	authBatchId: string | null;
 	authQueueStatus: "WAITING" | "READY" | "ACTIVATING" | "QR_PENDING" | "FAILED" | null;
+	isDefault?: boolean;
+	enabled?: boolean;
+	available?: boolean;
 }
 
 export interface SessionStatusChangedEvent {
