@@ -1,10 +1,24 @@
 import { Logger } from "@in.pulse-crm/utils";
 import { Prisma } from "@prisma/client";
 import prismaService from "./prisma.service";
+import type { InternalWppOutcome } from "../utils/internal-wpp-send-outcome";
+
+export interface InternalWhatsappQueueTiming {
+	firstClaimAt?: string;
+	submittedAt?: string;
+	slowAlertedAt?: string;
+	completedAt?: string;
+}
 
 export interface InternalWhatsappQueuePayload {
 	clientId: number;
 	remoteJobId?: string;
+	timing?: InternalWhatsappQueueTiming;
+	outcome?: InternalWppOutcome;
+	/** Manual "Reenviar" count; each generation uses its own remote idempotency key. */
+	retryGeneration?: number;
+	lastRetryAt?: string;
+	lastRetryBy?: number;
 	session: {
 		userId: number;
 		sectorId: number;
@@ -32,6 +46,8 @@ interface EnqueueInput {
 export interface InternalWhatsappQueueProcessResult {
 	status: "PENDING" | "COMPLETED" | "FAILED" | "UNKNOWN";
 	error?: string;
+	/** Updated payload JSON, persisted in the same write as the status (no extra query). */
+	messageData?: string;
 }
 
 export type InternalWhatsappQueueItem = Awaited<
@@ -90,6 +106,27 @@ class InternalWhatsappMessageQueueService {
 		}
 	}
 
+	/**
+	 * Re-opens a terminal item for a manual resend (new retry generation).
+	 * Conditional on the terminal status so it can never touch an item in flight.
+	 */
+	public async reopenForManualRetry(id: string, messageData: string): Promise<boolean> {
+		const reopened = await prismaService.internalMessageProcessingQueue.updateMany({
+			where: { id, status: { in: ["FAILED", "UNKNOWN"] } },
+			data: {
+				status: "PENDING",
+				error: null,
+				lockedBy: null,
+				lockedUntil: null,
+				processedAt: null,
+				processingStartedAt: null,
+				retryCount: 0,
+				messageData
+			}
+		});
+		return reopened.count === 1;
+	}
+
 	public startWorker(): void {
 		if (this.interval) return;
 		if (!this.handler) throw new Error("Internal WhatsApp queue process handler is not configured");
@@ -109,14 +146,18 @@ class InternalWhatsappMessageQueueService {
 		this.interval = null;
 	}
 
+	// `processingStartedAt` is the FIRST claim time of the current delivery (set only
+	// while null). Re-polls, thrown-error retries and restart recovery keep it, so
+	// `processedAt - processingStartedAt` measures the whole delivery. Until 2026-10
+	// it held the last poll's claim time (~0.25 s on every row). A manual
+	// "Reenviar" (new retry generation) clears it to start a new measurement.
 	private async recoverInterruptedItems(): Promise<void> {
 		const result = await prismaService.internalMessageProcessingQueue.updateMany({
 			where: { status: "PROCESSING" },
 			data: {
 				status: "PENDING",
 				lockedBy: null,
-				lockedUntil: null,
-				processingStartedAt: null
+				lockedUntil: null
 			}
 		});
 		if (result.count > 0) {
@@ -151,18 +192,19 @@ class InternalWhatsappMessageQueueService {
 			});
 			if (!item) return;
 
+			const processingStartedAt = item.processingStartedAt ?? new Date();
 			const claimed = await prismaService.internalMessageProcessingQueue.updateMany({
 				where: { id: item.id, status: "PENDING" },
 				data: {
 					status: "PROCESSING",
 					lockedBy: this.workerId,
 					lockedUntil: new Date(Date.now() + this.lockDurationMs),
-					processingStartedAt: new Date()
+					processingStartedAt
 				}
 			});
 			if (claimed.count !== 1) return;
 
-			await this.processClaimed(item);
+			await this.processClaimed({ ...item, processingStartedAt });
 		} catch (error) {
 			Logger.error(
 				`[InternalWhatsappQueue] Processing loop failed: ${error instanceof Error ? error.message : String(error)}`
@@ -182,7 +224,7 @@ class InternalWhatsappMessageQueueService {
 						status: "PENDING",
 						lockedBy: null,
 						lockedUntil: new Date(Date.now() + this.pollDelayMs),
-						processingStartedAt: null
+						...(result.messageData !== undefined ? { messageData: result.messageData } : {})
 					}
 				});
 				return;
@@ -195,7 +237,8 @@ class InternalWhatsappMessageQueueService {
 					error: result.error?.slice(0, 4000) || null,
 					processedAt: new Date(),
 					lockedBy: null,
-					lockedUntil: null
+					lockedUntil: null,
+					...(result.messageData !== undefined ? { messageData: result.messageData } : {})
 				}
 			});
 		} catch (error) {
@@ -209,8 +252,7 @@ class InternalWhatsappMessageQueueService {
 					retryCount: { increment: 1 },
 					error: errorMessage.slice(0, 4000),
 					lockedBy: null,
-					lockedUntil: new Date(Date.now() + retryDelay),
-					processingStartedAt: null
+					lockedUntil: new Date(Date.now() + retryDelay)
 				}
 			});
 			Logger.error(`[InternalWhatsappQueue] Item ${item.id} will retry idempotently: ${errorMessage}`);
