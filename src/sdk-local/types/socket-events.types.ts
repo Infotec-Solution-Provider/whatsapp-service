@@ -13,6 +13,7 @@ import {
 	InternalChatMember,
 	InternalMessage,
 } from "./internal.types";
+import type { WhatsappRetryHint } from "../../utils/internal-wpp-send-outcome";
 
 export enum SocketEventType {
 	WppChatStarted = "wpp_chat_started",
@@ -319,6 +320,8 @@ export interface InternalMessageStatusEventData {
 	chatId: number;
 	internalMessageId: number;
 	status: WppMessageStatus;
+	/** Present when status is ERROR in a WhatsApp-linked chat (outcome-only; author/admin checked by the API). */
+	whatsappRetry?: WhatsappRetryHint | null;
 }
 
 export type ReportStatusEventData = {

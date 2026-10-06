@@ -1,5 +1,6 @@
 import { WppMessageStatus } from "./whatsapp.types";
 import type { MentionEntity } from "../../utils/message-mention-metadata";
+import type { WhatsappRetryHint } from "../../utils/internal-wpp-send-outcome";
 
 export interface InternalMessage {
 	mentionEntities?: MentionEntity[];
@@ -8,6 +9,8 @@ export interface InternalMessage {
 	wwebjsIdStanza?: string | null;
 	reactions?: Array<{ actorId: string; emoji: string; fromMe: boolean; reactedAt: string }>;
 	reactionsUpdatedAt?: string | null;
+	/** Only on ERROR messages of WhatsApp-linked chats. */
+	whatsappRetry?: WhatsappRetryHint | null;
 	id: number;
 	instance: string;
 	from: string;

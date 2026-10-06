@@ -39,7 +39,9 @@ test("internal sends publish the persisted status without reloading history", as
 			},
 			internalChat: { findUnique: async () => ({ id: 8, wppGroupId: linked ? "group@g.us" : null }) },
 			wppSector: { findUnique: async () => ({ defaultClientId: 5 }) },
+			internalMessageProcessingQueue: { findFirst: async () => null, update: async () => ({}) },
 		});
+		stubDefault("./ops-alerts", { emit: () => undefined });
 		stubDefault("./socket.service", {
 			emit: async (type: string, room: string, data: Record<string, unknown>) => {
 				events.push({ type, room, data, persistedStatus: row.status });
@@ -56,14 +58,16 @@ test("internal sends publish the persisted status without reloading history", as
 		previous.set(servicePath, require.cache[servicePath]);
 		delete require.cache[servicePath];
 		const service = (require("./internal-chats.service") as typeof import("./internal-chats.service")).default;
-		const assertFinalEvent = (status: string) => {
+		const assertFinalEvent = (status: string, extra: Record<string, unknown> = {}) => {
 			const final = events.filter((event) => event.type === "internal_message_status").at(-1);
 			assert.equal(row.status, status);
 			assert.deepEqual(final, {
 				type: "internal_message_status", room: "status-test:internal-chat:8",
-				data: { chatId: 8, internalMessageId: 42, status }, persistedStatus: status,
+				data: { chatId: 8, internalMessageId: 42, status, ...extra }, persistedStatus: status,
 			});
 		};
+		// Legacy synchronous path: linked group but no queue row to reuse for a resend.
+		const noQueueHint = { whatsappRetry: { allowed: false, requiresConfirmation: false, reason: "NO_QUEUE_ITEM" } };
 		for (const sync of [true, false]) {
 			await t.test(`unlinked group, WhatsApp sync ${sync}`, async () => {
 				events.length = 0;
@@ -82,7 +86,8 @@ test("internal sends publish the persisted status without reloading history", as
 					return outcome === "success" ? { wwebjsId: "provider-1" } as CreateMessageDto : undefined;
 				};
 				await service.sendMessage(session, { chatId: "8", text: "Hello" });
-				assertFinalEvent(outcome === "success" ? "RECEIVED" : "ERROR");
+				if (outcome === "success") assertFinalEvent("RECEIVED");
+				else assertFinalEvent("ERROR", noQueueHint);
 			});
 		}
 		await t.test("queued confirmation replaces PENDING with persisted status", async () => {
@@ -98,7 +103,7 @@ test("internal sends publish the persisted status without reloading history", as
 			assert.deepEqual(await service.processQueuedWppGroupMessage(item), { status: "PENDING" });
 			assertFinalEvent("PENDING");
 			remoteStatus = "SENT";
-			assert.deepEqual(await service.processQueuedWppGroupMessage(item), { status: "COMPLETED" });
+			assert.equal((await service.processQueuedWppGroupMessage(item)).status, "COMPLETED");
 			assertFinalEvent("RECEIVED");
 		});
 	} finally {

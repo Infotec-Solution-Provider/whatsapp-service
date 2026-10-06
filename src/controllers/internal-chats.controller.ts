@@ -1,5 +1,5 @@
 import { Request, Response, Router } from "express";
-import internalChatsService from "../services/internal-chats.service";
+import internalChatsService, { InternalWppRetryError } from "../services/internal-chats.service";
 import messagePresentationService from "../services/message-presentation.service";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
@@ -42,6 +42,8 @@ class InternalChatsController {
 		// Edita uma mensagem de chat interno
 		this.router.put("/api/internal/messages/:id", isAuthenticated, this.editInternalMessage);
 		this.router.post("/api/internal/messages/:id/reaction", isAuthenticated, this.sendReaction);
+		// Reenvia ao grupo do WhatsApp uma mensagem interna que falhou (autor ou ADMIN)
+		this.router.post("/api/internal/messages/:id/whatsapp-retry", isAuthenticated, this.retryWhatsappDelivery);
 
 		// Atualiza grupo interno
 		this.router.put("/api/internal/groups/:id", isAuthenticated, this.updateInternalGroup);
@@ -69,6 +71,25 @@ class InternalChatsController {
 			res.status(200).send({ message: "Reaction confirmed.", data });
 		} catch (error) {
 			if (error instanceof MessageReactionError) {
+				res.status(error.statusCode).send({ message: error.message, code: error.code });
+				return;
+			}
+			throw error;
+		}
+	}
+
+	private async retryWhatsappDelivery(req: Request, res: Response) {
+		const id = Number(req.params["id"]);
+		if (!Number.isInteger(id) || id <= 0) {
+			throw new BadRequestError("Message ID is required!");
+		}
+		try {
+			const data = await internalChatsService.retryWppGroupMessage(req.session, id, {
+				confirmUncertain: req.body?.confirmUncertain === true
+			});
+			res.status(202).send({ message: "Reenvio agendado", data });
+		} catch (error) {
+			if (error instanceof InternalWppRetryError) {
 				res.status(error.statusCode).send({ message: error.message, code: error.code });
 				return;
 			}

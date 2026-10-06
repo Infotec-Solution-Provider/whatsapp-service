@@ -34,6 +34,20 @@ import messagePresentationService from "./message-presentation.service";
 import chatUserPreferencesService from "./chat-user-preferences.service";
 import { messageMentionPatch, operatorMentionEntities } from "../utils/message-mention-persistence";
 import { mentionMetadataToPrisma } from "../utils/message-mention-metadata";
+import type { RemoteMessageJobResponse } from "../types/remote-client.types";
+import {
+	INTERNAL_WPP_MAX_RETRY_GENERATIONS,
+	INTERNAL_WPP_RETRY_COOLDOWN_MS,
+	InternalWppOutcome,
+	WhatsappRetryHint,
+	classifyInternalWppJob,
+	internalWppIdempotencyKey,
+	outcomeErrorPrefix,
+	parseQueuePayload,
+	remoteJobDiagnostics,
+	whatsappRetryHint
+} from "../utils/internal-wpp-send-outcome";
+import opsAlerts from "./ops-alerts";
 
 const LEGACY_INTERNAL_GROUP_WHATSAPP_SYNC_DEFAULT = process.env["ENABLE_INTERNAL_GROUP_WHATSAPP_SYNC"] === "true";
 
@@ -64,6 +78,42 @@ interface UpdateInternalGroupData {
 interface EditInternalMessageOptions {
 	messageId: number;
 	text: string;
+}
+
+export type InternalWppRetryErrorCode = "CONFIRMATION_REQUIRED" | "NOT_RETRYABLE" | "RETRY_LIMIT" | "FORBIDDEN" | "NOT_FOUND";
+
+/** Manual WhatsApp resend rejection; the controller returns `{ message, code }` with this status. */
+export class InternalWppRetryError extends Error {
+	constructor(
+		public readonly statusCode: 403 | 404 | 409,
+		public readonly code: InternalWppRetryErrorCode,
+		message: string
+	) {
+		super(message);
+		this.name = "InternalWppRetryError";
+	}
+}
+
+const INTERNAL_WPP_SLOW_SEND_MS = Math.max(1000, Number(process.env["OPS_ALERTS_SLOW_SEND_MS"]) || 20_000);
+
+const OUTCOME_SUMMARIES: Record<InternalWppOutcome["kind"], string> = {
+	NOT_SENT: "Não enviada ao grupo (comprovadamente não saiu; reenvio seguro)",
+	FAILED: "Falha no envio ao grupo",
+	UNKNOWN: "Envio ao grupo sem confirmação (resultado incerto)"
+};
+
+function timeMs(value: unknown): number | null {
+	if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.getTime();
+	if (typeof value === "string" && value) {
+		const parsed = new Date(value).getTime();
+		return Number.isNaN(parsed) ? null : parsed;
+	}
+	return null;
+}
+
+function isoOrNull(value: unknown): string | null {
+	const ms = timeMs(value);
+	return ms === null ? null : new Date(ms).toISOString();
 }
 class InternalChatsService {
 	// Cria um grupo interno com um nome e participantes
@@ -1632,25 +1682,203 @@ class InternalChatsService {
 		};
 	}
 
-	private async updateMessageStatusAndNotify(messageId: number, status: InternalMessage["status"]): Promise<void> {
+	private async updateMessageStatusAndNotify(
+		messageId: number,
+		status: InternalMessage["status"],
+		whatsappRetry?: WhatsappRetryHint | null
+	): Promise<void> {
 		const message = await prismaService.internalMessage.update({
 			where: { id: messageId },
 			data: { status }
 		});
+		const hint =
+			message.status === "ERROR"
+				? whatsappRetry !== undefined
+					? whatsappRetry
+					: await this.resolveWhatsappRetryHint(message)
+				: null;
 		// Publish the persisted value so live messages match a history reload.
 		const room = `${message.instance}:internal-chat:${message.internalChatId}` as SocketServerInternalChatRoom;
 		await socketService.emit(SocketEventType.InternalMessageStatus, room, {
 			chatId: message.internalChatId,
 			internalMessageId: message.id,
-			status: message.status
+			status: message.status,
+			...(hint ? { whatsappRetry: hint } : {})
 		});
 	}
 
-	private async markQueuedWppMessageError(item: InternalWhatsappQueueItem, error: string): Promise<void> {
+	/** Outcome-only hint (socket rooms are shared); author/admin is enforced by the retry endpoint. */
+	private async resolveWhatsappRetryHint(message: {
+		id: number;
+		internalChatId: number;
+	}): Promise<WhatsappRetryHint | null> {
+		try {
+			const chat = await prismaService.internalChat.findUnique({
+				where: { id: message.internalChatId },
+				select: { wppGroupId: true }
+			});
+			if (!chat?.wppGroupId) return null;
+			const row = await prismaService.internalMessageProcessingQueue.findFirst({
+				where: { internalMessageId: message.id },
+				select: { messageData: true }
+			});
+			const payload = parseQueuePayload<InternalWhatsappQueuePayload>(row?.messageData);
+			return whatsappRetryHint({
+				exists: !!row,
+				retryGeneration: payload?.retryGeneration,
+				outcome: payload?.outcome
+			});
+		} catch (error) {
+			Logger.error(
+				`[internal-wpp-send] retry hint unavailable for message ${message.id}: ${error instanceof Error ? error.message : String(error)}`
+			);
+			return null;
+		}
+	}
+
+	/** Start of the current delivery generation (a manual resend restarts the clock). */
+	private queuedWppStartedAt(item: InternalWhatsappQueueItem, payload: InternalWhatsappQueuePayload): number {
+		return timeMs(payload.lastRetryAt) ?? timeMs(item.createdAt) ?? Date.now();
+	}
+
+	private queuedWppLogEntry(
+		item: InternalWhatsappQueueItem,
+		payload: InternalWhatsappQueuePayload,
+		job: RemoteMessageJobResponse | null,
+		status: string,
+		totalMs: number
+	) {
+		const remote = remoteJobDiagnostics(job);
+		return {
+			queueId: item.id,
+			internalMessageId: item.internalMessageId,
+			instance: item.instance,
+			clientId: payload.clientId,
+			jobId: job?.jobId ?? payload.remoteJobId ?? null,
+			retryGeneration: payload.retryGeneration ?? 0,
+			status,
+			outcome: payload.outcome?.kind ?? null,
+			createdAt: isoOrNull(item.createdAt),
+			firstClaimAt: payload.timing?.firstClaimAt ?? null,
+			completedAt: payload.timing?.completedAt ?? null,
+			totalMs,
+			remote: {
+				firstAttemptAt: remote.firstAttemptAt,
+				processedAt: remote.processedAt,
+				sendDurationMs: remote.sendDurationMs,
+				sendSessionId: remote.sendSessionId,
+				sendLibrary: remote.sendLibrary,
+				fallback: remote.fallback,
+				failureKind: remote.failureKind
+			}
+		};
+	}
+
+	private emitQueuedWppAlert(
+		type: "SEND_FAILED" | "SEND_SLOW",
+		item: InternalWhatsappQueueItem,
+		payload: InternalWhatsappQueuePayload,
+		job: RemoteMessageJobResponse | null,
+		summary: string,
+		totalMs: number
+	): void {
+		const remote = remoteJobDiagnostics(job);
+		opsAlerts.emit({
+			type,
+			severity: type === "SEND_FAILED" ? "high" : "warn",
+			instance: item.instance,
+			clientId: payload.clientId,
+			sessionId: remote.sendSessionId ?? undefined,
+			summary,
+			refs: {
+				internalMessageId: item.internalMessageId ?? undefined,
+				queueId: item.id,
+				jobId: job?.jobId ?? payload.remoteJobId,
+				library: remote.sendLibrary,
+				fallback: remote.fallback,
+				durationMs: totalMs,
+				firstAttemptAt: remote.firstAttemptAt ?? payload.timing?.firstClaimAt ?? null,
+				outcome: payload.outcome?.kind
+			}
+		});
+	}
+
+	/** Still in flight: persists timing only on the first slow detection (never on every poll). */
+	private pendingQueuedWppMessage(
+		item: InternalWhatsappQueueItem,
+		payload: InternalWhatsappQueuePayload,
+		timing: NonNullable<InternalWhatsappQueuePayload["timing"]>,
+		job: RemoteMessageJobResponse,
+		verifying: boolean
+	): InternalWhatsappQueueProcessResult {
+		const elapsed = Date.now() - this.queuedWppStartedAt(item, payload);
+		if (elapsed <= INTERNAL_WPP_SLOW_SEND_MS || timing.slowAlertedAt) return { status: "PENDING" };
+
+		timing.slowAlertedAt = new Date().toISOString();
+		payload.timing = timing;
+		Logger.info(
+			`[internal-wpp-send] slow ${JSON.stringify(this.queuedWppLogEntry(item, payload, job, job.status, elapsed))}`
+		);
+		this.emitQueuedWppAlert(
+			"SEND_SLOW",
+			item,
+			payload,
+			job,
+			verifying ? "Aguardando confirmação do WhatsApp" : "Envio ainda em andamento",
+			elapsed
+		);
+		return { status: "PENDING", messageData: JSON.stringify(payload) };
+	}
+
+	private completeQueuedWppMessage(
+		item: InternalWhatsappQueueItem,
+		payload: InternalWhatsappQueuePayload,
+		timing: NonNullable<InternalWhatsappQueuePayload["timing"]>,
+		job: RemoteMessageJobResponse
+	): InternalWhatsappQueueProcessResult {
+		const completedAt = new Date();
+		const totalMs = completedAt.getTime() - this.queuedWppStartedAt(item, payload);
+		timing.completedAt = completedAt.toISOString();
+		const slow = totalMs > INTERNAL_WPP_SLOW_SEND_MS && !timing.slowAlertedAt;
+		if (slow) timing.slowAlertedAt = timing.completedAt;
+		payload.timing = timing;
+		Logger.info(`[internal-wpp-send] ${JSON.stringify(this.queuedWppLogEntry(item, payload, job, "RECEIVED", totalMs))}`);
+		if (slow) this.emitQueuedWppAlert("SEND_SLOW", item, payload, job, "Entregue ao grupo com atraso", totalMs);
+		return { status: "COMPLETED", messageData: JSON.stringify(payload) };
+	}
+
+	/** Terminal failure: internal status ERROR with a retry hint, outcome persisted with the queue status. */
+	private async finishQueuedWppError(
+		item: InternalWhatsappQueueItem,
+		payload: InternalWhatsappQueuePayload,
+		timing: NonNullable<InternalWhatsappQueuePayload["timing"]>,
+		job: RemoteMessageJobResponse | null,
+		kind: InternalWppOutcome["kind"],
+		queueStatus: "FAILED" | "UNKNOWN",
+		error: string
+	): Promise<InternalWhatsappQueueProcessResult> {
+		const completedAt = new Date();
+		const outcome: InternalWppOutcome = {
+			kind,
+			safeToResend: kind === "NOT_SENT",
+			at: completedAt.toISOString(),
+			error: error.slice(0, 500)
+		};
+		payload.outcome = outcome;
+		timing.completedAt = completedAt.toISOString();
+		payload.timing = timing;
 		if (item.internalMessageId) {
-			await this.updateMessageStatusAndNotify(item.internalMessageId, "ERROR");
+			await this.updateMessageStatusAndNotify(
+				item.internalMessageId,
+				"ERROR",
+				whatsappRetryHint({ exists: true, retryGeneration: payload.retryGeneration, outcome })
+			);
 		}
 		Logger.error(`[InternalWhatsappQueue] ${error}`);
+		const totalMs = completedAt.getTime() - this.queuedWppStartedAt(item, payload);
+		Logger.info(`[internal-wpp-send] ${JSON.stringify(this.queuedWppLogEntry(item, payload, job, "ERROR", totalMs))}`);
+		this.emitQueuedWppAlert("SEND_FAILED", item, payload, job, OUTCOME_SUMMARIES[kind], totalMs);
+		return { status: queueStatus, error: `${outcomeErrorPrefix(kind)} ${error}`, messageData: JSON.stringify(payload) };
 	}
 
 	public async processQueuedWppGroupMessage(
@@ -1682,10 +1910,18 @@ class InternalChatsService {
 			...(payload.data.sendAsDocument !== undefined ? { sendAsDocument: payload.data.sendAsDocument } : {}),
 			...(payload.data.mentions !== undefined ? { mentions: payload.data.mentions as Mention[] | string } : {})
 		};
-		const idempotencyKey = `${item.instance}:internal-message:${item.internalMessageId}`;
+		// Generation 0 keeps the historical key; each manual resend gets a new remote job.
+		const idempotencyKey = internalWppIdempotencyKey(
+			item.instance,
+			item.internalMessageId,
+			payload.retryGeneration ?? 0
+		);
+		const timing = { ...(payload.timing || {}) };
+		const firstClaimAt = isoOrNull(item.processingStartedAt);
+		if (!timing.firstClaimAt && firstClaimAt) timing.firstClaimAt = firstClaimAt;
 
 		try {
-			let job;
+			let job: RemoteMessageJobResponse;
 			if (payload.remoteJobId) {
 				job = await client.getMessageJob(payload.remoteJobId);
 			} else {
@@ -1700,33 +1936,37 @@ class InternalChatsService {
 			}
 			if (!payload.remoteJobId) {
 				payload.remoteJobId = job.jobId;
+				timing.submittedAt = new Date().toISOString();
+				payload.timing = timing;
 				await prismaService.internalMessageProcessingQueue.update({
 					where: { id: item.id },
 					data: { messageData: JSON.stringify(payload) }
 				});
 			}
 
-			if (job.status === "PENDING" || job.status === "PROCESSING") {
-				return { status: "PENDING" };
+			const verdict = classifyInternalWppJob(job);
+			if (verdict.state === "PENDING") {
+				return this.pendingQueuedWppMessage(item, payload, timing, job, verdict.reason === "VERIFYING");
 			}
 
-			if (job.status === "SENT" && job.result) {
+			if (verdict.state === "SENT" && job.result) {
 				const { isGroup: _isGroup, groupId: _groupId, authorName: _authorName, ...sentMessage } = job.result;
 				await this.persistGeneratedWppIds(message.id, sentMessage, process, payload.clientId);
 				await this.updateMessageStatusAndNotify(message.id, "RECEIVED");
 				process.success({ jobId: job.jobId, wwebjsId: sentMessage.wwebjsId });
-				return { status: "COMPLETED" };
+				return this.completeQueuedWppMessage(item, payload, timing, job);
 			}
 
-			const error = job.error || `Remote job ${job.jobId} ended with status ${job.status}`;
-			await this.markQueuedWppMessageError(item, error);
-			process.failed(new Error(error));
-			return { status: job.status === "UNKNOWN" ? "UNKNOWN" : "FAILED", error };
+			const failure =
+				verdict.state === "ERROR"
+					? verdict
+					: ({ kind: "UNKNOWN", queueStatus: "UNKNOWN", error: `Remote job ${job.jobId} was sent without a result` } as const);
+			process.failed(new Error(failure.error));
+			return this.finishQueuedWppError(item, payload, timing, job, failure.kind, failure.queueStatus, failure.error);
 		} catch (error) {
 			if (axios.isAxiosError(error) && error.response?.status === 404 && payload.remoteJobId) {
 				const message = `Remote message job ${payload.remoteJobId} disappeared; delivery outcome is unknown`;
-				await this.markQueuedWppMessageError(item, message);
-				return { status: "UNKNOWN", error: message };
+				return this.finishQueuedWppError(item, payload, timing, null, "UNKNOWN", "UNKNOWN", message);
 			}
 			if (
 				axios.isAxiosError(error) &&
@@ -1735,12 +1975,116 @@ class InternalChatsService {
 				error.response.status < 500 &&
 				![404, 408, 429].includes(error.response.status)
 			) {
+				// A rejected request (e.g. idempotency conflict) is not proof the message never left.
 				const message = `Remote message job rejected with HTTP ${error.response.status}`;
-				await this.markQueuedWppMessageError(item, message);
-				return { status: "FAILED", error: message };
+				return this.finishQueuedWppError(item, payload, timing, null, "FAILED", "FAILED", message);
 			}
 			throw error;
 		}
+	}
+
+	/**
+	 * Manual "Reenviar" of a failed internal-group message. Only the author or an
+	 * ADMIN may resend; an outcome that is not provably unsent needs explicit
+	 * confirmation because the group may receive the message twice.
+	 */
+	public async retryWppGroupMessage(
+		session: SessionData,
+		id: number,
+		options: { confirmUncertain?: boolean } = {}
+	): Promise<{ id: number; status: "PENDING" }> {
+		const message = await prismaService.internalMessage.findUnique({ where: { id }, include: { chat: true } });
+		if (!message || message.instance !== session.instance) {
+			throw new InternalWppRetryError(404, "NOT_FOUND", "Mensagem não encontrada.");
+		}
+		if (message.from !== `user:${session.userId}` && session.role !== "ADMIN") {
+			throw new InternalWppRetryError(
+				403,
+				"FORBIDDEN",
+				"Apenas o autor da mensagem ou um administrador pode reenviá-la."
+			);
+		}
+		const notRetryable = (text: string) => new InternalWppRetryError(409, "NOT_RETRYABLE", text);
+		if (!message.chat?.wppGroupId) throw notRetryable("Este chat não está vinculado a um grupo do WhatsApp.");
+		const syncEnabled = await parametersService.isInternalGroupWhatsappSyncEnabled(
+			session.instance,
+			LEGACY_INTERNAL_GROUP_WHATSAPP_SYNC_DEFAULT
+		);
+		if (!syncEnabled) throw notRetryable("A sincronização com grupos do WhatsApp está desativada.");
+		if (message.status !== "ERROR" || message.wwebjsId || message.wwebjsIdStanza) {
+			throw notRetryable("Somente mensagens com falha de envio podem ser reenviadas.");
+		}
+
+		const row = await prismaService.internalMessageProcessingQueue.findFirst({ where: { internalMessageId: id } });
+		if (!row || row.instance !== session.instance) {
+			throw notRetryable("Não há registro de envio desta mensagem para reaproveitar.");
+		}
+		if (row.status !== "FAILED" && row.status !== "UNKNOWN") {
+			throw notRetryable("O envio desta mensagem ainda está em andamento.");
+		}
+		const payload = parseQueuePayload<InternalWhatsappQueuePayload>(row.messageData);
+		if (!payload || typeof payload.clientId !== "number" || !payload.session) {
+			throw notRetryable("O registro de envio desta mensagem é inválido.");
+		}
+
+		const generation = payload.retryGeneration ?? 0;
+		if (generation >= INTERNAL_WPP_MAX_RETRY_GENERATIONS) {
+			throw new InternalWppRetryError(409, "RETRY_LIMIT", "Limite de reenvios atingido para esta mensagem.");
+		}
+		const lastRetryAt = timeMs(payload.lastRetryAt);
+		if (lastRetryAt !== null && Date.now() - lastRetryAt < INTERNAL_WPP_RETRY_COOLDOWN_MS) {
+			throw new InternalWppRetryError(409, "RETRY_LIMIT", "Aguarde alguns segundos antes de reenviar novamente.");
+		}
+
+		const safe = payload.outcome?.safeToResend === true;
+		if (!safe && options.confirmUncertain !== true) {
+			throw new InternalWppRetryError(
+				409,
+				"CONFIRMATION_REQUIRED",
+				"Não foi possível confirmar se esta mensagem chegou ao grupo. Se ela tiver chegado, o grupo vai recebê-la duas vezes."
+			);
+		}
+		if (!safe) {
+			Logger.info(
+				`[internal-wpp-retry] uncertain confirmed by user ${session.userId} (message ${id}, queue ${row.id}, outcome ${payload.outcome?.kind ?? "LEGACY"})`
+			);
+		}
+
+		// Atomic claim: concurrent resends (or a late receipt) cannot both pass.
+		const claimed = await prismaService.internalMessage.updateMany({
+			where: { id, status: "ERROR", wwebjsId: null, wwebjsIdStanza: null },
+			data: { status: "PENDING" }
+		});
+		if (claimed.count !== 1) throw notRetryable("Esta mensagem já está sendo reenviada.");
+
+		// Reuse the original payload: the WhatsApp text keeps the original author's name.
+		const { remoteJobId: _remoteJobId, outcome: _outcome, timing: _timing, ...base } = payload;
+		const nextPayload: InternalWhatsappQueuePayload = {
+			...base,
+			retryGeneration: generation + 1,
+			lastRetryAt: new Date().toISOString(),
+			lastRetryBy: session.userId,
+			timing: {}
+		};
+		const reopened = await internalWhatsappMessageQueueService.reopenForManualRetry(row.id, JSON.stringify(nextPayload));
+		if (!reopened) {
+			await prismaService.internalMessage.updateMany({ where: { id, status: "PENDING" }, data: { status: "ERROR" } });
+			throw notRetryable("Não foi possível reabrir o envio desta mensagem.");
+		}
+
+		Logger.info(
+			`[internal-wpp-retry] ${JSON.stringify({
+				internalMessageId: id,
+				queueId: row.id,
+				instance: session.instance,
+				userId: session.userId,
+				retryGeneration: generation + 1,
+				previousOutcome: payload.outcome?.kind ?? null,
+				confirmedUncertain: !safe
+			})}`
+		);
+		await this.updateMessageStatusAndNotify(id, "PENDING");
+		return { id, status: "PENDING" };
 	}
 
 	public async sendMessageToWppGroup(
