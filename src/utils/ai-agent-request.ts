@@ -110,6 +110,16 @@ function normalizeMessageId(id: number | null | undefined): number | null {
 }
 
 /**
+ * O ai-service recusa o process-message sem chatId numérico (400). No step
+ * AI_AGENT do MessageFlow, durante a criação do chat, a mensagem ainda não foi
+ * gravada no chat (chatId nulo): chamar o ai-service nesse momento só gera uma
+ * requisição recusada, e quem aciona o agente é a distribuição de mensagens.
+ */
+export function hasAiAgentChatId(chatId: number | null | undefined): chatId is number {
+	return typeof chatId === "number" && Number.isInteger(chatId) && chatId > 0;
+}
+
+/**
  * Payload do process-message. Mantém os campos que o ai-service já lê e
  * acrescenta, quando houver, a mensagem que disparou a chamada (P21:
  * gatilho Palavra-chave): messageId, messageBody (aparado, até 2000

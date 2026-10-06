@@ -7,6 +7,7 @@ import {
 	buildInternalServiceHeaders,
 	getAiAgentProcessMessageUrl,
 	getAiApiUrl,
+	hasAiAgentChatId,
 	summarizeAiAgentProcessPayload
 } from "./ai-agent-request";
 
@@ -124,6 +125,14 @@ assert.equal(
 );
 assert.equal("messageType" in buildAiAgentProcessPayload({ ...base, message: { type: "  " } }), false);
 
+// ─── Step AI_AGENT: só aciona o ai-service quando a mensagem já tem chat ────
+// (o ai-service devolve 400 sem chatId numérico; na criação do chat a mensagem ainda não tem chatId)
+assert.equal(hasAiAgentChatId(123), true);
+assert.equal(hasAiAgentChatId(1), true);
+for (const chatId of [null, undefined, 0, -5, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+	assert.equal(hasAiAgentChatId(chatId), false, `chatId ${String(chatId)} não deve acionar o agente pelo step`);
+}
+
 // ─── Resumo para log: sem o texto do cliente ────────────────────────────────
 const summary = summarizeAiAgentProcessPayload(
 	buildAiAgentProcessPayload({ ...base, message: { id: 3, body: "Meu CPF é 123", type: "chat" } })
@@ -134,4 +143,4 @@ assert.equal(summary.messageId, 3);
 assert.equal(JSON.stringify(summary).includes("CPF"), false);
 assert.equal(summarizeAiAgentProcessPayload(buildAiAgentProcessPayload(base)).messageBodyLength, 0);
 
-console.log("ai-agent-request: cabeçalho interno, URL do ai-service e payload do process-message passed");
+console.log("ai-agent-request: cabeçalho interno, URL do ai-service, payload do process-message e chatId do step passed");
