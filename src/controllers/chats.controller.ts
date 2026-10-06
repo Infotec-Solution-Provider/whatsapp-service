@@ -8,12 +8,79 @@ import protectedRead from "../middlewares/protected-read";
 import chatUserPreferencesService, { ChatPreferenceType } from "../services/chat-user-preferences.service";
 import publicReportFieldsService from "../services/public-report-fields.service";
 import transferHistoryService from "../services/transfer-history.service";
+import { TemplateVariables } from "../types/whatsapp-api.types";
+import {
+	chatScopeFromSession,
+	messagesScopeFromSession,
+	parseOptionalInstance,
+	parsePositiveInt
+} from "../utils/chat-scope";
 
 const parseOptionalPositiveInt = (value: unknown, field: string) => {
 	if (value === undefined || value === "") return undefined;
 	const parsed = Number(value);
 	if (!Number.isInteger(parsed) || parsed <= 0) throw new BadRequestError(`${field} must be a positive integer!`);
 	return parsed;
+};
+
+/* Validação das rotas internas usadas pelo agente de IA (mensagens em português). */
+
+const requireAgentRouteChatId = (value: unknown) => {
+	const chatId = parsePositiveInt(value);
+	if (chatId === null) throw new BadRequestError("Informe um ID de chat válido.");
+	return chatId;
+};
+
+const requireAgentRouteInstance = (value: unknown) => {
+	const instance = parseOptionalInstance(value);
+	if (!instance) throw new BadRequestError("Informe a empresa do chat (instance).");
+	return instance;
+};
+
+const requireAgentRoutePositiveInt = (value: unknown, field: string) => {
+	const parsed = parsePositiveInt(value);
+	if (parsed === null) throw new BadRequestError(`O campo ${field} deve ser um número inteiro positivo.`);
+	return parsed;
+};
+
+/** Ausente ou nulo = null; presente precisa ser inteiro positivo. Nunca responde “Agent ID is required!”. */
+const parseAgentRouteOptionalPositiveInt = (value: unknown, field: string) => {
+	if (value === undefined || value === null) return null;
+	return requireAgentRoutePositiveInt(value, field);
+};
+
+const parseAgentRouteOptionalText = (value: unknown, field: string) => {
+	if (value === undefined || value === null) return null;
+	if (typeof value !== "string") throw new BadRequestError(`O campo ${field} deve ser um texto.`);
+	return value.trim() || null;
+};
+
+const parseAgentRouteTemplateVariables = (value: unknown): TemplateVariables => {
+	if (value === undefined || value === null) return {} as TemplateVariables;
+	if (typeof value !== "object" || Array.isArray(value)) {
+		throw new BadRequestError("O campo templateVariables deve ser um objeto com os valores das variáveis.");
+	}
+
+	const variables: Record<string, string> = {};
+	for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+		if (raw === undefined || raw === null) {
+			variables[key] = "";
+		} else if (typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean") {
+			variables[key] = String(raw);
+		} else {
+			throw new BadRequestError(`A variável de template “${key}” deve ser um texto.`);
+		}
+	}
+
+	return variables as unknown as TemplateVariables;
+};
+
+const parseAgentRouteComponents = (value: unknown) => {
+	if (value === undefined || value === null) return [];
+	if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+		throw new BadRequestError("O campo components deve ser uma lista de textos.");
+	}
+	return value as string[];
 };
 
 const parseDate = (value: unknown, field: string) => {
@@ -48,6 +115,11 @@ class ChatsController {
 		);
 		this.router.get("/api/whatsapp/transfers", publicBiRateLimit, isAuthenticated, this.getPublicTransfers.bind(this));
 		this.router.get("/api/internal/whatsapp/chats/:id", onlyLocal, this.getInternalChatById.bind(this));
+		this.router.get(
+			"/api/internal/whatsapp/chats/:id/messages",
+			onlyLocal,
+			this.getInternalChatMessages.bind(this)
+		);
 		this.router.post(
 			"/api/internal/whatsapp/chats/:id/agent-send-message",
 			onlyLocal,
@@ -57,6 +129,17 @@ class ChatsController {
 			"/api/internal/whatsapp/chats/ensure-active",
 			onlyLocal,
 			this.ensureInternalActiveChat.bind(this)
+		);
+		this.router.post(
+			"/api/internal/whatsapp/chats/:id/agent-transfer",
+			onlyLocal,
+			this.transferChatByAgent.bind(this)
+		);
+		this.router.post("/api/internal/whatsapp/chats/:id/agent-finish", onlyLocal, this.finishChatByAgent.bind(this));
+		this.router.post(
+			"/api/internal/whatsapp/chats/:id/agent-send-template",
+			onlyLocal,
+			this.sendTemplateByAgent.bind(this)
 		);
 		this.router.post("/api/whatsapp/chats/:id/finish", isAuthenticated, this.finishChatById);
 		this.router.post("/api/whatsapp/chats", isAuthenticated, this.startChatByContactId);
@@ -178,7 +261,22 @@ class ChatsController {
 		};
 	}
 	private async getChatById(req: Request, res: Response) {
-		return this.sendChatById(req, res);
+		const id = parsePositiveInt(req.params["id"]);
+
+		if (id === null) {
+			throw new BadRequestError("Chat ID is required!");
+		}
+
+		const chat = await chatsService.getChatById(id, chatScopeFromSession(req.session));
+
+		if (!chat) {
+			throw new NotFoundError("Chat não encontrado.");
+		}
+
+		res.status(200).send({
+			message: "Chat retrieved successfully!",
+			data: chat
+		});
 	}
 
 	private async getChatMessages(req: Request, res: Response) {
@@ -200,7 +298,7 @@ class ChatsController {
 		});
 	}
 
-	private async fetchChatMessagesPage(req: Request) {
+	private parseChatMessagesPageRequest(req: Request) {
 		const chatId = Number(req.params["id"]);
 		const limit = Math.min(Math.max(Math.trunc(Number(req.query["limit"])) || 50, 1), 100);
 		const beforeId = req.query["beforeId"] ? Number(req.query["beforeId"]) : null;
@@ -213,24 +311,53 @@ class ChatsController {
 			throw new BadRequestError("beforeId must be a positive integer!");
 		}
 
-		return chatsService.getChatMessagesPage(req.session, chatId, limit, beforeId);
+		return { chatId, limit, beforeId };
 	}
 
+	private async fetchChatMessagesPage(req: Request) {
+		const { chatId, limit, beforeId } = this.parseChatMessagesPageRequest(req);
+
+		return chatsService.getChatMessagesPage(messagesScopeFromSession(req.session), chatId, limit, beforeId);
+	}
+
+	/** Página de mensagens para o agente de IA: mesmo contrato da rota autenticada, escopo só por tenant. */
+	private async getInternalChatMessages(req: Request, res: Response) {
+		const instance = parseOptionalInstance(req.query["instance"]);
+
+		if (!instance) {
+			throw new BadRequestError("Instance is required!");
+		}
+
+		const { chatId, limit, beforeId } = this.parseChatMessagesPageRequest(req);
+		const data = await chatsService.getChatMessagesPage({ instance }, chatId, limit, beforeId);
+
+		res.status(200).send({
+			message: "Chat messages retrieved successfully!",
+			data
+		});
+	}
+
+	/**
+	 * Sem `instance`, busca em todos os tenants e devolve o histórico inteiro do contato
+	 * (ai-service antigo); `instance` restringe ao tenant e `messages=false` não carrega o histórico.
+	 */
 	private async getInternalChatById(req: Request, res: Response) {
-		return this.sendChatById(req, res);
-	}
+		const id = parsePositiveInt(req.params["id"]);
 
-	private async sendChatById(req: Request, res: Response) {
-		const { id } = req.params;
-
-		if (!id) {
+		if (id === null) {
 			throw new BadRequestError("Chat ID is required!");
 		}
 
-		const chat = await chatsService.getChatById(Number(id));
+		const instance = parseOptionalInstance(req.query["instance"]);
+		const withMessages = req.query["messages"] !== "false";
+		const chat = await chatsService.getChatById(
+			id,
+			instance ? { instance } : undefined,
+			withMessages ? {} : { withMessages: false }
+		);
 
 		if (!chat) {
-			throw new NotFoundError("Chat not found!");
+			throw new NotFoundError(instance ? "Chat não encontrado." : "Chat not found!");
 		}
 
 		res.status(200).send({
@@ -240,7 +367,10 @@ class ChatsController {
 	}
 
 	private async ensureInternalActiveChat(req: Request, res: Response) {
-		const { instance, contactId, agentId, systemMessage, sectorId, userId } = req.body as Record<string, unknown>;
+		const { instance, contactId, agentId, systemMessage, sectorId, userId } = (req.body ?? {}) as Record<
+			string,
+			unknown
+		>;
 
 		if (typeof instance !== "string" || !instance.trim()) {
 			throw new BadRequestError("Instance is required!");
@@ -250,14 +380,14 @@ class ChatsController {
 			throw new BadRequestError("Contact ID is required!");
 		}
 
-		if (!Number.isInteger(agentId) || Number(agentId) <= 0) {
-			throw new BadRequestError("Agent ID is required!");
-		}
+		// Opcional: “Iniciar chat” do Assistente não tem agente. A mensagem de erro não pode ser
+		// “Agent ID is required!”, que o ai-service novo interpreta como whatsapp-service antigo.
+		const parsedAgentId = parseAgentRouteOptionalPositiveInt(agentId, "agentId");
 
 		const data = await chatsService.ensureActiveChatForAgent({
 			instance: instance.trim(),
 			contactId: Number(contactId),
-			agentId: Number(agentId),
+			agentId: parsedAgentId,
 			...(typeof systemMessage === "string" ? { systemMessage } : {}),
 			sectorId: Number.isInteger(sectorId) ? Number(sectorId) : null,
 			userId: Number.isInteger(userId) ? Number(userId) : null
@@ -271,10 +401,11 @@ class ChatsController {
 
 	private async sendInternalAgentMessage(req: Request, res: Response) {
 		const chatId = Number(req.params["id"]);
-		const rawText = req.body.text;
+		const body = (req.body ?? {}) as Record<string, unknown>;
+		const rawText = body["text"];
 		const text = typeof rawText === "string" ? rawText : "";
-		const clientId = typeof req.body.clientId === "number" ? req.body.clientId : null;
-		const fileId = typeof req.body.fileId === "number" ? req.body.fileId : null;
+		const clientId = typeof body["clientId"] === "number" ? body["clientId"] : null;
+		const fileId = typeof body["fileId"] === "number" ? body["fileId"] : null;
 
 		if (!chatId || Number.isNaN(chatId)) {
 			throw new BadRequestError("Chat ID is required!");
@@ -284,15 +415,91 @@ class ChatsController {
 			throw new BadRequestError("Text or fileId is required!");
 		}
 
+		const agentId = parseAgentRouteOptionalPositiveInt(body["agentId"], "agentId");
+		const instance = parseOptionalInstance(body["instance"]);
+
 		const message = await chatsService.sendInternalAgentMessage(chatId, {
 			clientId,
 			text,
-			fileId
+			fileId,
+			agentId,
+			instance
 		});
 
 		res.status(201).send({
 			message: "Agent message sent successfully!",
 			data: message
+		});
+	}
+
+	private async transferChatByAgent(req: Request, res: Response) {
+		const chatId = requireAgentRouteChatId(req.params["id"]);
+		const body = (req.body ?? {}) as Record<string, unknown>;
+		const instance = requireAgentRouteInstance(body["instance"]);
+		const agentId = requireAgentRoutePositiveInt(body["agentId"], "agentId");
+		const userId = requireAgentRoutePositiveInt(body["userId"], "userId");
+		const agentName = parseAgentRouteOptionalText(body["agentName"], "agentName");
+		const reason = parseAgentRouteOptionalText(body["reason"], "reason");
+
+		const data = await chatsService.transferChatByAgent(chatId, { instance, agentId, agentName, userId, reason });
+
+		res.status(200).send({
+			message: "Atendimento transferido.",
+			data
+		});
+	}
+
+	private async finishChatByAgent(req: Request, res: Response) {
+		const chatId = requireAgentRouteChatId(req.params["id"]);
+		const body = (req.body ?? {}) as Record<string, unknown>;
+		const instance = requireAgentRouteInstance(body["instance"]);
+		const agentId = requireAgentRoutePositiveInt(body["agentId"], "agentId");
+		const agentName = parseAgentRouteOptionalText(body["agentName"], "agentName");
+		const reason = parseAgentRouteOptionalText(body["reason"], "reason");
+		const rawResultId = body["resultId"];
+
+		if (rawResultId !== undefined && rawResultId !== null && !Number.isSafeInteger(rawResultId)) {
+			throw new BadRequestError("O campo resultId deve ser um número inteiro.");
+		}
+
+		await chatsService.finishChatByAgent(chatId, {
+			instance,
+			agentId,
+			agentName,
+			resultId: typeof rawResultId === "number" ? rawResultId : null,
+			reason
+		});
+
+		res.status(200).send({
+			message: "Atendimento finalizado."
+		});
+	}
+
+	private async sendTemplateByAgent(req: Request, res: Response) {
+		const chatId = requireAgentRouteChatId(req.params["id"]);
+		const body = (req.body ?? {}) as Record<string, unknown>;
+		const instance = requireAgentRouteInstance(body["instance"]);
+		const agentId = requireAgentRoutePositiveInt(body["agentId"], "agentId");
+		const clientId = parseAgentRouteOptionalPositiveInt(body["clientId"], "clientId");
+		const templateName = parseAgentRouteOptionalText(body["templateName"], "templateName");
+		const templateLanguage = parseAgentRouteOptionalText(body["templateLanguage"], "templateLanguage");
+
+		if (!templateName) {
+			throw new BadRequestError("Informe o nome do template (templateName).");
+		}
+
+		await chatsService.sendTemplateByAgent(chatId, {
+			instance,
+			agentId,
+			clientId,
+			templateName,
+			templateLanguage,
+			templateVariables: parseAgentRouteTemplateVariables(body["templateVariables"]),
+			components: parseAgentRouteComponents(body["components"])
+		});
+
+		res.status(201).send({
+			message: "Template enviado."
 		});
 	}
 

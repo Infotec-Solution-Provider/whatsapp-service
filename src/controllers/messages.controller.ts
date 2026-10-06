@@ -15,6 +15,7 @@ import messagePresentationService from "../services/message-presentation.service
 import messageSendTrace, { markMessageSendStage } from "../middlewares/message-send-trace.middleware";
 import ProcessingLogger from "../utils/processing-logger";
 import { MessageReactionError, positiveReactionId } from "../utils/message-reaction";
+import { parseOptionalInstance } from "../utils/chat-scope";
 
 class MessagesController {
 	constructor(public readonly router: Router) {
@@ -38,7 +39,7 @@ class MessagesController {
 			this.getSendAttempt
 		);
 		this.router.post("/api/internal/whatsapp/chats/:chatId/agent-message", onlyLocal, this.createAgentMessage);
-		this.router.post("/api/internal/whatsapp/chats/:chatId/agent-send-message", onlyLocal, this.sendAgentMessage);
+		// POST /api/internal/whatsapp/chats/:id/agent-send-message fica em chats.controller.ts.
 		this.router.post(
 			"/api/internal/whatsapp/chats/:chatId/agent-template-message",
 			onlyLocal,
@@ -276,7 +277,7 @@ class MessagesController {
 
 	private async createAgentMessage(req: Request, res: Response) {
 		const chatId = Number(req.params["chatId"]);
-		const { text, agentId } = req.body as Record<string, unknown>;
+		const { text, agentId, instance } = (req.body ?? {}) as Record<string, unknown>;
 
 		if (!Number.isInteger(chatId) || chatId <= 0) {
 			throw new BadRequestError("Chat ID is required!");
@@ -290,7 +291,12 @@ class MessagesController {
 			throw new BadRequestError("Agent ID is required!");
 		}
 
-		const message = await whatsappService.createSimulatedAgentMessage(chatId, text.trim(), Number(agentId));
+		const message = await whatsappService.createSimulatedAgentMessage(
+			chatId,
+			text.trim(),
+			Number(agentId),
+			parseOptionalInstance(instance)
+		);
 
 		res.status(201).send({
 			message: "Message created successfully!",
@@ -298,38 +304,9 @@ class MessagesController {
 		});
 	}
 
-	private async sendAgentMessage(req: Request, res: Response) {
-		const chatId = Number(req.params["chatId"]);
-		const { text, agentId, clientId } = req.body as Record<string, unknown>;
-
-		if (!Number.isInteger(chatId) || chatId <= 0) {
-			throw new BadRequestError("Chat ID is required!");
-		}
-
-		if (typeof text !== "string" || !text.trim()) {
-			throw new BadRequestError("Text is required!");
-		}
-
-		if (!Number.isInteger(agentId) || Number(agentId) <= 0) {
-			throw new BadRequestError("Agent ID is required!");
-		}
-
-		const message = await whatsappService.sendAgentMessage(
-			chatId,
-			text.trim(),
-			Number(agentId),
-			typeof clientId === "number" && Number.isInteger(clientId) && clientId > 0 ? clientId : null
-		);
-
-		res.status(201).send({
-			message: "Message sent successfully!",
-			data: message
-		});
-	}
-
 	private async createAgentTemplateMessage(req: Request, res: Response) {
 		const chatId = Number(req.params["chatId"]);
-		const { agentId, templateName, templateLanguage } = req.body as Record<string, unknown>;
+		const { agentId, templateName, templateLanguage, instance } = (req.body ?? {}) as Record<string, unknown>;
 
 		if (!Number.isInteger(chatId) || chatId <= 0) {
 			throw new BadRequestError("Chat ID is required!");
@@ -347,7 +324,8 @@ class MessagesController {
 			chatId,
 			Number(agentId),
 			templateName.trim(),
-			typeof templateLanguage === "string" && templateLanguage.trim() ? templateLanguage.trim() : null
+			typeof templateLanguage === "string" && templateLanguage.trim() ? templateLanguage.trim() : null,
+			parseOptionalInstance(instance)
 		);
 
 		res.status(201).send({

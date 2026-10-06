@@ -5,7 +5,8 @@ type TransferSource =
 	| "manual"
 	| "auto-sector"
 	| "auto-operator"
-	| "bot-return-previous-operator";
+	| "bot-return-previous-operator"
+	| "ai-agent";
 
 interface ChatTransferSnapshot {
 	id: number;

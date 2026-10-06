@@ -1,7 +1,8 @@
 import { Customer, SessionData, SocketEventType, SocketServerMonitorRoom, SocketServerUserRoom } from "../sdk-local";
-import { Logger } from "@in.pulse-crm/utils";
-import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
+import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { Prisma, WppChat, WppContact, WppMessage, WppSector } from "@prisma/client";
 import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
+import { TemplateMessage } from "../adapters/template.adapter";
 import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
 import { CustomerSchedule } from "../message-flow/base/base.step";
 import ProcessingLogger from "../utils/processing-logger";
@@ -15,6 +16,15 @@ import whatsappService, { SendTemplateData } from "./whatsapp.service";
 import parametersService from "./parameters.service";
 import contactsService from "./contacts.service";
 import { withPublicMessageDirection } from "../utils/public-message-direction";
+import {
+	ChatScope,
+	buildAgentFinishMessage,
+	buildAgentTransferHistoryReason,
+	buildAgentTransferMessage,
+	buildSyntheticSession,
+	buildSystemFinishMessage
+} from "../utils/chat-scope";
+import { TemplateVariables } from "../types/whatsapp-api.types";
 import messagePresentationService from "./message-presentation.service";
 import chatUserPreferencesService from "./chat-user-preferences.service";
 import publicReportFieldsService from "./public-report-fields.service";
@@ -76,10 +86,61 @@ interface SystemStartNewChatProps {
 interface EnsureActiveChatForAgentProps {
 	instance: string;
 	contactId: number;
-	agentId: number;
+	/** Opcional: “Iniciar chat” do Assistente cria o chat sem agente (agent_id nulo). */
+	agentId?: number | null;
 	systemMessage?: string;
 	sectorId?: number | null;
 	userId?: number | null;
+}
+
+interface SendInternalAgentMessageData {
+	clientId?: number | null;
+	text?: string | null;
+	fileId?: number | null;
+	quotedId?: number | null;
+	agentId?: number | null;
+	/** Tenant do chat; sem ele, busca sem escopo (ai-service antigo). */
+	instance?: string | null;
+}
+
+export interface AgentTransferInput {
+	instance: string;
+	agentId: number;
+	agentName?: string | null;
+	userId: number;
+	reason?: string | null;
+}
+
+export interface AgentFinishInput {
+	instance: string;
+	agentId: number;
+	agentName?: string | null;
+	resultId?: number | null;
+	reason?: string | null;
+}
+
+export interface AgentSendTemplateInput {
+	instance: string;
+	agentId: number;
+	clientId?: number | null;
+	templateName: string;
+	templateLanguage?: string | null;
+	templateVariables: TemplateVariables;
+	components: string[];
+}
+
+const FETCH_OPERATOR_NAME_QUERY = "SELECT NOME FROM operadores WHERE CODIGO = ?";
+
+/**
+ * Repassa o erro HTTP sem a causa original: a causa pode trazer a configuração da
+ * chamada ao provedor (com credenciais) e iria inteira no corpo da resposta.
+ */
+function withoutErrorCause(error: unknown) {
+	if (error instanceof BadRequestError) {
+		return new BadRequestError(error.message);
+	}
+
+	return error;
 }
 
 export const FETCH_CUSTOMERS_QUERY = "SELECT * FROM clientes WHERE CODIGO IN (?)";
@@ -291,12 +352,17 @@ class ChatsService {
 		};
 	}
 
-	public async getChatMessagesPage(session: SessionData, chatId: number, limit: number, beforeId: number | null) {
+	/**
+	 * Página de mensagens de um chat do tenant do escopo (e do setor, quando o escopo
+	 * trouxer). A sessão usa messagesScopeFromSession; a rota interna, só o tenant.
+	 */
+	public async getChatMessagesPage(scope: ChatScope, chatId: number, limit: number, beforeId: number | null) {
+		const { instance } = scope;
 		const chat = await prismaService.wppChat.findFirst({
 			where: {
 				id: chatId,
-				instance: session.instance,
-				...(session.instance === "nunes" && session.sectorId !== 3 ? { sectorId: session.sectorId } : {})
+				instance,
+				...(scope.sectorId !== null && scope.sectorId !== undefined ? { sectorId: scope.sectorId } : {})
 			},
 			select: { id: true }
 		});
@@ -305,7 +371,7 @@ class ChatsService {
 
 		const page = await prismaService.wppMessage.findMany({
 			where: {
-				instance: session.instance,
+				instance,
 				chatId,
 				...(beforeId ? { id: { lt: beforeId } } : {})
 			},
@@ -314,7 +380,7 @@ class ChatsService {
 		});
 		const hasMore = page.length > limit;
 		const messages = page.slice(0, limit).reverse();
-		if (session.instance === "vollo") {
+		if (instance === "vollo") {
 			for (const message of messages) {
 				try {
 					message.body = decodeURIComponent(message.body);
@@ -328,10 +394,10 @@ class ChatsService {
 			.filter((id): id is number => typeof id === "number");
 		const quotedMessages = quotedIds.length
 			? await prismaService.wppMessage.findMany({
-					where: { id: { in: quotedIds }, instance: session.instance }
+					where: { id: { in: quotedIds }, instance }
 				})
 			: [];
-		if (session.instance === "vollo") {
+		if (instance === "vollo") {
 			for (const message of quotedMessages) {
 				try {
 					message.body = decodeURIComponent(message.body);
@@ -342,10 +408,8 @@ class ChatsService {
 		}
 
 		return {
-			messages: (await messagePresentationService.hydrate(session.instance, messages)).map(
-				withPublicMessageDirection
-			),
-			quotedMessages: (await messagePresentationService.hydrate(session.instance, quotedMessages)).map(
+			messages: (await messagePresentationService.hydrate(instance, messages)).map(withPublicMessageDirection),
+			quotedMessages: (await messagePresentationService.hydrate(instance, quotedMessages)).map(
 				withPublicMessageDirection
 			),
 			nextCursor: hasMore && messages.length ? messages[0]!.id : null
@@ -584,9 +648,18 @@ class ChatsService {
 		return publicReportFieldsService.withConversationReport(instance, presented);
 	}
 
-	public async getChatById(id: number) {
-		const chat = await prismaService.wppChat.findUnique({
-			where: { id },
+	/**
+	 * Chat com contato, cliente do CRM e histórico do contato. Sem escopo, busca em
+	 * todos os tenants (rota interna chamada pelo ai-service antigo); com
+	 * `withMessages: false`, não carrega o histórico (`messages: []`).
+	 */
+	public async getChatById(id: number, scope?: ChatScope, opts: { withMessages?: boolean } = {}) {
+		const chat = await prismaService.wppChat.findFirst({
+			where: {
+				id,
+				...(scope ? { instance: scope.instance } : {}),
+				...(scope && scope.sectorId !== null && scope.sectorId !== undefined ? { sectorId: scope.sectorId } : {})
+			},
 			include: {
 				contact: true
 			}
@@ -596,14 +669,15 @@ class ChatsService {
 			return null;
 		}
 
-		const rawMessages = chat.contactId
-			? await prismaService.wppMessage.findMany({
-					where: { contactId: chat.contactId },
-					orderBy: { timestamp: "asc" }
-				})
-			: [];
+		const rawMessages =
+			opts.withMessages !== false && chat.contactId
+				? await prismaService.wppMessage.findMany({
+						where: { contactId: chat.contactId },
+						orderBy: { timestamp: "asc" }
+					})
+				: [];
 
-		const messages = await messagePresentationService.hydrate(chat.instance, rawMessages);
+		const messages = rawMessages.length ? await messagePresentationService.hydrate(chat.instance, rawMessages) : [];
 		if (chat.contact?.customerId) {
 			try {
 				const customerRes = await instancesService.executeQuery<Customer[]>(
@@ -623,17 +697,10 @@ class ChatsService {
 		return { ...chat, messages };
 	}
 
-	public async sendInternalAgentMessage(
-		chatId: number,
-		data: {
-			clientId?: number | null;
-			text?: string | null;
-			fileId?: number | null;
-			quotedId?: number | null;
-		}
-	) {
-		const chat = await prismaService.wppChat.findUnique({
-			where: { id: chatId },
+	/** Resposta do agente de IA (texto ou arquivo), gravada com agentId para não contar como resposta humana. */
+	public async sendInternalAgentMessage(chatId: number, data: SendInternalAgentMessageData) {
+		const chat = await prismaService.wppChat.findFirst({
+			where: { id: chatId, ...(data.instance ? { instance: data.instance } : {}) },
 			include: {
 				contact: true,
 				sector: true
@@ -641,29 +708,73 @@ class ChatsService {
 		});
 
 		if (!chat) {
-			throw new BadRequestError("Chat não encontrado.");
+			throw new NotFoundError("Chat não encontrado.");
 		}
 
-		if (!chat.contact?.phone) {
-			throw new BadRequestError("Chat não possui telefone de contato para envio.");
-		}
+		const contactAddress = chat.contact ? contactsService.resolveContactAddress(chat.contact) : null;
 
-		const resolvedClientId = data.clientId ?? chat.sector?.defaultClientId ?? null;
-
-		if (!resolvedClientId) {
-			throw new BadRequestError("Não foi possível determinar o client do WhatsApp para este chat.");
+		if (!contactAddress) {
+			throw new BadRequestError("Contato sem identificador WhatsApp para envio.");
 		}
 
 		if ((!data.text || !data.text.trim()) && !data.fileId) {
 			throw new BadRequestError("É necessário informar texto ou fileId para enviar a mensagem do agente.");
 		}
 
-		return whatsappService.sendBotMessage(chat.contact.phone, resolvedClientId, {
-			chat,
-			text: data.text ?? "",
-			quotedId: data.quotedId ?? null,
-			fileId: data.fileId ?? null
-		});
+		const clientId = await this.resolveAgentClientId(chat, data.clientId);
+
+		try {
+			return await whatsappService.sendBotMessage(contactAddress, clientId, {
+				chat,
+				text: data.text ?? "",
+				quotedId: data.quotedId ?? null,
+				fileId: data.fileId ?? null,
+				agentId: data.agentId ?? null
+			});
+		} catch (error) {
+			throw withoutErrorCause(error);
+		}
+	}
+
+	/**
+	 * Canal das ações do agente: o informado; senão o último usado no chat; senão o
+	 * padrão do setor. Recusa canal de outro tenant.
+	 */
+	private async resolveAgentClientId(chat: WppChat & { sector: WppSector | null }, providedClientId?: number | null) {
+		let clientId =
+			typeof providedClientId === "number" && Number.isInteger(providedClientId) && providedClientId > 0
+				? providedClientId
+				: null;
+
+		if (clientId === null) {
+			const latestChatMessage = await prismaService.wppMessage.findFirst({
+				where: {
+					chatId: chat.id,
+					clientId: { not: null }
+				},
+				orderBy: [{ sentAt: "desc" }, { id: "desc" }],
+				select: { clientId: true }
+			});
+
+			clientId = latestChatMessage?.clientId ?? null;
+		}
+
+		if (clientId === null) {
+			clientId = chat.sector?.defaultClientId ?? null;
+		}
+
+		if (clientId === null) {
+			Logger.error(`[agent-send] No clientId available to send agent message for chat ${chat.id}`);
+			throw new BadRequestError("Não foi possível determinar o client do WhatsApp para este chat.");
+		}
+
+		const client = whatsappService.getClient(clientId);
+
+		if (client && client.instance !== chat.instance) {
+			throw new BadRequestError("O canal de WhatsApp informado não pertence a esta empresa.");
+		}
+
+		return clientId;
 	}
 
 	public async transferAttendance(token: string, session: SessionData, id: number, userId: number) {
@@ -672,11 +783,11 @@ class ChatsService {
 		const usersService = getUsersClient();
 		usersService.setAuth(token);
 
-		const chats = await prismaService.wppChat.findUnique({
-			where: { id }
+		const chats = await prismaService.wppChat.findFirst({
+			where: { id, instance }
 		});
 		if (!chats) {
-			throw new Error("Chat não encontrado!");
+			throw new NotFoundError("Chat não encontrado.");
 		}
 		if (!chats.userId) {
 			throw new Error("Chat não possui userId!");
@@ -737,7 +848,8 @@ class ChatsService {
 		id: number,
 		resultId: number,
 		scheduleDate: Date | null,
-		reason?: string
+		reason?: string,
+		options: { systemMessage?: string } = {}
 	) {
 		const logger = new ProcessingLogger(
 			session.instance,
@@ -748,6 +860,16 @@ class ChatsService {
 
 		try {
 			logger.log(`Iniciando finalização do chat. Chat ID: ${id}, Resultado ID: ${resultId}`);
+
+			const scopedChat = await prismaService.wppChat.findFirst({
+				where: { id, instance: session.instance },
+				select: { id: true }
+			});
+
+			if (!scopedChat) {
+				logger.log(`Chat não encontrado na instância ${session.instance}. Chat ID: ${id}`);
+				throw new NotFoundError("Chat não encontrado.");
+			}
 
 			logger.log(`Buscando resultado no banco de dados da instância com resultId: ${resultId}`);
 			const results = await instancesService.executeQuery<InpulseResult[]>(session.instance, FETCH_RESULT_QUERY, [
@@ -768,18 +890,19 @@ class ChatsService {
 			usersService.setAuth(token || "");
 
 			logger.log(`Buscando usuário que finalizou o atendimento. UserId: ${userId}`);
-			const user = resultId !== -50 && (await usersService.getUserById(userId));
+			// Sessões sintéticas (sistema e agente virtual) usam userId <= 0: não há usuário a buscar.
+			const user = resultId !== -50 && userId > 0 ? await usersService.getUserById(userId) : null;
 			if (user) {
 				logger.log(`Usuário encontrado: ${user.NOME} (ID: ${user.CODIGO})`);
 			} else {
-				logger.log(`Chat finalizado pelo sistema (resultId: -50 ou usuário não encontrado)`);
+				logger.log(`Chat finalizado pelo sistema (resultId: -50, sessão sem usuário ou usuário não encontrado)`);
 			}
 
 			if (shouldTriggerSurvey) {
 				logger.log("Resultado configurado para pesquisa de satisfação. Não finalizando atendimento.");
 
-				const chat = await prismaService.wppChat.findUnique({
-					where: { id },
+				const chat = await prismaService.wppChat.findFirst({
+					where: { id, instance },
 					include: {
 						contact: true
 					}
@@ -824,6 +947,7 @@ class ChatsService {
 			const updateResult = await prismaService.wppChat.updateMany({
 				where: {
 					id,
+					instance,
 					isFinished: false
 				},
 				data: {
@@ -862,15 +986,16 @@ class ChatsService {
 				`Chat atualizado com sucesso. Chat ID: ${chat.id}, Status: finalizado, Resultado ID: ${chat.resultId}`
 			);
 
-			let finishMsg: string = "";
+			let finishMsg: string;
 
-			if (!user && resultId === -50) {
-				finishMsg = `Atendimento finalizado pelo sistema.` + (reason ? `\nMotivo: ${reason}` : "");
-				logger.log(`Mensagem do sistema: "${finishMsg}"`);
-			}
 			if (user) {
 				finishMsg = `Atendimento finalizado por ${user.NOME}.\nResultado: ${results[0]?.NOME || "N/D"} `;
 				logger.log(`Mensagem do usuário: "${finishMsg}"`);
+			} else {
+				finishMsg =
+					options.systemMessage ??
+					buildSystemFinishMessage(resultId !== -50 ? (result?.NOME ?? null) : null, reason);
+				logger.log(`Mensagem do sistema: "${finishMsg}"`);
 			}
 
 			logger.log(`Adicionando mensagem de sistema ao chat`);
@@ -1446,11 +1571,222 @@ class ChatsService {
 			contact,
 			sectorId: inferredSectorId,
 			userId: userId ?? null,
-			agentId,
+			agentId: agentId ?? null,
 			...(systemMessage !== undefined ? { systemMessage } : {})
 		});
 
 		return { chat: newChat, existed: false };
+	}
+
+	/**
+	 * Transferência pedida pelo agente de IA, sem token de usuário: atribui o operador
+	 * (mesmo em chat sem dono), tira o agente e o robô do chat e avisa as telas.
+	 */
+	public async transferChatByAgent(chatId: number, input: AgentTransferInput) {
+		const { instance, agentId, userId } = input;
+		const logger = new ProcessingLogger(instance, "agent-transfer", `chat_${chatId}_agent_${agentId}_${Date.now()}`, {
+			chatId,
+			agentId,
+			userId
+		});
+
+		try {
+			const previousChat = await prismaService.wppChat.findFirst({
+				where: { id: chatId, instance, isFinished: false }
+			});
+
+			if (!previousChat) {
+				throw new NotFoundError("Chat não encontrado ou já finalizado.");
+			}
+
+			const userName = await this.findOperatorName(instance, userId, logger);
+
+			const updateResult = await prismaService.wppChat.updateMany({
+				where: { id: chatId, instance, isFinished: false },
+				data: { userId, agentId: null, botId: null }
+			});
+
+			if (updateResult.count === 0) {
+				throw new NotFoundError("Chat não encontrado ou já finalizado.");
+			}
+
+			const chat = await prismaService.wppChat.findUniqueOrThrow({ where: { id: chatId } });
+			logger.log(`Chat ${chat.id} atribuído ao operador ${userId} (antes: ${previousChat.userId ?? "sem dono"}).`);
+
+			// A transferência já foi gravada: falhas daqui em diante só são registradas,
+			// para o ai-service não tratar como transferência que não aconteceu.
+			await this.runAfterAgentAction(logger, "sincronizar o chat no CRM", () => this.syncChatToLocal(chat));
+			await transferHistoryService.recordTransfer({
+				previousChat: {
+					id: previousChat.id,
+					instance: previousChat.instance,
+					userId: previousChat.userId,
+					sectorId: previousChat.sectorId
+				},
+				nextChat: {
+					id: chat.id,
+					instance: chat.instance,
+					userId: chat.userId,
+					sectorId: chat.sectorId
+				},
+				source: "ai-agent",
+				initiatedByUserId: null,
+				reason: buildAgentTransferHistoryReason(agentId, input.reason)
+			});
+			await this.runAfterAgentAction(logger, "gravar a mensagem de sistema", () =>
+				messagesDistributionService.addSystemMessage(
+					chat,
+					buildAgentTransferMessage(input.agentName, agentId, userName, userId)
+				)
+			);
+			await this.runAfterAgentAction(logger, "avisar as telas", async () => {
+				await socketService.emit(SocketEventType.WppChatTransfer, `${instance}:chat:${chat.id}`, {
+					chatId: chat.id
+				});
+
+				if (chat.sectorId !== null) {
+					const monitorRoom: SocketServerMonitorRoom = `${instance}:${chat.sectorId}:monitor`;
+					await socketService.emit(SocketEventType.WppChatStarted, monitorRoom, { chatId: chat.id });
+				}
+
+				const userRoom: SocketServerUserRoom = `${instance}:user:${userId}`;
+				await socketService.emit(SocketEventType.WppChatStarted, userRoom, { chatId: chat.id });
+			});
+
+			const data = { chatId: chat.id, userId, userName };
+			logger.success(data);
+
+			return data;
+		} catch (err) {
+			logger.failed(err);
+			throw err;
+		}
+	}
+
+	/** Encerramento pedido pelo agente de IA, sem token de usuário (resultado padrão −50). */
+	public async finishChatByAgent(chatId: number, input: AgentFinishInput) {
+		const { instance, agentId } = input;
+		const chat = await prismaService.wppChat.findFirst({
+			where: { id: chatId, instance },
+			select: { id: true, sectorId: true }
+		});
+
+		if (!chat) {
+			throw new NotFoundError("Chat não encontrado.");
+		}
+
+		await this.finishChatById(
+			null,
+			buildSyntheticSession(instance, chat.sectorId),
+			chat.id,
+			input.resultId ?? -50,
+			null,
+			input.reason ?? undefined,
+			{ systemMessage: buildAgentFinishMessage(input.agentName, agentId, input.reason) }
+		);
+	}
+
+	/** Template disparado pelo agente de IA; a mensagem fica com agentId (não conta como resposta humana). */
+	public async sendTemplateByAgent(chatId: number, input: AgentSendTemplateInput) {
+		const { instance, agentId } = input;
+		const chat = await prismaService.wppChat.findFirst({
+			where: { id: chatId, instance, isFinished: false },
+			include: { contact: true, sector: true }
+		});
+
+		if (!chat) {
+			throw new NotFoundError("Chat não encontrado ou já finalizado.");
+		}
+
+		const contactAddress = chat.contact ? contactsService.resolveContactAddress(chat.contact) : null;
+
+		if (!chat.contact || !contactAddress) {
+			throw new BadRequestError("Contato sem identificador WhatsApp para envio.");
+		}
+
+		const clientId = await this.resolveAgentClientId(chat, input.clientId);
+
+		if (!whatsappService.getClient(clientId)) {
+			throw new BadRequestError("Client do WhatsApp não encontrado.");
+		}
+
+		if (!whatsappService.clientSupportsTemplates(clientId)) {
+			throw new BadRequestError("Este canal não oferece templates.");
+		}
+
+		let templates: TemplateMessage[];
+
+		try {
+			templates = await whatsappService.getTemplates(clientId);
+		} catch (error) {
+			Logger.error(
+				`[agent-send-template] Falha ao listar templates | instance=${instance} | clientId=${clientId}: ${sanitizeErrorMessage(error)}`
+			);
+			throw new BadRequestError("Não foi possível consultar os templates deste canal agora. Tente novamente em instantes.");
+		}
+
+		const templateName = input.templateName.trim();
+		const templateLanguage = input.templateLanguage?.trim() || null;
+		const template = (Array.isArray(templates) ? templates : []).find(
+			(item) => item.name === templateName && (!templateLanguage || item.language === templateLanguage)
+		);
+
+		if (!template) {
+			throw new NotFoundError(
+				`Template “${templateName}”${templateLanguage ? ` (${templateLanguage})` : ""} não encontrado neste canal.`
+			);
+		}
+
+		try {
+			await whatsappService.sendTemplate(
+				buildSyntheticSession(instance, chat.sectorId),
+				clientId,
+				contactAddress,
+				{ template, templateVariables: input.templateVariables, components: input.components },
+				chat.id,
+				chat.contact.id,
+				{ agentId }
+			);
+		} catch (error) {
+			throw withoutErrorCause(error);
+		}
+	}
+
+	/** Nome do operador no CRM do tenant; falha de consulta não impede a transferência (fica o código). */
+	private async findOperatorName(instance: string, userId: number, logger: ProcessingLogger) {
+		let rows: Array<{ NOME?: unknown }>;
+
+		try {
+			rows = await instancesService.executeQuery<Array<{ NOME?: unknown }>>(instance, FETCH_OPERATOR_NAME_QUERY, [
+				userId
+			]);
+		} catch (error) {
+			logger.log(`Nome do operador ${userId} indisponível (CRM): ${sanitizeErrorMessage(error)}`);
+			return null;
+		}
+
+		if (!Array.isArray(rows)) {
+			logger.log(`Resposta inesperada do CRM ao buscar o operador ${userId}; seguindo com o código.`);
+			return null;
+		}
+
+		// Consulta respondida sem linha: o operador não existe neste tenant e o chat ficaria sem dono visível.
+		if (rows.length === 0) {
+			throw new BadRequestError(`Operador #${userId} não encontrado nesta empresa.`);
+		}
+
+		const name = rows[0]?.NOME;
+
+		return typeof name === "string" && name.trim() ? name.trim() : null;
+	}
+
+	private async runAfterAgentAction(logger: ProcessingLogger, step: string, action: () => Promise<unknown>) {
+		try {
+			await action();
+		} catch (error) {
+			logger.log(`Falha ao ${step} depois da ação do agente: ${sanitizeErrorMessage(error)}`);
+			Logger.error(`[agent-action] Falha ao ${step}: ${sanitizeErrorMessage(error)}`);
+		}
 	}
 
 	private async checkIfChatExistsOrThrow(instance: string, contactId: number) {

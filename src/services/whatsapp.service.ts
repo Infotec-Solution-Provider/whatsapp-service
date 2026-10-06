@@ -1,7 +1,7 @@
 import { SessionData } from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { InternalMessage, WppChat, WppClientType, WppMessage, WppSector } from "@prisma/client";
-import { BadRequestError, InternalServerError } from "@rgranatodutra/http-errors";
+import { BadRequestError, InternalServerError, NotFoundError } from "@rgranatodutra/http-errors";
 import "dotenv/config";
 import { TemplateMessage } from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
@@ -421,18 +421,23 @@ class WhatsappService {
 		}
 	}
 
-	public async createSimulatedAgentMessage(chatId: number, text: string, agentId: number) {
+	public async createSimulatedAgentMessage(chatId: number, text: string, agentId: number, instance?: string | null) {
 		const process = new ProcessingLogger("internal", "simulate-agent-message", `${chatId}-${Date.now()}`, {
 			chatId,
 			agentId,
+			instance: instance ?? null,
 		});
 
-		const chat = await prismaService.wppChat.findUnique({
-			where: { id: chatId },
+		const chat = await prismaService.wppChat.findFirst({
+			where: { id: chatId, ...(instance ? { instance } : {}) },
 			include: { contact: true },
 		});
 
-		if (!chat || !chat.contact) {
+		if (!chat) {
+			throw new NotFoundError("Chat não encontrado.");
+		}
+
+		if (!chat.contact) {
 			throw new BadRequestError("Chat ou contato não encontrado.");
 		}
 
@@ -463,80 +468,34 @@ class WhatsappService {
 		return message;
 	}
 
-	public async sendAgentMessage(chatId: number, text: string, agentId: number, providedClientId: number | null = null) {
-		Logger.info(`[agent-send] Starting agent message send for chat ${chatId}`);
-		const chat = await prismaService.wppChat.findUnique({
-			where: { id: chatId },
-			include: {
-				contact: true,
-				sector: true,
-			},
-		});
-
-		if (!chat || !chat.contact) {
-			throw new BadRequestError("Chat ou contato não encontrado.");
-		}
-
-		const contactAddress = contactsService.resolveContactAddress(chat.contact);
-		if (!contactAddress) {
-			throw new BadRequestError("Contato sem identificador WhatsApp para envio.");
-		}
-
-		let resolvedClientId =
-			typeof providedClientId === "number" && Number.isInteger(providedClientId) && providedClientId > 0
-				? providedClientId
-				: null;
-
-		if (resolvedClientId === null) {
-			const latestChatMessage = await prismaService.wppMessage.findFirst({
-				where: {
-					chatId,
-					clientId: { not: null },
-				},
-				orderBy: [{ sentAt: "desc" }, { id: "desc" }],
-			});
-
-			resolvedClientId = latestChatMessage?.clientId ?? null;
-		}
-
-		if (resolvedClientId === null) {
-			resolvedClientId = chat.sector?.defaultClientId ?? null;
-		}
-
-		if (resolvedClientId === null) {
-			Logger.error(`[agent-send] No clientId available to send agent message for chat ${chatId}`);
-			throw new BadRequestError("Client do WhatsApp não encontrado para envio do agente.");
-		}
-
-		return this.sendBotMessage(contactAddress, resolvedClientId, {
-			chat,
-			text,
-			agentId,
-		});
-	}
-
 	public async createSimulatedAgentTemplateMessage(
 		chatId: number,
 		agentId: number,
 		templateName: string,
 		templateLanguage: string | null,
+		instance?: string | null,
 	) {
 		const process = new ProcessingLogger("internal", "simulate-agent-template-message", `${chatId}-${Date.now()}`, {
 			chatId,
 			agentId,
 			templateName,
 			templateLanguage,
+			instance: instance ?? null,
 		});
 
-		const chat = await prismaService.wppChat.findUnique({
-			where: { id: chatId },
+		const chat = await prismaService.wppChat.findFirst({
+			where: { id: chatId, ...(instance ? { instance } : {}) },
 			include: {
 				contact: true,
 				sector: true,
 			},
 		});
 
-		if (!chat || !chat.contact) {
+		if (!chat) {
+			throw new NotFoundError("Chat não encontrado.");
+		}
+
+		if (!chat.contact) {
 			throw new BadRequestError("Chat ou contato não encontrado.");
 		}
 
@@ -682,6 +641,9 @@ class WhatsappService {
 				...pendingMsg,
 				...sentMsg,
 				status: "SENT",
+				// O from passa a ser o do provedor (me:<telefone>); a resposta da IA continua
+				// identificada pelo agentId da mensagem pendente, mesmo que um client devolva outro valor.
+				agentId: pendingMsg.agentId ?? null,
 				isForwarded:
 					typeof sentMsg.isForwarded === "boolean"
 						? sentMsg.isForwarded
@@ -818,7 +780,8 @@ class WhatsappService {
 		to: string,
 		data: SendTemplateData,
 		chatId: number,
-		contactId: number
+		contactId: number,
+		options: { agentId?: number | null } = {}
 	) {
 		const process = new ProcessingLogger(session.instance, "send-template", `${to}-${Date.now()}`, data);
 		let stage = "normalize-template";
@@ -882,6 +845,11 @@ class WhatsappService {
 				gupshupId: message.gupshupId,
 			});
 
+			if (typeof options.agentId === "number" && options.agentId > 0) {
+				// Template disparado pelo agente de IA: o from do provedor é mantido; o agentId identifica a origem.
+				message.agentId = options.agentId;
+			}
+
 			stage = "persist-message";
 			const savedMsg = await messagesService.insertMessage(message);
 			process.log("Mensagem salva no banco de dados.", savedMsg);
@@ -906,6 +874,13 @@ class WhatsappService {
 			process.failed(originalError);
 			throw new BadRequestError("Erro ao enviar mensagem de template: " + sanitizeErrorMessage(error), error);
 		}
+	}
+
+	/** Só os canais oficiais (WABA e Gupshup) têm templates; WWEBJS e REMOTE não. */
+	public clientSupportsTemplates(clientId: number) {
+		const client = this.getClient(clientId);
+
+		return client instanceof WABAWhatsappClient || client instanceof GupshupWhatsappClient;
 	}
 
 	public async getTemplates(clientId: number) {

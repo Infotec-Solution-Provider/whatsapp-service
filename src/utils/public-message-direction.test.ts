@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { getPublicMessageDirection } from "./public-message-direction";
+import { getPublicMessageDirection, withPublicMessageDirection } from "./public-message-direction";
 import { PublicBiRateLimiter } from "../middlewares/public-bi-rate-limit.middleware";
 
 assert.deepEqual(getPublicMessageDirection({ from: "5511999999999", userId: null }), {
@@ -15,6 +15,35 @@ assert.deepEqual(getPublicMessageDirection({ from: "me:5511888888888", userId: n
 	senderType: "WHATSAPP_ACCOUNT"
 });
 assert.deepEqual(getPublicMessageDirection({ from: "bot:ai-agent:7", userId: null }), {
+	direction: "OUTBOUND",
+	senderType: "BOT"
+});
+// Resposta do agente de IA: depois do envio o from vira me:<telefone>, mas agentId identifica o robô.
+assert.deepEqual(getPublicMessageDirection({ from: "me:5511888888888", userId: null, agentId: 7 }), {
+	direction: "OUTBOUND",
+	senderType: "BOT"
+});
+assert.deepEqual(getPublicMessageDirection({ from: "bot:ai-agent:7", userId: null, agentId: 7 }), {
+	direction: "OUTBOUND",
+	senderType: "BOT"
+});
+assert.deepEqual(getPublicMessageDirection({ from: "me:5511888888888", userId: 10, agentId: 7 }), {
+	direction: "OUTBOUND",
+	senderType: "BOT"
+});
+assert.deepEqual(getPublicMessageDirection({ from: "me:5511888888888", userId: null, agentId: null }), {
+	direction: "OUTBOUND",
+	senderType: "WHATSAPP_ACCOUNT"
+});
+assert.deepEqual(getPublicMessageDirection({ from: "5511999999999", userId: null, agentId: null }), {
+	direction: "INBOUND",
+	senderType: "CONTACT"
+});
+assert.deepEqual(withPublicMessageDirection({ id: 1, from: "me:5511888888888", userId: null, agentId: 3 }), {
+	id: 1,
+	from: "me:5511888888888",
+	userId: null,
+	agentId: 3,
 	direction: "OUTBOUND",
 	senderType: "BOT"
 });

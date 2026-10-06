@@ -11,12 +11,18 @@ export type PublicMessageSenderType =
 interface DirectionSource {
 	from: string;
 	userId?: number | null;
+	/** Preenchido nas respostas do agente de IA, que depois do envio ficam com from = me:<telefone>. */
+	agentId?: number | null;
 }
 
 export function getPublicMessageDirection(message: DirectionSource): {
 	direction: PublicMessageDirection;
 	senderType: PublicMessageSenderType;
 } {
+	if (message.agentId !== null && message.agentId !== undefined) {
+		return { direction: "OUTBOUND", senderType: "BOT" };
+	}
+
 	if (message.from.startsWith("bot:")) {
 		return { direction: "OUTBOUND", senderType: "BOT" };
 	}
