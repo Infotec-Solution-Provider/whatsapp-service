@@ -239,6 +239,20 @@ test("state file: atomic persist, reload, tolerate missing and corrupt files", a
 	fs.rmSync(path.dirname(h.cfg.stateFile), { recursive: true, force: true });
 });
 
+test("state file: a shutdown flush during an async persist never shares its temp file", async () => {
+	const h = harness();
+	h.service.loadState();
+	h.service.setCursor("operator-terminal", 1);
+	const inFlight = h.service.persist();
+	h.service.setCursor("operator-terminal", 2);
+	h.service.stop();
+	await inFlight;
+	const stored = JSON.parse(fs.readFileSync(h.cfg.stateFile, "utf8"));
+	assert.equal(stored.cursors["operator-terminal"], 2, "the final flush wins");
+	assert.deepEqual(fs.readdirSync(path.dirname(h.cfg.stateFile)), ["state.json"], "no temp file left");
+	fs.rmSync(path.dirname(h.cfg.stateFile), { recursive: true, force: true });
+});
+
 // ─── WhatsApp sender ────────────────────────────────────────────────────────
 
 function senderHarness(mode: "auto" | "on" | "off", options: { state?: string; failPost?: boolean; failList?: boolean } = {}) {
@@ -326,18 +340,26 @@ function monitorHarness() {
 	const operatorGroups: Array<Record<string, unknown>> = [];
 	const operatorRows: Array<Record<string, unknown>> = [];
 	const stormGroups: Array<{ clientId: number; _count: { _all: number } }> = [];
+	const connectedEventClients = new Set<number>();
 	const db = {
 		wppClient: {
 			findMany: async () => [...snapshots.entries()].map(([id, snapshot]) => ({
 				id, instance: id === 11 ? "exatron" : "nunes", sessionSnapshot: snapshot
 			}))
 		},
-		wppClientSessionEvent: { groupBy: async () => stormGroups },
+		wppClientSessionEvent: {
+			groupBy: async ({ where }: { where: { state?: string; clientId: { in: number[] } } }) =>
+				where.state === "DISCONNECTED"
+					? stormGroups
+					: where.clientId.in.filter((id) => connectedEventClients.has(id)).map((clientId) => ({ clientId, _count: { _all: 1 } }))
+		},
 		internalMessageProcessingQueue: { findMany: async () => internalRows },
 		operatorOutboundSend: {
 			groupBy: async () => operatorGroups,
-			findMany: async ({ where }: { where: { completedAt: { gte: Date } } }) =>
-				operatorRows.filter((row) => (row["completedAt"] as Date).getTime() >= where.completedAt.gte.getTime())
+			findMany: async ({ where, skip = 0, take }: { where: { completedAt: { gte: Date } }; skip?: number; take: number }) =>
+				operatorRows
+					.filter((row) => (row["completedAt"] as Date).getTime() >= where.completedAt.gte.getTime())
+					.slice(skip, skip + take)
 		}
 	};
 	const monitor = new OpsAlertsMonitor(h.service, h.cfg, db as never, () => undefined, h.now);
@@ -346,7 +368,7 @@ function monitorHarness() {
 		state, stateChangedAt: at(0), lastConnectedAt: at(10 * MIN), lastDisconnectedAt: null,
 		lastObservedAt: at(0), consecutivePollFailures: 0, ...extra
 	});
-	return { ...h, monitor, snapshots, internalRows, operatorGroups, operatorRows, stormGroups, at, snapshot };
+	return { ...h, monitor, snapshots, internalRows, operatorGroups, operatorRows, stormGroups, connectedEventClients, at, snapshot };
 }
 
 test("SESSION_DOWN after 180 s (60 s for QR/LOGGED_OUT), RESOLVED when back, scope respected", async () => {
@@ -419,5 +441,97 @@ test("operator REMOTE terminal UNKNOWN/FAILED alerts once, never historical rows
 	m.advance(MIN);
 	await m.monitor.runChecks();
 	assert.equal(m.sent.length, 1, "rows already alerted are skipped");
+	fs.rmSync(path.dirname(m.cfg.stateFile), { recursive: true, force: true });
+});
+
+test("SESSION_DOWN fires once during a reconnect loop that moves lastDisconnectedAt every few seconds", async () => {
+	const m = monitorHarness();
+	const lastConnectedAt = m.at(10 * MIN);
+	let firedAt: number | null = null;
+	const start = m.now();
+	for (let step = 0; step < 20; step += 1) {
+		// Baileys: DISCONNECTED -> 5 s -> RECONNECTING -> socket closes again -> DISCONNECTED ...
+		m.snapshots.set(2, m.snapshot(step % 2 ? "RECONNECTING" : "DISCONNECTED", {
+			lastConnectedAt, lastDisconnectedAt: m.at(5_000), stateChangedAt: m.at(step % 2 ? 0 : 5_000)
+		}));
+		await m.monitor.runChecks();
+		if (firedAt === null && m.sent.length) firedAt = m.now() - start;
+		m.advance(30_000);
+	}
+	assert.equal(m.sent.filter((text) => text.includes("Sessão fora do ar")).length, 1, "one critical, no repeats");
+	assert.ok(firedAt !== null && firedAt <= 4 * MIN, `fired after ${firedAt} ms`);
+
+	m.snapshots.set(2, m.snapshot("CONNECTED", { lastConnectedAt: m.at(0) }));
+	await m.monitor.runChecks();
+	assert.equal(m.sent.filter((text) => text.startsWith("[RESOLVIDO] nunes")).length, 1);
+	assert.equal(m.service.getCursor("session-down:2"), null, "outage tracking ends when connected");
+
+	// A new outage starts its own clock.
+	m.snapshots.set(2, m.snapshot("DISCONNECTED", { lastConnectedAt: m.at(1_000), lastDisconnectedAt: m.at(0) }));
+	await m.monitor.runChecks();
+	assert.equal(m.sent.length, 2, "not re-alerted from the old outage start");
+});
+
+test("scope survives a wwebjs-api restart that nulls lastConnectedAt (persisted CONNECTED transition)", async () => {
+	const m = monitorHarness();
+	m.snapshots.set(2, m.snapshot("QR_PENDING", { lastConnectedAt: null, stateChangedAt: m.at(2 * MIN) }));
+	m.snapshots.set(4, m.snapshot("QR_PENDING", { lastConnectedAt: null, stateChangedAt: m.at(2 * MIN) }));
+	m.connectedEventClients.add(2);
+	await m.monitor.runChecks();
+	assert.equal(m.sent.length, 1, "client 4 has no connection in 24 h and stays out of scope");
+	assert.match(m.sent[0]!, /^\[CRÍTICO\] nunes · Sessão fora do ar\nCliente 2\nEstado QR_PENDING/);
+});
+
+test("persistent storm and backlog alert once per condition, not on every re-check", async () => {
+	const m = monitorHarness();
+	m.snapshots.set(2, m.snapshot("CONNECTED"));
+	m.stormGroups.push({ clientId: 2, _count: { _all: 14 } });
+	m.internalRows.push({ instance: "nunes", createdAt: m.at(5 * MIN), messageData: JSON.stringify({ clientId: 2 }) });
+	for (let minute = 0; minute < 60; minute += 1) {
+		await m.monitor.runChecks();
+		if (minute % 5 === 0) await m.monitor.checkDisconnectStorm();
+		m.service.tick();
+		m.advance(MIN);
+	}
+	assert.equal(m.sent.filter((text) => text.includes("Desconexões frequentes")).length, 1);
+	assert.equal(m.sent.filter((text) => text.includes("Fila de envio atrasada")).length, 1);
+	assert.ok(!m.sent.some((text) => text.includes("ocorrências")), "re-checks are not counted as occurrences");
+
+	// Cleared, then back: a new condition alerts again (after the dedup window).
+	m.internalRows.length = 0;
+	await m.monitor.runChecks();
+	m.advance(11 * MIN);
+	m.internalRows.push({ instance: "nunes", createdAt: m.at(3 * MIN), messageData: JSON.stringify({ clientId: 2 }) });
+	await m.monitor.runChecks();
+	assert.equal(m.sent.filter((text) => text.includes("Fila de envio atrasada")).length, 2);
+});
+
+test("QUEUE_BACKLOG skips internal rows already reported as SEND_SLOW", async () => {
+	const m = monitorHarness();
+	m.snapshots.set(2, m.snapshot("CONNECTED"));
+	m.internalRows.push({
+		instance: "nunes", createdAt: m.at(5 * MIN),
+		messageData: JSON.stringify({ clientId: 2, timing: { slowAlertedAt: m.at(4 * MIN).toISOString() } })
+	});
+	await m.monitor.runChecks();
+	assert.equal(m.sent.length, 0);
+});
+
+test("operator scan reads a burst larger than one page", async () => {
+	const m = monitorHarness();
+	m.snapshots.set(11, m.snapshot("CONNECTED"));
+	m.snapshots.set(12, m.snapshot("CONNECTED"));
+	m.service.loadState();
+	await m.monitor.runChecks();
+	m.advance(MIN);
+	for (let index = 0; index < 150; index += 1) {
+		m.operatorRows.push({
+			id: `op-${index}`, instance: index < 100 ? "exatron" : "nunes", clientId: index < 100 ? 11 : 12, messageId: index,
+			remoteJobId: null, status: "UNKNOWN", createdAt: m.at(50_000), completedAt: m.at(40_000 - index * 100)
+		});
+	}
+	await m.monitor.runChecks();
+	assert.ok(m.sent.some((text) => /^\[CRÍTICO\] nunes · Falha no envio\nCliente 12/.test(text)), "rows past the first 100 are alerted");
+	assert.equal(m.service.recent().filter((entry) => entry.alert.type === "SEND_FAILED").length, 150);
 	fs.rmSync(path.dirname(m.cfg.stateFile), { recursive: true, force: true });
 });

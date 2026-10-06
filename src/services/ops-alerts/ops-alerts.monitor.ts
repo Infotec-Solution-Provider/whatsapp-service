@@ -2,7 +2,7 @@ import type prismaService from "../prisma.service";
 import { parseQueuePayload } from "../../utils/internal-wpp-send-outcome";
 import { formatSeconds } from "./ops-alerts.format";
 import type { OpsAlertsService } from "./ops-alerts.service";
-import type { OpsAlertsConfig } from "./ops-alerts.types";
+import type { OpsAlertInput, OpsAlertsConfig } from "./ops-alerts.types";
 
 type Db = Pick<
 	typeof prismaService,
@@ -10,6 +10,10 @@ type Db = Pick<
 >;
 
 const OPERATOR_CURSOR = "operator-terminal";
+const SESSION_DOWN_CURSOR = "session-down:";
+const CONDITION_CURSOR = "condition:";
+const OPERATOR_SCAN_PAGE = 100;
+const OPERATOR_SCAN_MAX_PAGES = 5;
 const OPERATOR_SCAN_OVERLAP_MS = 5_000;
 const OPERATOR_SCAN_MAX_LOOKBACK_MS = 60 * 60 * 1000;
 const UNREACHABLE_POLL_FAILURES = 3;
@@ -26,6 +30,17 @@ interface ScopedClient {
 		lastObservedAt: Date;
 		consecutivePollFailures: number;
 	};
+}
+
+interface OperatorTerminalRow {
+	id: string;
+	instance: string;
+	clientId: number;
+	messageId: number;
+	remoteJobId: string | null;
+	status: string;
+	createdAt: Date;
+	completedAt: Date | null;
 }
 
 /** Periodic database checks feeding the ops alerts (session, storm, backlog, operator outcomes). */
@@ -102,19 +117,37 @@ export class OpsAlertsMonitor {
 			}
 		});
 		const since = this.now() - this.config.scopeWindowMs;
-		const clients: ScopedClient[] = [];
-		const scope = new Map<number, { instance: string }>();
+		const candidates: ScopedClient[] = [];
 		for (const row of rows) {
-			const snapshot = row.sessionSnapshot;
-			if (!snapshot || this.config.excludedClientIds.has(row.id)) continue;
-			const recentlyConnected =
-				snapshot.state === "CONNECTED" || (snapshot.lastConnectedAt?.getTime() ?? 0) >= since;
-			if (!recentlyConnected) continue;
-			clients.push({ id: row.id, instance: row.instance, snapshot });
-			scope.set(row.id, { instance: row.instance });
+			if (!row.sessionSnapshot || this.config.excludedClientIds.has(row.id)) continue;
+			candidates.push({ id: row.id, instance: row.instance, snapshot: row.sessionSnapshot });
 		}
+		const connected = new Set(
+			candidates
+				.filter(
+					({ snapshot }) => snapshot.state === "CONNECTED" || (snapshot.lastConnectedAt?.getTime() ?? 0) >= since
+				)
+				.map((client) => client.id)
+		);
+		// `lastConnectedAt` lives in the wwebjs-api process memory: after a restart it is
+		// null, exactly when a session that did not come back matters most. A persisted
+		// transition to or from CONNECTED in the window proves a recent connection instead.
+		const unproven = candidates.filter((client) => !connected.has(client.id)).map((client) => client.id);
+		if (unproven.length) {
+			const events = await this.db.wppClientSessionEvent.groupBy({
+				by: ["clientId"],
+				where: {
+					clientId: { in: unproven },
+					occurredAt: { gte: new Date(since) },
+					OR: [{ state: "CONNECTED" }, { previousState: "CONNECTED" }]
+				},
+				_count: { _all: true }
+			});
+			for (const event of events) connected.add(event.clientId);
+		}
+		const clients = candidates.filter((client) => connected.has(client.id));
 		this.clients = clients;
-		this.alerts.setScope(scope);
+		this.alerts.setScope(new Map(clients.map((client) => [client.id, { instance: client.instance }])));
 	}
 
 	/** PRIMARY not CONNECTED for too long (snapshot is PRIMARY-first, see remote-session-directory). */
@@ -128,6 +161,7 @@ export class OpsAlertsMonitor {
 				now - snapshot.lastObservedAt.getTime() > this.config.sessionDownMs;
 
 			if (snapshot.state === "CONNECTED" && !unreachable) {
+				this.alerts.clearCursor(`${SESSION_DOWN_CURSOR}${client.id}`);
 				if (this.alerts.isOpen(key)) {
 					this.alerts.emit({ ...key, severity: "resolved", summary: "Sessão conectada novamente" });
 				}
@@ -146,7 +180,8 @@ export class OpsAlertsMonitor {
 
 			const disconnectedAt = snapshot.lastDisconnectedAt?.getTime() ?? 0;
 			const connectedAt = snapshot.lastConnectedAt?.getTime() ?? 0;
-			const downSince = disconnectedAt && disconnectedAt >= connectedAt ? disconnectedAt : snapshot.stateChangedAt.getTime();
+			const observed = disconnectedAt && disconnectedAt >= connectedAt ? disconnectedAt : snapshot.stateChangedAt.getTime();
+			const downSince = this.outageStart(client.id, observed, connectedAt);
 			const threshold = AUTH_STATES.has(snapshot.state) ? this.config.sessionAuthDownMs : this.config.sessionDownMs;
 			if (now - downSince <= threshold) continue;
 			this.alerts.emit({
@@ -156,10 +191,46 @@ export class OpsAlertsMonitor {
 				refs: { state: snapshot.state, since: new Date(downSince).toISOString() }
 			});
 		}
+		const scoped = new Set(this.clients.map((client) => `${SESSION_DOWN_CURSOR}${client.id}`));
+		for (const name of this.alerts.cursorNames(SESSION_DOWN_CURSOR)) {
+			if (!scoped.has(name)) this.alerts.clearCursor(name);
+		}
+	}
+
+	/**
+	 * Start of the current outage. wwebjs-api moves `lastDisconnectedAt` on EVERY failed
+	 * reconnect (Baileys retries every ~5 s), so the snapshot alone would restart the clock
+	 * forever. The earliest start seen is kept (persisted) until the session connects again.
+	 */
+	private outageStart(clientId: number, observed: number, lastConnectedAt: number): number {
+		const name = `${SESSION_DOWN_CURSOR}${clientId}`;
+		const tracked = this.alerts.getCursor(name);
+		const since = tracked !== null && tracked > lastConnectedAt ? Math.min(tracked, observed) : observed;
+		if (since !== tracked) this.alerts.setCursor(name, since);
+		return since;
+	}
+
+	/**
+	 * Level-triggered checks (storm, backlog) alert when a condition starts, not on every
+	 * re-check: a re-check is not a new occurrence. A condition that clears and comes back
+	 * alerts again.
+	 */
+	private syncConditions(kind: string, active: Map<string, OpsAlertInput>): void {
+		const prefix = `${CONDITION_CURSOR}${kind}:`;
+		for (const [id, alert] of active) {
+			const name = `${prefix}${id}`;
+			if (this.alerts.getCursor(name) !== null) continue;
+			this.alerts.setCursor(name, this.now());
+			this.alerts.emit(alert);
+		}
+		for (const name of this.alerts.cursorNames(prefix)) {
+			if (!active.has(name.slice(prefix.length))) this.alerts.clearCursor(name);
+		}
 	}
 
 	public async checkDisconnectStorm(): Promise<void> {
-		if (!this.clients.length) return;
+		const active = new Map<string, OpsAlertInput>();
+		if (!this.clients.length) return this.syncConditions("storm", active);
 		const since = new Date(this.now() - 60 * 60 * 1000);
 		const groups = await this.db.wppClientSessionEvent.groupBy({
 			by: ["clientId"],
@@ -170,7 +241,7 @@ export class OpsAlertsMonitor {
 			const count = group._count._all;
 			const client = this.clients.find((item) => item.id === group.clientId);
 			if (!client || count <= this.config.disconnectStormThreshold) continue;
-			this.alerts.emit({
+			active.set(String(client.id), {
 				type: "DISCONNECT_STORM",
 				severity: "warn",
 				instance: client.instance,
@@ -179,6 +250,7 @@ export class OpsAlertsMonitor {
 				refs: { count }
 			});
 		}
+		this.syncConditions("storm", active);
 	}
 
 	/** Internal group queue and operator outbound items still open after the backlog threshold. */
@@ -201,7 +273,11 @@ export class OpsAlertsMonitor {
 			take: 200
 		});
 		for (const row of internal) {
-			const payload = parseQueuePayload<{ clientId?: number; lastRetryAt?: string }>(row.messageData);
+			const payload = parseQueuePayload<{ clientId?: number; lastRetryAt?: string; timing?: { slowAlertedAt?: string } }>(
+				row.messageData
+			);
+			// Already reported as SEND_SLOW: claimed and waiting on the remote job or receipt window.
+			if (payload?.timing?.slowAlertedAt) continue;
 			// A manual resend restarts the clock; createdAt keeps the original time.
 			const retriedAt = payload?.lastRetryAt ? new Date(payload.lastRetryAt).getTime() : Number.NaN;
 			const startedAt = Number.isNaN(retriedAt) ? row.createdAt.getTime() : Math.max(retriedAt, row.createdAt.getTime());
@@ -219,8 +295,9 @@ export class OpsAlertsMonitor {
 			add(group.instance, group.clientId, "operator", group._min.createdAt?.getTime() ?? now, group._count._all);
 		}
 
-		for (const entry of backlog.values()) {
-			this.alerts.emit({
+		const active = new Map<string, OpsAlertInput>();
+		for (const [id, entry] of backlog) {
+			active.set(id, {
 				type: "QUEUE_BACKLOG",
 				severity: "warn",
 				instance: entry.instance,
@@ -229,6 +306,7 @@ export class OpsAlertsMonitor {
 				refs: { queue: entry.queue, count: entry.count, since: new Date(entry.oldest).toISOString() }
 			});
 		}
+		this.syncConditions("backlog", active);
 	}
 
 	/** Operator REMOTE sends that ended UNKNOWN/FAILED since the last scan. */
@@ -241,18 +319,33 @@ export class OpsAlertsMonitor {
 			return;
 		}
 		const since = new Date(Math.max(stored, now - OPERATOR_SCAN_MAX_LOOKBACK_MS) - OPERATOR_SCAN_OVERLAP_MS);
-		const rows = await this.db.operatorOutboundSend.findMany({
-			// next_attempt_at >= completed_at for terminal rows, so it narrows the indexed range.
-			where: {
-				status: { in: ["FAILED", "UNKNOWN"] },
-				deliveryMode: "REMOTE",
-				nextAttemptAt: { gte: since },
-				completedAt: { gte: since }
-			},
-			select: { id: true, instance: true, clientId: true, messageId: true, remoteJobId: true, status: true, createdAt: true, completedAt: true },
-			orderBy: { completedAt: "asc" },
-			take: 100
-		});
+		let lastCompletedAt: number | null = null;
+		let truncated = false;
+		for (let page = 0; page < OPERATOR_SCAN_MAX_PAGES; page += 1) {
+			const rows: OperatorTerminalRow[] = await this.db.operatorOutboundSend.findMany({
+				// next_attempt_at >= completed_at for terminal rows, so it narrows the indexed range.
+				where: {
+					status: { in: ["FAILED", "UNKNOWN"] },
+					deliveryMode: "REMOTE",
+					nextAttemptAt: { gte: since },
+					completedAt: { gte: since }
+				},
+				select: { id: true, instance: true, clientId: true, messageId: true, remoteJobId: true, status: true, createdAt: true, completedAt: true },
+				orderBy: [{ completedAt: "asc" }, { id: "asc" }],
+				skip: page * OPERATOR_SCAN_PAGE,
+				take: OPERATOR_SCAN_PAGE
+			});
+			this.alertOperatorRows(rows, now);
+			const last = rows.at(-1)?.completedAt;
+			if (last) lastCompletedAt = last.getTime();
+			truncated = rows.length === OPERATOR_SCAN_PAGE;
+			if (!truncated) break;
+		}
+		// A burst larger than the pages read resumes from the last row read; seen ids skip repeats.
+		this.alerts.setCursor(OPERATOR_CURSOR, truncated && lastCompletedAt !== null ? lastCompletedAt : now);
+	}
+
+	private alertOperatorRows(rows: OperatorTerminalRow[], now: number): void {
 		for (const row of rows) {
 			if (this.alerts.hasSeen(row.id)) continue;
 			this.alerts.markSeen(row.id);
@@ -273,6 +366,5 @@ export class OpsAlertsMonitor {
 				}
 			});
 		}
-		this.alerts.setCursor(OPERATOR_CURSOR, now);
 	}
 }

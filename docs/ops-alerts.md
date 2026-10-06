@@ -9,9 +9,9 @@ Módulo `src/services/ops-alerts/`. Avisa a equipe da Infotec sobre falhas de en
 | `SEND_FAILED` | high (`[CRÍTICO]`) | fila interna de grupos (`processQueuedWppGroupMessage`) | mensagem interna termina em ERROR (`NOT_SENT`, `FAILED` ou `UNKNOWN`) |
 | `SEND_FAILED` | high (`[CRÍTICO]`) | varredura periódica de `operator_outbound_send` | envio de operador `REMOTE` termina `UNKNOWN` ou `FAILED` (só linhas concluídas depois da subida do processo) |
 | `SEND_SLOW` | warn (`[AVISO]`) | fila interna de grupos | mais de 20 s entre a criação (ou o último "Reenviar") e o término, ou ainda em andamento depois de 20 s. Um aviso por mensagem |
-| `SESSION_DOWN` | critical (`[CRÍTICO]`) | snapshot da sessão (`client_session_snapshots`) | sessão PRIMARY fora de `CONNECTED` há mais de 180 s, ou `QR_PENDING`/`LOGGED_OUT` há mais de 60 s, ou API do wwebjs sem responder ao poll (≥ 3 falhas e último snapshot com mais de 180 s). Envia `[RESOLVIDO]` uma vez quando volta |
-| `DISCONNECT_STORM` | warn | `client_session_events` (a cada 5 min) | mais de 10 eventos `DISCONNECTED` na última hora para o mesmo cliente |
-| `QUEUE_BACKLOG` | warn | fila interna e `operator_outbound_send` (a cada 60 s) | itens `PENDING`/`PROCESSING` com mais de 2 min. Na fila interna o relógio recomeça no último "Reenviar" |
+| `SESSION_DOWN` | critical (`[CRÍTICO]`) | snapshot da sessão (`client_session_snapshots`) | sessão PRIMARY fora de `CONNECTED` há mais de 180 s, ou `QR_PENDING`/`LOGGED_OUT` há mais de 60 s, ou API do wwebjs sem responder ao poll (≥ 3 falhas e último snapshot com mais de 180 s). O início da queda é o primeiro visto e fica guardado no estado até a sessão conectar de novo: num loop de reconexão o wwebjs-api atualiza `lastDisconnectedAt` a cada tentativa, e isso não reinicia o relógio. Envia `[RESOLVIDO]` uma vez quando volta |
+| `DISCONNECT_STORM` | warn | `client_session_events` (a cada 5 min) | mais de 10 eventos `DISCONNECTED` na última hora para o mesmo cliente. Alerta uma vez quando a condição começa; enquanto ela dura, as novas verificações não contam como ocorrências |
+| `QUEUE_BACKLOG` | warn | fila interna e `operator_outbound_send` (a cada 60 s) | itens `PENDING`/`PROCESSING` com mais de 2 min. Na fila interna o relógio recomeça no último "Reenviar", e itens que já geraram `SEND_SLOW` não entram. Alerta uma vez quando a condição começa (por instância, cliente e fila) e de novo só se ela sumir e voltar |
 
 Os envios diretos do health check (`HEALTHPROBE_REQUEST`) não são jobs e não são observados.
 
@@ -19,7 +19,7 @@ O snapshot da sessão depende da correção do monitor de sessões: para um `cli
 
 ## Escopo
 
-- Só clientes `REMOTE` ativos que estiveram `CONNECTED` nas últimas 24 h (`OPS_ALERTS_SCOPE_WINDOW_MS`). O conjunto é recarregado a cada verificação periódica.
+- Só clientes `REMOTE` ativos que estiveram `CONNECTED` nas últimas 24 h (`OPS_ALERTS_SCOPE_WINDOW_MS`). O conjunto é recarregado a cada verificação periódica. A prova vem do snapshot (estado `CONNECTED` ou `last_connected_at`) ou, quando ele não basta, de uma transição para ou a partir de `CONNECTED` em `client_session_events`: depois de um restart do wwebjs-api o `last_connected_at` volta nulo, e uma sessão que não voltou continua no escopo.
 - `OPS_ALERTS_EXCLUDED_CLIENT_IDS` (padrão `1,9,10`: cliente de testes e clientes suprimaxxi inativos) nunca alerta.
 - Os alertas trazem apenas identificadores: instância, cliente, sessão, id da mensagem, id do job, duração e horários. Nunca texto de mensagem, telefone ou erro bruto do provedor.
 
@@ -29,7 +29,7 @@ O snapshot da sessão depende da correção do monitor de sessões: para um `cli
 - A primeira ocorrência sai na hora. Repetições dentro de `OPS_ALERTS_DEDUP_WINDOW_MS` (10 min) são contadas e saem num resumo "+N ocorrências em 10 min" ao fim da janela.
 - Um crítico aberto (`SESSION_DOWN`) não repete. Recebe lembretes a cada 30 min (no máximo 3) e um `[RESOLVIDO]` quando a sessão volta. Uma nova queda depois do resolvido alerta de novo na hora.
 - Limite global `OPS_ALERTS_MAX_PER_HOUR` (20 mensagens por hora). O excedente vira um único `[RESUMO]` quando houver vaga. `[RESOLVIDO]` sai mesmo com o limite atingido.
-- Estado (janelas, críticos abertos, contador por hora, cursor da varredura de operador) fica em `OPS_ALERTS_STATE_FILE`. Padrão: `data/ops-alerts-state.json` relativo ao diretório de trabalho do processo. Em produção o PM2 roda em `dist/`, então o arquivo fica em `dist/data/`. A escrita é atômica (arquivo temporário + rename). Arquivo ausente ou corrompido é ignorado.
+- Estado (janelas, críticos abertos, contador por hora, cursor da varredura de operador, início de quedas e condições abertas) fica em `OPS_ALERTS_STATE_FILE`. Padrão: `data/ops-alerts-state.json` relativo ao diretório de trabalho do processo. Em produção o PM2 roda em `dist/`, então o arquivo fica em `dist/data/`. A escrita é atômica (arquivo temporário próprio de cada escrita + rename; uma gravação assíncrona ainda em curso no desligamento é descartada em favor da final). Arquivo ausente ou corrompido é ignorado.
 - `opsAlerts.emit(...)` é síncrono, nunca lança exceção e não é aguardado. Um buffer em memória guarda os últimos 1000 eventos. Falha de canal só gera log, nunca outro alerta.
 
 ## Canais

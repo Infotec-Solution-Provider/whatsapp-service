@@ -64,6 +64,8 @@ export class OpsAlertsService {
 	private persisting = false;
 	private persistAgain = false;
 	private loaded = false;
+	private stopped = false;
+	private writeSeq = 0;
 
 	constructor(
 		private readonly config: OpsAlertsConfig,
@@ -77,6 +79,7 @@ export class OpsAlertsService {
 
 	public start(): void {
 		if (!this.config.enabled || this.tickTimer) return;
+		this.stopped = false;
 		this.loadState();
 		this.tickTimer = setInterval(() => this.tick(), this.config.tickMs);
 		this.tickTimer.unref();
@@ -87,6 +90,8 @@ export class OpsAlertsService {
 		this.tickTimer = null;
 		if (this.persistTimer) clearTimeout(this.persistTimer);
 		this.persistTimer = null;
+		// An async persist still in flight must not rename over the final flush.
+		this.stopped = true;
 		this.flushStateSync();
 	}
 
@@ -116,6 +121,16 @@ export class OpsAlertsService {
 	public setCursor(name: string, value: number): void {
 		this.state.cursors[name] = value;
 		this.schedulePersist();
+	}
+
+	public clearCursor(name: string): void {
+		if (!(name in this.state.cursors)) return;
+		delete this.state.cursors[name];
+		this.schedulePersist();
+	}
+
+	public cursorNames(prefix: string): string[] {
+		return Object.keys(this.state.cursors).filter((name) => name.startsWith(prefix));
 	}
 
 	public hasSeen(id: string): boolean {
@@ -362,9 +377,13 @@ export class OpsAlertsService {
 		this.persisting = true;
 		try {
 			const file = this.config.stateFile;
-			const temp = `${file}.${process.pid}.tmp`;
+			const temp = this.tempFile(file);
 			await fs.promises.mkdir(path.dirname(file), { recursive: true });
 			await fs.promises.writeFile(temp, this.serialize(), "utf8");
+			if (this.stopped) {
+				await fs.promises.unlink(temp).catch(() => undefined);
+				return;
+			}
 			await fs.promises.rename(temp, file);
 		} catch (error) {
 			this.safeLog({ event: "state-write-failed", reason: error instanceof Error ? error.message : String(error) });
@@ -377,11 +396,17 @@ export class OpsAlertsService {
 		}
 	}
 
+	/** Every write gets its own temp file, so a sync flush never shares one with an async persist. */
+	private tempFile(file: string): string {
+		this.writeSeq += 1;
+		return `${file}.${process.pid}.${this.writeSeq}.tmp`;
+	}
+
 	private flushStateSync(): void {
 		if (!this.loaded) return;
 		try {
 			const file = this.config.stateFile;
-			const temp = `${file}.${process.pid}.tmp`;
+			const temp = this.tempFile(file);
 			fs.mkdirSync(path.dirname(file), { recursive: true });
 			fs.writeFileSync(temp, this.serialize(), "utf8");
 			fs.renameSync(temp, file);
