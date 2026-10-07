@@ -104,13 +104,17 @@ class DashboardController {
 		const endDate = (req.query["endDate"] as string) || null;
 		const SETORES = (req.query["SETORES"] as string) || "*";
 		const OPERADORES = (req.query["OPERADORES"] as string) || "*";
+		const compareStartDate = (req.query["compareStartDate"] as string) || null;
+		const compareEndDate = (req.query["compareEndDate"] as string) || null;
 
 		const data = await operatorPerformanceService.getOperatorPerformance(
 			req.session.instance,
 			startDate,
 			endDate,
 			OPERADORES,
-			SETORES
+			SETORES,
+			compareStartDate,
+			compareEndDate
 		);
 
 		res.status(200).send({

@@ -49,6 +49,7 @@
 		"test:resource-pressure": "ts-node src/services/durable-worker-concurrency.test.ts && ts-node src/services/webhook-worker-errors.test.ts && node --test scripts/capture-resource-incident.test.cjs",
 		"test:database-incidents": "ts-node src/utils/database-operation-metrics.test.ts && ts-node --files src/middlewares/database-tenant-context.test.ts && ts-node src/utils/database-incident-log.test.ts && ts-node src/utils/database-incident-capture.test.ts && node --test scripts/capture-resource-incident.test.cjs",
 		"test:public-api": "ts-node src/utils/public-message-direction.test.ts",
+		"test:operator-performance": "ts-node src/utils/comparison-range.test.ts && ts-node src/utils/report-rules.test.ts",
 		"test:ai-integration": "ts-node src/middlewares/only-local.middleware.test.ts && ts-node src/utils/chat-scope.test.ts && ts-node src/utils/public-message-direction.test.ts && ts-node src/utils/ai-agent-request.test.ts && ts-node src/message-flow/message-flow.ai-agent.test.ts",
 		"test:idle-chats": "ts-node src/routines/idle-chats.routine.test.ts",
 		"test:contact-action-requests:mysql": "node scripts/smoke-contact-action-requests.js",

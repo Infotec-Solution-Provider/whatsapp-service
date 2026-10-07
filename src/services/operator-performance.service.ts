@@ -9,6 +9,7 @@ import {
 	SYSTEM_OPERATOR_ID,
 	SYSTEM_OPERATOR_NAME
 } from "../utils/report-rules";
+import { describeComparisonRange, resolveComparisonRange } from "../utils/comparison-range";
 
 interface OperatorRow {
 	CODIGO: bigint | number | string;
@@ -247,10 +248,17 @@ export interface OperatorPerformanceDailySeriesRow {
 	previousAverageHandlingSeconds: number | null;
 }
 
+export interface OperatorPerformanceComparisonRange {
+	startDate: string;
+	endDate: string;
+}
+
 export interface OperatorPerformanceReportResult {
 	summary: OperatorPerformanceSummary;
 	previousSummary: OperatorPerformanceSummary | null;
 	comparisonEnabled: boolean;
+	/** Intervalo efetivamente usado no comparativo (instantes ISO); null sem comparativo. */
+	previousRange: OperatorPerformanceComparisonRange | null;
 	operatorPerformance: OperatorPerformanceRow[];
 	dailySeries: OperatorPerformanceDailySeriesRow[];
 }
@@ -513,13 +521,6 @@ const getRangeLengthInDays = (startDate: Date, endDate: Date) => {
 	const end = new Date(endDate);
 	end.setHours(0, 0, 0, 0);
 	return Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
-};
-
-const getPreviousRange = (startDate: Date, endDate: Date) => {
-	const duration = endDate.getTime() - startDate.getTime();
-	const previousEnd = new Date(startDate.getTime() - 1);
-	const previousStart = new Date(previousEnd.getTime() - duration);
-	return { previousStart, previousEnd };
 };
 
 const createEmptyDailyBucket = (): DailySeriesMetricsBucket => ({
@@ -2108,7 +2109,9 @@ class OperatorPerformanceService {
 		startDateRaw?: string | null,
 		endDateRaw?: string | null,
 		operatorsRaw?: string | null,
-		sectorsRaw?: string | null
+		sectorsRaw?: string | null,
+		compareStartDateRaw?: string | null,
+		compareEndDateRaw?: string | null
 	): Promise<OperatorPerformanceReportResult> {
 		const startDate = parseBoundaryDate(startDateRaw, "start");
 		const endDate = parseBoundaryDate(endDateRaw, "end");
@@ -2122,6 +2125,8 @@ class OperatorPerformanceService {
 				endDateRaw,
 				operatorsRaw,
 				sectorsRaw,
+				compareStartDateRaw,
+				compareEndDateRaw,
 				parsedOperatorIds: operatorIds?.length || 0,
 				parsedSectorIds: sectorIds?.length || 0,
 				...describeRange(startDate, endDate)
@@ -2144,17 +2149,20 @@ class OperatorPerformanceService {
 			let previousRowsById = new Map<number, OperatorPerformanceRow>();
 			let previousStartDate: Date | null = null;
 			let previousEndDate: Date | null = null;
+			let previousRange: OperatorPerformanceComparisonRange | null = null;
 
 			if (comparisonEnabled && startDate && endDate) {
-				const previousRange = getPreviousRange(startDate, endDate);
-				previousStartDate = previousRange.previousStart;
-				previousEndDate = previousRange.previousEnd;
+				const comparisonRange = resolveComparisonRange(startDate, endDate, compareStartDateRaw, compareEndDateRaw);
+				previousStartDate = comparisonRange.previousStart;
+				previousEndDate = comparisonRange.previousEnd;
+				previousRange = describeComparisonRange(comparisonRange);
 
 				Logger.info(
 					`[OperatorPerformanceService] Previous period enabled ${stringifyLogData({
 						instance,
 						currentRange: describeRange(startDate, endDate),
-						previousRange: describeRange(previousStartDate, previousEndDate)
+						previousRange,
+						comparisonSource: comparisonRange.source
 					})}`
 				);
 
@@ -2241,6 +2249,7 @@ class OperatorPerformanceService {
 				summary: currentPeriod.summary,
 				previousSummary,
 				comparisonEnabled,
+				previousRange,
 				operatorPerformance,
 				dailySeries
 			};
