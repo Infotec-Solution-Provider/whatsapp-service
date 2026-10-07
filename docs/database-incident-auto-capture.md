@@ -6,6 +6,23 @@ A medição está ativa por padrão no cliente Prisma compartilhado. `DATABASE_O
 
 Operações lentas ou com erro geram `[database-operation]` no stderr do PM2, no máximo uma linha a cada cinco segundos por processo. `suppressed` conta as observações omitidas desde a última linha; todas continuam contribuindo para os agregados. O registro contém modelo/ação, duração, código Prisma quando disponível, quantidade de itens do array retornado e operações em andamento. Não inclui SQL, argumentos, destinatários, conteúdo, resultados ou texto do erro.
 
+Os registros também incluem `tenant` (o identificador `instance`) e `tenantSource`:
+
+- `query`: identificado no campo `instance` do filtro ou dos dados de criação. Inclui igualdade, `in` com um valor, chaves compostas e combinações `AND`/`OR` que permitam identificar um único tenant.
+- `context`: identificado na sessão autenticada ou no item de fila. Indica o tenant que originou a operação; não comprova que o SQL possui filtro por tenant. Consultas raw usam apenas essa origem, sem interpretar SQL ou parâmetros.
+- `unknown`: `tenant: null`, quando nenhuma dessas fontes está disponível. É esperado nas varreduras globais de filas e nas buscas apenas por ID fora de um contexto identificado.
+- `ambiguous`: `tenant: null`, quando o filtro/lote não permite identificar um único tenant com segurança, o identificador é inválido ou a análise excede seus limites. Não usa o contexto como substituto nesses casos.
+
+Exemplo ilustrativo de campos adicionados a uma linha:
+
+```json
+{"operation":"WppChat.findMany","tenant":"cliente_exemplo","tenantSource":"query","durationMs":16774,"failed":false,"resultRows":65240}
+```
+
+O contexto assíncrono é separado por requisição/item, inclusive em processamento concorrente. Está ligado à autenticação HTTP, ao envio durável do operador (após obter o item), às notificações desse envio e ao processamento das filas WABA, Gupshup e de mensagens recebidas. Outros workers continuam identificados quando a própria consulta contém `instance`; consultas apenas por ID nesses caminhos podem permanecer `unknown`.
+
+Não há consulta adicional para descobrir o tenant, nem captura de sessão, conteúdo, SQL ou argumentos completos. A identificação é capturada no início da operação e aparece também em `active` e `recent` abaixo. Agregados e limite de emissão continuam por processo/modelo/ação, sem criar grupos por tenant; `suppressed` pode incluir outros tenants. A atualização requer publicar o build e reiniciar o serviço, sem migration ou nova variável de ambiente.
+
 Cada novo JSONL de incidente inclui `databaseOperations` no registro `trigger`:
 
 - `active`: até 20 operações acompanhadas com maior tempo decorrido, ainda sem terminar na hora do erro.

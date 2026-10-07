@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { PrismaClient } from "@prisma/client";
 import { databaseOperationExtension } from "./database-operation-extension";
 import { DatabaseOperationMetrics } from "./database-operation-metrics";
+import { testDatabaseOperationTenant } from "./database-operation-tenant.test";
+import { withDatabaseTenant } from "./database-tenant-context";
 
 async function main() {
+	await testDatabaseOperationTenant();
 	let now = 0;
 	const reports: Record<string, unknown>[] = [];
 	const metrics = new DatabaseOperationMetrics({ clock: () => now, slowMs: 1_000, report: (entry) => { reports.push(entry); } });
@@ -13,7 +16,7 @@ async function main() {
 	now = 2_000;
 	const during = metrics.snapshot();
 	assert.equal(during.inFlight, 1);
-	assert.deepEqual(during.active, [{ operation: "WppMessage.findMany", elapsedMs: 2_000 }]);
+	assert.deepEqual(during.active, [{ operation: "WppMessage.findMany", tenant: null, tenantSource: "unknown", elapsedMs: 2_000 }]);
 	release(result);
 	assert.equal(await pending, result, "observation must preserve the original result");
 	assert.equal(metrics.snapshot().inFlight, 0);
@@ -73,13 +76,20 @@ async function main() {
 		},
 	});
 	try {
-		await client.wppMessage.findMany({ where: { body: "private message" }, take: 3 });
-		await client.$queryRawUnsafe("SELECT ?", "private parameter");
-		await assert.rejects(client.wppMessage.count(), /private-password/);
-		assert.deepEqual(calls[0], { model: "WppMessage", operation: "findMany", args: { where: { body: "private message" }, take: 3 } });
+		await client.wppMessage.findMany({ where: { instance: "tenant-a", body: "private message" }, take: 3 });
+		await withDatabaseTenant("tenant-b", async () => {
+			await client.$queryRawUnsafe("SELECT ?", "private parameter");
+			await assert.rejects(client.wppMessage.count(), /private-password/);
+		});
+		assert.deepEqual(calls[0], { model: "WppMessage", operation: "findMany", args: { where: { instance: "tenant-a", body: "private message" }, take: 3 } });
 		assert.equal(calls[1]?.operation, "$queryRawUnsafe");
 		assert.equal(calls[1]?.model, undefined);
 		assert.equal(clientMetrics.snapshot().recent.length, 3);
+		assert.deepEqual(clientMetrics.snapshot().recent.map(({ tenant, tenantSource }) => ({ tenant, tenantSource })), [
+			{ tenant: "tenant-a", tenantSource: "query" },
+			{ tenant: "tenant-b", tenantSource: "context" },
+			{ tenant: "tenant-b", tenantSource: "context" },
+		]);
 		assert.equal(clientMetrics.snapshot().inFlight, 0);
 		assert.doesNotMatch(JSON.stringify(clientMetrics.snapshot()), /private|SELECT|unused/);
 	} finally { await base.$disconnect(); }

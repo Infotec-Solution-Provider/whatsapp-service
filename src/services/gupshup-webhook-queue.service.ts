@@ -3,6 +3,7 @@ import { Logger } from "@in.pulse-crm/utils";
 import { GupshupWebhookQueueStatus } from "@prisma/client";
 import prismaService from "./prisma.service";
 import gupshupService from "./gupshup.service";
+import { withDatabaseTenant } from "../utils/database-tenant-context";
 
 const QUEUE_POLL_INTERVAL = parseInt(process.env["GUPSHUP_WEBHOOK_QUEUE_POLL_INTERVAL"] || "1000", 10);
 const MAX_CONCURRENT_PROCESSING = parseInt(process.env["GUPSHUP_WEBHOOK_MAX_CONCURRENT"] || "5", 10);
@@ -60,7 +61,7 @@ class GupshupWebhookQueueService {
           const item = await this.getNextPendingItem();
           if (item) {
             this.activeProcessing++;
-            void this.processItem(item.id).catch((error) => {
+            void withDatabaseTenant(item.instance, () => this.processItem(item.id)).catch((error) => {
               Logger.error(`Error processing Gupshup webhook queue item ${item.id}`, error as Error);
             }).finally(() => {
               this.activeProcessing--;

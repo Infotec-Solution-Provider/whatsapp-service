@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import type { DatabaseOperationTenant } from "./database-operation-tenant";
 
 const MAX_GROUPS = 128;
 const MAX_ACTIVE = 256;
@@ -16,7 +17,7 @@ interface Totals {
 	maxMs: number;
 	maxResultRows: number;
 }
-interface Observation {
+interface Observation extends DatabaseOperationTenant {
 	at: string;
 	operation: string;
 	durationMs: number;
@@ -32,14 +33,14 @@ interface Options {
 }
 
 /** Application elapsed time, including pool waits; never SQL execution time.
- * Retains only bounded numeric metadata, never arguments, SQL, results or errors.
+ * Retains bounded metadata and tenant identifiers, never arguments, SQL, results or errors.
  */
 export class DatabaseOperationMetrics {
 	private readonly enabled: boolean;
 	private readonly slowMs: number;
 	private readonly clock: () => number;
 	private readonly groups = new Map<string, Totals>();
-	private readonly active = new Map<object, { operation: string; started: number }>();
+	private readonly active = new Map<object, { operation: string; started: number } & DatabaseOperationTenant>();
 	private readonly recent: Observation[] = [];
 	private inFlight = 0;
 	private lastReport = -Infinity;
@@ -51,7 +52,7 @@ export class DatabaseOperationMetrics {
 		this.clock = options.clock ?? (() => performance.now());
 	}
 
-	async measure<T>(model: string | undefined, operation: string, execute: () => Promise<T>): Promise<T> {
+	async measure<T>(model: string | undefined, operation: string, execute: () => Promise<T>, attribution: DatabaseOperationTenant = { tenant: null, tenantSource: "unknown" }): Promise<T> {
 		if (!this.enabled) return execute();
 		// Names come from Prisma metadata, not SQL or request input.
 		const label = `${model ?? "raw"}.${operation}`;
@@ -64,7 +65,8 @@ export class DatabaseOperationMetrics {
 		}
 		const started = this.clock();
 		const token = {};
-		if (this.active.size < MAX_ACTIVE) this.active.set(token, { operation: key, started });
+		const { tenant, tenantSource } = attribution;
+		if (this.active.size < MAX_ACTIVE) this.active.set(token, { operation: key, started, tenant, tenantSource });
 		this.inFlight++;
 		totals.inFlight++;
 		totals.peakInFlight = Math.max(totals.peakInFlight, totals.inFlight);
@@ -94,7 +96,7 @@ export class DatabaseOperationMetrics {
 			const slow = durationMs >= this.slowMs;
 			totals.slow += Number(slow);
 			if (slow || failed) {
-				const entry = { at: new Date().toISOString(), operation: key, durationMs, failed, code, resultRows };
+				const entry = { at: new Date().toISOString(), operation: key, tenant, tenantSource, durationMs, failed, code, resultRows };
 				this.recent.push(entry);
 				if (this.recent.length > MAX_RECENT) this.recent.shift();
 				if (now - this.lastReport >= REPORT_INTERVAL_MS) {
@@ -112,7 +114,7 @@ export class DatabaseOperationMetrics {
 		return {
 			enabled: this.enabled, slowMs: this.slowMs, inFlight: this.inFlight,
 			untrackedInFlight: this.inFlight - this.active.size,
-			active: Array.from(this.active.values(), (item) => ({ operation: item.operation, elapsedMs: Math.round(Math.max(0, now - item.started)) }))
+			active: Array.from(this.active.values(), (item) => ({ operation: item.operation, tenant: item.tenant, tenantSource: item.tenantSource, elapsedMs: Math.round(Math.max(0, now - item.started)) }))
 				.sort((a, b) => b.elapsedMs - a.elapsedMs).slice(0, 20),
 			// Cumulative since process startup. Parallel durations can overlap.
 			operations: Array.from(this.groups.values(), (item) => ({ ...item }))
