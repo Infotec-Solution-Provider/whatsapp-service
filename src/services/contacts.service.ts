@@ -656,7 +656,7 @@ class ContactsService {
 			await instancesService.executeQuery(contact.instance, query, [
 				contact.id,
 				contact.instance,
-				safeEncode(contact.name),
+				safeEncode(contact.name) || "",
 				contact.phone,
 				contact.customerId,
 				contact.isDeleted
