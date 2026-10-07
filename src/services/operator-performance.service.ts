@@ -9,7 +9,10 @@ import {
 	SYSTEM_OPERATOR_ID,
 	SYSTEM_OPERATOR_NAME
 } from "../utils/report-rules";
-import { describeComparisonRange, resolveComparisonRange } from "../utils/comparison-range";
+import { type ComparisonRangeSource, describeComparisonRange, resolveComparisonRange } from "../utils/comparison-range";
+import { parseBoundaryDate } from "../utils/date-boundary";
+
+export { parseBoundaryDate };
 
 interface OperatorRow {
 	CODIGO: bigint | number | string;
@@ -251,6 +254,8 @@ export interface OperatorPerformanceDailySeriesRow {
 export interface OperatorPerformanceComparisonRange {
 	startDate: string;
 	endDate: string;
+	/** "custom": intervalo pedido em compareStartDate/compareEndDate; "previous-period": período anterior de mesma duração. */
+	source: ComparisonRangeSource;
 }
 
 export interface OperatorPerformanceReportResult {
@@ -408,35 +413,6 @@ const normalizeDateTime = (value: string | Date | null | undefined) => {
 
 	const parsed = new Date(value);
 	return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
-};
-
-export const parseBoundaryDate = (value: string | null | undefined, boundary: "start" | "end") => {
-	if (!value) return null;
-	const trimmed = String(value).trim();
-	if (!trimmed) return null;
-
-	const simpleDateMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-	if (simpleDateMatch) {
-		const [, yearRaw, monthRaw, dayRaw] = simpleDateMatch;
-		const year = Number(yearRaw);
-		const month = Number(monthRaw);
-		const day = Number(dayRaw);
-
-		if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
-			return null;
-		}
-
-		if (boundary === "start") {
-			return new Date(year, month - 1, day, 0, 0, 0, 0);
-		}
-
-		return new Date(year, month - 1, day, 23, 59, 59, 999);
-	}
-
-	const date = new Date(trimmed);
-	if (Number.isNaN(date.getTime())) return null;
-
-	return date;
 };
 
 const parseIds = (rawValue: string | null | undefined) => {
