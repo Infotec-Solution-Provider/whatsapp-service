@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { databaseOperationMetrics, type DatabaseOperationMetrics } from "./database-operation-metrics";
+import { resolveDatabaseOperationTenant } from "./database-operation-tenant";
 
 export function databaseOperationExtension(metrics: DatabaseOperationMetrics = databaseOperationMetrics) {
 	return Prisma.defineExtension({
@@ -7,7 +8,7 @@ export function databaseOperationExtension(metrics: DatabaseOperationMetrics = d
 		query: {
 			$allOperations({ model, operation, args, query }) {
 				// Forward the provided query to preserve the current transaction.
-				return metrics.measure(model, operation, () => query(args));
+				return metrics.measure(model, operation, () => query(args), resolveDatabaseOperationTenant(model, operation, args));
 			},
 		},
 	});

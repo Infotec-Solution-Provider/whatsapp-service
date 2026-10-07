@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { currentDatabaseTenant } from "../utils/database-tenant-context";
 import { Prisma, PrismaClient } from "@prisma/client";
 import PrismaOperatorOutboundRepository from "./operator-outbound.repository";
 import { OperatorOutboundService } from "./operator-outbound.service";
@@ -191,6 +192,32 @@ function fixture(
 
 const tests: Array<[string, () => Promise<void>]> = [];
 const test = (name: string, body: () => Promise<void>) => tests.push([name, body]);
+
+test("worker tenant context survives delivery and transactional finalization without leaking", async () => {
+	const observed: string[] = [];
+	const f = fixture({
+		deliver: async (item) => {
+			await Promise.resolve();
+			assert.equal(currentDatabaseTenant(), item.instance);
+			observed.push(`deliver:${item.instance}`);
+			return { status: "SENT", result: { wwebjsId: `receipt-${item.instance}` } };
+		},
+		finalize: async (_tx, message) => {
+			assert.equal(currentDatabaseTenant(), message.instance);
+			observed.push(`finalize:${message.instance}`);
+		},
+		onMessage: async (message) => {
+			await Promise.resolve();
+			assert.equal(currentDatabaseTenant(), message.instance);
+			observed.push(`notify:${message.instance}`);
+		},
+	});
+	await Promise.all(["tenant-a", "tenant-b"].map((instance) => f.service.enqueue(input({ instance, message: { ...input().message, instance } }))));
+	await f.service.processOnce();
+	assert.deepEqual(f.errors, []);
+	assert.deepEqual(observed.sort(), ["deliver:tenant-a", "deliver:tenant-b", "finalize:tenant-a", "finalize:tenant-b", "notify:tenant-a", "notify:tenant-b"]);
+	assert.equal(currentDatabaseTenant(), null);
+});
 
 test("enqueue commits message and job without an interactive transaction", async () => {
 	const f = fixture();

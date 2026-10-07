@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { currentDatabaseTenant } from "../utils/database-tenant-context";
 
 interface TestWorker {
 	activeProcessing: number;
@@ -61,7 +62,7 @@ async function testEscapedItemFailure(kind: WorkerKind, stage: FailureStage): Pr
 		await pendingWrite.promise;
 		throw timeout;
 	};
-	handleWebhook = async () => { deliveries++; throw new Error("Handler failed"); };
+	handleWebhook = async () => { assert.equal(currentDatabaseTenant(), "test"); deliveries++; throw new Error("Handler failed"); };
 	db["$queryRawUnsafe"] = async (query: string) => {
 		if (query.includes("ORDER BY")) polls++;
 		return [item];

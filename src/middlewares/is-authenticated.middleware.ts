@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import authService from "../services/auth.service";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { withDatabaseTenant } from "../utils/database-tenant-context";
 
 export default async function isAuthenticated(
 	req: Request,
@@ -20,7 +21,7 @@ export default async function isAuthenticated(
 		const session = await authService.fetchSessionData(authToken);
 		req.session = session;
 
-		next();
+		withDatabaseTenant(session.instance, () => next());
 	} catch (err) {
 		res.status(401).json({
 			message: "Unauthorized!",

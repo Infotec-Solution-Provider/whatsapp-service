@@ -3,6 +3,7 @@ import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { randomUUID } from "crypto";
 import prismaService from "./prisma.service";
 import wabaService from "./waba.service";
+import { withDatabaseTenant } from "../utils/database-tenant-context";
 
 const QUEUE_POLL_INTERVAL = parseInt(process.env["WABA_WEBHOOK_QUEUE_POLL_INTERVAL"] || "1000", 10);
 const MAX_CONCURRENT_PROCESSING = parseInt(process.env["WABA_WEBHOOK_MAX_CONCURRENT"] || "5", 10);
@@ -34,7 +35,7 @@ class WABAWebhookQueueService {
 		const id = randomUUID();
 		const payloadJson = this.stringifyPayload(payload);
 
-		await prismaService.$executeRawUnsafe(
+		await withDatabaseTenant(instance, () => prismaService.$executeRawUnsafe(
 			`INSERT INTO waba_webhook_queue (
 				id, instance, payload, status, retry_count, max_retries, created_at, updated_at
 			) VALUES (?, ?, CAST(? AS JSON), ?, 0, ?, NOW(3), NOW(3))`,
@@ -43,7 +44,7 @@ class WABAWebhookQueueService {
 			payloadJson,
 			WABA_QUEUE_STATUS.PENDING,
 			MAX_RETRIES
-		);
+		));
 
 		return id;
 	}
@@ -72,7 +73,7 @@ class WABAWebhookQueueService {
 					const item = await this.getNextPendingItem();
 					if (item) {
 						this.activeProcessing++;
-						void this.processItem(item.id).catch((error) => {
+						void withDatabaseTenant(item.instance, () => this.processItem(item.id)).catch((error) => {
 							Logger.error(`Error processing WABA webhook queue item ${item.id}`, error as Error);
 						}).finally(() => {
 							this.activeProcessing--;

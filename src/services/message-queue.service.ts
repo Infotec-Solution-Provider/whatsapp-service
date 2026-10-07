@@ -1,6 +1,7 @@
 import prismaService from "./prisma.service";
 import ProcessingLogger from "../utils/processing-logger";
 import { Logger } from "@in.pulse-crm/utils";
+import { withDatabaseTenant } from "../utils/database-tenant-context";
 
 interface QueueMessageData {
   instance: string;
@@ -190,7 +191,7 @@ class MessageQueueService {
       }) as QueueItem[];
 
       // Processa cada item em paralelo (mas apenas um por contato)
-      await Promise.allSettled(claimedItems.map((item) => this.processQueueItem(item)));
+      await Promise.allSettled(claimedItems.map((item) => withDatabaseTenant(item.instance, () => this.processQueueItem(item))));
     } finally {
       this.isProcessing = false;
     }
