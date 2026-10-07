@@ -288,22 +288,22 @@ class LocalSyncService {
 					) lm ON lm.contact_id = m.contact_id AND lm.max_sent_at = m.sent_at
 					WHERE m.instance = ? AND m.contact_id IS NOT NULL
 					ON DUPLICATE KEY UPDATE
-						message_id = IF(VALUES(sent_at) >= sent_at, VALUES(message_id), message_id),
-						chat_id = IF(VALUES(sent_at) >= sent_at, VALUES(chat_id), chat_id),
-						\`from\` = IF(VALUES(sent_at) >= sent_at, VALUES(\`from\`), \`from\`),
-						\`to\` = IF(VALUES(sent_at) >= sent_at, VALUES(\`to\`), \`to\`),
-						type = IF(VALUES(sent_at) >= sent_at, VALUES(type), type),
-						body = IF(VALUES(sent_at) >= sent_at, VALUES(body), body),
-						timestamp = IF(VALUES(sent_at) >= sent_at, VALUES(timestamp), timestamp),
-						sent_at = IF(VALUES(sent_at) >= sent_at, VALUES(sent_at), sent_at),
-						status = IF(VALUES(sent_at) >= sent_at, VALUES(status), status),
-						file_id = IF(VALUES(sent_at) >= sent_at, VALUES(file_id), file_id),
-						file_name = IF(VALUES(sent_at) >= sent_at, VALUES(file_name), file_name),
-						file_type = IF(VALUES(sent_at) >= sent_at, VALUES(file_type), file_type),
-						file_size = IF(VALUES(sent_at) >= sent_at, VALUES(file_size), file_size),
-						user_id = IF(VALUES(sent_at) >= sent_at, VALUES(user_id), user_id),
-						billing_category = IF(VALUES(sent_at) >= sent_at, VALUES(billing_category), billing_category),
-						client_id = IF(VALUES(sent_at) >= sent_at, VALUES(client_id), client_id)
+						message_id = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(message_id), wpp_last_messages.message_id),
+						chat_id = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(chat_id), wpp_last_messages.chat_id),
+						\`from\` = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(\`from\`), wpp_last_messages.\`from\`),
+						\`to\` = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(\`to\`), wpp_last_messages.\`to\`),
+						type = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(type), wpp_last_messages.type),
+						body = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(body), wpp_last_messages.body),
+						timestamp = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(timestamp), wpp_last_messages.timestamp),
+						sent_at = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(sent_at), wpp_last_messages.sent_at),
+						status = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(status), wpp_last_messages.status),
+						file_id = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(file_id), wpp_last_messages.file_id),
+						file_name = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(file_name), wpp_last_messages.file_name),
+						file_type = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(file_type), wpp_last_messages.file_type),
+						file_size = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(file_size), wpp_last_messages.file_size),
+						user_id = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(user_id), wpp_last_messages.user_id),
+						billing_category = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(billing_category), wpp_last_messages.billing_category),
+						client_id = IF(VALUES(sent_at) >= wpp_last_messages.sent_at, VALUES(client_id), wpp_last_messages.client_id)
 				`;
 				await instancesService.executeQuery(instance, backfillLastMessagesQuery, [instance, instance]);
 				console.log(`[LocalSync] Backfill de wpp_last_messages concluído`);
@@ -488,7 +488,7 @@ class LocalSyncService {
 				values.push(
 					c.id,
 					c.instance,
-					safeEncode(c.name),
+					safeEncode(c.name) || "",
 					c.phone,
 					c.customerId,
 					c.isDeleted ? 1 : 0
