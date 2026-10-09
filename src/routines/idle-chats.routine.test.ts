@@ -1,12 +1,23 @@
 import assert from "node:assert/strict";
+import type { Parameter } from "@prisma/client";
 
 const HOUR = 60 * 60 * 1000;
 const IDLE_TIME = 48 * HOUR;
 
-interface FakeMessage { sentAt: Date; from: string; }
+interface FakeMessage {
+	sentAt: Date;
+	from: string;
+}
 interface FakeChat {
-	id: number; instance: string; userId: number | null; sectorId: number | null; contactId: number;
-	startedAt: Date; isFinished: boolean; messages: FakeMessage[]; contact: { name: string } | null;
+	id: number;
+	instance: string;
+	userId: number | null;
+	sectorId: number | null;
+	contactId: number;
+	startedAt: Date;
+	isFinished: boolean;
+	messages: FakeMessage[];
+	contact: { name: string } | null;
 }
 
 const previousModules = new Map<string, NodeModule | undefined>();
@@ -25,11 +36,32 @@ let notifications: number[] = [];
 let finishAttempts: number[] = [];
 let failingChats = new Map<number, "before-update" | "after-update">();
 let messagesWindowStart: Date | null = null;
-const results: Array<{ processedChats: number; finishedChats: number; failedChatIds: number[]; stopReason: string | null }> = [];
+const results: Array<{
+	processedChats: number;
+	finishedChats: number;
+	failedChatIds: number[];
+	stopReason: string | null;
+}> = [];
 
-const parameters = [
-	{ id: 1, scope: "INSTANCE", key: "chat_auto_finish_enabled", value: "true", instance: "suprimaxxi", sectorId: null, userId: null },
-	{ id: 2, scope: "INSTANCE", key: "chat_auto_finish_idle_time", value: String(IDLE_TIME), instance: "suprimaxxi", sectorId: null, userId: null },
+const parameters: Parameter[] = [
+	{
+		id: 1,
+		scope: "INSTANCE",
+		key: "chat_auto_finish_enabled",
+		value: "true",
+		instance: "suprimaxxi",
+		sectorId: null,
+		userId: null
+	},
+	{
+		id: 2,
+		scope: "INSTANCE",
+		key: "chat_auto_finish_idle_time",
+		value: String(IDLE_TIME),
+		instance: "suprimaxxi",
+		sectorId: null,
+		userId: null
+	}
 ];
 
 // No real database, tenant or WhatsApp provider is used by these tests.
@@ -38,7 +70,10 @@ mockModule("../services/prisma.service", {
 	default: {
 		parameter: { findMany: async () => parameters },
 		wppChat: {
-			findMany: async (args: { where: { instance: { in: string[] } }; include: { messages: { where: { sentAt: { gte: Date } } } } }) => {
+			findMany: async (args: {
+				where: { instance: { in: string[] } };
+				include: { messages: { where: { sentAt: { gte: Date } } } };
+			}) => {
 				const gte = args.include.messages.where.sentAt.gte;
 				messagesWindowStart = gte;
 				return chats
@@ -47,14 +82,19 @@ mockModule("../services/prisma.service", {
 						...chat,
 						messages: chat.messages
 							.filter((message) => message.sentAt >= gte)
-							.sort((a, b) => b.sentAt.getTime() - a.sentAt.getTime()),
+							.sort((a, b) => b.sentAt.getTime() - a.sentAt.getTime())
 					}));
 			},
-			findUnique: async ({ where }: { where: { id: number } }) => chats.find((chat) => chat.id === where.id) ?? null,
+			findUnique: async ({ where }: { where: { id: number } }) =>
+				chats.find((chat) => chat.id === where.id) ?? null
 		},
-		notification: { create: async ({ data }: { data: { chatId: number } }) => { notifications.push(data.chatId); } },
-		wppSector: { findUnique: async () => null },
-	},
+		notification: {
+			create: async ({ data }: { data: { chatId: number } }) => {
+				notifications.push(data.chatId);
+			}
+		},
+		wppSector: { findUnique: async () => null, findMany: async () => [{ instance: "suprimaxxi" }] }
+	}
 });
 mockModule("../services/chats.service", {
 	__esModule: true,
@@ -66,21 +106,23 @@ mockModule("../services/chats.service", {
 			if (failure === "before-update") throw new Error(`timeout of 60000ms exceeded (chat ${chatId})`);
 			chat.isFinished = true;
 			if (failure === "after-update") throw new Error(`tenant sync failed (chat ${chatId})`);
-		},
-	},
+		}
+	}
 });
 mockModule("../services/whatsapp.service", { __esModule: true, default: { getClient: async () => null } });
 mockModule("../bots/choose-sector.bot", {
 	__esModule: true,
-	default: { checkIfAlreadyAskedToBackToMenu: async () => false, askIfWantsToBackToMenu: async () => undefined },
+	default: { checkIfAlreadyAskedToBackToMenu: async () => false, askIfWantsToBackToMenu: async () => undefined }
 });
 mockModule("../utils/processing-logger", {
 	__esModule: true,
 	default: class {
 		log(): void {}
-		success(result: (typeof results)[number]): void { results.push(result); }
+		success(result: (typeof results)[number]): void {
+			results.push(result);
+		}
 		failed(): void {}
-	},
+	}
 });
 mockModule("@in.pulse-crm/utils", { Logger: { info: () => undefined, error: () => undefined } });
 
@@ -88,9 +130,15 @@ const runIdleChatsJob = (require("./idle-chats.routine") as typeof import("./idl
 
 function idleChat(id: number, lastMessageAgo: number | null = null): FakeChat {
 	return {
-		id, instance: "suprimaxxi", userId: 7, sectorId: 1, contactId: id, contact: { name: `Contato ${id}` },
-		startedAt: new Date(now - 10 * 24 * HOUR), isFinished: false,
-		messages: lastMessageAgo === null ? [] : [{ sentAt: new Date(now - lastMessageAgo), from: "5511999999999" }],
+		id,
+		instance: "suprimaxxi",
+		userId: 7,
+		sectorId: 1,
+		contactId: id,
+		contact: { name: `Contato ${id}` },
+		startedAt: new Date(now - 10 * 24 * HOUR),
+		isFinished: false,
+		messages: lastMessageAgo === null ? [] : [{ sentAt: new Date(now - lastMessageAgo), from: "5511999999999" }]
 	};
 }
 
@@ -107,7 +155,12 @@ async function testBacklogDrainsInBatches(): Promise<void> {
 
 	await runIdleChatsJob();
 	assert.equal(notifications.length, 50, "one run must finish a full batch, not a single chat");
-	assert.deepEqual(results[0], { processedChats: 50, finishedChats: 50, failedChatIds: [], stopReason: "limite de 50 ações por execução" });
+	assert.deepEqual(results[0], {
+		processedChats: 50,
+		finishedChats: 50,
+		failedChatIds: [],
+		stopReason: "limite de 50 ações por execução"
+	});
 
 	await runIdleChatsJob();
 	await runIdleChatsJob();
@@ -170,6 +223,44 @@ async function main(): Promise<void> {
 		await testFailedChatDoesNotBlockOthers();
 		await testConsecutiveFailuresStopTheRun();
 		await testFailureAfterFinishingStillNotifies();
+		parameters.push({
+			id: 3,
+			scope: "USER",
+			key: "chat_auto_finish_enabled",
+			value: "false",
+			instance: "other-tenant",
+			sectorId: null,
+			userId: 7
+		});
+		reset([idleChat(6000)]);
+		await runIdleChatsJob();
+		assert.deepEqual(notifications, [6000], "another tenant's user with the same ID cannot disable this chat");
+		parameters[0]!.value = "false";
+		parameters.push({
+			id: 4,
+			scope: "USER",
+			key: "chat_auto_finish_enabled",
+			value: "true",
+			instance: "suprimaxxi",
+			sectorId: null,
+			userId: 7
+		});
+		reset([idleChat(6001), { ...idleChat(6002), userId: 8 }]);
+		await runIdleChatsJob();
+		assert.deepEqual(notifications, [6001], "a user exception enables only that user when instance is disabled");
+		parameters.pop();
+		parameters.push({
+			id: 5,
+			scope: "SECTOR",
+			key: "chat_auto_finish_enabled",
+			value: "true",
+			instance: null,
+			sectorId: 1,
+			userId: null
+		});
+		reset([idleChat(6003), { ...idleChat(6004), sectorId: 2 }]);
+		await runIdleChatsJob();
+		assert.deepEqual(notifications, [6003], "legacy sector exception enables only that sector");
 		console.log("idle-chats.routine tests passed");
 	} finally {
 		Date.now = realDateNow;
