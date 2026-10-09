@@ -31,7 +31,7 @@ import { Logger } from "@in.pulse-crm/utils";
 import axios from "axios";
 import parametersService from "../services/parameters.service";
 import { buildRemoteSendFileOptions } from "../utils/remote-send-file-options";
-import { REMOTE_STATUS_RETRY_DELAYS_MS, shouldApplyRemoteStatus } from "../utils/remote-message-status";
+import { shouldApplyRemoteStatus } from "../utils/remote-message-status";
 import messageReactionsService from "../services/message-reactions.service";
 import { MessageReactionError } from "../utils/message-reaction";
 
@@ -389,25 +389,21 @@ class RemoteWhatsappClient implements WhatsappClient {
 		});
 	}
 
-	public async handleMessageStatus(messageId: string, status: string, attempt = 0): Promise<void> {
+	public async handleMessageStatus(messageId: string, status: string): Promise<void> {
 		try {
-			const currentMessage = await prismaService.wppMessage.findUnique({
+			const candidates = await prismaService.wppMessage.findMany({
 				where: {
-					wwebjsIdStanza: messageId
-				}
+					wwebjsIdStanza: messageId, clientId: this.id, instance: this.instance
+				},
+				take: 2
 			});
+			if (candidates.length > 1) throw new Error("REMOTE_RECEIPT_AMBIGUOUS_MESSAGE");
+			const currentMessage = candidates[0];
 
 			if (!currentMessage) {
-				// The receipt can arrive before the outbound job result links this provider id to the message.
-				const delay = REMOTE_STATUS_RETRY_DELAYS_MS[attempt];
-				if (delay !== undefined) {
-					setTimeout(() => void this.handleMessageStatus(messageId, status, attempt + 1), delay).unref();
-					return;
-				}
-				console.log(
-					`Não foi possível atualizar a mensagem de id: ${messageId} (status ${status}; mensagem não encontrada após ${attempt} novas tentativas)`
-				);
-				return;
+				// The durable inbox retries after the outbound job links the provider ID.
+				// No detached timer or successful completion before the update exists.
+				throw new Error("REMOTE_RECEIPT_MESSAGE_NOT_FOUND");
 			}
 
 			if (!shouldApplyRemoteStatus(currentMessage.status, status)) {
@@ -429,7 +425,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 				status: status as WppMessageStatus
 			});
 		} catch (err) {
-			console.log("Não foi possível atualizar a mensagem de id: " + messageId);
+			throw err;
 		}
 	}
 
