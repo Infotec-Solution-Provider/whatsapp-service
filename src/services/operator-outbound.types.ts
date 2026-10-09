@@ -1,4 +1,5 @@
 import type { OperatorOutboundSend, Prisma, WppMessage } from "@prisma/client";
+import type { SendFailureCategory } from "../utils/send-failure-category";
 
 export class OperatorOutboundRequestError extends Error {
 	constructor(message: string, public readonly statusCode: 400 | 409) {
@@ -35,6 +36,7 @@ export interface OperatorOutboundDeliveryResult {
 	remoteJobId?: string;
 	result?: Partial<WppMessage>;
 	error?: string;
+	failureCategory?: SendFailureCategory;
 }
 
 export interface OperatorOutboundHandler {
