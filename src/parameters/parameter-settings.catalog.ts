@@ -1,3 +1,5 @@
+import type { ParameterScope } from "./parameter-settings.target";
+
 export interface ParameterSetting {
 	key: string;
 	label: string;
@@ -11,6 +13,7 @@ export interface ParameterSetting {
 	multiplier?: number;
 	min?: number;
 	max?: number;
+	supportedScopes?: ParameterScope[];
 }
 
 function toggle(
@@ -210,3 +213,14 @@ export const whatsappParameterSettings: ParameterSetting[] = [
 		"Integrações"
 	)
 ];
+
+// These consumers deliberately resolve fewer levels than the session feature flags.
+for (const setting of whatsappParameterSettings) {
+	setting.supportedScopes =
+		setting.key.startsWith("require_supervisor_approval_") ||
+		setting.key === "feature_internal_group_whatsapp_sync_enabled"
+			? ["INSTANCE"]
+			: setting.key === "customer_linking_bot_enabled"
+				? ["INSTANCE", "SECTOR"]
+				: ["INSTANCE", "SECTOR", "USER"];
+}

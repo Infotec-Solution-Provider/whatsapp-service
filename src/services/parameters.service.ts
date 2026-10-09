@@ -38,18 +38,28 @@ class ParametersService {
 				scope: "USER",
 				instance,
 				userId
-			}
+			},
+			orderBy: { id: "asc" }
 		});
 
 		return userParams;
 	}
 
-	public async getSectorParams(sectorId: number) {
+	public async getSectorParams(instance: string, sectorId: number) {
+		// Older sector rows have no instance. Only accept them for a sector owned by this tenant.
+		const sector = await prismaService.wppSector.findFirst({
+			where: { id: sectorId, instance },
+			select: { id: true }
+		});
+		if (!sector) return [];
 		const sectorParams = await prismaService.parameter.findMany({
 			where: {
 				scope: "SECTOR",
-				sectorId
-			}
+				sectorId,
+				userId: null,
+				OR: [{ instance }, { instance: null }]
+			},
+			orderBy: { id: "asc" }
 		});
 
 		return sectorParams;
@@ -57,7 +67,8 @@ class ParametersService {
 
 	public async getInstanceParams(instance: string) {
 		const instanceParams = await prismaService.parameter.findMany({
-			where: { instance, scope: "INSTANCE" }
+			where: { instance, scope: "INSTANCE" },
+			orderBy: { id: "asc" }
 		});
 
 		return instanceParams;
@@ -65,7 +76,7 @@ class ParametersService {
 
 	public async getInstanceBooleanParam(instance: string, key: string, defaultValue = false) {
 		const params = await this.getInstanceParams(instance);
-		const value = params.find((parameter) => parameter.key === key)?.value;
+		const value = params.filter((parameter) => parameter.key === key).at(-1)?.value;
 		if (value === "true") return true;
 		if (value === "false") return false;
 		return defaultValue;
@@ -86,7 +97,7 @@ class ParametersService {
 	}) {
 		const [instanceParams, sectorParams, userParams] = await Promise.all([
 			this.getInstanceParams(instance),
-			sectorId ? this.getSectorParams(sectorId) : [],
+			sectorId ? this.getSectorParams(instance, sectorId) : [],
 			userId ? this.getUserParams(instance, userId) : []
 		]);
 

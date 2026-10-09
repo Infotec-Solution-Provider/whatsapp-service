@@ -13,7 +13,7 @@ interface MessageLike {
 
 const ROUTINE_PARAMETERS = [
 	"chat_auto_finish_enabled", // Habilita a rotina se estiver como true
-	"chat_auto_finish_idle_time" // Define o tempo em minutos para considerar um chat como ocioso
+	"chat_auto_finish_idle_time" // Tempo em milissegundos; a tela administrativa exibe minutos
 ];
 
 const DEFAULT_CHAT_IDLE_TIME = 30 * 60 * 1000; // minutos
@@ -163,20 +163,20 @@ export default async function runIdleChatsJob() {
 }
 
 async function getRoutineEnabledInstances(parameters: Parameter[]) {
-	const enabledInstances: string[] = [];
-
-	parameters.forEach((param) => {
-		if (
-			param.key === "chat_auto_finish_enabled" &&
-			param.value === "true" &&
-			param.scope === "INSTANCE" &&
-			param.instance
-		) {
-			enabledInstances.push(param.instance);
-		}
-	});
-
-	return enabledInstances;
+	// A sector/user exception can enable the routine even when the instance is disabled.
+	const enabled = parameters.filter((param) => param.key === "chat_auto_finish_enabled" && param.value === "true");
+	const instances = enabled.flatMap((param) => (param.instance ? [param.instance] : []));
+	const legacySectorIds = enabled
+		.filter((param) => param.scope === "SECTOR" && !param.instance && param.sectorId !== null)
+		.map((param) => param.sectorId!);
+	if (legacySectorIds.length) {
+		const sectors = await prismaService.wppSector.findMany({
+			where: { id: { in: legacySectorIds } },
+			select: { instance: true }
+		});
+		instances.push(...sectors.map((sector) => sector.instance));
+	}
+	return [...new Set(instances)];
 }
 
 // Sem mensagens na janela o chat conta como ocioso, então ela precisa cobrir o maior tempo configurado.
@@ -218,7 +218,8 @@ async function getRoutineParameters() {
 	return prismaService.parameter.findMany({
 		where: {
 			key: { in: ROUTINE_PARAMETERS }
-		}
+		},
+		orderBy: { id: "asc" }
 	});
 }
 
@@ -226,8 +227,20 @@ async function getRoutineParametersForChat(parameters: Parameter[], chat: WppCha
 	const chatParameters: { [key: string]: string | null } = {};
 
 	const instanceParams = parameters.filter((param) => param.scope === "INSTANCE" && param.instance === chat.instance);
-	const sectorParams = parameters.filter((param) => param.scope === "SECTOR" && param.sectorId === chat.sectorId);
-	const userParams = parameters.filter((param) => param.scope === "USER" && param.userId === chat.userId);
+	const sectorParams = parameters.filter(
+		(param) =>
+			param.scope === "SECTOR" &&
+			chat.sectorId !== null &&
+			param.sectorId === chat.sectorId &&
+			(param.instance === null || param.instance === chat.instance)
+	);
+	const userParams = parameters.filter(
+		(param) =>
+			param.scope === "USER" &&
+			chat.userId !== null &&
+			param.instance === chat.instance &&
+			param.userId === chat.userId
+	);
 
 	instanceParams.forEach((param) => {
 		chatParameters[param.key] = param.value;
@@ -253,7 +266,10 @@ async function finishChatAndNotify(chat: WppChat, reason: string, contactName: s
 		await chatsService.systemFinishChatById(chat.id, reason);
 	} catch (error) {
 		// A falha pode vir depois de o chat ser marcado (ex.: sincronização com o tenant): ainda assim notifica.
-		const current = await prismaService.wppChat.findUnique({ where: { id: chat.id }, select: { isFinished: true } });
+		const current = await prismaService.wppChat.findUnique({
+			where: { id: chat.id },
+			select: { isFinished: true }
+		});
 		if (!current?.isFinished) throw error;
 	}
 

@@ -35,15 +35,20 @@ No frontend atual, **Cadastros → Parâmetros → WhatsApp** oferece controles 
 `src/parameters/parameter-settings.catalog.ts`. Adicionar ou remover uma definição desse catálogo altera
 a tela sem criar um formulário novo. Chaves fora dele continuam preservadas no banco.
 
-- `GET /api/whatsapp/parameter-settings`: catálogo e valores explicitamente configurados na instância autenticada.
+- `GET /api/whatsapp/parameter-settings?scope=SECTOR&sectorId=11` ou `?scope=USER&userId=7`: catálogo compatível, valores explícitos e valores herdados, com a origem de cada um. Sem escopo, consulta a instância.
+- `GET /api/whatsapp/parameter-settings/targets?scope=USER&search=nome`: busca de usuários do CRM do tenant, limitada a 50 resultados, sem credenciais; `scope=SECTOR` lista apenas os setores WhatsApp da instância. A busca aceita também código e inclui usuários inativos identificados.
 - `PATCH /api/whatsapp/parameter-settings`: `{ changes: [{ key, value, previousValue }] }`.
 - Ambas as rotas exigem autenticação e perfil `ADMIN`; a instância vem da sessão, nunca do payload.
-- `value: null` restaura o comportamento padrão removendo somente os registros da chave no escopo `INSTANCE`,
-  com `sectorId` e `userId` nulos. Desativar grava `"false"`; restaurar e desativar têm significados diferentes.
+- `value: null` remove somente a exceção da chave no alvo selecionado, restaurando a herança. Desativar grava `"false"`; restaurar e desativar têm significados diferentes.
 - O salvamento é transacional, com isolamento `Serializable` e comparação de `previousValue`. Conflitos retornam
   HTTP 409, sem sobrescrever a edição concorrente. Não há retry automático de gravação.
 - A tela atualiza os parâmetros resolvidos da sessão ao salvar. Outras sessões carregam as opções na próxima consulta.
-- Setor e usuário não são editados nesta tela e continuam prevalecendo onde o consumidor permite.
+- Setor e usuário são editáveis pela seleção de escopo. O PATCH aceita `target: { scope: "SECTOR", sectorId: 11 }` ou `{ scope: "USER", userId: 7 }`; o tenant sempre vem da sessão administrativa. Setores e usuários são validados antes da leitura e gravação.
+- **Personalizar** fixa uma exceção, inclusive quando igual ao valor herdado. **Usar valor herdado** remove somente a exceção selecionada (`value: null`). Trocar de alvo com rascunho exige descarte explícito; respostas atrasadas do alvo anterior são ignoradas.
+- A herança do usuário considera seu setor atual no CRM, validado contra os setores WhatsApp da instância. Sem setor correspondente, herda diretamente da instância. Exceções USER pertencem ao usuário e tenant, independentemente de mudanças de setor.
+- Registros SECTOR legados com `instance = NULL` continuam aceitos somente para setores pertencentes ao tenant. Novos registros sempre gravam a instância. Duplicatas legadas são resolvidas pelo maior `id` e atualizadas/removidas juntas para o alvo.
+- Aprovações de contatos e sincronização de grupos internos são exclusivas da instância. O bot de vinculação aceita instância e setor. As demais opções do catálogo aceitam os três escopos; o backend rejeita gravações incompatíveis.
+- A rotina de inatividade considera ativações por setor/usuário mesmo sem ativação global. A identificação de usuário na rotina inclui o tenant, evitando colisões de códigos entre bancos CRM.
 - A configuração atual de inatividade usa `chat_auto_finish_idle_time`, em **milissegundos**, na rotina
   `src/routines/idle-chats.routine.ts`. A tela converte esse valor para minutos; padrão da rotina: 30 minutos.
 - Sincronização de grupos internos possui padrão dependente do provedor; a tela apresenta explicitamente
