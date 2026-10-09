@@ -29,6 +29,28 @@ Uniqueness: `scope + instance + sectorId + userId + key`.
 - `GET /api/whatsapp/session/parameters`: retorna o objeto de parâmetros resolvidos para a sessão autenticada.
 - `ParametersService.getSessionParams(session: SessionData)`: carrega e mescla os parâmetros dos três escopos.
 
+### Tela administrativa de parâmetros
+
+No frontend atual, **Cadastros → Parâmetros → WhatsApp** oferece controles amigáveis para as opções de
+`src/parameters/parameter-settings.catalog.ts`. Adicionar ou remover uma definição desse catálogo altera
+a tela sem criar um formulário novo. Chaves fora dele continuam preservadas no banco.
+
+- `GET /api/whatsapp/parameter-settings`: catálogo e valores explicitamente configurados na instância autenticada.
+- `PATCH /api/whatsapp/parameter-settings`: `{ changes: [{ key, value, previousValue }] }`.
+- Ambas as rotas exigem autenticação e perfil `ADMIN`; a instância vem da sessão, nunca do payload.
+- `value: null` restaura o comportamento padrão removendo somente os registros da chave no escopo `INSTANCE`,
+  com `sectorId` e `userId` nulos. Desativar grava `"false"`; restaurar e desativar têm significados diferentes.
+- O salvamento é transacional, com isolamento `Serializable` e comparação de `previousValue`. Conflitos retornam
+  HTTP 409, sem sobrescrever a edição concorrente. Não há retry automático de gravação.
+- A tela atualiza os parâmetros resolvidos da sessão ao salvar. Outras sessões carregam as opções na próxima consulta.
+- Setor e usuário não são editados nesta tela e continuam prevalecendo onde o consumidor permite.
+- A configuração atual de inatividade usa `chat_auto_finish_idle_time`, em **milissegundos**, na rotina
+  `src/routines/idle-chats.routine.ts`. A tela converte esse valor para minutos; padrão da rotina: 30 minutos.
+- Sincronização de grupos internos possui padrão dependente do provedor; a tela apresenta explicitamente
+  **Padrão do provedor**, **Ativada** e **Desativada**.
+
+A aba CRM usa a API do `users-service` e a tabela legada `parametros` do tenant; não usa `clients_parameters`.
+
 ## Parâmetros em uso
 
 ### Aprovação de ações sobre contatos

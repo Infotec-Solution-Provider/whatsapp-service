@@ -40,6 +40,7 @@
 		"test:send-reliability": "npm run test:internal-message-status && npm run test:ops-alerts && npm run test:session-directory",
 		"test:legacy-message-encoding": "ts-node src/services/messages-local-encoding.test.ts",
 		"test:parameters": "ts-node src/services/parameters.service.test.ts",
+		"test:parameter-settings": "ts-node --files src/services/parameter-settings.service.test.ts",
 		"test:edit-message-id": "ts-node src/utils/resolve-edit-message-id.test.ts",
 		"test:operator-send": "ts-node src/utils/operator-send-request.test.ts && ts-node src/utils/operator-send-delivery.test.ts && ts-node src/utils/remote-send-file-options.test.ts && ts-node src/utils/operator-quoted-message.test.ts && ts-node src/services/operator-outbound.test.ts && npm run test:waba-send",
 		"test:waba-send": "ts-node src/utils/waba-send.test.ts && ts-node src/whatsapp-client/waba-whatsapp-client.test.ts && ts-node src/services/message-send-error-presentation.test.ts && ts-node src/services/waba-legacy-send-status.test.ts && ts-node src/services/files-waba-media.test.ts",
