@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { hostname } from "node:os";
-import { Prisma, RemoteInboundEventInbox, RemoteInboundEventInboxStatus } from "@prisma/client";
+import { Prisma, RemoteInboundEventInbox, RemoteInboundEventInboxStatus, WppMessageStatus } from "@prisma/client";
 import { Logger } from "@in.pulse-crm/utils";
 import MessageDto from "../types/remote-client.types";
 import prismaService from "./prisma.service";
 import { resolveWorkerConcurrency } from "../utils/worker-concurrency";
+import { AsyncConcurrencyLimiter } from "../utils/async-concurrency-limiter";
 
 const DEFAULT_PROCESSING_INTERVAL_MS = 250;
 const DEFAULT_LOCK_DURATION_MS = 60_000;
@@ -23,12 +24,21 @@ export interface RemoteInboundMessagePayload {
 	message: MessageDto;
 }
 
+export interface RemoteInboundStatusPayload {
+	type: "message-status-received";
+	clientId: number;
+	messageId: string;
+	status: WppMessageStatus;
+}
+
+export type RemoteInboundPayload = RemoteInboundMessagePayload | RemoteInboundStatusPayload;
+
 export interface RemoteInboundInboxProcessResult {
 	messageId: number | null;
 }
 
 export interface RemoteInboundInboxProcessor {
-	process(item: RemoteInboundEventInbox, payload: RemoteInboundMessagePayload): Promise<RemoteInboundInboxProcessResult>;
+	process(item: RemoteInboundEventInbox, payload: RemoteInboundPayload): Promise<RemoteInboundInboxProcessResult>;
 }
 
 export interface RemoteInboundInboxEnqueueResult {
@@ -55,7 +65,7 @@ function canonicalize(value: unknown): unknown {
 	return value === undefined ? null : String(value);
 }
 
-export function hashRemoteInboundPayload(payload: RemoteInboundMessagePayload): string {
+export function hashRemoteInboundPayload(payload: RemoteInboundPayload): string {
 	return createHash("sha256").update(JSON.stringify(canonicalize(payload))).digest("hex");
 }
 
@@ -102,6 +112,7 @@ export function assertRemoteInboundPayloadMatches(
 
 export class RemoteInboundEventInboxService {
 	private readonly concurrency = resolveWorkerConcurrency(process.env["REMOTE_INBOUND_EVENT_CONCURRENCY"]);
+	private readonly receiptAdmission = new AsyncConcurrencyLimiter(4);
 	private readonly processingIntervalMs = Math.max(
 		50,
 		Number(process.env["REMOTE_INBOUND_EVENT_INTERVAL_MS"] || DEFAULT_PROCESSING_INTERVAL_MS)
@@ -128,13 +139,36 @@ export class RemoteInboundEventInboxService {
 		const providerMessageId = getRemoteInboundProviderMessageId(message);
 		const idempotencyKey = resolveRemoteInboundIdempotencyKey(explicitIdempotencyKey, clientId, message);
 		const payload: RemoteInboundMessagePayload = { type: "message-received", clientId, message };
+		return this.enqueuePayload(payload, providerMessageId, payload.type, idempotencyKey);
+	}
+
+	public async enqueueStatus(clientId: number, messageId: string, status: string): Promise<RemoteInboundInboxEnqueueResult> {
+		if (!Number.isSafeInteger(clientId) || clientId < 1 || typeof messageId !== "string" || !messageId.trim() || messageId.length > 255 ||
+			!Object.values(WppMessageStatus).includes(status as WppMessageStatus)) {
+			throw new RemoteInboundInboxRequestError("Invalid remote message status event", 400);
+		}
+		// Transport timestamps differ across replays/group participants. A receipt
+		// represents the same transition regardless of its transport timestamp.
+		const payload: RemoteInboundStatusPayload = {
+			type: "message-status-received", clientId, messageId: messageId.trim(), status: status as WppMessageStatus
+		};
+		const key = `remote-status:v1:${hashRemoteInboundPayload(payload)}`;
+		return this.receiptAdmission.run(() => this.enqueuePayload(
+			payload, payload.messageId, `${payload.type}:${payload.status}`, key
+		));
+	}
+
+	private async enqueuePayload(
+		payload: RemoteInboundPayload, providerMessageId: string, eventType: string, idempotencyKey: string
+	): Promise<RemoteInboundInboxEnqueueResult> {
+		const clientId = payload.clientId;
 		const payloadHash = hashRemoteInboundPayload(payload);
 		const jsonPayload = canonicalize(payload) as Prisma.InputJsonValue;
 		const findExisting = () => prismaService.remoteInboundEventInbox.findFirst({
 			where: {
 				OR: [
 					{ idempotencyKey },
-					{ clientId, eventType: payload.type, providerMessageId }
+					{ clientId, eventType, providerMessageId }
 				]
 			}
 		});
@@ -152,7 +186,7 @@ export class RemoteInboundEventInboxService {
 					data: {
 						idempotencyKey,
 						clientId,
-						eventType: payload.type,
+						eventType,
 						providerMessageId,
 						payloadHash,
 						payload: jsonPayload,
@@ -276,7 +310,7 @@ export class RemoteInboundEventInboxService {
 		leaseHeartbeat.unref();
 
 		try {
-			const payload = item.payload as unknown as RemoteInboundMessagePayload;
+			const payload = item.payload as unknown as RemoteInboundPayload;
 			const result = await this.processor.process(item, payload);
 			const completed = await prismaService.remoteInboundEventInbox.updateMany({
 				where: { id, status: "PROCESSING", lockedBy: this.workerId },
