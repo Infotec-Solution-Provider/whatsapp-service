@@ -35,6 +35,12 @@ async function main() {
 	assert.deepEqual(replay.result, { wwebjsId: "provider-id", wwebjsIdStanza: "stanza" }, "provider cannot overwrite tenant, author, body or public ID");
 	assert.equal(delivered, 1, "retry after lost response uses same remote intent");
 	assert.equal(directCalls, 0, "durable requests never fall back to synchronous sends");
+	client.getMessageJob = async () => ({ ...response("FAILED"), error: "Connection Closed; private provider detail" });
+	const technicalFailure = await deliverOperatorMessage({ ...item, remoteJobId: "remote-job" }, options, client);
+	assert.equal(technicalFailure.failureCategory, "CHANNEL");
+	assert.equal(technicalFailure.error, "O provedor confirmou falha no envio.", "health category does not expose raw provider errors");
+	client.getMessageJob = async () => ({ ...response("FAILED"), error: "Invalid recipient" });
+	assert.equal((await deliverOperatorMessage({ ...item, remoteJobId: "remote-job" }, options, client)).failureCategory, "MESSAGE");
 	client.getMessageJob = async () => { throw { response: { status: 404 } }; };
 	assert.equal((await deliverOperatorMessage({ ...item, remoteJobId: "remote-job" }, options, client)).status, "UNKNOWN");
 	assert.equal(submitCalls, 2, "missing known job does not submit a new message");
@@ -112,7 +118,7 @@ async function main() {
 	} } } });
 	client.sendMessage = async () => { throw rejection; };
 	assert.deepEqual(await deliverOperatorMessage({ ...item, deliveryMode: "DIRECT" }, options, client), {
-		status: "FAILED", error: rejection.message,
+		status: "FAILED", error: rejection.message, failureCategory: "MESSAGE",
 	}, "official rejection retains the original safe cause and is a confirmed failure");
 	client.sendMessage = async () => { throw wabaPreparationError(new Error("upload unavailable")); };
 	assert.equal((await deliverOperatorMessage({ ...item, deliveryMode: "DIRECT" }, options, client)).status, "FAILED");

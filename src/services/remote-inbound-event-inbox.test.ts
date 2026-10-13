@@ -156,6 +156,18 @@ async function testDurableEnqueueContract(): Promise<void> {
 	]);
 	assert.deepEqual(concurrent.map((result) => result.created).sort(), [false, true]);
 	assert.equal(concurrent[0]?.id, concurrent[1]?.id);
+
+	const receipt = await remoteInboundEventInboxService.enqueueStatus(7, "stanza-123", "READ");
+	const replay = await remoteInboundEventInboxService.enqueueStatus(7, "stanza-123", "READ");
+	assert.equal(replay.id, receipt.id);
+	assert.equal(replay.created, false);
+	assert.notEqual((await remoteInboundEventInboxService.enqueueStatus(7, "stanza-123", "RECEIVED")).id, receipt.id);
+	assert.notEqual((await remoteInboundEventInboxService.enqueueStatus(8, "stanza-123", "READ")).id, receipt.id);
+	assert.equal(rows.get(receipt.idempotencyKey).maxRetries, 0);
+	await assert.rejects(remoteInboundEventInboxService.enqueueStatus(7, "", "READ"), RemoteInboundInboxRequestError);
+	await assert.rejects(remoteInboundEventInboxService.enqueueStatus(7, "id", "INVALID"), RemoteInboundInboxRequestError);
+	delegate.create = async () => { throw new Error("P2024 database unavailable"); };
+	await assert.rejects(remoteInboundEventInboxService.enqueueStatus(7, "new-id", "READ"), /P2024/);
 }
 
 testDurableEnqueueContract()

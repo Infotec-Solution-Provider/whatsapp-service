@@ -7,15 +7,18 @@ import remoteSessionMonitorService from "./remote-session-monitor.service";
 import remoteInboundEventInboxService, {
 	RemoteInboundInboxEnqueueResult,
 	RemoteInboundInboxProcessResult,
-	RemoteInboundMessagePayload
+	RemoteInboundPayload
 } from "./remote-inbound-event-inbox.service";
 import { RemoteInboundEventInbox } from "@prisma/client";
 import prismaService from "./prisma.service";
 import messageReactionsService from "./message-reactions.service";
 import { tenantSqlEnabled } from "../tenant-sql/registry";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
+import { AsyncConcurrencyLimiter, AsyncKeyedSequencer } from "../utils/async-concurrency-limiter";
 
 class RemoteClientService {
+	private readonly receiptSequencer = new AsyncKeyedSequencer();
+	private readonly receiptProcessing = new AsyncConcurrencyLimiter(4);
 	private async withClientTenant<T>(clientId: number, execute: () => Promise<T>): Promise<T> {
 		if (!tenantSqlEnabled()) return execute();
 		const registered = await prismaService.wppClient.findFirst({
@@ -50,6 +53,9 @@ class RemoteClientService {
 		if (event.type === "message-received") {
 			return remoteInboundEventInboxService.enqueue(clientId, event.message, idempotencyKey);
 		}
+		if (event.type === "message-status-received") {
+			return remoteInboundEventInboxService.enqueueStatus(clientId, event.messageId, event.status);
+		}
 		if (event.type === "message-reaction") {
 			// Callback acceptance depends on storage, not a runtime that may be restarting.
 			const registered = await prismaService.wppClient.findFirst({ where: { id: clientId, type: "REMOTE" } });
@@ -82,9 +88,6 @@ class RemoteClientService {
 			case "message-revoked":
 				await client.handleMessageRevoked(event);
 				break;
-			case "message-status-received":
-				await client.handleMessageStatus(event.messageId, event.status);
-				break;
 			default:
 				throw new BadRequestError(`Unknown event type: ${(event as any).type}`);
 		}
@@ -96,13 +99,18 @@ class RemoteClientService {
 
 	public async processInboundInboxItem(
 		item: RemoteInboundEventInbox,
-		payload: RemoteInboundMessagePayload
+		payload: RemoteInboundPayload
 	): Promise<RemoteInboundInboxProcessResult> {
 		return this.withClientTenant(item.clientId, async () => {
 		if (item.clientId !== payload.clientId) {
 			throw new Error(`Inbox client mismatch for ${item.id}`);
 		}
 		const client = this.getRemoteClient(item.clientId);
+		if (payload.type === "message-status-received") {
+			await this.receiptSequencer.run(`${item.clientId}:${payload.messageId}`, () =>
+				this.receiptProcessing.run(() => client.handleMessageStatus(payload.messageId, payload.status)));
+			return { messageId: null };
+		}
 		const messageId = await client.handleMessageReceived(payload.message);
 		return { messageId };
 		});

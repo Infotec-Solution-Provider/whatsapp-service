@@ -9,6 +9,8 @@ import socketService from "./socket.service";
 import { calculateSessionStability } from "./remote-session-stability";
 import { pickClientSession } from "../utils/remote-session-directory";
 import wwebjsHealthCheckService from "./wwebjs-health-check.service";
+import { ChannelMessageHealthReader } from "./channel-message-health.reader";
+import type { ChannelMessageHealth } from "./channel-message-health";
 
 const REMOTE_TIMEOUT_MS = 5_000;
 const STABILITY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -57,6 +59,7 @@ function sanitizedReason(reason: string | null): string | null {
 }
 
 class RemoteSessionMonitorService {
+	private readonly messageHealthReader = new ChannelMessageHealthReader(prismaService);
 	public async recordSnapshot(clientId: number, session: RemoteSessionInfo, context: SnapshotContext): Promise<void> {
 		const client = await prismaService.wppClient.findFirst({
 			where: { id: clientId, type: WppClientType.REMOTE, isActive: true },
@@ -166,12 +169,13 @@ class RemoteSessionMonitorService {
 			orderBy: { name: "asc" }
 		});
 
-		const [disconnections, directory] = await Promise.all([
+		const [disconnections, directory, messageHealth] = await Promise.all([
 			this.countUnexpectedDisconnections(clients.map((client) => client.id)),
-			this.loadRemoteSessionDirectory(clients)
+			this.loadRemoteSessionDirectory(clients),
+			this.messageHealthReader.read(session.instance, clients.map((client) => client.id))
 		]);
 		return clients.map((client) => ({
-			...this.toClientResponse(client, disconnections.get(client.id) || 0),
+			...this.toClientResponse(client, disconnections.get(client.id) || 0, messageHealth.get(client.id) || null),
 			...this.sessionMetadata(directory.get(client.id))
 		}));
 	}
@@ -187,17 +191,18 @@ class RemoteSessionMonitorService {
 		}
 
 		const since = new Date(Date.now() - STABILITY_WINDOW_MS);
-		const events = await prismaService.wppClientSessionEvent.findMany({
-			where: { clientId, occurredAt: { gte: since } },
-			select: { id: true, previousState: true, state: true, reason: true, occurredAt: true, source: true },
-			orderBy: { occurredAt: "desc" },
-			take: 200
-		});
-		const disconnectCount = events.filter(
-			(event) => event.state === "DISCONNECTED" || event.state === "ERROR"
-		).length;
+		const [events, disconnections, messageHealth] = await Promise.all([
+			prismaService.wppClientSessionEvent.findMany({
+				where: { clientId, occurredAt: { gte: since } },
+				select: { id: true, previousState: true, state: true, reason: true, occurredAt: true, source: true },
+				orderBy: { occurredAt: "desc" },
+				take: 200
+			}),
+			this.countUnexpectedDisconnections([clientId]),
+			this.messageHealthReader.read(session.instance, [clientId])
+		]);
 
-		return { ...this.toClientResponse(client, disconnectCount), events };
+		return { ...this.toClientResponse(client, disconnections.get(clientId) || 0, messageHealth.get(clientId) || null), events };
 	}
 
 	public async restart(session: SessionData, clientId: number) {
@@ -467,11 +472,12 @@ class RemoteSessionMonitorService {
 
 	private toClientResponse(
 		client: { id: number; name: string; phone: string | null; sessionSnapshot: any },
-		disconnectCount: number
+		disconnectCount: number,
+		messageHealth: ChannelMessageHealth | null
 	) {
 		const snapshot = client.sessionSnapshot;
 		const functionalHealth = wwebjsHealthCheckService.getLatest(client.id);
-		const stability = calculateSessionStability(snapshot, disconnectCount, Date.now(), functionalHealth);
+		const stability = calculateSessionStability(snapshot, disconnectCount, Date.now(), functionalHealth, messageHealth);
 
 		return {
 			id: client.id,
@@ -479,6 +485,7 @@ class RemoteSessionMonitorService {
 			phone: snapshot?.phone || client.phone,
 			snapshot,
 			functionalHealth,
+			messageHealth,
 			stability: stability.level,
 			stabilityReason: stability.reason,
 			disconnections24h: disconnectCount,

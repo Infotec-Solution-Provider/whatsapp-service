@@ -3,6 +3,7 @@ import type { SendMessageOptions } from "../types/whatsapp-instance.types";
 import type { RemoteMessageJobResponse } from "../types/remote-client.types";
 import type CreateMessageDto from "../dtos/create-message.dto";
 import { WabaDeliveryError } from "./waba-send";
+import { sendFailureCategory, SendFailureCategory } from "./send-failure-category";
 
 export interface OperatorDeliveryClient {
 	instance: string;
@@ -23,6 +24,7 @@ export interface OperatorDeliveryOutcome {
 	remoteJobId?: string;
 	result?: Partial<WppMessage>;
 	error?: string;
+	failureCategory?: SendFailureCategory;
 }
 
 const SAFE_REMOTE_REQUEST_CODES = new Set([
@@ -57,7 +59,7 @@ export async function deliverOperatorMessage(
 	client: OperatorDeliveryClient | undefined,
 ): Promise<OperatorDeliveryOutcome> {
 	if (!client || client.instance !== item.instance) {
-		return { status: item.deliveryMode === "DIRECT" ? "FAILED" : "PENDING", error: "Canal indisponível antes do envio." };
+		return { status: item.deliveryMode === "DIRECT" ? "FAILED" : "PENDING", error: "Canal indisponível antes do envio.", failureCategory: "CHANNEL" };
 	}
 	if (item.deliveryMode === "DIRECT") {
 		try {
@@ -65,7 +67,7 @@ export async function deliverOperatorMessage(
 			return { status: "SENT", result: operatorProviderResult(result) };
 		} catch (error) {
 			if (error instanceof WabaDeliveryError) {
-				return { status: error.deliveryStatus, error: error.message };
+				return { status: error.deliveryStatus, error: error.message, failureCategory: sendFailureCategory(error) };
 			}
 			return { status: "UNKNOWN", error: "Não foi possível confirmar o resultado do envio. Não reenviar automaticamente." };
 		}
@@ -92,7 +94,7 @@ export async function deliverOperatorMessage(
 				return { status: "UNKNOWN", remoteJobId, error: "Envio aceito sem identificador válido retornado." };
 			}
 		}
-		if (job.status === "FAILED") return { status: "FAILED", remoteJobId, error: "O provedor confirmou falha no envio." };
+		if (job.status === "FAILED") return { status: "FAILED", remoteJobId, error: "O provedor confirmou falha no envio.", failureCategory: sendFailureCategory(job.error) };
 		if (job.status === "UNKNOWN") {
 			return {
 				status: "UNKNOWN",
