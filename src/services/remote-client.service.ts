@@ -90,6 +90,7 @@ class RemoteClientService {
 		}
 
 		Logger.info(`[RemoteClientService] Remote event handled | clientId=${clientId} | type=${event.type}`);
+		return undefined;
 		});
 	}
 
