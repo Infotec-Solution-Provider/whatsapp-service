@@ -12,8 +12,18 @@ import remoteInboundEventInboxService, {
 import { RemoteInboundEventInbox } from "@prisma/client";
 import prismaService from "./prisma.service";
 import messageReactionsService from "./message-reactions.service";
+import { tenantSqlEnabled } from "../tenant-sql/registry";
+import { withDatabaseTenant } from "../utils/database-tenant-context";
 
 class RemoteClientService {
+	private async withClientTenant<T>(clientId: number, execute: () => Promise<T>): Promise<T> {
+		if (!tenantSqlEnabled()) return execute();
+		const registered = await prismaService.wppClient.findFirst({
+			where: { id: clientId, type: "REMOTE" }, select: { instance: true }
+		});
+		if (!registered) throw new NotFoundError("Remote client not found");
+		return withDatabaseTenant(registered.instance, execute);
+	}
 	private getRemoteClient(clientId: number): RemoteWhatsappClient {
 		const client = whatsappService.getClient(clientId);
 
@@ -31,6 +41,7 @@ class RemoteClientService {
 		event: RemoteClientEvent,
 		idempotencyKey?: string
 	): Promise<RemoteInboundInboxEnqueueResult | void> {
+		return this.withClientTenant(clientId, async () => {
 		Logger.info(`[RemoteClientService] Handling remote event | clientId=${clientId} | type=${event.type}`);
 
 		// Message delivery is acknowledged after the durable inbox write, even
@@ -79,18 +90,21 @@ class RemoteClientService {
 		}
 
 		Logger.info(`[RemoteClientService] Remote event handled | clientId=${clientId} | type=${event.type}`);
+		});
 	}
 
 	public async processInboundInboxItem(
 		item: RemoteInboundEventInbox,
 		payload: RemoteInboundMessagePayload
 	): Promise<RemoteInboundInboxProcessResult> {
+		return this.withClientTenant(item.clientId, async () => {
 		if (item.clientId !== payload.clientId) {
 			throw new Error(`Inbox client mismatch for ${item.id}`);
 		}
 		const client = this.getRemoteClient(item.clientId);
 		const messageId = await client.handleMessageReceived(payload.message);
 		return { messageId };
+		});
 	}
 }
 
