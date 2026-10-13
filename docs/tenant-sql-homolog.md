@@ -40,3 +40,11 @@ Manter `PROCESS_LOG_STORAGE=dedicated` no WhatsApp. Build: `npx tsc`; não usar 
 Antes de qualquer gravação no runtime, restaurar os arquivos de ambiente e builds do backup e reiniciar somente os dois processos de homolog retorna à origem preservada. Depois de novas gravações, os bancos dos tenants são a fonte de verdade: parar os gravadores, preservar um backup desses bancos e reconciliar INSERT/UPDATE/DELETE antes de reativar o central. Trocar apenas a variável de ambiente perde a visibilidade das alterações posteriores ao cutover e não é um retorno validado.
 
 Esta entrega não habilita destinos de produção nem demonstra compatibilidade do runtime com o MySQL 5.5/percent-encoding do piloto Karsten. O migrador histórico e os dados centrais permanecem disponíveis.
+
+## Integração das atualizações locais em 13/10/2026
+
+A integração incorpora os recibos REMOTE persistentes (`8e03790`) e a saúde do canal baseada em mensagens (`c5c673f`), além do histórico de `origin/main`. O único conflito de conteúdo, em `remote-client.service.ts`, preserva tanto a seleção do banco do tenant quanto a admissão limitada e o processamento sequenciado dos recibos. O HTTP confirma persistência com 202 enquanto o inbox está pendente e só retorna 200 para conclusão; recibos não localizados ou ambíguos permanecem disponíveis para retry durável. A progressão de status conserva `READ`, e a saúde do canal não provoca reenvio de mensagens `UNKNOWN`.
+
+O `prisma/schema.prisma` continua idêntico ao commit de homolog `3d725b2`. Os recibos utilizam `remote_inbound_event_inbox.event_type` (VARCHAR 64), `payload` JSON e as chaves canônicas existentes; a categoria da falha usa `operator_outbound_send.provider_outcome` JSON. Não há coluna, tabela, índice ou enum novo que exija DDL aditivo nos bancos do tenant. Não executar novamente a cópia da origem central: o runtime já recebeu gravações e permanece como fonte de verdade.
+
+As verificações locais exigidas são `npx tsc --noEmit`, `npm run test:tenant-sql`, `npm run test:remote-inbound` e `npm run test:functional-health`. A suíte de entrada cobre o inbox, a concorrência limitada, o handler real, as respostas HTTP e a preservação do tenant durante a admissão e o processamento assíncrono. A publicação continua restrita à homolog e precisa validar os endpoints autenticados de monitoria e callback depois do restart.

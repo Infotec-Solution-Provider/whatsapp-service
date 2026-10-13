@@ -13,7 +13,7 @@ Falhas reais recentes continuam na janela mesmo após um teste aprovado. `UNKNOW
 
 ## Fontes e limites
 
-O leitor usa o cliente Prisma central existente do whatsapp-service (`prisma.service.ts`, datasource do serviço). A correspondência de nomes físicos foi conferida no `prisma/schema.prisma` local; não houve consulta ao schema ou aos dados de produção.
+O leitor usa a interface de banco do whatsapp-service (`prisma.service.ts`). No modo `WHATSAPP_STORAGE=tenant-sql`, essa interface executa SQL parametrizado com mysql2 nas tabelas `wpp_runtime_*` do banco CRM do tenant; consultas raw têm seus nomes de tabela reescritos pelo adaptador. No modo central, usa o cliente Prisma existente. A correspondência de nomes físicos foi conferida no `prisma/schema.prisma` local; não houve consulta ao schema ou aos dados de produção.
 
 - `messages`: saídas `me:`, `bot:` e `user:` com `ERROR`, `UNKNOWN` ou `PENDING` atrasado; relação com `operator_outbound_send` fornece horário de conclusão e categoria da falha. Estados com confirmação posterior deixam de ser considerados erros, mesmo se a tentativa durável ainda guardar resultado antigo.
 - `operator_outbound_send`: o resultado persistido (`provider_outcome`) de novos envios de operador conserva `failureCategory` (`CHANNEL`, `MESSAGE`, `UNCLASSIFIED`). Erros reconhecíveis de transporte/sessão identificam falha técnica; recusas genéricas permanecem sem causa identificada. Os textos do provedor não são adicionados à resposta do monitor.
