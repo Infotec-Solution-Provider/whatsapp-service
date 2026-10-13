@@ -1,4 +1,5 @@
 import { Prisma, WppContact, WppSchedule } from "@prisma/client";
+import { tenantSqlEnabled } from "../tenant-sql/registry";
 import prismaService from "./prisma.service";
 import { CreateScheduleDTO, Customer, SessionData } from "../sdk-local";
 import chatsService, { FETCH_CUSTOMERS_QUERY } from "./chats.service";
@@ -165,6 +166,7 @@ class SchedulesService {
 	}
 
 	public async syncScheduleToLocal(schedule: WppSchedule) {
+		if (tenantSqlEnabled()) return;
 		try {
 			const scheduledAt = this.formatDateForMySQL(schedule.scheduledAt);
 			const scheduleDate = this.formatDateForMySQL(schedule.scheduleDate);
@@ -244,6 +246,7 @@ class SchedulesService {
 	}
 
 	private async deleteScheduleFromLocal(schedule: WppSchedule) {
+		if (tenantSqlEnabled()) return;
 		try {
 			await instancesService.executeQuery(
 				schedule.instance,

@@ -1,38 +1,11 @@
-import { Prisma, PrismaClient } from "@prisma/client";
-import { recordDatabaseIncident } from "../utils/database-incident-log";
-import { startDatabaseIncidentCapture } from "../utils/database-incident-capture";
-import { databaseOperationExtension } from "../utils/database-operation-extension";
+import type { PrismaClient } from "@prisma/client";
+import { tenantSqlEnabled } from "../tenant-sql/registry";
+import { createTenantSqlRouter } from "../tenant-sql/router";
 
-const databaseUrl = process.env["WHATSAPP_DATABASE_URL"];
-const prismaLog = [{ emit: "event", level: "error" }] as [{ emit: "event"; level: "error" }];
-type PrismaEventOptions = Prisma.PrismaClientOptions & { log: typeof prismaLog };
-
-const options: PrismaEventOptions = databaseUrl
-	? {
-		log: prismaLog,
-		datasources: {
-			db: {
-				url: databaseUrl
-			}
-		}
-	}
-	: { log: prismaLog };
-const prismaClient = new PrismaClient<PrismaEventOptions>(options);
-startDatabaseIncidentCapture();
-
-// This listener runs even when the caller catches the Prisma exception and
-// the normal ProcessLog write cannot reach MySQL.
-prismaClient.$on("error", (event) => {
-	recordDatabaseIncident(event, { source: "prisma-engine", operation: event.target });
-});
-
-// Extended clients omit event registration; listeners belong to the base client.
+// Prisma remains only a compile-time contract for the existing callers. When
+// tenant SQL is selected, the central Prisma module is never loaded.
 export type DatabaseClient = Omit<PrismaClient, "$on" | "$extends">;
-// This query-only extension forwards args/results unchanged, including the
-// transaction context. Prisma's dynamic extension type uses different generic
-// transaction signatures; keep the existing, unmodified delegate contract.
-const prismaService = prismaClient.$extends(databaseOperationExtension()) as unknown as DatabaseClient;
-
-export default prismaService;
-
-
+const database: DatabaseClient = tenantSqlEnabled()
+	? createTenantSqlRouter() as DatabaseClient
+	: (require("./central-prisma.service") as { default: DatabaseClient }).default;
+export default database;

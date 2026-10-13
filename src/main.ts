@@ -48,6 +48,8 @@ import operatorSendService from "./services/operator-send.service";
 import { flushDatabaseIncidentLog, recordDatabaseIncident } from "./utils/database-incident-log";
 import processLogs from "./logs/service";
 import { startOpsAlerts, stopOpsAlerts } from "./services/ops-alerts";
+import { tenantSqlEnabled } from "./tenant-sql/registry";
+import database from "./services/prisma.service";
 
 whatsappService.buildClients();
 operatorSendService.configureWorker();
@@ -67,6 +69,7 @@ const logRoute = (r: express.Router) => {
 };
 
 app.use(cors());
+app.get("/health", (_req, res) => res.json({ service: "whatsapp", storage: tenantSqlEnabled() ? "tenant-sql" : "central", storageVersion: 1 }));
 
 // Respostas da API são dinâmicas e por usuário: sem ETag/304 e sem cache no navegador.
 // Evita o Chrome reaproveitar uma cópia em cache que não decodifica (ERR_CONTENT_DECODING_FAILED 304).
@@ -194,6 +197,7 @@ const shutdown = async (signal: string): Promise<void> => {
 		flushDatabaseIncidentLog(),
 		new Promise<void>((resolve) => setTimeout(resolve, 1_000)),
 	]);
+	if (tenantSqlEnabled()) await database.$disconnect();
 	process.exit(0);
 };
 

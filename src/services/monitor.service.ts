@@ -1,4 +1,5 @@
 import type { SessionData } from "../sdk-local";
+import { tenantSqlEnabled } from "../tenant-sql/registry";
 import chatsService from "./chats.service";
 import internalChatsService from "./internal-chats.service";
 import schedulesService from "./schedules.service";
@@ -38,7 +39,7 @@ class MonitorService {
 		const request = parseMonitorRequest(input);
 		if (summary) request.filters.operationalStatus = "all";
 		const params = await parametersService.getSessionParams(session);
-		const local = params["monitor:use_local_search"] === "true";
+		const local = !tenantSqlEnabled() && params["monitor:use_local_search"] === "true";
 		const slaMinutes = parseSlaMinutes(params["monitor:sla_minutes"]);
 		const { searchText, searchColumn, categories } = request.filters;
 		// Central WhatsApp has customer IDs; names live in the CRM. Fetch matching IDs
@@ -132,7 +133,7 @@ class MonitorService {
 		const history = await readMonitorMessages(
 			this.execute(session),
 			session,
-			parameters["monitor:use_local_search"] === "true",
+			!tenantSqlEnabled() && parameters["monitor:use_local_search"] === "true",
 			input
 		);
 		const all = [

@@ -1,3 +1,4 @@
+import { tenantSqlEnabled } from "../tenant-sql/registry";
 import { SessionData, SocketEventType, SocketServerChatRoom } from "../sdk-local";
 import { Prisma, WppMessage } from "@prisma/client";
 import { NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
@@ -262,6 +263,7 @@ class MessagesService {
 			}
 		});
 
+		if (tenantSqlEnabled()) return;
 		try {
 			await instancesService.executeQuery(
 				instance,
@@ -497,6 +499,7 @@ class MessagesService {
 	}
 
 	public async syncMessageToLocal(message: WppMessage, strict = false) {
+        if (tenantSqlEnabled()) return;
 		const query = `
 				INSERT INTO wpp_messages (
 					id, instance, wwebjs_id, wwebjs_id_stanza, waba_id, gupshup_id, gupshup_request_id,

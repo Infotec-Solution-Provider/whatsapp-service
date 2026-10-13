@@ -51,7 +51,7 @@ export class ContactMapper {
 	/**
 	 * Map a database row to a contact object
 	 */
-	public static mapDatabaseRow(row: DatabaseContactRow): MappedContact {
+	public static mapDatabaseRow(row: DatabaseContactRow, encodedName = true): MappedContact {
 		const customer = this.mapCustomerData(row);
 		const sectorIds = this.mapSectorIds(row.sector_ids);
 		const chatingWith = row.operator_NOME || null;
@@ -59,7 +59,7 @@ export class ContactMapper {
 		return {
 			id: row.id,
 			instance: row.instance,
-			name: safeDecode(row.name) || row.name,
+			name: encodedName ? safeDecode(row.name) || row.name : row.name,
 			phone: row.phone,
 			customerId: row.customer_id,
 			isDeleted: row.is_deleted,

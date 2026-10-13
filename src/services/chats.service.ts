@@ -1,3 +1,4 @@
+import { tenantSqlEnabled } from "../tenant-sql/registry";
 import { Customer, SessionData, SocketEventType, SocketServerMonitorRoom, SocketServerUserRoom } from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { Prisma, WppChat, WppContact, WppMessage, WppSector } from "@prisma/client";
@@ -1816,6 +1817,7 @@ class ChatsService {
 	}
 
 	public async syncChatToLocal(chat: WppChat) {
+        if (tenantSqlEnabled()) return;
 		try {
 			const startedAt = this.formatDateForMySQL(chat.startedAt);
 			const finishedAt = this.formatDateForMySQL(chat.finishedAt);

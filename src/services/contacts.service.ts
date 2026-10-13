@@ -1,3 +1,5 @@
+import { tenantSqlEnabled } from "../tenant-sql/registry";
+import { withDatabaseTenant } from "../utils/database-tenant-context";
 import { SessionData } from "../sdk-local";
 import { Prisma, WppContact } from "@prisma/client";
 import { BadRequestError, ConflictError } from "@rgranatodutra/http-errors";
@@ -244,6 +246,11 @@ class ContactsService {
 	}
 
 	public async getContactsWithCustomerLocally(instance: string, filters: ContactsFilters) {
+		const execute = <T>(sql: string, params: any[]): Promise<T> => tenantSqlEnabled()
+			? withDatabaseTenant(instance, () => prismaService.$queryRawUnsafe<T>(sql
+				.replace(/\bwpp_contacts\b/g, "contacts").replace(/\bwpp_chats\b/g, "chats")
+				.replace(/\bwpp_contact_sectors\b/g, "(SELECT contactId AS contact_id, sectorId AS sector_id FROM contacts_sectors)"), ...params))
+			: instancesService.executeQuery<T>(instance, sql, params);
 		// Validate and normalize pagination parameters
 		const { page, perPage } = PaginationHelper.validatePagination(filters.page, filters.perPage);
 
@@ -253,7 +260,7 @@ class ContactsService {
 
 		// Execute count query
 		const countQuery = ContactQueryBuilder.buildCountQuery(whereClause);
-		const countResult = await instancesService.executeQuery<Array<{ total: number }>>(instance, countQuery, params);
+		const countResult = await execute<Array<{ total: number }>>(countQuery, params);
 
 		const total = countResult[0]?.total || 0;
 
@@ -270,7 +277,7 @@ class ContactsService {
 		const offset = PaginationHelper.calculateOffset(page, perPage);
 		const dataQueryParams = [...params, perPage, offset];
 
-		const contacts = await instancesService.executeQuery<any[]>(instance, dataQuery, dataQueryParams);
+		const contacts = await execute<any[]>(dataQuery, dataQueryParams);
 
 		// Early return if query returned no results (shouldn't happen but safety check)
 		if (contacts.length === 0) {
@@ -281,7 +288,7 @@ class ContactsService {
 		}
 
 		// Map database rows to contact objects
-		const mappedContacts = contacts.map((row) => ContactMapper.mapDatabaseRow(row));
+		const mappedContacts = contacts.map((row) => ContactMapper.mapDatabaseRow(row, !tenantSqlEnabled()));
 
 		return {
 			data: mappedContacts,
@@ -642,6 +649,7 @@ class ContactsService {
 	}
 
 	private async syncContactToLocal(contact: WppContact) {
+        if (tenantSqlEnabled()) return;
 		try {
 			const query = `
 				INSERT INTO wpp_contacts (id, instance, name, phone, customer_id, is_deleted)
@@ -667,6 +675,7 @@ class ContactsService {
 	}
 
 	private async syncContactSectorsToLocal(contactId: number, instance: string, sectorIds: number[]) {
+        if (tenantSqlEnabled()) return;
 		try {
 			// Delete existing sectors
 			const deleteQuery = "DELETE FROM wpp_contact_sectors WHERE contact_id = ?";

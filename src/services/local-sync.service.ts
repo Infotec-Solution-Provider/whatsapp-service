@@ -1,4 +1,5 @@
 import { safeEncode } from "../utils/safe-encode";
+import { tenantSqlEnabled } from "../tenant-sql/registry";
 import instancesService from "./instances.service";
 import prismaService from "./prisma.service";
 
@@ -950,6 +951,7 @@ class LocalSyncService {
 	 * Run full synchronization for a specific instance
 	 */
 	public async syncInstance(instance: string, options: SyncOptions = {}): Promise<void> {
+		if (tenantSqlEnabled()) return;
 		console.log(`[LocalSync] ====== Iniciando sincronizacao para: ${instance} ======`);
 
 		if (options.skipContacts) console.log(`[LocalSync] Pulando sincronizacao de contatos`);
@@ -991,6 +993,7 @@ class LocalSyncService {
 	 * Run full synchronization for all instances
 	 */
 	public async syncAllInstances(options: SyncOptions = {}): Promise<void> {
+		if (tenantSqlEnabled()) return;
 		console.log(`[LocalSync] Iniciando sincronizacao de todas as instancias`);
 
 		try {
@@ -1016,6 +1019,7 @@ class LocalSyncService {
 	}
 
 	public async ensureLocalTables(instance: string): Promise<void> {
+		if (tenantSqlEnabled()) return;
 		await this.ensureTablesExist(instance);
 	}
 
@@ -1023,6 +1027,7 @@ class LocalSyncService {
 	 * Reset sync state for an entity (forces full resync on next run)
 	 */
 	public async resetSyncState(instance: string, entity: 'messages' | 'chats' | 'all'): Promise<void> {
+		if (tenantSqlEnabled()) throw new Error("Local sync is disabled while tenant SQL is authoritative");
 		try {
 			if (entity === 'all') {
 				const query = `DELETE FROM wpp_sync_state`;
@@ -1067,6 +1072,7 @@ class LocalSyncService {
 	 * Force full resync by clearing data and state
 	 */
 	public async forceFullResync(instance: string): Promise<void> {
+		if (tenantSqlEnabled()) throw new Error("Local sync is disabled while tenant SQL is authoritative");
 		console.log(`[LocalSync] Iniciando full resync para ${instance}...`);
 
 		try {
