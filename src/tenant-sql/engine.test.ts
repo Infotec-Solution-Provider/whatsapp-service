@@ -65,6 +65,15 @@ test("callbacks bind delegates and raw SQL to the transaction connection", async
 	assert.deepEqual(h.calls[1]!.values, ["safe", 8]);
 });
 
+test("raw prepared pagination rewrites tenant tables and retains bound search values", async () => {
+	const h = harness();
+	await h.client.$queryRawUnsafe("SELECT id FROM contacts WHERE instance = ? AND name LIKE ? LIMIT ? OFFSET ?", "tenant-a", "%O'Reilly\\%", 20, 40);
+	assert.equal(h.calls[0]!.sql, "SELECT id FROM `wpp_runtime_contacts` WHERE instance = ? AND name LIKE ? LIMIT 20 OFFSET 40");
+	assert.deepEqual(h.calls[0]!.values, ["tenant-a", "%O'Reilly\\%"]);
+	await assert.rejects(Promise.resolve(h.client.$queryRawUnsafe("SELECT id FROM contacts LIMIT ?", -1)), /PAGINATION_INVALID/);
+	assert.equal(h.calls.length, 1);
+});
+
 test("an array operation cannot escape while its transaction waits for a connection", async () => {
 	const h = harness();
 	let acquire!: () => void;

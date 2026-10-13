@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import type { Pool, PoolConnection } from "mysql2/promise";
 import { models, getModelMeta, hydrate, quoteIdent, scalarValue, type ModelMetadata, type RelationMetadata, type ScalarField } from "./metadata";
 import { compileOrderBy, compileWhere, rewriteRawSql } from "./compiler";
+import { compileRawPagination } from "./raw-pagination";
 
 type Data = Record<string, any>;
 type Executor = { execute(options: { sql: string; values: any[]; timeout: number }): Promise<[any, any]> };
@@ -188,7 +189,8 @@ export class NativeTenantClient {
 	}
 	async executeOperation(modelName: string, operation: string, args: any = {}): Promise<any> {
 		if (modelName === "$raw") {
-			const result = await this.sql(rewriteRawSql(args.sql), args.values);
+			const prepared = compileRawPagination(rewriteRawSql(args.sql), args.values);
+			const result = await this.sql(prepared.sql, prepared.values);
 			return operation === "execute" ? Number(result.affectedRows ?? 0) : result;
 		}
 		const meta = getModelMeta(modelName);
