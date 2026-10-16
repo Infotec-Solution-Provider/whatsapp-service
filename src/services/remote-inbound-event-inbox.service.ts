@@ -93,7 +93,11 @@ export function resolveRemoteInboundIdempotencyKey(
 	return key;
 }
 
-export function calculateRemoteInboundRetryDelayMs(retryCount: number): number {
+export function calculateRemoteInboundRetryDelayMs(retryCount: number, eventType?: string, errorMessage?: string): number {
+	// Keep early retries fast while an outbound job links its provider ID. Old
+	// unmatched receipts remain durable, but must not consume the worker forever.
+	if (retryCount >= 8 && eventType?.startsWith("message-status-received:") &&
+		errorMessage === "REMOTE_RECEIPT_MESSAGE_NOT_FOUND") return 3_600_000;
 	return Math.min(300_000, 1_000 * 2 ** Math.min(Math.max(retryCount, 0), 8));
 }
 
@@ -270,7 +274,9 @@ export class RemoteInboundEventInboxService {
 			const now = new Date();
 			const candidates = await prismaService.remoteInboundEventInbox.findMany({
 				where: { status: "PENDING", nextAttemptAt: { lte: now } },
-				orderBy: { createdAt: "asc" },
+				// A retry goes behind events already due, regardless of its original
+				// creation date. Uses the existing (status, next_attempt_at) index.
+				orderBy: [{ nextAttemptAt: "asc" }, { id: "asc" }],
 				take: this.concurrency,
 				select: { id: true }
 			});
@@ -341,7 +347,7 @@ export class RemoteInboundEventInboxService {
 				status: terminal ? "FAILED" : "PENDING",
 				retryCount,
 				error: message,
-				nextAttemptAt: new Date(Date.now() + calculateRemoteInboundRetryDelayMs(retryCount)),
+				nextAttemptAt: new Date(Date.now() + calculateRemoteInboundRetryDelayMs(retryCount, item.eventType, message)),
 				lockedBy: null,
 				lockedUntil: null
 			}
