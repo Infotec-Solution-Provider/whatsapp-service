@@ -25,6 +25,7 @@ async function main(): Promise<void> {
 	await assert.rejects(client.handleMessageStatus("synthetic-stanza", "READ"), /P2024/);
 	assert.deepEqual(query.where, { wwebjsIdStanza: "synthetic-stanza", clientId: 2, instance: "test-tenant" });
 	assert.equal(query.take, 2);
+	assert.deepEqual(query.select, { id: true, status: true });
 	failure = null;
 	await client.handleMessageStatus("synthetic-stanza", "READ");
 	assert.equal(writes, 1);

@@ -34,7 +34,7 @@
 		"test:functional-health": "ts-node src/services/waba-health-status.test.ts && npm run test:channel-health",
 		"test:channel-health": "ts-node src/services/channel-message-health.test.ts && ts-node src/services/remote-session-stability.test.ts",
 		"test:waba-health-status": "ts-node src/services/waba-health-status.test.ts && ts-node src/whatsapp-client/waba-whatsapp-client.test.ts",
-		"test:remote-inbound": "ts-node src/services/remote-inbound-event-inbox.test.ts",
+		"test:remote-inbound": "ts-node src/services/remote-inbound-event-inbox.test.ts && ts-node src/services/remote-inbound-fairness.test.ts",
 		"test:internal-message-status": "ts-node src/services/internal-message-status.test.ts && ts-node src/services/internal-wpp-delivery.test.ts && ts-node src/services/internal-whatsapp-message-queue.test.ts && ts-node src/services/message-presentation-retry.test.ts",
 		"test:ops-alerts": "ts-node src/services/ops-alerts/ops-alerts.test.ts",
 		"test:session-directory": "ts-node src/utils/remote-session-directory.test.ts",

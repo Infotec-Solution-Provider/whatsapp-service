@@ -395,6 +395,7 @@ class RemoteWhatsappClient implements WhatsappClient {
 				where: {
 					wwebjsIdStanza: messageId, clientId: this.id, instance: this.instance
 				},
+				select: { id: true, status: true },
 				take: 2
 			});
 			if (candidates.length > 1) throw new Error("REMOTE_RECEIPT_AMBIGUOUS_MESSAGE");

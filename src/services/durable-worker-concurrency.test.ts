@@ -42,7 +42,7 @@ async function testBatchDrainsOnDatabaseFailure(stage: FailureStage): Promise<vo
 			candidateQueries++;
 			assert.equal(args.take, 4);
 			assert.deepEqual(args.select, { id: true });
-			assert.deepEqual(args.orderBy, { createdAt: "asc" });
+			assert.deepEqual(args.orderBy, [{ nextAttemptAt: "asc" }, { id: "asc" }]);
 			return rows.filter((row) => row.status === "PENDING").slice(0, args.take).map(({ id }) => ({ id }));
 		},
 		updateMany: async ({ where, data }: { where: { id?: string }; data: { status: string; retryCount?: number } }) => {
