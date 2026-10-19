@@ -35,6 +35,16 @@ O login aceita até 10 tentativas por minuto para a mesma origem, tenant e usuá
 
 Listagens retornam o envelope `{"message":"...","data":{...}}`. Conversas usam `data.items` e `data.pagination`. O filtro `contactId` é aplicado junto com o tenant do token. Conversas aceitam `startedFrom`/`startedTo` e `finishedFrom`/`finishedTo` (inclusivos).
 
+### Conversas com atividade no período (`updatedFrom` / `updatedTo`)
+
+`GET /api/whatsapp/conversations?updatedFrom=2026-10-16T00:00:00-03:00&updatedTo=2026-10-17T00:00:00-03:00&limit=100`
+
+O filtro seleciona conversas com pelo menos um destes eventos no intervalo inclusivo: abertura (`started_at`), encerramento (`finished_at`), mensagem (`sent_at`), transferência registrada (`transferred_at`) ou última alteração do contato vinculado (`contacts.updated_at`). O total e os itens usam o mesmo filtro, combinado com os demais filtros da rota. A ordenação continua `startedAt DESC, id DESC`.
+
+`updatedFrom` é obrigatório quando `updatedTo` é informado. Ambos exigem ISO 8601 com fuso. A janela máxima é de 31 dias; divida períodos maiores. Sem `updatedTo`, o servidor fixa o instante da consulta e o devolve em `data.activityWindow.to`; reutilize esse valor nas páginas seguintes. `data.activityWindow.semantics` é `activity`.
+
+Este contrato acompanha **atividade**, sem novas colunas e sem migração. Não é um histórico de todas as alterações: resultado/tag alterados sem novo evento, edições/status de mensagens antigas, exclusões, alterações diretas no CRM/ERP e contatos cujo `updated_at` foi novamente alterado depois da janela não são garantidos. As respostas são o estado atual, não uma fotografia histórica. Mudanças durante a paginação ainda podem deslocar itens. Use sobreposição entre janelas, deduplicação por ID, recarga das conversas abertas e reconciliação completa periódica para o BI. O filtro não exige nem utiliza `chats.updated_at` ou `messages.updated_at`.
+
 Na exportação por período, repita a chamada usando `data.pagination.nextCursor` como `afterId`. Termine quando `hasMore` for `false`. `sentFrom` e `sentTo` são inclusivos. A rota de transferências pagina do mesmo jeito.
 
 Em conversas, `contact.customer` traz o cliente do CRM vinculado ao contato (`null` quando não há vínculo):

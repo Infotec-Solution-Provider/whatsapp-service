@@ -8,6 +8,7 @@ import protectedRead from "../middlewares/protected-read";
 import chatUserPreferencesService, { ChatPreferenceType } from "../services/chat-user-preferences.service";
 import publicReportFieldsService from "../services/public-report-fields.service";
 import transferHistoryService from "../services/transfer-history.service";
+import { parseConversationActivityRange } from "../utils/public-conversation-activity";
 
 const parseOptionalPositiveInt = (value: unknown, field: string) => {
 	if (value === undefined || value === "") return undefined;
@@ -87,6 +88,7 @@ class ChatsController {
 		const finishedFrom = parseDate(req.query["finishedFrom"], "finishedFrom");
 		const finishedTo = parseDate(req.query["finishedTo"], "finishedTo");
 		const filters: PublicConversationsFilters = {
+			...parseConversationActivityRange(req.query["updatedFrom"], req.query["updatedTo"]),
 			page,
 			limit,
 			...(rawIsFinished === undefined ? {} : { isFinished: rawIsFinished === "true" }),
