@@ -17,6 +17,7 @@ import {
 	type MonitorRow
 } from "./monitor-reader";
 import { readMonitorMessages } from "./monitor-history";
+import { monitorChannelQuery } from "./monitor-channels";
 
 // SQL semantics are exercised on disposable in-memory databases. Only MySQL's epoch
 // function and charset conversion are adapted; no application database is contacted.
@@ -184,6 +185,19 @@ async function test(name: string, run: () => unknown | Promise<unknown>) {
 }
 
 async function run() {
+	await test("channel catalog is bounded, scoped and selects no credentials, including inactive historical channels", () => {
+		const query = monitorChannelQuery(session, { page: "2", search: "Comercial" });
+		assert.equal(query.skip, 20);
+		assert.equal(query.take, 20);
+		assert.deepEqual(query.select, { id: true, name: true, phone: true, isActive: true });
+		assert.equal(query.where.instance, "nunes");
+		assert.deepEqual(query.where.sectors, { some: { instance: "nunes", id: 2 } });
+		assert.equal("isActive" in query.where, false);
+		assert.equal(monitorChannelQuery({ ...session, instance: "other" }, {}).where.sectors, undefined);
+		assert.equal(monitorChannelQuery({ ...session, sectorId: 3 }, {}).where.sectors, undefined);
+		for (const input of [{ page: "0" }, { page: "1.5" }, { page: ["1"] }, { search: ["x"] }, { search: "x".repeat(101) }])
+			assert.throws(() => monitorChannelQuery(session, input));
+	});
 	await test("reject invalid pages, oversized limits, booleans and sort injection", () => {
 		for (const input of [
 			{ page: 0 },
@@ -192,6 +206,9 @@ async function run() {
 			{ pageSize: 101 },
 			{ filters: { sortOrder: "desc; DROP TABLE chats" } },
 			{ filters: { showBots: "false" } },
+			{ filters: { lastMessageChannelId: "1 OR 1=1" } },
+			{ filters: { lastMessageChannelId: -1 } },
+			{ filters: { lastMessageChannelId: 1.5 } },
 			{ filters: { startedAt: { from: "bad" } } }
 		])
 			assert.throws(() => parseMonitorRequest(input));
@@ -222,6 +239,7 @@ async function run() {
 		for (const route of [
 			"/api/whatsapp/monitor/search",
 			"/api/whatsapp/monitor/summary",
+			"/api/whatsapp/monitor/channels",
 			"/api/whatsapp/monitor/chats/:type/:id/messages"
 		]) {
 			assert.ok(controller.includes(`"${route}",\n\t\t\tisAuthenticated,\n\t\t\tisAdmin,`));
@@ -244,6 +262,27 @@ async function run() {
 		assert.throws(() => parseMonitorRequest({ filters: { startedAt: { from: "2026-02-31" } } }));
 	});
 	for (const local of [false, true]) {
+		await test(`${local ? "local" : "standard"}: channel filters the latest message before paging and summary`, async () => {
+			const db = local ? tenant : central;
+			const messages = local ? "wpp_messages" : "messages";
+			db.exec(`UPDATE ${messages} SET client_id = 2 WHERE id IN (14, 60)`);
+			try {
+				const request = parseMonitorRequest({ pageSize: 1, filters: { lastMessageChannelId: 2 } });
+				const ctx = context(local, request.filters);
+				const page = await monitorPage(execute, monitorSources(ctx), request);
+				assert.equal(page.totalCount, 1);
+				assert.equal(Number(page.rows[0]?.["id"]), 1);
+				assert.equal(mapMonitorRow(page.rows[0]!).lastMessage?.clientId, 2);
+				assert.equal((await monitorSummary(execute, monitorSources(ctx), 30)).inProgress, 1);
+				const previous = await execute(local, buildMonitorQuery("wpp", context(local, { lastMessageChannelId: 1 })));
+				assert.ok(previous.every(row => Number(row["id"]) !== 1));
+				const missing = await monitorPage(execute, monitorSources(context(local, { lastMessageChannelId: 999 })), parseMonitorRequest({ filters: { lastMessageChannelId: 999 } }));
+				assert.equal(missing.totalCount, 0);
+				assert.equal((await execute(false, buildMonitorQuery("internal", context(false, request.filters)))).length, 0);
+			} finally {
+				db.exec(`UPDATE ${messages} SET client_id = 1 WHERE id IN (14, 60)`);
+			}
+		});
 		await test(`${local ? "local" : "standard"}: last message and unread stay within chat; bot/system do not end human wait`, async () => {
 			const ctx = context(local);
 			const rows = await execute(local, buildMonitorQuery("wpp", ctx));

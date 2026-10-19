@@ -14,6 +14,12 @@ class MonitorController {
 			isAdmin,
 			protectedRead("monitor.search", this.searchMonitorData)
 		);
+		this.router.get(
+			"/api/whatsapp/monitor/channels",
+			isAuthenticated,
+			isAdmin,
+			protectedRead("monitor.channels", this.getMonitorChannels)
+		);
 		this.router.post(
 			"/api/whatsapp/monitor/summary",
 			isAuthenticated,
@@ -52,6 +58,9 @@ class MonitorController {
 
 	private async getMonitorSummary(req: Request) {
 		return { data: await monitorService.getMonitorSummary(req.session, { filters: req.body?.filters }) };
+	}
+	private async getMonitorChannels(req: Request) {
+		return { data: await monitorService.getMonitorChannels(req.session, { page: req.query["page"], search: req.query["search"] }) };
 	}
 
 	private async getMonitorMessages(req: Request) {
