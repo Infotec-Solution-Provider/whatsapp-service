@@ -29,6 +29,7 @@ import contactsService from "./contacts.service";
 import { createUploadTraceLogger } from "../utils/file-upload-trace";
 import readyMessagesService from "./ready-messages.service";
 import { WabaDeliveryError } from "../utils/waba-send";
+import { getTemplateAttribution } from "../utils/template-attribution";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -845,10 +846,9 @@ class WhatsappService {
 				gupshupId: message.gupshupId,
 			});
 
-			if (typeof options.agentId === "number" && options.agentId > 0) {
-				// Template disparado pelo agente de IA: o from do provedor é mantido; o agentId identifica a origem.
-				message.agentId = options.agentId;
-			}
+			// A sessão identifica quem disparou; o dono atual da conversa não é prova de autoria.
+			// Agentes continuam automáticos mesmo quando executam sob a sessão de um supervisor.
+			Object.assign(message, getTemplateAttribution(session.userId, options.agentId));
 
 			stage = "persist-message";
 			const savedMsg = await messagesService.insertMessage(message);
