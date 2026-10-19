@@ -29,6 +29,8 @@ import { TemplateVariables } from "../types/whatsapp-api.types";
 import messagePresentationService from "./message-presentation.service";
 import chatUserPreferencesService from "./chat-user-preferences.service";
 import publicReportFieldsService from "./public-report-fields.service";
+import { buildConversationActivityQueries, PublicConversationsFilters } from "../utils/public-conversation-activity";
+export type { PublicConversationsFilters } from "../utils/public-conversation-activity";
 
 interface InpulseResult {
 	CODIGO: number;
@@ -61,19 +63,6 @@ interface ChatsFilters {
 	isFinished?: string;
 }
 
-export interface PublicConversationsFilters {
-	page: number;
-	limit: number;
-	isFinished?: boolean;
-	userId?: number;
-	sectorId?: number;
-	contactId?: number;
-	search?: string;
-	startedFrom?: Date;
-	startedTo?: Date;
-	finishedFrom?: Date;
-	finishedTo?: Date;
-}
 
 interface SystemStartNewChatProps {
 	instance: string;
@@ -533,6 +522,27 @@ class ChatsService {
 	}
 
 	public async getPublicConversations(session: SessionData, filters: PublicConversationsFilters) {
+		if (filters.updatedFrom || filters.updatedTo) {
+			const query = buildConversationActivityQueries(session.instance, filters);
+			const [counts, ids] = await Promise.all([
+				prismaService.$queryRawUnsafe<Array<{ total: bigint | number }>>(query.countSql, ...query.values),
+				prismaService.$queryRawUnsafe<Array<{ id: number }>>(query.pageSql, ...query.pageValues)
+			]);
+			const total = Number(counts[0]?.total ?? 0);
+			const items = ids.length ? await prismaService.wppChat.findMany({
+				where: { instance: session.instance, id: { in: ids.map(({ id }) => Number(id)) } },
+				orderBy: [{ startedAt: "desc" }, { id: "desc" }],
+				include: { contact: true, sector: true, _count: { select: { messages: true } } }
+			}) : [];
+			return {
+				items: await this.presentPublicConversations(session.instance, items),
+				pagination: {
+					page: filters.page, limit: filters.limit, total, totalPages: Math.ceil(total / filters.limit),
+					hasNextPage: filters.page * filters.limit < total, hasPreviousPage: filters.page > 1
+				},
+				activityWindow: { from: filters.updatedFrom, to: filters.updatedTo, semantics: "activity" }
+			};
+		}
 		const where: Prisma.WppChatWhereInput = {
 			instance: session.instance,
 			...(filters.isFinished === undefined ? {} : { isFinished: filters.isFinished }),

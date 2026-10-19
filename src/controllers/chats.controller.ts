@@ -9,6 +9,7 @@ import chatUserPreferencesService, { ChatPreferenceType } from "../services/chat
 import publicReportFieldsService from "../services/public-report-fields.service";
 import transferHistoryService from "../services/transfer-history.service";
 import { TemplateVariables } from "../types/whatsapp-api.types";
+import { parseConversationActivityRange } from "../utils/public-conversation-activity";
 import {
 	chatScopeFromSession,
 	messagesScopeFromSession,
@@ -170,6 +171,7 @@ class ChatsController {
 		const finishedFrom = parseDate(req.query["finishedFrom"], "finishedFrom");
 		const finishedTo = parseDate(req.query["finishedTo"], "finishedTo");
 		const filters: PublicConversationsFilters = {
+			...parseConversationActivityRange(req.query["updatedFrom"], req.query["updatedTo"]),
 			page,
 			limit,
 			...(rawIsFinished === undefined ? {} : { isFinished: rawIsFinished === "true" }),
