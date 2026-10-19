@@ -8,8 +8,10 @@ import parametersService from "../services/parameters.service";
 import prismaService from "../services/prisma.service";
 import socketService from "../services/socket.service";
 import whatsappService from "../services/whatsapp.service";
-import JsonSessionStore from "../utils/json-session-store";
 import ProcessingLogger from "../utils/processing-logger";
+import path from "node:path";
+import { SatisfactionSessionStore } from "./satisfaction-session-store";
+import { persistInitialSurveyRating, persistSurveyAnswer, SurveyChatLock } from "./satisfaction-answer-persistence";
 
 type RunningSession = {
 	chatId: number;
@@ -19,6 +21,8 @@ type RunningSession = {
 	questionIndex: number;
 	lastActivity: number; // timestamp (ms) da última interação
 	timeoutms?: number; // opcionalmente pode ter timeout customizado
+	pendingAnswer?: { messageId: number; rating: number; questionIndex: number; initial: boolean };
+	lastProcessedMessageId?: number;
 };
 
 type SatisfactionQuestionKey = "q1" | "q2" | "q3" | "q4";
@@ -60,12 +64,13 @@ const INACTIVITY_TIMEOUT_MS = process.env["EXATRON_PESQUISA_TIMEOUT_MS"]
 	? parseInt(process.env["EXATRON_PESQUISA_TIMEOUT_MS"])
 	: 30 * 60 * 1000;
 
-const store = new JsonSessionStore<RunningSession>({ filename: "exatron-satisfaction.sessions.json" });
+const store = new SatisfactionSessionStore<RunningSession>(path.resolve(process.cwd(), "data", "exatron-satisfaction.sessions.json"));
 
 class ExatronSatisfactionBot {
 	private sessions = new Map<number, RunningSession>();
 	private initialized = false;
 	private watcherStarted = false;
+	private readonly chatLock = new SurveyChatLock();
 
 	private async ensureLoaded() {
 		if (this.initialized) return;
@@ -82,6 +87,9 @@ class ExatronSatisfactionBot {
 						questionIndex: s.questionIndex ?? 0,
 						lastActivity: s.lastActivity ?? now,
 						userId: s.userId,
+						...(s.sectorId ? { sectorId: s.sectorId } : {}),
+						...(s.pendingAnswer ? { pendingAnswer: s.pendingAnswer } : {}),
+						...(s.lastProcessedMessageId ? { lastProcessedMessageId: s.lastProcessedMessageId } : {}),
 						timeoutms: s.timeoutms ?? INACTIVITY_TIMEOUT_MS
 					});
 				}
@@ -104,7 +112,7 @@ class ExatronSatisfactionBot {
 		if (!s) {
 			const newSession: RunningSession = {
 				chatId: chat.id,
-				userId: chat.contactId,
+				userId: chat.userId,
 				step: 1,
 				questionIndex: 0,
 				lastActivity: Date.now(),
@@ -128,7 +136,12 @@ class ExatronSatisfactionBot {
 
 	/** Permite resetar o fluxo manualmente (ex.: intervenção humana). */
 	public async reset(chatId: number, userId: number) {
+		return this.chatLock.run(chatId, () => this.resetLocked(chatId, userId));
+	}
+
+	private async resetLocked(chatId: number, userId: number) {
 		await this.ensureLoaded();
+		if (this.sessions.get(chatId)?.pendingAnswer) throw new Error("SURVEY_ANSWER_PENDING_PERSISTENCE");
 		const newSession: RunningSession = {
 			chatId,
 			step: 1,
@@ -157,11 +170,32 @@ class ExatronSatisfactionBot {
 		const now = Date.now();
 
 		for (const s of Array.from(this.sessions.values())) {
-			const timeoutms = s.timeoutms ?? INACTIVITY_TIMEOUT_MS;
+			await this.chatLock.run(s.chatId, async () => {
+				if (this.sessions.get(s.chatId) !== s) return;
+				// A storage failure is not customer inactivity. Preserve and retry the original answer.
+				if (s.pendingAnswer) { await this.retryPendingAnswer(s); return; }
+				const timeoutms = s.timeoutms ?? INACTIVITY_TIMEOUT_MS;
+				if (s.step < 2 && now - s.lastActivity >= timeoutms) await this.handleSessionTimeout(s, now);
+			});
+		}
+	}
 
-			if (s.step < 2 && now - s.lastActivity >= timeoutms) {
-				await this.handleSessionTimeout(s, now);
+	private async retryPendingAnswer(session: RunningSession): Promise<void> {
+		const pending = session.pendingAnswer;
+		if (!pending) return;
+		const logger = new ProcessingLogger("exatron", "exatron-satisfaction-persistence", `retry-${session.chatId}-${pending.messageId}-${Date.now()}`, {
+			chatId: session.chatId, messageId: pending.messageId, questionIndex: pending.questionIndex,
+		});
+		try {
+			const chat = await prismaService.wppChat.findUnique({ where: { id: session.chatId } });
+			const message = await prismaService.wppMessage.findUnique({ where: { id: pending.messageId } });
+			const contact = chat?.contactId ? await prismaService.wppContact.findUnique({ where: { id: chat.contactId } }) : null;
+			if (!chat || chat.instance !== "exatron" || !contact || contact.instance !== chat.instance || !message || message.instance !== chat.instance || message.chatId !== chat.id) {
+				throw new Error("SURVEY_PENDING_SOURCE_UNAVAILABLE");
 			}
+			await this.persistPendingAnswer(chat, contact, session, message, logger);
+		} catch {
+			logger.failed(new Error("SURVEY_ANSWER_PENDING_PERSISTENCE"));
 		}
 	}
 
@@ -240,10 +274,6 @@ class ExatronSatisfactionBot {
 		await this.sendBotText(from, chat, question.text, quotedId);
 	}
 
-	private buildQuestionStorageText(question: SatisfactionQuestion): string {
-		return `[${question.key}] ${question.text}`;
-	}
-
 	private async addSystemMessageForChat(
 		chat: WppChat,
 		text: string,
@@ -270,95 +300,58 @@ class ExatronSatisfactionBot {
 		}
 	}
 
-	// Tenta persistir a nota/resposta no banco da instância (se existir a estrutura antiga). Ignora falhas.
-	private async tryStoreInitialRating(
-		instance: string,
-		chat: WppChat,
-		originalMessage: string | undefined,
-		rating: number,
-		logger?: ProcessingLogger
-	) {
-		try {
-			logger?.log("Persistindo nota inicial na base legada (se disponível)");
-			// Muitas bases antigas possuem w_atendimentos_feedbacks. Usamos chat.id como fallback para CODIGO_ATENDIMENTO.
-			await instancesService.executeQuery<any>(
-				instance,
-				"UPDATE w_atendimentos_feedbacks SET NOTA_ATENDIMENTO = ?, COMENTARIO = ? WHERE CODIGO_ATENDIMENTO = ?",
-				[rating, `${originalMessage || ""}`, chat.id]
-			);
-			logger?.log("Nota inicial persistida com sucesso");
-		} catch (e) {
-			// silencioso: base pode não ter a tabela/colunas
-			logger?.log("Falha ao persistir nota inicial (tabela ausente?)");
-		}
+	private async queueAnswer(chat: WppChat, contact: WppContact, session: RunningSession, message: WppMessage,
+		rating: number, initial: boolean, logger: ProcessingLogger): Promise<void> {
+		session.pendingAnswer = { messageId: message.id, rating, questionIndex: session.questionIndex, initial };
+		// Save only the reference. The original answer remains in the existing messages table.
+		await store.save(() => this.sessions.values());
+		await this.persistPendingAnswer(chat, contact, session, message, logger);
 	}
 
-	private async tryStoreQuestionAnswer(
-		instance: string,
-		chat: WppChat,
-		contact: WppContact,
-		question: SatisfactionQuestion,
-		originalMessage: string | undefined,
-		rating: number,
-		questionIndex: number,
-		logger?: ProcessingLogger
-	) {
-		try {
-			// Opcionalmente tentamos descobrir um possível numberId; se falhar, usamos 0.
-			let numberId = 0;
-
-			try {
-				const phone = (contact.phone || "").replace(/[^0-9]/g, "");
-				logger?.log("Buscando numberId no legado por telefone", { phone });
-				const res =
-					(await instancesService.executeQuery<Array<{ CODIGO: number }>>(
-						instance,
-						"SELECT CODIGO FROM w_numeros WHERE NUMERO = ? LIMIT 1",
-						[phone]
-					)) || [];
-				if (res.length > 0 && res[0]) numberId = res[0].CODIGO;
-			} catch { }
-
-			const questionStored = this.buildQuestionStorageText(question);
-			const isNotApplicable = rating === 99 ? 1 : 0;
-
-			logger?.log("Persistindo resposta de pergunta no legado (v2)", {
-				questionKey: question.key,
-				rating,
-				questionIndex
+	private async persistPendingAnswer(chat: WppChat, contact: WppContact, session: RunningSession,
+		message: WppMessage, logger: ProcessingLogger): Promise<void> {
+		const pending = session.pendingAnswer;
+		if (!pending || pending.messageId !== message.id) throw new Error("SURVEY_PENDING_ANSWER_MISMATCH");
+		const query = (sql: string, values: unknown[]) => instancesService.executeQuery<unknown>(chat.instance, sql, values);
+		if (pending.initial) {
+			await persistInitialSurveyRating(query, chat.id, message.body, pending.rating);
+		} else {
+			const question = QUESTIONS[pending.questionIndex];
+			if (!question) throw new Error("SURVEY_PENDING_QUESTION_INVALID");
+			const numbers = await instancesService.executeQuery<Array<{ CODIGO: number }>>(
+				chat.instance, "SELECT CODIGO FROM w_numeros WHERE NUMERO = ? LIMIT 1", [(contact.phone || "").replace(/[^0-9]/g, "")],
+			);
+			await persistSurveyAnswer(query, {
+				chatId: chat.id, numberId: numbers[0]?.CODIGO ?? 0, messageId: message.id,
+				questionKey: question.key, question: question.text, questionIndex: pending.questionIndex,
+				answer: message.body, rating: pending.rating,
 			});
-
-			try {
-				await instancesService.executeQuery<any>(
-					instance,
-					"INSERT INTO w_questionarios_respostas (CODIGO_ATENDIMENTO, CODIGO_NUMERO, PERGUNTA, RESPOSTA, NOTA, QUESTION_KEY, SURVEY_VERSION, QUESTION_INDEX, IS_NOT_APPLICABLE, SCALE_MIN, SCALE_MAX) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-					[
-						chat.id,
-						numberId,
-						questionStored,
-						originalMessage || "",
-						rating,
-						question.key,
-						"EXA_V2_1_10",
-						questionIndex + 1,
-						isNotApplicable,
-						1,
-						10
-					]
-				);
-			} catch {
-				await instancesService.executeQuery<any>(
-					instance,
-					"INSERT INTO w_questionarios_respostas (CODIGO_ATENDIMENTO, CODIGO_NUMERO, PERGUNTA, RESPOSTA, NOTA) VALUES (?, ?, ?, ?, ?)",
-					[chat.id, numberId, questionStored, originalMessage || "", rating]
-				);
-			}
-
-			logger?.log("Resposta persistida com sucesso");
-		} catch (e) {
-			// silencioso: base pode não ter a tabela/colunas
-			logger?.log("Falha ao persistir resposta (tabela ausente?)");
 		}
+		logger.log("Persistência da resposta confirmada", { messageId: message.id, questionIndex: pending.questionIndex });
+		const previous = { ...session };
+		session.questionIndex = pending.initial ? 0 : pending.questionIndex + 1;
+		session.step = session.questionIndex >= QUESTIONS.length ? 2 : 1;
+		session.lastActivity = Date.now();
+		session.lastProcessedMessageId = message.id;
+		delete session.pendingAnswer;
+		try { await store.save(() => this.sessions.values()); }
+		catch {
+			Object.assign(session, previous);
+			if (previous.lastProcessedMessageId === undefined) delete session.lastProcessedMessageId;
+			throw new Error("SURVEY_PROGRESS_SAVE_FAILED");
+		}
+		// A supervisor may have closed the chat during a CRM outage. Save the answer without reopening/sending.
+		const current = await prismaService.wppChat.findFirst({ where: { id: chat.id, instance: chat.instance } });
+		if (!current || current.isFinished) { this.remove(chat.id); return; }
+		const target = this.getMessageTarget(contact, message);
+		if (session.step === 2) {
+			await this.finishChat(chat, logger);
+			await this.sendBotText(target, chat, THANKS_MSG, message.id);
+			this.remove(chat.id);
+		} else {
+			await this.sendQuestion(target, chat, session.questionIndex, message.id);
+		}
+		logger.success({ step: session.step, questionIndex: session.questionIndex });
 	}
 
 	private async finishChat(chat: WppChat, logger?: ProcessingLogger) {
@@ -395,6 +388,10 @@ class ExatronSatisfactionBot {
 	 * Útil quando você quer disparar a pesquisa sem aguardar mensagem do cliente.
 	 */
 	public async startInitialRating(chat: WppChat, contact: WppContact, to: string, quotedId?: number) {
+		return this.chatLock.run(chat.id, () => this.startInitialRatingLocked(chat, contact, to, quotedId));
+	}
+
+	private async startInitialRatingLocked(chat: WppChat, contact: WppContact, to: string, quotedId?: number) {
 		if (chat.instance !== "exatron") {
 			return;
 		}
@@ -409,6 +406,7 @@ class ExatronSatisfactionBot {
 			{ chatId: chat.id, contactId: contact.id, mode: "initial-rating" }
 		);
 		try {
+			if (session.pendingAnswer) throw new Error("SURVEY_ANSWER_PENDING_PERSISTENCE");
 			// Garante Step 0 (aguarda nota) e zera índice de perguntas
 			session.step = 0;
 			session.questionIndex = 0;
@@ -433,6 +431,10 @@ class ExatronSatisfactionBot {
 		to: string,
 		quotedId?: number
 	) {
+		return this.chatLock.run(chat.id, () => this.startBotLocked(chat, contact, to, quotedId));
+	}
+
+	private async startBotLocked(chat: WppChat, contact: WppContact, to: string, quotedId?: number) {
 		if (chat.instance !== "exatron") {
 			return;
 		}
@@ -447,6 +449,7 @@ class ExatronSatisfactionBot {
 			{ chatId: chat.id, contactId: contact.id, mode: "first-question" }
 		);
 		try {
+			if (session.pendingAnswer) throw new Error("SURVEY_ANSWER_PENDING_PERSISTENCE");
 			logger.log("Iniciando startBot", {
 				to,
 				quotedId: quotedId ?? null,
@@ -479,12 +482,25 @@ class ExatronSatisfactionBot {
 		contact: WppContact,
 		message: WppMessage
 	) {
+		return this.chatLock.run(chat.id, () => this.processMessageLocked(chat, contact, message));
+	}
+
+	private async processMessageLocked(
+		chat: WppChat,
+		contact: WppContact,
+		message: WppMessage
+	) {
 		if (chat.instance !== "exatron") {
 			return;
 		}
 
 		await this.ensureLoaded();
 		const session = await this.getOrCreate(chat);
+		if (session.lastProcessedMessageId && message.id <= session.lastProcessedMessageId) return;
+		if (session.pendingAnswer) {
+			await this.retryPendingAnswer(session);
+			return;
+		}
 		session.lastActivity = Date.now();
 		store.scheduleSave(() => this.sessions.values());
 
@@ -498,8 +514,7 @@ class ExatronSatisfactionBot {
 			questionIndex: session.questionIndex
 		});
 		logger.log("Mensagem recebida", {
-			from: message.from,
-			body: (message.body || "").slice(0, 200),
+			messageId: message.id,
 			chatFinished: chat.isFinished
 		});
 
@@ -517,8 +532,8 @@ class ExatronSatisfactionBot {
 				default:
 					logger.log(`Unknown step: ${session.step}`);
 			}
-		} catch (err) {
-			logger.failed(err);
+		} catch {
+			logger.failed(new Error(session.pendingAnswer ? "SURVEY_ANSWER_PENDING_PERSISTENCE" : "SURVEY_PROCESSING_FAILED"));
 		}
 	}
 
@@ -540,19 +555,7 @@ class ExatronSatisfactionBot {
 			return;
 		}
 
-		logger.log("Nota válida recebida", { rating });
-		await this.tryStoreInitialRating(chat.instance, chat, message.body, rating, logger);
-
-		// Advance to questions
-		session.step = 1;
-		session.questionIndex = 0;
-		session.lastActivity = Date.now();
-		store.scheduleSave(() => this.sessions.values());
-
-		const target = this.getMessageTarget(contact, message);
-		logger.log("Enviando primeira pergunta", { index: session.questionIndex, target });
-		await this.sendQuestion(target, chat, session.questionIndex, message.id);
-		logger.success({ step: session.step, questionIndex: session.questionIndex });
+		await this.queueAnswer(chat, contact, session, message, rating, true, logger);
 	}
 
 	private async handleQuestionAnswer(
@@ -574,36 +577,7 @@ class ExatronSatisfactionBot {
 			return;
 		}
 
-		const question = QUESTIONS[session.questionIndex]!;
-		logger.log("Resposta válida recebida para pergunta", { index: session.questionIndex, rating });
-		await this.tryStoreQuestionAnswer(
-			chat.instance,
-			chat,
-			contact,
-			question,
-			message.body,
-			rating,
-			session.questionIndex,
-			logger
-		);
-
-		session.questionIndex++;
-		session.lastActivity = Date.now();
-		store.scheduleSave(() => this.sessions.values());
-		const target = this.getMessageTarget(contact, message);
-		logger.log("Avancando pergunta", { nextIndex: session.questionIndex, target });
-
-		if (session.questionIndex < QUESTIONS.length) {
-			logger.log("Enviando próxima pergunta", { index: session.questionIndex });
-			await this.sendQuestion(target, chat, session.questionIndex, message.id);
-			logger.success({ step: session.step, questionIndex: session.questionIndex });
-		} else {
-			logger.log("Todas perguntas respondidas, finalizando atendimento");
-			await this.finishChat(chat, logger);
-			await this.sendBotText(target, chat, THANKS_MSG, message.id);
-			this.remove(chat.id);
-			logger.success({ step: session.step, finished: true });
-		}
+		await this.queueAnswer(chat, contact, session, message, rating, false, logger);
 	}
 
 	private async handleCompletion(
