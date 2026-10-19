@@ -5,6 +5,7 @@ import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import onlyLocal from "../middlewares/only-local.middleware";
 import upload from "../middlewares/multer.middleware";
 import publicBiRateLimit from "../middlewares/public-bi-rate-limit.middleware";
+import publicBiAuthenticated from "../middlewares/public-bi-auth.middleware";
 import messagesService from "../services/messages.service";
 import whatsappService from "../services/whatsapp.service";
 import operatorSendService from "../services/operator-send.service";
@@ -19,7 +20,7 @@ import { parseOptionalInstance } from "../utils/chat-scope";
 
 class MessagesController {
 	constructor(public readonly router: Router) {
-		this.router.get("/api/whatsapp/messages/export", publicBiRateLimit, isAuthenticated, this.exportMessages);
+		this.router.get("/api/whatsapp/messages/export", publicBiAuthenticated, publicBiRateLimit, this.exportMessages);
 		this.router.get("/api/whatsapp/messages/:id", this.getMessageById);
 		this.router.patch("/api/whatsapp/messages/mark-as-read", isAuthenticated, this.readContactMessages);
 		this.router.post(
@@ -46,7 +47,7 @@ class MessagesController {
 			this.createAgentTemplateMessage
 		);
 		this.router.post("/api/whatsapp/:clientId/messages/forward", isAuthenticated, this.forwardMessages.bind(this));
-		this.router.get("/api/whatsapp/messages", publicBiRateLimit, isAuthenticated, this.fetchMessages);
+		this.router.get("/api/whatsapp/messages", isAuthenticated, publicBiRateLimit, this.fetchMessages);
 
 		this.router.put("/api/whatsapp/:clientId/messages/:id", isAuthenticated, this.editMessage);
 		this.router.post("/api/whatsapp/:clientId/messages/:id/reaction", isAuthenticated, this.sendReaction);
