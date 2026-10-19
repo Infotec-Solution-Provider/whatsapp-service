@@ -33,6 +33,10 @@ Todos os parâmetros são opcionais.
 | `search` | texto | — | Busca por nome, telefone ou WhatsApp ID do contato. |
 | `startedFrom` | data | — | Data/hora inicial da conversa, em formato aceito pelo JavaScript, como `2026-08-01T00:00:00Z`. |
 | `startedTo` | data | — | Data/hora final da conversa. |
+| `finishedFrom` / `finishedTo` | data | — | Limites inclusivos do encerramento. |
+| `updatedFrom` / `updatedTo` | ISO com fuso | — | Atividade observável: abertura, encerramento, mensagens, transferências ou atualização do contato. Janela de até 31 dias; `updatedTo` exige `updatedFrom`. |
+
+O contrato de atividade e seus limites estão em [API WhatsApp para BI](BI_WHATSAPP_API.md#conversas-com-atividade-no-período-updatedfrom--updatedto). Não equivale a todas as alterações do registro. Total e itens aplicam a mesma seleção. Sem `updatedTo`, reutilize `data.activityWindow.to` nas próximas páginas.
 
 As conversas são ordenadas da mais recente para a mais antiga.
 
