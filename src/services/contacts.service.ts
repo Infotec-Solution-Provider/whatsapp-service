@@ -1,6 +1,6 @@
 import { SessionData } from "../sdk-local";
 import { Prisma, WppContact } from "@prisma/client";
-import { BadRequestError, ConflictError } from "@rgranatodutra/http-errors";
+import { BadRequestError, ConflictError, InternalServerError } from "@rgranatodutra/http-errors";
 import { ContactMapper } from "../mappers/contact.mapper";
 import { CustomerSchedule } from "../message-flow/base/base.step";
 import { ContactQueryBuilder } from "../utils/contact-query-builder";
@@ -634,14 +634,14 @@ class ContactsService {
 		return contact;
 	}
 
-	public async syncContactStateToLocal(contact: WppContact, sectorIds?: number[]) {
-		await this.syncContactToLocal(contact);
+	public async syncContactStateToLocal(contact: WppContact, sectorIds?: number[], requireSync = false) {
+		await this.syncContactToLocal(contact, requireSync);
 		if (sectorIds) {
 			await this.syncContactSectorsToLocal(contact.id, contact.instance, sectorIds);
 		}
 	}
 
-	private async syncContactToLocal(contact: WppContact) {
+	private async syncContactToLocal(contact: WppContact, requireSync = false) {
 		try {
 			const query = `
 				INSERT INTO wpp_contacts (id, instance, name, phone, customer_id, is_deleted)
@@ -663,6 +663,7 @@ class ContactsService {
 			]);
 		} catch (error) {
 			console.error("[syncContactToLocal] Erro ao sincronizar contato:", error);
+			if (requireSync) throw new InternalServerError("CONTACT_CUSTOMER_SYNC_PENDING");
 		}
 	}
 
