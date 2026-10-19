@@ -26,7 +26,10 @@ export function parseConversationActivityRange(from: unknown, to: unknown, now =
 			throw new BadRequestError(`${field} must be an ISO date with timezone!`);
 		}
 		const parsed = new Date(value);
-		if (!Number.isFinite(parsed.getTime())) throw new BadRequestError(`${field} must be a valid date!`);
+		const localDate = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+		if (!Number.isFinite(parsed.getTime()) || !Number.isFinite(localDate.getTime()) || localDate.toISOString().slice(0, 10) !== value.slice(0, 10) || Number(value.slice(11, 13)) > 23) {
+			throw new BadRequestError(`${field} must be a valid date!`);
+		}
 		return parsed;
 	};
 	const updatedFrom = parse(from, "updatedFrom");

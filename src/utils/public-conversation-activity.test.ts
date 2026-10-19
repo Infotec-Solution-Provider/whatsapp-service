@@ -47,6 +47,8 @@ try {
 	assert.deepEqual(run({ search: "' OR 1=1 --" }), { total: 0, ids: [] });
 	assert.deepEqual(run({ startedTo: new Date("2026-09-01T00:00:00Z") }), { total: 0, ids: [] });
 	assert.deepEqual(parseConversationActivityRange(undefined, undefined), {});
+	assert.throws(() => parseConversationActivityRange("2026-02-30T00:00:00Z", "2026-03-01T00:00:00Z"), /valid date/);
+	assert.throws(() => parseConversationActivityRange("2026-10-16T24:00:00Z", "2026-10-17T00:00:00Z"), /valid date/);
 	const fixedNow = new Date("2026-10-18T00:00:00Z");
 	assert.equal(parseConversationActivityRange("2026-10-16T00:00:00Z", undefined, fixedNow).updatedTo, fixedNow);
 	assert.throws(() => parseConversationActivityRange(undefined, "2026-10-17T00:00:00Z"), /updatedFrom is required/);

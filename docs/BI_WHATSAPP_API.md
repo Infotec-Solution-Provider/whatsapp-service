@@ -14,7 +14,7 @@ Content-Type: application/json
 {"instance":"TENANT","LOGIN":"USUARIO_SERVICO","SENHA":"SENHA"}
 ```
 
-O token está em `data.token`, vale por 7 dias e é renovado repetindo o login. Não há refresh token nem token longo revogável atualmente.
+O token de usuário está em `data.token`, vale por 7 dias e é renovado repetindo o login. Não há refresh token nesse fluxo. A versão com as correções INF-20261019-004 também oferece uma credencial de serviço opcional, exclusiva de leitura BI, descrita abaixo; ela exige publicação e configuração pelo administrador.
 
 O login aceita até 10 tentativas por minuto para a mesma origem, tenant e usuário.
 
@@ -71,7 +71,7 @@ Cada mensagem retorna:
 {"direction":"INBOUND|OUTBOUND|INTERNAL","senderType":"CONTACT|ATTENDANT|WHATSAPP_ACCOUNT|BOT|SYSTEM|THIRD_PARTY"}
 ```
 
-`direction` e `senderType` descrevem a origem da mensagem. Para reproduzir os relatórios do painel, use o campo `report` (seção abaixo). O campo `userId` identifica o atendente que digitou a mensagem; templates e respostas automáticas vêm sem `userId`. Não use `status` para inferir direção: `RECEIVED` também pode significar que uma mensagem enviada foi entregue.
+`direction` e `senderType` descrevem a origem da mensagem. Para reproduzir os relatórios do painel, use o campo `report` (seção abaixo). O campo `userId` identifica o atendente autor. Após a publicação da correção, templates enviados por uma sessão humana também gravam esse autor; agentes preservam `agentId` e não recebem autoria humana. Templates históricos sem autor permanecem assim: o responsável atual da conversa não prova quem disparou. Não use `status` para inferir direção: `RECEIVED` também pode significar que uma mensagem enviada foi entregue.
 
 Status possíveis: `PENDING`, `SENT`, `RECEIVED`, `READ`, `DOWNLOADED`, `ERROR`, `REVOKED`.
 
@@ -110,6 +110,32 @@ O painel usa dias no horário de Brasília: para um mês, filtre de `...T00:00:0
 
 ## Uso recomendado
 
-As rotas de BI compartilham a quota de 50 chamadas por minuto por token e aceitam no máximo 4 chamadas simultâneas por token. Ao exceder, retornam `429` com `Retry-After`, `RateLimit-Limit`, `RateLimit-Remaining` e `RateLimit-Reset`.
+Por padrão, as rotas de BI compartilham a quota de 50 chamadas por minuto por token e aceitam no máximo 4 chamadas simultâneas por token. Ao exceder, retornam `429` com `Retry-After`, `RateLimit-Limit`, `RateLimit-Remaining` e `RateLimit-Reset`. Limitação anterior à autenticação retorna `429` e `Retry-After`.
 
 Use `limit=100` e, no cliente, no máximo 2 chamadas simultâneas. Em `429`, `502`, `503` ou `504`, faça nova tentativa com espera exponencial e respeite `Retry-After`.
+
+## Configuração opcional pelo administrador
+
+Nenhuma credencial ou cota foi ativada por esta alteração. Não incluir tokens em Git, logs ou exemplos reais.
+
+`PUBLIC_BI_SERVICE_TOKENS_FILE` aponta para um arquivo JSON externo ao repositório, legível apenas pelo processo/administrador. Cada entrada contém `id`, `instance`, `sha256` (64 caracteres hexadecimais minúsculos), `expiresAt` (ISO com fuso) e opcionalmente `disabled`. Gerar o segredo com aleatoriedade criptográfica: prefixo `bi1_` mais pelo menos 32 bytes aleatórios codificados em base64url; guardar somente seu SHA-256 no arquivo e entregar o segredo por canal seguro. A expiração é explícita, podendo superar os sete dias do JWT. O administrador define a validade.
+
+O arquivo é relido a cada requisição dessa credencial. Remover/desativar uma entrada revoga o acesso; uma rotação pode manter temporariamente dois hashes com o mesmo `id` e tenant. Arquivo inválido/ilegível retorna `503` sem afetar o login comum. Sem arquivo configurado, essas credenciais são recusadas. Limites: 128 entradas e 64 KiB.
+
+A credencial só aceita os GETs da tabela de rotas acima, pertence a um único tenant e dá leitura de BI de todo esse tenant; não é uma restrição por setor. POST, HEAD e demais rotas são recusados antes dos controladores. Não fornece sessão de operador nem acesso ao CRM, ao painel ou ao reports-service.
+
+`PUBLIC_BI_RATE_PROFILES_JSON` configura cotas por tenant e janela noturna. Exemplo ilustrativo, não aplicado:
+
+```json
+[{"instance":"TENANT","maxRequests":50,"maxConcurrent":4,"night":{"start":"22:00","end":"06:00","timeZone":"America/Sao_Paulo","maxRequests":120,"maxConcurrent":4}}]
+```
+
+Os tokens do tenant com perfil compartilham a cota e a concorrência. Início inclusivo/fim exclusivo; atravessar meia-noite é suportado. Sem perfil, mantêm-se os limites por token e as variáveis existentes `PUBLIC_BI_RATE_LIMIT_MAX_REQUESTS`, `PUBLIC_BI_RATE_LIMIT_WINDOW_MS`, `PUBLIC_BI_MAX_CONCURRENT_REQUESTS`. Perfis são lidos no início do processo. Contadores são locais ao processo; não usar múltiplos workers como se houvesse uma cota distribuída. Validar capacidade e EXPLAIN das consultas antes de ampliar a cota.
+
+## Primeira devolutiva e qualidade dos dados
+
+A primeira devolutiva é a média aritmética, em segundos corridos, de uma primeira resposta por conversa elegível. Parte da primeira mensagem do cliente e termina na primeira mensagem da operação estritamente posterior, dentro do período filtrado. A regra existente exige a mesma data SQL dos timestamps armazenados; não desconta horário não útil. Mensagens identificadas como bot ficam fora normalmente; templates com origem da operação podem contar. Saudações/confirmações reconhecidas até uma hora após outro encerramento do contato são excluídas. A consulta dos detalhes passou a usar a mesma seleção do KPI e da série diária. O painel mostra soma, contagem e média dos detalhes.
+
+Em contatos, o filtro **Sem cliente** permite listar os registros a completar. **Vincular cliente** usa a busca por CPF/CNPJ existente e exige seleção e confirmação; nunca substitui um vínculo já preenchido por outro usuário. Uma falha de sincronização com o CRM é informada e permite repetir a mesma confirmação. Sugestões por telefone dependem do parâmetro de instância `contact_customer_phone_suggestions_enabled=true`, desativado por padrão, schema compatível e acesso ao CRM. Correspondências ambíguas continuam exigindo escolha humana; não há preenchimento em lote.
+
+Na pesquisa, registros sem data não passam mais por filtros de período. A resposta do relatório informa metadados de dados ausentes e associação não verificada. O enriquecimento histórico da Exatron ainda depende de validar o schema/dados legados. O bot guarda referências a respostas pendentes no arquivo de sessões existente, confirma a gravação antes de avançar e usa a mensagem de origem para evitar duplicação em tentativas após falha. Isso pressupõe um único processo proprietário do arquivo e não garante envio exatamente uma vez após queda entre checkpoint e envio. Não houve ativação do disparo automático, reenvio de pesquisas ou alteração de motivos de encerramento.
