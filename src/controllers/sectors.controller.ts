@@ -1,14 +1,14 @@
 import { Request, Response, Router } from "express";
-import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import sectorsService from "../services/sectors.service";
 import publicBiRateLimit from "../middlewares/public-bi-rate-limit.middleware";
+import publicBiAuthenticated from "../middlewares/public-bi-auth.middleware";
 
 class SectorsController {
 	constructor(public readonly router: Router) {
 		this.router.get(
 			"/api/whatsapp/sectors",
+			publicBiAuthenticated,
 			publicBiRateLimit,
-			isAuthenticated,
 			this.getSectors
 		);
 	}

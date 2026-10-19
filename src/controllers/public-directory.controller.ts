@@ -1,7 +1,7 @@
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import { Request, Response, Router } from "express";
-import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import publicBiRateLimit from "../middlewares/public-bi-rate-limit.middleware";
+import publicBiAuthenticated from "../middlewares/public-bi-auth.middleware";
 import instancesService from "../services/instances.service";
 
 interface OperatorDirectoryRow {
@@ -16,7 +16,7 @@ interface OperatorDirectoryRow {
 
 class PublicDirectoryController {
 	constructor(public readonly router: Router) {
-		this.router.get("/api/whatsapp/users", publicBiRateLimit, isAuthenticated, this.getUsers);
+		this.router.get("/api/whatsapp/users", publicBiAuthenticated, publicBiRateLimit, this.getUsers);
 	}
 
 	private async getUsers(req: Request, res: Response) {

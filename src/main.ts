@@ -1,13 +1,15 @@
+import "dotenv/config";
 import { Logger, logRoutes } from "@in.pulse-crm/utils";
 import { handleRequestError } from "@rgranatodutra/http-errors";
 import cors from "cors";
-import "dotenv/config";
+import { publicBiServiceTokenGuard } from "./middlewares/public-bi-auth.middleware";
 import express, { NextFunction, Request, Response } from "express";
 import "express-async-errors";
 import cron from "node-cron";
 import autoResponseController from "./controllers/auto-response.controller";
 import chatsController from "./controllers/chats.controller";
 import contactsController from "./controllers/contacts.controller";
+import contactCustomerLinkController from "./controllers/contact-customer-link.controller";
 import customerProfileTagsController from "./controllers/customer-profile-tags.controller";
 import dashboardController from "./controllers/dashboard.controller";
 import flowExecutionController from "./controllers/flow-execution.controller";
@@ -67,6 +69,8 @@ const logRoute = (r: express.Router) => {
 };
 
 app.use(cors());
+app.use(publicBiServiceTokenGuard);
+app.get("/health", (_req, res) => res.json({ service: "whatsapp", storage: "central", storageVersion: 1 }));
 
 // Respostas da API são dinâmicas e por usuário: sem ETag/304 e sem cache no navegador.
 // Evita o Chrome reaproveitar uma cópia em cache que não decodifica (ERR_CONTENT_DECODING_FAILED 304).
@@ -88,6 +92,7 @@ app.use(logRoute(messagesController.router));
 app.use(logRoute(walletsController.router));
 app.use(logRoute(resultsController.router));
 app.use(logRoute(contactsController.router));
+app.use(logRoute(contactCustomerLinkController));
 app.use(logRoute(customerProfileTagsController.router));
 app.use(logRoute(dashboardController.router));
 app.use(logRoute(sectorsController.router));
