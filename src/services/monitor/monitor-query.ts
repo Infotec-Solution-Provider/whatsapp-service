@@ -229,6 +229,12 @@ export function buildMonitorQuery(category: MonitorCategory, context: MonitorQue
 			});
 		}
 	}
+	// The filter refers to the same latest message projected above, never any
+	// earlier message or the chat's current/default channel. Keep it before paging/counts.
+	if (f.lastMessageChannelId !== "all") {
+		if (category === "wpp") add("lm.client_id = ?", f.lastMessageChannelId);
+		else add("1 = 0");
+	}
 	if (category !== "internal") {
 		const scheduleAlias = category === "schedule" ? "c" : "sch";
 		if (f.scheduledBy !== "all") add(`${scheduleAlias}.scheduled_by = ?`, f.scheduledBy);

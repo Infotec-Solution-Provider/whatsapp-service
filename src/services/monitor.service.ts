@@ -18,8 +18,17 @@ import {
 } from "./monitor/monitor-reader";
 import { readMonitorMessages, type MonitorHistoryInput } from "./monitor/monitor-history";
 import messagePresentationService from "./message-presentation.service";
+import { monitorChannelQuery } from "./monitor/monitor-channels";
 
 class MonitorService {
+	public async getMonitorChannels(session: SessionData, input: { page?: unknown; search?: unknown }) {
+		const { page, ...query } = monitorChannelQuery(session, input);
+		const [items, totalCount] = await Promise.all([
+			prismaService.wppClient.findMany(query),
+			prismaService.wppClient.count({ where: query.where })
+		]);
+		return { items, totalCount, page, pageSize: 20 };
+	}
 	public async getMonitorData(session: SessionData) {
 		// Preserve the legacy response for callers not yet migrated to paginated search.
 		const schedules = await schedulesService.getSchedulesBySession(session, {});
@@ -87,7 +96,7 @@ class MonitorService {
 			clientIds.length
 				? prismaService.wppClient.findMany({
 						where: { instance: session.instance, id: { in: clientIds } },
-						select: { id: true, type: true }
+						select: { id: true, type: true, name: true, phone: true }
 					})
 				: [],
 			outgoingIds.length
@@ -113,7 +122,10 @@ class MonitorService {
 				(member) => item.chatType === "internal" && member.internalChatId === item.id
 			);
 			const client = clients.find((candidate) => candidate.id === Number(rows[index]?.["lm_client_id"]));
-			if (client && item.chatType === "wpp") item.operational.channel = client.type;
+			if (item.chatType === "wpp") {
+				item.operational.lastMessageChannel = client ? { id: client.id, name: client.name, phone: client.phone } : null;
+				if (client) item.operational.channel = client.type;
+			}
 			const attempt = attempts.find((candidate) => candidate.messageId === Number(rows[index]?.["outgoing_id"]));
 			if (attempt && attempt.status !== "SENT") item.operational.deliveryStatus = attempt.status;
 			if (!context.local && item.customer)

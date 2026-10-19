@@ -24,6 +24,7 @@ export interface MonitorFilters {
 		showSchedules: boolean;
 	};
 	user: number | "all";
+	lastMessageChannelId: number | "all";
 	showBots: boolean;
 	showOngoing: boolean;
 	showFinished: boolean;
@@ -57,6 +58,7 @@ export interface MonitorOperational {
 	waitingSince: string | null;
 	unreadCount: number | null;
 	channel: string | null;
+	lastMessageChannel?: { id: number; name: string; phone: string | null } | null;
 	deliveryStatus: string | null;
 	slaBreached: boolean | null;
 }
@@ -138,6 +140,7 @@ export function parseMonitorRequest(input: MonitorSearchInput = {}): MonitorRequ
 			showSchedules: bool(categories["showSchedules"], true, "showSchedules")
 		},
 		user: user(f["user"], "user"),
+		lastMessageChannelId: user(f["lastMessageChannelId"], "lastMessageChannelId"),
 		scheduledBy: user(f["scheduledBy"], "scheduledBy"),
 		scheduledFor: user(f["scheduledFor"], "scheduledFor"),
 		showBots: bool(f["showBots"], false, "showBots"),

@@ -61,6 +61,7 @@ export function mapMonitorRow(row: MonitorRow) {
 				: null,
 		unreadCount: number(row["unread_count"]),
 		channel: category === "internal" ? "INTERNAL" : null,
+		lastMessageChannel: null,
 		deliveryStatus:
 			row["outgoing_status"] === null || row["outgoing_status"] === undefined
 				? null
