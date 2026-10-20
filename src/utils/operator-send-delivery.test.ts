@@ -3,6 +3,80 @@ import type CreateMessageDto from "../dtos/create-message.dto";
 import type { RemoteMessageJobResponse } from "../types/remote-client.types";
 import { deliverOperatorMessage, OperatorDeliveryClient, OperatorDeliveryInput } from "./operator-send-delivery";
 import { classifyWabaSendError, wabaPreparationError } from "./waba-send";
+import { shouldApplyRemoteStatus } from "./remote-message-status";
+
+async function testReceiptConfirmationWindow(): Promise<void> {
+	const originalNow = Date.now;
+	const startedAt = Date.parse("2026-10-20T15:00:00.000Z");
+	let now = startedAt;
+	Date.now = () => now;
+	try {
+		const providerMessageId = "A123456789ABCDEF0123456789ABCDEF";
+		const item: OperatorDeliveryInput = { id: "receipt-window", instance: "tenant", deliveryMode: "REMOTE", remoteJobId: null };
+		const options = { to: "5511999999999", text: "Documento de teste" };
+		const base: RemoteMessageJobResponse = {
+			contractVersion: 1, jobId: "receipt-job", idempotencyKey: "operator-outbound:v1:receipt-window",
+			status: "UNKNOWN", result: null, error: "uncertain send", attempts: 1,
+			createdAt: new Date(startedAt).toISOString(), updatedAt: new Date(startedAt).toISOString(),
+			confirmationStatus: "VERIFYING", confirmationDeadlineAt: new Date(startedAt + 120_000).toISOString(),
+			providerMessageId,
+		};
+		let remote = { ...base };
+		let submissions = 0;
+		let lookups = 0;
+		const client: OperatorDeliveryClient = {
+			instance: "tenant",
+			sendMessage: async () => { throw new Error("A receipt lookup must never dispatch synchronously"); },
+			submitMessageJob: async (_options, _isGroup, key) => {
+				submissions++;
+				assert.equal(key, base.idempotencyKey);
+				return remote;
+			},
+			getMessageJob: async (jobId) => { lookups++; assert.equal(jobId, base.jobId); return remote; },
+		};
+		assert.deepEqual(await deliverOperatorMessage(item, options, client), {
+			status: "PENDING", remoteJobId: base.jobId, error: "Verificando envio. Não reenviar automaticamente.",
+		}, "an uncertain submission remains pending only for its bounded receipt window");
+		const linked = { ...item, remoteJobId: base.jobId };
+		now += 11_000;
+		assert.equal((await deliverOperatorMessage(linked, options, client)).status, "PENDING");
+		now += 30_000;
+		remote = { ...base, status: "SENT", result: { wwebjsIdStanza: providerMessageId, status: "RECEIVED" } as NonNullable<RemoteMessageJobResponse["result"]> };
+		const confirmed = await deliverOperatorMessage(linked, options, client);
+		assert.deepEqual(confirmed, { status: "SENT", remoteJobId: base.jobId, result: { wwebjsIdStanza: providerMessageId } });
+		assert.equal(shouldApplyRemoteStatus("SENT", "RECEIVED"), true, "the linked receipt may advance the message after polling succeeds");
+		assert.equal(submissions, 1, "confirmation never resubmits a known remote job");
+		assert.equal(lookups, 2);
+
+		remote = { ...base };
+		assert.equal((await deliverOperatorMessage(linked, options, client)).status, "PENDING");
+		now = startedAt + 120_000;
+		remote = { ...base, confirmationStatus: "TIMED_OUT" };
+		const timedOut = await deliverOperatorMessage(linked, options, client);
+		assert.equal(timedOut.status, "UNKNOWN", "timeout cannot imply failure or safe resend");
+		assert.deepEqual(timedOut.result, { wwebjsIdStanza: providerMessageId }, "the reserved identity survives terminal uncertainty for later receipt correlation");
+		assert.equal(shouldApplyRemoteStatus("UNKNOWN", "RECEIVED"), true);
+		assert.equal(shouldApplyRemoteStatus("UNKNOWN", "READ"), true);
+
+		for (const deadline of [undefined, null, "", "invalid", new Date(now - 1).toISOString(), new Date(now).toISOString(), new Date(now + 120_001).toISOString()]) {
+			remote = { ...base };
+			delete remote.confirmationDeadlineAt;
+			if (deadline !== undefined) remote.confirmationDeadlineAt = deadline;
+			assert.equal((await deliverOperatorMessage(linked, options, client)).status, "UNKNOWN", `invalid or unbounded receipt window must close: ${deadline}`);
+		}
+		for (const invalidId of [undefined, null, "", "not-an-id", "A".repeat(31), "A".repeat(33), "G".repeat(32), ` ${providerMessageId}`, `${providerMessageId}\n`]) {
+			remote = { ...base, confirmationStatus: "TIMED_OUT" };
+			delete remote.providerMessageId;
+			if (invalidId !== undefined) remote.providerMessageId = invalidId;
+			const outcome = await deliverOperatorMessage(linked, options, client);
+			assert.equal(outcome.status, "UNKNOWN");
+			assert.equal(outcome.result, undefined, "an invalid reserved identity must never be persisted");
+		}
+		assert.equal(submissions, 1, "expired/invalid windows and late receipts never create a new attempt");
+	} finally {
+		Date.now = originalNow;
+	}
+}
 
 async function main() {
 	const item: OperatorDeliveryInput = { id: "attempt-one", instance: "tenant", deliveryMode: "REMOTE", remoteJobId: null };
@@ -127,6 +201,7 @@ async function main() {
 	client.sendMessage = async () => { throw { deliveryStatus: "FAILED", message: "untrusted provider error" }; };
 	assert.equal((await deliverOperatorMessage({ ...item, deliveryMode: "DIRECT" }, options, client)).status, "UNKNOWN",
 		"untyped errors from other clients cannot opt into safe failure");
+	await testReceiptConfirmationWindow();
 	console.log("operator-send-delivery: response loss, same intent, scoped results, UNKNOWN and no fallback passed");
 }
 

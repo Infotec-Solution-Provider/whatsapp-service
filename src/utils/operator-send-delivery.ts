@@ -96,9 +96,21 @@ export async function deliverOperatorMessage(
 		}
 		if (job.status === "FAILED") return { status: "FAILED", remoteJobId, error: "O provedor confirmou falha no envio.", failureCategory: sendFailureCategory(job.error) };
 		if (job.status === "UNKNOWN") {
+			const now = Date.now();
+			const deadline = typeof job.confirmationDeadlineAt === "string" ? Date.parse(job.confirmationDeadlineAt) : Number.NaN;
+			// Keep consulting this exact job while its bounded receipt window is
+			// open. A pending local job never submits again once remoteJobId exists.
+			if (job.confirmationStatus === "VERIFYING" && Number.isFinite(deadline) &&
+				deadline > now && deadline <= now + 120_000) {
+				return { status: "PENDING", remoteJobId, error: "Verificando envio. Não reenviar automaticamente." };
+			}
 			return {
 				status: "UNKNOWN",
 				remoteJobId,
+				// Preserve only the reserved UUID-shaped identity so a later real
+				// receipt can find this message without implying server acceptance.
+				...(typeof job.providerMessageId === "string" && job.providerMessageId.length === 32 && /^[a-f0-9]{32}$/i.test(job.providerMessageId)
+					? { result: { wwebjsIdStanza: job.providerMessageId } } : {}),
 				error:
 					job.confirmationStatus === "TIMED_OUT"
 						? "Não foi possível confirmar o envio em dois minutos. A mensagem pode já ter chegado."
