@@ -15,6 +15,8 @@ export interface RemoteMessageJobResponse {
 	updatedAt: string;
 	confirmationStatus?: "NOT_APPLICABLE" | "VERIFYING" | "TIMED_OUT";
 	confirmationDeadlineAt?: string | null;
+	/** Reserved attempt identity for receipt correlation; it does not prove delivery. */
+	providerMessageId?: string | null;
 	created?: boolean;
 	// Diagnostic fields added by newer wwebjs-api builds (contractVersion stays 1).
 	// All optional: older builds omit them and unknown fields are ignored.
