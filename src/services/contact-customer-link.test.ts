@@ -15,7 +15,7 @@ function fixture(overrides: Partial<WppContact> = {}) {
 		getCustomer: async (id) => { customerReads++; return customerExists ? customer(id) : null; },
 		linkIfUnlinked: async (instance, id, customerId) => {
 			beforeWrite?.();
-			if (row.instance !== instance || row.id !== id || row.customerId !== null || row.isDeleted) return 0;
+			if (row.instance !== instance || row.id !== id || ![null, 0, -1].includes(row.customerId) || row.isDeleted) return 0;
 			writes++; row.customerId = customerId; return 1;
 		},
 		syncContact: async () => { syncs++; if (failSync) throw new Error("CRM sync unavailable"); }
@@ -24,6 +24,12 @@ function fixture(overrides: Partial<WppContact> = {}) {
 }
 
 async function main() {
+	for (const customerId of [0, -1]) {
+		const historical = fixture({ customerId });
+		await historical.service.link("tenant-a", 8, 12);
+		assert.equal(historical.row.customerId, 12);
+		assert.equal(historical.counts().writes, 1);
+	}
 	const normal = fixture();
 	await normal.service.link("tenant-a", 8, 12);
 	assert.equal(normal.row.customerId, 12);

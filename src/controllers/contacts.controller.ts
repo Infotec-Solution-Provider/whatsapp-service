@@ -29,14 +29,14 @@ class ContactsController {
 
 	private async addSectorToContact(req: Request, res: Response) {
 		const contactId = Number(req.params["contactId"]);
-		const sectorId = req.body && req.body.sectorId ? Number(req.body.sectorId) : undefined;
+		const sectorId = req.body?.sectorId;
 
 		if (!sectorId) {
 			res.status(400).send({ message: "sectorId is required" });
 			return;
 		}
 
-		const contact = await contactsService.addSectorToContact(contactId, sectorId);
+		const contact = await contactsService.addSectorToContact(req.session, contactId, sectorId);
 
 		res.status(200).send({
 			message: "Sector added to contact successfully!",
@@ -298,14 +298,17 @@ class ContactsController {
 
 	private async updateContact(req: Request, res: Response) {
 		const contactId = Number(req.params["contactId"]);
+		if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
+			res.status(400).send({ message: "Dados do contato inválidos." });
+			return;
+		}
 		const { sectorIds, ...updateData } = req.body;
-		const parsedSectorIds = Array.isArray(sectorIds) ? sectorIds.map((s: any) => Number(s)) : undefined;
 
 		const updatedContact = await contactsService.updateContactWrapper(
 			req.session,
 			contactId,
 			updateData,
-			parsedSectorIds
+			sectorIds
 		);
 
 		res.status(200).send({

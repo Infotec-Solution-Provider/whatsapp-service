@@ -30,7 +30,7 @@ router.post("/api/whatsapp/contacts/:contactId/customer", isAuthenticated, async
 		getContact: (instance, id) => prismaService.wppContact.findFirst({ where: { instance, id } }),
 		getCustomer: customerLookup(req),
 		linkIfUnlinked: async (instance, id, customerId) => (await prismaService.wppContact.updateMany({
-			where: { instance, id, isDeleted: false, customerId: null }, data: { customerId }
+			where: { instance, id, isDeleted: false, OR: [{ customerId: null }, { customerId: { in: [0, -1] } }] }, data: { customerId }
 		})).count,
 		syncContact: (contact) => contactsService.syncContactStateToLocal(contact, undefined, true)
 	});

@@ -3,7 +3,6 @@ import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import schedulesService from "../services/schedules.service";
 import unifiedSchedulesService from "../services/unified-schedules.service";
 import { BadRequestError } from "@rgranatodutra/http-errors";
-import { WppSchedule } from "@prisma/client";
 import { CreateScheduleDTO } from "../sdk-local";
 import { UnifiedScheduleFilters } from "../types/unified-schedule.types";
 interface SchedulesFilters {
@@ -94,9 +93,7 @@ class SchedulesController {
 			throw new BadRequestError("Invalid or missing formData!");
 		}
 
-		let scheduleData = formData as WppSchedule;
-
-		const result = await schedulesService.editSchedule(scheduleData, +id);
+		const result = await schedulesService.editSchedule(req.session, formData, id);
 
 		res.status(200).send({
 			message: "Schedule patched successfully!",
@@ -111,7 +108,7 @@ class SchedulesController {
 			throw new BadRequestError("Message ID is required!");
 		}
 
-		const result = await schedulesService.deleteSchedule(+id);
+		const result = await schedulesService.deleteSchedule(req.session, id);
 
 		res.status(200).send({
 			message: "Schedule deleted successfully!",

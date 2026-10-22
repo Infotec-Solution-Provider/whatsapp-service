@@ -8,6 +8,9 @@ import instancesService from "./instances.service";
 import runIdleChatsJob from "../routines/idle-chats.routine";
 import runSchedulesJob from "../routines/schedules.routine";
 import localSyncService from "./local-sync.service";
+import { NotFoundError } from "@rgranatodutra/http-errors";
+import parseScheduleEdit from "./schedule-edit.contract";
+import positiveResourceId from "../utils/positive-resource-id";
 
 interface ChatsFilters {
 	userId?: string;
@@ -144,9 +147,19 @@ class SchedulesService {
 		return schedules;
 	}
 
-	public async editSchedule(scheduleData: WppSchedule, scheduleId: number) {
+	private mutationScope(session: SessionData, rawId: unknown) {
+		return {
+			id: positiveResourceId(rawId), instance: session.instance, AND: [{ chatId: null }],
+			...(session.role === "ADMIN" ? {} : { OR: [{ scheduledBy: session.userId }, { scheduledFor: session.userId }] })
+		};
+	}
+
+	public async editSchedule(session: SessionData, input: unknown, rawId: unknown) {
+		const scheduleData = parseScheduleEdit(input);
+		const where = this.mutationScope(session, rawId);
+		if (!await prismaService.wppSchedule.findFirst({ where })) throw new NotFoundError("Agendamento pendente não encontrado.");
 		const schedules = await prismaService.wppSchedule.update({
-			where: { id: scheduleId },
+			where,
 			data: scheduleData
 		});
 
@@ -155,9 +168,11 @@ class SchedulesService {
 		return schedules;
 	}
 
-	public async deleteSchedule(scheduleId: number) {
+	public async deleteSchedule(session: SessionData, rawId: unknown) {
+		const where = this.mutationScope(session, rawId);
+		if (!await prismaService.wppSchedule.findFirst({ where })) throw new NotFoundError("Agendamento pendente não encontrado.");
 		const schedules = await prismaService.wppSchedule.delete({
-			where: { id: scheduleId }
+			where
 		});
 
 		await this.deleteScheduleFromLocal(schedules);

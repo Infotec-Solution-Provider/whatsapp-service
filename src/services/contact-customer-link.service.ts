@@ -30,12 +30,13 @@ export class ContactCustomerLinkService {
 		const customerId = positiveContactId(rawCustomerId);
 		const contact = await this.dependencies.getContact(instance, contactId);
 		if (!contact || contact.isDeleted) throw new BadRequestError("Contato ativo não encontrado.");
-		if (contact.customerId !== null && contact.customerId !== customerId) {
+		const unlinked = contact.customerId === null || contact.customerId === 0 || contact.customerId === -1;
+		if (!unlinked && contact.customerId !== customerId) {
 			throw new ConflictError("Este contato já possui cliente vinculado. Atualize a lista antes de continuar.");
 		}
 		const customer = await this.dependencies.getCustomer(customerId);
 		if (!customer || customer.id !== customerId) throw new BadRequestError("Cliente não encontrado ou sem acesso.");
-		if (contact.customerId === null) {
+		if (unlinked) {
 			const count = await this.dependencies.linkIfUnlinked(instance, contactId, customerId);
 			if (count !== 1) {
 				throw new ConflictError("O contato foi alterado durante a confirmação. Atualize a lista antes de continuar.");

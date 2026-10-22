@@ -57,6 +57,9 @@ function fixture(initialRows: Contact[] = []) {
 		return row;
 	};
 	const db = {
+		wppSector: {
+			findMany: async ({ where }: Query) => where.id.in.filter((id: number) => [7, 8, 9].includes(id)).map((id: number) => ({ id, instance: where.instance }))
+		},
 		wppContact: {
 			findFirst: async ({ where }: Query) => structuredClone(rows.find((row) => matches(row, where)) ?? null),
 			findUnique: async ({ where }: Query) => structuredClone(rows.find((row) => matches(row, where)) ?? null),

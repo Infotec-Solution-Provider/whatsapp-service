@@ -27,6 +27,22 @@ function harness(reply: (sql: string, values: any[]) => any = () => []) {
 	return { client, pool, connection, calls, events, failCommit: (error: Error) => { commitError = error; } };
 }
 
+test("CRM schedule mutations retain tenant, pending state and owner predicates in the native write", async () => {
+	const h = harness(sql => {
+		if (sql.startsWith("SELECT")) return [{ id: 9, instance: "tenant-a", chat_id: null, scheduled_by: 7, scheduled_for: 8 }];
+		return { affectedRows: 1 };
+	});
+	await h.client["wppSchedule"].update({
+		where: { id: 9, instance: "tenant-a", AND: [{ chatId: null }], OR: [{ scheduledBy: 7 }, { scheduledFor: 7 }] },
+		data: { description: "Fixture" }
+	});
+	const mutation = h.calls.find(call => call.sql.startsWith("UPDATE"));
+	assert.ok(mutation);
+	assert.match(mutation.sql, /`instance`/); assert.match(mutation.sql, /`chat_id` IS NULL/);
+	assert.match(mutation.sql, /`scheduled_by`/); assert.match(mutation.sql, /`scheduled_for`/);
+	assert.match(mutation.sql, / OR /); assert.ok(mutation.values.includes("tenant-a")); assert.ok(mutation.values.includes(7));
+});
+
 test("delegates are lazy, scope tenant data and hydrate scalar results", async () => {
 	const h = harness(() => [{ id: 3, instance: "tenant-a", isDeleted: 0, updatedAt: "2026-10-13 12:30:00.000" }]);
 	const query = h.client["wppContact"].findMany({ where: { name: "O'Reilly" }, orderBy: { id: "desc" }, take: 2, skip: 1 });

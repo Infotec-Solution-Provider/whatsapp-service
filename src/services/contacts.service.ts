@@ -2,7 +2,9 @@ import { tenantSqlEnabled } from "../tenant-sql/registry";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
 import { SessionData } from "../sdk-local";
 import { Prisma, WppContact } from "@prisma/client";
-import { BadRequestError, ConflictError, InternalServerError } from "@rgranatodutra/http-errors";
+import { BadRequestError, ConflictError, InternalServerError, NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
+import { parseContactEdit, parseContactSectorIds } from "./contact-edit.contract";
+import positiveResourceId from "../utils/positive-resource-id";
 import { ContactMapper } from "../mappers/contact.mapper";
 import { CustomerSchedule } from "../message-flow/base/base.step";
 import { ContactQueryBuilder } from "../utils/contact-query-builder";
@@ -332,6 +334,8 @@ class ContactsService {
 		sectorIds?: number[],
 		overwriteExisting = false
 	) {
+		sectorIds = parseContactSectorIds(sectorIds);
+		if (sectorIds !== undefined) await this.validateContactSectors(prismaService, instance, sectorIds);
 		const validPhone = this.normalizePhone(phone);
 		if (!validPhone) {
 			throw new BadRequestError("Informe o telefone do contato.");
@@ -458,60 +462,57 @@ class ContactsService {
 		return updated;
 	}
 
-	public async updateContact(contactId: number, data: Prisma.WppContactUpdateInput, sectorIds?: number[]) {
-		if (!sectorIds) {
-			const contact = await prismaService.wppContact.update({
-				where: { id: contactId },
-				data
-			});
-
-			await this.syncContactToLocal(contact);
-
-			return contact;
-		}
-
-		const cleanedSectorIds = [...new Set(sectorIds)];
-
-		const updatePayload: Prisma.WppContactUpdateInput = {
-			...data,
-			sectors: {
-				deleteMany: {},
-				create: cleanedSectorIds.map((id) => ({ sectorId: id }))
-			}
-		} as any;
-
-		const contact = await prismaService.wppContact.update({
-			where: { id: contactId },
-			data: updatePayload,
-			include: { sectors: true } as any
-		});
-
-		await this.syncContactToLocal(contact);
-		await this.syncContactSectorsToLocal(contactId, contact.instance, cleanedSectorIds);
-
-		return contact;
-	}
-
 	public async updateContactWrapper(
 		session: SessionData,
 		contactId: number,
-		data: Prisma.WppContactUpdateInput,
-		sectorIds?: number[]
+		input: unknown,
+		rawSectorIds?: unknown
 	) {
-		const parameters = await parametersService.getSessionParams(session);
-		if (parameters["update_only_own_contacts"] === "true" && session.role !== "ADMIN") {
-			const contact: WppContact = (await prismaService.wppContact.findUnique({
-				where: { id: contactId }
-			})) as WppContact;
+		positiveResourceId(contactId);
+		const data = parseContactEdit(input);
+		const sectorIds = parseContactSectorIds(rawSectorIds);
+		const existing = await this.editableContact(session, contactId);
+		const customerId = existing.customerId && existing.customerId > 0 ? existing.customerId : null;
+		if (data.customerId !== undefined && data.customerId !== customerId) {
+			throw new ConflictError("O vínculo do cliente deve ser alterado pela operação específica. Atualize o contato.");
+		}
+		const contact = await prismaService.$transaction(async tx => {
+			if (sectorIds !== undefined) await this.validateContactSectors(tx, session.instance, sectorIds);
+			return tx.wppContact.update({
+				where: { id: contactId, instance: session.instance, isDeleted: false, customerId: existing.customerId,
+					...(session.role === "ADMIN" ? {} : { isOnlyAdmin: false }) },
+				data: {
+					...(data.name === undefined ? {} : { name: data.name }),
+					...(sectorIds === undefined ? {} : { sectors: { deleteMany: {}, create: sectorIds.map(sectorId => ({ sectorId })) } })
+				},
+				include: { sectors: true }
+			});
+		});
+		await this.syncContactToLocal(contact);
+		if (sectorIds !== undefined) await this.syncContactSectorsToLocal(contactId, session.instance, sectorIds);
+		return contact;
+	}
 
-			if (contact.customerId) {
-				const loalty = await this.getContactLoalty(contact);
-				if (!loalty || loalty.userId !== session.userId) {
-					throw new BadRequestError("Você só pode atualizar contatos que estão fidelizados com você.");
-				}
+	private async editableContact(session: SessionData, contactId: number) {
+		const contact = await prismaService.wppContact.findFirst({
+			where: { id: contactId, instance: session.instance, isDeleted: false }, include: { sectors: true }
+		});
+		if (!contact) throw new NotFoundError("Contato ativo não encontrado.");
+		if (session.role !== "ADMIN") {
+			if (contact.isOnlyAdmin) throw new UnauthorizedError("Contato restrito a administradores.");
+			const parameters = await parametersService.getSessionParams(session);
+			if (parameters["update_only_own_contacts"] === "true" && contact.customerId) {
+				const loyalty = await this.getContactLoalty(contact);
+				if (!loyalty || loyalty.userId !== session.userId) throw new UnauthorizedError("Você só pode atualizar contatos fidelizados com você.");
 			}
 		}
-		return this.updateContact(contactId, data, sectorIds);
+		return contact;
+	}
+
+	private async validateContactSectors(tx: Prisma.TransactionClient, instance: string, sectorIds: number[]) {
+		if (!sectorIds.length) return;
+		const sectors = await tx.wppSector.findMany({ where: { instance, id: { in: sectorIds } }, select: { id: true } });
+		if (sectors.length !== sectorIds.length) throw new BadRequestError("Um dos setores não está disponível nesta empresa.");
 	}
 
 	public async getContactLoalty(contact: WppContact) {
@@ -536,46 +537,22 @@ class ContactsService {
 		return result[0] || null;
 	}
 
-	public async addSectorToContact(contactId: number, sectorId: number) {
-		const contact = await prismaService.wppContact.findUnique({
-			where: { id: contactId },
-			include: { sectors: true } as any
-		});
-
-		if (!contact) {
-			throw new BadRequestError("Contato não encontrado");
-		}
-
-		const existingSectorIds = ((contact as any).sectors || []).map((s: any) => s.sectorId);
-
-		// If contact is global (no sectors), do not allow adding sector (matching create conflict rule)
-		if (existingSectorIds.length === 0) {
-			throw new ConflictError("Este número já está cadastrado globalmente");
-		}
-
-		if (existingSectorIds.includes(sectorId)) {
-			// nothing to do, return contact with sectors
-			return await prismaService.wppContact.findUnique({
-				where: { id: contactId },
-				include: { sectors: true } as any
+	public async addSectorToContact(session: SessionData, contactId: number, rawSectorId: unknown) {
+		positiveResourceId(contactId);
+		const sectorId = positiveResourceId(rawSectorId);
+		const contact = await this.editableContact(session, contactId);
+		if (!contact.sectors.length) throw new ConflictError("Este número já está cadastrado globalmente");
+		const updated = await prismaService.$transaction(async tx => {
+			await this.validateContactSectors(tx, session.instance, [sectorId]);
+			return tx.wppContact.update({
+				where: { id: contactId, instance: session.instance, isDeleted: false, customerId: contact.customerId,
+					...(session.role === "ADMIN" ? {} : { isOnlyAdmin: false }) },
+				data: { sectors: { connectOrCreate: { where: { contactId_sectorId: { contactId, sectorId } }, create: { sectorId } } } },
+				include: { sectors: true }
 			});
-		}
-
-		// Add new sector association
-		const updated = await prismaService.wppContact.update({
-			where: { id: contactId },
-			data: { sectors: { create: { sectorId } } } as any,
-			include: { sectors: true } as any
 		});
-
-		if (updated) {
-			// Sync the contact itself
-			await this.syncContactToLocal(updated);
-			// Sync the sector associations
-			const allSectorIds = ((updated as any).sectors || []).map((s: any) => s.sectorId);
-			await this.syncContactSectorsToLocal(contactId, contact.instance, allSectorIds);
-		}
-
+		await this.syncContactToLocal(updated);
+		await this.syncContactSectorsToLocal(contactId, session.instance, updated.sectors.map(sector => sector.sectorId));
 		return updated;
 	}
 
