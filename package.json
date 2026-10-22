@@ -65,7 +65,9 @@
 		"redis:keys": "bash scripts/redis.sh keys",
 		"redis:clear": "bash scripts/redis.sh clear",
 		"redis:monitor": "bash scripts/redis.sh monitor",
-		"redis:ui": "bash scripts/redis.sh ui"
+		"redis:ui": "bash scripts/redis.sh ui",
+		"test:session-changes": "ts-node src/services/session-changes/session-change-cursor.test.ts",
+		"test:session-changes:mysql": "ts-node src/services/session-changes/session-changes.mysql.test.ts"
 	},
 	"author": "Renan G. Dutra",
 	"license": "ISC",
