@@ -7,6 +7,8 @@ import "express-async-errors";
 import cron from "node-cron";
 import autoResponseController from "./controllers/auto-response.controller";
 import chatsController from "./controllers/chats.controller";
+import sessionChangesController from "./controllers/session-changes.controller";
+import retainSessionChanges from "./routines/session-change-retention.routine";
 import contactsController from "./controllers/contacts.controller";
 import customerProfileTagsController from "./controllers/customer-profile-tags.controller";
 import dashboardController from "./controllers/dashboard.controller";
@@ -58,6 +60,7 @@ remoteInboundEventInboxService.setProcessor({
 	process: (item, payload) => remoteClientService.processInboundInboxItem(item, payload)
 });
 const app = express();
+cron.schedule("*/5 * * * *", () => { void retainSessionChanges(); });
 
 const routesToLog: Array<express.Router> = [];
 const logRoute = (r: express.Router) => {
@@ -84,6 +87,7 @@ app.use(express.static("public"));
 
 app.use(logRoute(whatsappController.router));
 app.use(logRoute(chatsController.router));
+app.use(logRoute(sessionChangesController.router));
 app.use(logRoute(messagesController.router));
 app.use(logRoute(walletsController.router));
 app.use(logRoute(resultsController.router));

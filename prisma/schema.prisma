@@ -7,6 +7,32 @@ datasource db {
   url      = env("WHATSAPP_DATABASE_URL")
 }
 
+// Written by transactional MySQL triggers, including raw SQL writers.
+model SessionChangeStream {
+  instance      String @id @db.VarChar(191)
+  epoch         String @db.Char(36)
+  sequence      BigInt @default(0) @db.UnsignedBigInt
+  floorSequence BigInt @default(0) @map("floor_sequence") @db.UnsignedBigInt
+
+  @@map("session_change_streams")
+}
+
+model SessionChange {
+  instance         String   @db.VarChar(191)
+  sequence         BigInt   @db.UnsignedBigInt
+  kind             String   @db.VarChar(16)
+  entityId         Int      @map("entity_id")
+  chatId           Int?     @map("chat_id")
+  previousUserId   Int?     @map("previous_user_id")
+  previousWalletId Int?     @map("previous_wallet_id")
+  previousSectorId Int?     @map("previous_sector_id")
+  createdAt        DateTime @default(dbgenerated("(utc_timestamp(3))")) @map("created_at") @db.DateTime(3)
+
+  @@id([instance, sequence])
+  @@index([createdAt], map: "session_changes_created_at_idx")
+  @@map("session_changes")
+}
+
 model WppClient {
   id                Int                       @id @default(autoincrement())
   name              String
