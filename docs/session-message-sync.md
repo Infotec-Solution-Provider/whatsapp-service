@@ -23,7 +23,7 @@ O leitor captura head e página na mesma transação curta REPEATABLE READ, sem 
 
 ## Frontend
 
-Uma rotina por sessão/aba consulta a cada 15–18 segundos e aguarda cada requisição terminar. Páginas adicionais têm intervalo de 250 ms. Timeout de 20 segundos e backoff de 30/60/120 segundos, respeitando `Retry-After`.
+Uma rotina por sessão/aba consulta a cada 120 segundos e aguarda cada requisição terminar. Páginas adicionais têm intervalo de 250 ms. Timeout de 20 segundos e backoff de 30/60/120 segundos, respeitando `Retry-After`.
 
 Reconexão, evento `online`, foco e retorno à aba antecipam a consulta; aba oculta/offline pausa novas buscas. O cursor só avança depois da aplicação. Respostas de sessão anterior são canceladas/descartadas. Eventos do socket ou troca de conversa durante uma leitura invalidam aquela resposta, que é repetida sem avançar o cursor. Os rooms dos chats recuperados são registrados e reinscritos após reconexão.
 
@@ -35,7 +35,7 @@ Escopo: atendimentos WhatsApp da sessão. Monitoria, chats internos e mudanças 
 
 A cada cinco minutos, um worker sem sobreposição percorre até 20 instâncias e elimina até 1000 eventos expirados por instância. Mantém o mesmo lock de publicação e atualiza `floor_sequence` na mesma transação. Só remove prefixo contíguo com mais de sete dias; cursor anterior ao piso provoca reset.
 
-A chave primária `(instance,sequence)` atende a paginação por intervalo. Existe índice de `created_at` para inspeção operacional. A frequência deve ser medida em homologação: 1000 abas visíveis representam aproximadamente 56–67 buscas/segundo, além de autenticação e projeções. Não há coordenação entre abas neste escopo.
+A chave primária `(instance,sequence)` atende a paginação por intervalo. Existe índice de `created_at` para inspeção operacional. A frequência deve ser medida em homologação: 1000 abas visíveis representam aproximadamente 8,3 buscas/segundo, além de autenticação e projeções. Não há coordenação entre abas neste escopo.
 
 ## Validação e ativação
 
@@ -44,10 +44,12 @@ A chave primária `(instance,sequence)` atende a paginação por intervalo. Exis
 - `npm run test:read-protection`, `npm run test:remote-inbound`, `npx tsc --noEmit --pretty false`.
 - Frontend: `npm run test:message-sync`, `npm run test:message-sync:e2e`, testes existentes de mensagens e `npx tsc --noEmit --pretty false --incremental false`.
 
-Antes de publicar: integrar os commits em `homolog`, revisar/aplicar a migration no **banco central homolog do WhatsApp**, verificar as nove triggers e executar smoke com socket interrompido e HTTP disponível. Não executar DDL nos bancos CRM dos tenants. Conferir latência p95, leituras/vazão, espera pelo contador, deadlocks e capacidade da retenção sob tráfego equivalente. Os testes locais não medem o tráfego real ou o custo da rede até os CRMs.
+Release urgente autorizada em 23/10/2026: montar sobre os commits reais de produção (`d537562` backend e `f9db820` frontend), sem integrar as features novas de homologação. Aplicar somente esta migration no banco central WhatsApp, verificar as nove triggers e executar smoke com socket interrompido e HTTP disponível. Não executar DDL nos bancos CRM dos tenants. Conferir latência p95, leituras/vazão, espera pelo contador, deadlocks e capacidade da retenção sob tráfego equivalente. Os testes locais não medem o tráfego real ou o custo da rede até os CRMs.
 
 Ordem: migration completa → backend → frontend. Não há DDL no startup. A criação dos triggers adquire metadata locks; fazer a ativação em janela controlada. O novo lock de contador pode aumentar contenção e deadlocks em transações que atualizem várias linhas: avaliar em homologação antes de produção.
 
 Rollback de aplicação: restaurar os artefatos anteriores de frontend/backend, mantendo tabelas e triggers para não quebrar gravações em andamento. Não remover as tabelas enquanto existirem triggers. A remoção definitiva do mecanismo requer procedimento separado com escritores controlados.
 
 Nenhum deploy ou DDL em homologação/produção foi executado nesta implementação.
+
+O painel mostra estado da conexão WebSocket e horário do último evento de conversas recebido. A busca HTTP tem horário separado e não atualiza esse indicador. O botão Atualizar consome o cursor atual, sem recarregar o histórico.
