@@ -10,7 +10,7 @@ interface Bucket { count: number; resetAt: number; flights: Map<string, Flight> 
 export class ReadRequestGate {
 	private readonly buckets = new Map<string, Bucket>();
 	constructor(private readonly options = {
-		maxRequests: 30, windowMs: 10_000, maxConcurrent: 4, maxWaiters: 8, maxUsers: 5000
+		maxRequests: 120, windowMs: 10_000, maxConcurrent: 12, maxWaiters: 24, maxUsers: 5000
 	}, private readonly clock: () => number = Date.now) {}
 
 	run<T>(user: string, key: string, execute: () => Promise<T>, signal?: AbortSignal): Promise<T | undefined> {

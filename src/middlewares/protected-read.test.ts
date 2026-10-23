@@ -112,6 +112,25 @@ async function main() {
 	assert.deepEqual(fresh.body, { data: [42] });
 	assert.equal(fresh.listenerCount("close"), 0);
 	assert.equal(old.listenerCount("close"), 0);
+
+	// Production defaults tolerate startup bursts while retaining bounded work.
+	const startupGate = new ReadRequestGate();
+	const startup = Array.from({ length: 12 }, () => deferred<number>());
+	const startupReads = startup.map((work, index) => startupGate.run("startup", String(index), () => work.promise));
+	await assert.rejects(startupGate.run("startup", "excess", async () => 0), ReadRequestLimitError);
+	startup.forEach((work, index) => work.resolve(index));
+	assert.equal((await Promise.all(startupReads)).length, 12);
+	assert.equal(await startupGate.run("startup", "released", async () => 1), 1);
+	const defaultQuota = new ReadRequestGate();
+	for (let index = 0; index < 120; index++) await defaultQuota.run("quota", "read", async () => index);
+	await assert.rejects(defaultQuota.run("quota", "read", async () => 121), ReadRequestLimitError);
+	const sharedGate = new ReadRequestGate(), sharedWork = deferred<number>();
+	let sharedCalls = 0;
+	const joined = Array.from({ length: 24 }, () => sharedGate.run("shared", "same", () => { sharedCalls++; return sharedWork.promise; }));
+	await assert.rejects(sharedGate.run("shared", "same", async () => 0), ReadRequestLimitError);
+	sharedWork.resolve(1);
+	assert.equal((await Promise.all(joined)).length, 24);
+	assert.equal(sharedCalls, 1);
 	console.log("protected-read: sharing, disconnect, quotas, isolation, failures and HTTP contracts passed");
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; });

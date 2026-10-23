@@ -51,12 +51,13 @@ Os carregamentos autenticados de chats da sessão (WhatsApp e internos), listas 
 pesquisa de contatos e monitoria (busca local e endpoints legados) passam por
 `protectedRead`, após autenticação e verificação de administrador quando exigida.
 
-- Limites compartilhados entre essas rotas: 4 operações diferentes em andamento e
-  30 requisições por janela de 10 segundos, por instância + usuário.
+- Limites compartilhados entre essas rotas: 12 operações diferentes em andamento e
+  120 requisições por janela de 10 segundos, por instância + usuário (ampliados
+  em 23/10/2026 para acomodar os carregamentos simultâneos da interface).
 - Consultas idênticas compartilham o trabalho ainda em andamento. A chave inclui
   operação, sessão completa (inclusive setor/papel), parâmetros, query e body,
   em ordem canônica e com hash. Token e IP não são utilizados como identidade.
-- Cada operação admite até 8 conexões aguardando. Desconectar remove apenas aquele
+- Cada operação admite até 24 conexões aguardando. Desconectar remove apenas aquele
   aguardante. O limite da operação só é liberado quando ela resolve/rejeita.
 - Não há cache de resultados concluídos, fila de operações ou retries de consultas.
   Erros liberam a operação e chegam aos aguardantes que continuam conectados.
