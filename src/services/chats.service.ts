@@ -1342,10 +1342,9 @@ class ChatsService {
 			logger.log(`Iniciando finalização do chat pelo sistema. Chat ID: ${chatId}, Motivo: ${reason}`);
 
 			logger.log(`Buscando chat no banco de dados`);
-			const chat = await prismaService.wppChat.findFirst({
-				where: { id: chatId, ...expectedChat },
-				include: { contact: true }
-			});
+			const chat = expectedChat
+				? await prismaService.wppChat.findFirst({ where: { id: chatId, ...expectedChat }, include: { contact: true } })
+				: await prismaService.wppChat.findUnique({ where: { id: chatId }, include: { contact: true } });
 
 			if (!chat) {
 				logger.log(`Erro: Chat não encontrado. Chat ID: ${chatId}`);
