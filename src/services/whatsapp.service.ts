@@ -169,19 +169,6 @@ class WhatsappService {
 		return this.clients.get(id);
 	}
 
-	public async getClientsBySector(sectorId: number) {
-		const sector = await prismaService.wppSector.findUniqueOrThrow({
-			where: { id: sectorId },
-			include: { clients: true }
-		});
-
-		return sector.clients.map((c) => ({
-			id: c.id,
-			name: c.name,
-			type: c.type
-		}));
-	}
-
 	public async editMessage({ session, options, logger: process }: EditMessageData) {
 		process.log("Iniciando o processo de edição de mensagem.");
 		try {

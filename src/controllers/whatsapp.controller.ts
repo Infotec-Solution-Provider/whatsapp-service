@@ -1,6 +1,7 @@
 import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import whatsappService from "../services/whatsapp.service";
+import sectorClientsService from "../services/sector-clients.service";
 
 class WhatsappController {
 	constructor(public readonly router: Router) {
@@ -11,7 +12,7 @@ class WhatsappController {
 	}
 
 	private async getClients(req: Request, res: Response) {
-		const clients = await whatsappService.getClientsBySector(Number(req.params["sectorId"]));
+		const clients = await sectorClientsService.list(req.session, req.params["sectorId"]);
 
 		res.status(200).json({
 			message: "Clients retrieved successfully!",

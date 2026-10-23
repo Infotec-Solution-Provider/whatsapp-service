@@ -8,7 +8,8 @@ import instancesService from "./instances.service";
 import runIdleChatsJob from "../routines/idle-chats.routine";
 import runSchedulesJob from "../routines/schedules.routine";
 import localSyncService from "./local-sync.service";
-import { NotFoundError } from "@rgranatodutra/http-errors";
+import { InternalServerError, NotFoundError } from "@rgranatodutra/http-errors";
+import scheduleCreationService from "./schedule-creation.service";
 import parseScheduleEdit from "./schedule-edit.contract";
 import positiveResourceId from "../utils/positive-resource-id";
 
@@ -97,33 +98,12 @@ class SchedulesService {
 	}
 
 	public async createSchedule(session: SessionData, data: CreateScheduleDTO) {
-		const chat = await prismaService.wppChat.findFirst({
-			where: {
-				contactId: data.contactId,
-				instance: session.instance,
-				isFinished: false
-			}
-		});
-
-		const date = new Date(data.date);
-
-		const schedules = await prismaService.wppSchedule.create({
-			data: {
-				instance: session.instance,
-				scheduledBy: session.userId,
-				scheduledFor: data.scheduledFor,
-				scheduleDate: date,
-				contactId: data.contactId,
-				sectorId: session.sectorId,
-				scheduledAt: new Date()
-			}
-		});
-
+		const { schedule: schedules, chat } = await scheduleCreationService.create(session, data);
 		await this.syncScheduleToLocal(schedules);
-
 		if (chat) {
-			const systemMsg = `Esse atendimento foi agendado para retorno em ${date.toLocaleString('pt-BR')}.\nAgendado por ${session.name}.`;
-			await chatsService.systemFinishChatById(chat.id, systemMsg);
+			const systemMsg = `Esse atendimento foi agendado para retorno em ${schedules.scheduleDate.toLocaleString('pt-BR')}.\nAgendado por ${session.name}.`;
+			try { await chatsService.systemFinishChatById(chat.id, systemMsg, { instance: session.instance, contactId: chat.contactId, userId: chat.userId, sectorId: chat.sectorId }); }
+			catch { throw new InternalServerError("Agendamento criado, mas não foi possível confirmar o encerramento do atendimento. Atualize a lista antes de tentar novamente."); }
 		}
 
 		return schedules;

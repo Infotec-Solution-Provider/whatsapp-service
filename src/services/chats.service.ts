@@ -2,7 +2,7 @@ import { tenantSqlEnabled } from "../tenant-sql/registry";
 import { Customer, SessionData, SocketEventType, SocketServerMonitorRoom, SocketServerUserRoom } from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { Prisma, WppChat, WppContact, WppMessage, WppSector } from "@prisma/client";
-import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
+import { BadRequestError, ConflictError, NotFoundError } from "@rgranatodutra/http-errors";
 import { TemplateMessage } from "../adapters/template.adapter";
 import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
 import { CustomerSchedule } from "../message-flow/base/base.step";
@@ -860,7 +860,7 @@ class ChatsService {
 		resultId: number,
 		scheduleDate: Date | null,
 		reason?: string,
-		options: { systemMessage?: string } = {}
+		options: { systemMessage?: string; expectedChat?: Pick<WppChat, "instance" | "contactId" | "userId" | "sectorId"> } = {}
 	) {
 		const logger = new ProcessingLogger(
 			session.instance,
@@ -873,7 +873,7 @@ class ChatsService {
 			logger.log(`Iniciando finalização do chat. Chat ID: ${id}, Resultado ID: ${resultId}`);
 
 			const scopedChat = await prismaService.wppChat.findFirst({
-				where: { id, instance: session.instance },
+				where: { id, instance: session.instance, ...options.expectedChat },
 				select: { id: true }
 			});
 
@@ -959,7 +959,8 @@ class ChatsService {
 				where: {
 					id,
 					instance,
-					isFinished: false
+					isFinished: false,
+					...options.expectedChat
 				},
 				data: {
 					isFinished: true,
@@ -970,6 +971,7 @@ class ChatsService {
 			});
 
 			if (updateResult.count === 0) {
+				if (options.expectedChat) throw new ConflictError("O atendimento mudou durante o agendamento.");
 				logger.log(`Chat já estava finalizado. Ignorando nova tentativa de finalização. Chat ID: ${id}`);
 				logger.success(`Finalização ignorada (idempotência). Chat ID: ${id}`);
 				return;
@@ -1330,7 +1332,7 @@ class ChatsService {
 		}
 	}
 
-	public async systemFinishChatById(chatId: number, reason: string) {
+	public async systemFinishChatById(chatId: number, reason: string, expectedChat?: Pick<WppChat, "instance" | "contactId" | "userId" | "sectorId">) {
 		const logger = new ProcessingLogger("system", "system-finish-chat", `chat_${chatId}_${Date.now()}`, {
 			chatId,
 			reason
@@ -1340,8 +1342,8 @@ class ChatsService {
 			logger.log(`Iniciando finalização do chat pelo sistema. Chat ID: ${chatId}, Motivo: ${reason}`);
 
 			logger.log(`Buscando chat no banco de dados`);
-			const chat = await prismaService.wppChat.findUnique({
-				where: { id: chatId },
+			const chat = await prismaService.wppChat.findFirst({
+				where: { id: chatId, ...expectedChat },
 				include: { contact: true }
 			});
 
@@ -1367,7 +1369,8 @@ class ChatsService {
 				chatId,
 				-50,
 				null,
-				reason
+				reason,
+				...(expectedChat ? [{ expectedChat }] : [])
 			);
 
 			logger.success(`Chat finalizado pelo sistema com sucesso`);
