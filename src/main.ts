@@ -188,6 +188,7 @@ const shutdown = async (signal: string): Promise<void> => {
 	const serverClosed = new Promise<void>((resolve) => server.close(() => resolve()));
 	const graceful = Promise.all([
 		serverClosed,
+		operatorOutboundService.stopAndDrain(30_000),
 		remoteInboundEventInboxService.stopAndDrain(30_000),
 		messageQueueService.stopAndDrain(30_000)
 	]);

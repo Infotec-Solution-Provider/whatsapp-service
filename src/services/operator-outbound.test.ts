@@ -4,6 +4,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import PrismaOperatorOutboundRepository from "./operator-outbound.repository";
 import { OperatorOutboundService } from "./operator-outbound.service";
 import { deliverOperatorMessage, type OperatorDeliveryClient } from "../utils/operator-send-delivery";
+import { REMOTE_RECONCILIATION_DELAY_MS, REMOTE_RECONCILIATION_MAX_AGE_MS } from "./operator-outbound.service";
 import {
 	OperatorOutboundEnqueueInput,
 	OperatorOutboundHandler,
@@ -19,6 +20,7 @@ type State = { messages: Row[]; jobs: Row[]; nextMessageId: number };
 function matches(row: Row, where: Row = {}): boolean {
 	return Object.entries(where).every(([key, condition]) => {
 		if (key === "OR") return (condition as Row[]).some((branch) => matches(row, branch));
+		if (key === "AND") return (condition as Row[]).every((branch) => matches(row, branch));
 		if (key === "instance_userId_idempotencyKey") {
 			assert.deepEqual(Object.keys(condition).sort(), ["idempotencyKey", "instance", "userId"]);
 			return matches(row, condition);
@@ -28,6 +30,7 @@ function matches(row: Row, where: Row = {}): boolean {
 			return Object.entries(condition).every(([operator, expected]: [string, any]) => {
 				switch (operator) {
 					case "lte": return actual !== null && actual <= expected;
+					case "gte": return actual !== null && actual >= expected;
 					case "gt": return actual !== null && actual > expected;
 					case "not": return actual !== expected;
 					case "in": return expected.includes(actual);
@@ -52,6 +55,7 @@ class IsolatedDatabase {
 	failTransactions = false;
 	failJobCreate = false;
 	beforeExpiredReadReturns: (() => Promise<void>) | null = null;
+	jobQueries: Row[] = [];
 	private tail = Promise.resolve();
 	constructor(readonly now: () => Date) {}
 
@@ -86,8 +90,19 @@ class IsolatedDatabase {
 					return read(state, row, args);
 				}),
 				findMany: async (args: Row) => {
-					const result = await execute((state) => state[table].filter((row) => matches(row, args["where"]))
-						.slice(0, args["take"] ?? 100).map((row) => read(state, row, args)));
+					if (table === "jobs") this.jobQueries.push(structuredClone(args));
+					const result = await execute((state) => {
+						const rows = state[table].filter((row) => matches(row, args["where"]));
+						const orders = args["orderBy"] ? (Array.isArray(args["orderBy"]) ? args["orderBy"] : [args["orderBy"]]) : [];
+						rows.sort((a, b) => {
+							for (const order of orders) for (const [key, direction] of Object.entries(order)) {
+								if (a[key] < b[key]) return direction === "asc" ? -1 : 1;
+								if (a[key] > b[key]) return direction === "asc" ? 1 : -1;
+							}
+							return 0;
+						});
+						return rows.slice(0, args["take"] ?? 100).map((row) => read(state, row, args));
+					});
 					if (table === "jobs" && args["where"]?.status === "PROCESSING" && this.beforeExpiredReadReturns) {
 						const hook = this.beforeExpiredReadReturns;
 						this.beforeExpiredReadReturns = null;
@@ -770,6 +785,152 @@ test("missing/oversized idempotency keys fail before persistence", async () => {
 		await assert.rejects(f.service.enqueue(input({ idempotencyKey })), (error: unknown) => error instanceof OperatorOutboundRequestError && error.statusCode === 400);
 	}
 	assert.equal(f.db.state.messages.length, 0);
+});
+
+test("late UNKNOWN reconciliation finalizes once, notifies again and never enters delivery/preflight", async () => {
+	let finalized = 0;
+	let reconciled = 0;
+	let preflights = 0;
+	const f = fixture({
+		preflight: async () => { preflights++; return true; },
+		deliver: async () => ({ status: "UNKNOWN", remoteJobId: "late-job" }),
+		reconcile: async (item) => {
+			reconciled++;
+			assert.equal(currentDatabaseTenant(), item.instance);
+			return { status: "SENT", remoteJobId: "late-job", result: { wwebjsIdStanza: "late-stanza" } };
+		},
+		finalize: async (_tx, message) => { finalized++; assert.equal(message.status, "SENT"); },
+	});
+	await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+	await f.service.processOnce();
+	assert.equal(f.job()["status"], "UNKNOWN");
+	assert.equal(f.notifications(), 1);
+	f.advance(101);
+	await f.service.reconcileOnce();
+	assert.equal(f.job()["status"], "SENT");
+	assert.equal(f.message()["wwebjsIdStanza"], "late-stanza");
+	assert.equal(finalized, 1);
+	assert.equal(f.job()["notificationPending"], true);
+	await f.worker().reconcileOnce();
+	await f.service.processOnce();
+	assert.equal(f.notifications(), 2);
+	assert.equal(reconciled, 1);
+	assert.equal(preflights, 1, "reconciliation does not call preflight or deliver");
+	assert.equal(f.job()["attemptCount"], 1, "read-only lookup does not create a send attempt");
+});
+
+test("unresolved lookups retain durable cadence and original age across restart", async () => {
+	let lookups = 0;
+	const f = fixture({
+		deliver: async () => ({ status: "UNKNOWN", remoteJobId: "late-job", error: "original uncertainty" }),
+		reconcile: async () => { lookups++; return { status: "UNKNOWN" }; },
+	});
+	await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+	await f.service.processOnce();
+	f.advance(101);
+	const originalCompletedAt = f.job()["completedAt"];
+	await f.service.reconcileOnce();
+	assert.equal(f.job()["status"], "UNKNOWN");
+	assert.equal(f.job()["error"], "original uncertainty");
+	assert.deepEqual(f.job()["completedAt"], originalCompletedAt);
+	assert.equal(f.job()["nextAttemptAt"].getTime(), f.now().getTime() + REMOTE_RECONCILIATION_DELAY_MS);
+	await f.worker().reconcileOnce();
+	assert.equal(lookups, 1);
+	f.advance(REMOTE_RECONCILIATION_DELAY_MS);
+	await f.worker().reconcileOnce();
+	assert.equal(lookups, 2);
+	f.advance(REMOTE_RECONCILIATION_MAX_AGE_MS);
+	await f.worker().reconcileOnce();
+	assert.equal(lookups, 2, "expired uncertainty does not poll forever");
+});
+
+test("reconciliation candidates are bounded, ordered and exclude DIRECT, no job, old rows and pending notifications", async () => {
+	const f = fixture({ reconcile: async () => ({ status: "UNKNOWN" }) });
+	for (let i = 0; i < 12; i++) await f.service.enqueue(input({ idempotencyKey: `candidate-${i}`, deliveryMode: "REMOTE" }));
+	for (const row of f.db.state.jobs) Object.assign(row, { status: "UNKNOWN", remoteJobId: `remote-${row["id"]}`, completedAt: f.now() });
+	f.db.state.jobs[0]!["deliveryMode"] = "DIRECT";
+	f.db.state.jobs[1]!["remoteJobId"] = null;
+	f.db.state.jobs[2]!["completedAt"] = new Date(f.now().getTime() - REMOTE_RECONCILIATION_MAX_AGE_MS - 1);
+	f.db.state.jobs[3]!["notificationPending"] = true;
+	await f.service.reconcileOnce();
+	const query = f.db.jobQueries.find((q) => q["where"].status === "UNKNOWN")!;
+	assert.equal(query["take"], 4);
+	assert.deepEqual(query["orderBy"], [{ nextAttemptAt: "asc" }, { id: "asc" }]);
+	assert.deepEqual(Object.keys(query["where"].nextAttemptAt).sort(), ["gte", "lte"]);
+	const advanced = f.db.state.jobs.filter((row) => row["nextAttemptAt"] > f.now());
+	assert.equal(advanced.length, 4);
+	assert.ok(advanced.every((row) => Number(row["id"].slice(4)) > 4));
+});
+
+test("concurrent receipt wins over remote failure; job/finalizer/notifications converge without status regression", async () => {
+	let finalized = 0;
+	const f = fixture({
+		deliver: async () => ({ status: "UNKNOWN", remoteJobId: "late-job" }),
+		reconcile: async () => {
+			f.message()["status"] = "READ";
+			return { status: "FAILED", remoteJobId: "late-job", error: "transport failed" };
+		},
+		finalize: async (_tx, message) => { finalized++; assert.equal(message.status, "READ"); },
+	});
+	await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+	await f.service.processOnce();
+	f.advance(101);
+	await f.service.reconcileOnce();
+	assert.equal(f.message()["status"], "READ");
+	assert.equal(f.job()["status"], "SENT");
+	assert.equal(f.job()["error"], null);
+	await f.service.processOnce();
+	assert.equal(finalized, 1);
+	assert.equal(f.notifications(), 2);
+});
+
+test("reconciliation lease excludes a second worker and an old notification cannot clear it", async () => {
+	let release!: () => void;
+	let started!: () => void;
+	const entered = new Promise<void>((resolve) => { started = resolve; });
+	const waiting = new Promise<void>((resolve) => { release = resolve; });
+	let lookups = 0;
+	const f = fixture({
+		deliver: async () => ({ status: "UNKNOWN", remoteJobId: "late-job" }),
+		reconcile: async () => { lookups++; started(); await waiting; return { status: "SENT", remoteJobId: "late-job", result: { wwebjsId: "late-id" } }; },
+	});
+	await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+	await f.service.processOnce();
+	f.advance(101);
+	const first = f.service.reconcileOnce();
+	await entered;
+	const token = f.job()["lockedBy"];
+	await f.repository.finishNotification(f.job()["id"], "expired-notification", true, f.now());
+	assert.equal(f.job()["lockedBy"], token);
+	await f.worker().reconcileOnce();
+	assert.equal(lookups, 1);
+	release();
+	await first;
+	assert.equal(f.job()["status"], "SENT");
+});
+
+test("finalization failure rolls reconciliation back; next scheduled lookup can retry without dispatch", async () => {
+	let finalized = 0;
+	let shouldFail = true;
+	const f = fixture({
+		deliver: async () => ({ status: "UNKNOWN", remoteJobId: "late-job" }),
+		reconcile: async () => ({ status: "SENT", remoteJobId: "late-job", result: { wwebjsId: "late-id" } }),
+		finalize: async () => { if (shouldFail) throw new Error("finalize interrupted"); finalized++; },
+	});
+	await f.service.enqueue(input({ deliveryMode: "REMOTE" }));
+	await f.service.processOnce();
+	f.advance(101);
+	await f.service.reconcileOnce();
+	assert.equal(f.job()["status"], "UNKNOWN");
+	assert.equal(f.message()["status"], "UNKNOWN");
+	assert.equal(f.job()["notificationPending"], false);
+	assert.equal(f.job()["lockedBy"], null);
+	shouldFail = false;
+	f.advance(REMOTE_RECONCILIATION_DELAY_MS);
+	await f.worker().reconcileOnce();
+	assert.equal(f.job()["status"], "SENT");
+	assert.equal(finalized, 1);
+	assert.equal(f.job()["attemptCount"], 1);
 });
 
 async function run(): Promise<void> {

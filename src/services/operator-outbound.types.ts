@@ -43,6 +43,8 @@ export interface OperatorOutboundHandler {
 	/** Returning false defers work before entering a provider; no attempt is recorded. */
 	preflight?(item: OperatorOutboundItem): Promise<boolean>;
 	deliver(item: OperatorOutboundItem): Promise<OperatorOutboundDeliveryResult>;
+	/** Read-only lookup of an already known remote job. Must never dispatch. */
+	reconcile?(item: OperatorOutboundItem): Promise<OperatorOutboundDeliveryResult>;
 	onMessage(message: WppMessage, payload: Prisma.JsonValue): Promise<void>;
 	/** Database-only effects, committed atomically with SENT. Must be idempotent. */
 	finalize?(tx: Prisma.TransactionClient, message: WppMessage, payload: Prisma.JsonValue): Promise<void>;
@@ -63,6 +65,10 @@ export interface OperatorOutboundRepository {
 	notificationCandidates(now: Date, limit: number): Promise<string[]>;
 	claimNotification(id: string, token: string, now: Date, lockedUntil: Date): Promise<OperatorOutboundItem | null>;
 	finishNotification(id: string, token: string, success: boolean, nextAttemptAt: Date): Promise<void>;
+	reconciliationCandidates(now: Date, since: Date, limit: number): Promise<string[]>;
+	claimReconciliation(id: string, token: string, now: Date, since: Date, lockedUntil: Date, nextAttemptAt: Date): Promise<OperatorOutboundItem | null>;
+	completeReconciliation(id: string, token: string, now: Date, outcome: OperatorOutboundDeliveryResult, finalize: OperatorOutboundHandler["finalize"]): Promise<boolean>;
+	releaseReconciliation(id: string, token: string): Promise<void>;
 }
 
 export function assertOperatorOutboundReplay(

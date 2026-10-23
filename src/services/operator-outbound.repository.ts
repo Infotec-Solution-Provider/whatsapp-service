@@ -234,4 +234,80 @@ export default class PrismaOperatorOutboundRepository implements OperatorOutboun
 			data: { notificationPending: !success, lockedBy: null, lockedUntil: null, nextAttemptAt },
 		});
 	}
+
+	private reconciliationWhere(now: Date, since: Date): Prisma.OperatorOutboundSendWhereInput {
+		return {
+			status: "UNKNOWN", deliveryMode: "REMOTE", remoteJobId: { not: null },
+			notificationPending: false, completedAt: { gte: since },
+			// Leading status + bounded time range use the existing queue index.
+			nextAttemptAt: { gte: since, lte: now },
+			OR: [{ lockedUntil: null }, { lockedUntil: { lte: now } }],
+		};
+	}
+
+	async reconciliationCandidates(now: Date, since: Date, limit: number): Promise<string[]> {
+		const rows = await this.db.operatorOutboundSend.findMany({
+			where: this.reconciliationWhere(now, since),
+			orderBy: [{ nextAttemptAt: "asc" }, { id: "asc" }], take: limit, select: { id: true },
+		});
+		return rows.map((row) => row.id);
+	}
+
+	async claimReconciliation(id: string, token: string, now: Date, since: Date, lockedUntil: Date, nextAttemptAt: Date) {
+		const claimed = await this.db.operatorOutboundSend.updateMany({
+			where: { ...this.reconciliationWhere(now, since), id },
+			// UNKNOWN never becomes PENDING/PROCESSING. Persist cadence before IO:
+			// a crash cannot cause immediate repeated lookups after restart.
+			data: { lockedBy: token, lockedUntil, nextAttemptAt },
+		});
+		if (claimed.count !== 1) return null;
+		return this.db.operatorOutboundSend.findUnique({ where: { id }, include: { message: true } });
+	}
+
+	async completeReconciliation(id: string, token: string, now: Date, outcome: OperatorOutboundDeliveryResult,
+		finalize: OperatorOutboundHandler["finalize"]): Promise<boolean> {
+		if (!outcome.remoteJobId || (outcome.status !== "SENT" && outcome.status !== "FAILED")) return false;
+		const remoteJobId = outcome.remoteJobId;
+		return this.db.$transaction(async (tx) => {
+			const owned = await tx.operatorOutboundSend.updateMany({
+				where: { id, status: "UNKNOWN", deliveryMode: "REMOTE", remoteJobId,
+					lockedBy: token, lockedUntil: { gt: now }, notificationPending: false },
+				data: { updatedAt: now },
+			});
+			if (owned.count !== 1) return false;
+			const job = await tx.operatorOutboundSend.findUniqueOrThrow({ where: { id } });
+			const fields = operatorOutboundProviderFields(outcome.result);
+			const identities: Prisma.WppMessageWhereInput[] = [];
+			for (const key of ["wwebjsId", "wwebjsIdStanza", "wabaId", "gupshupId", "gupshupRequestId"] as const) {
+				const value = fields[key];
+				if (typeof value === "string") identities.push({ OR: [{ [key]: null }, { [key]: value }] });
+			}
+			// This UPDATE locks the message before reading its status. A concurrent
+			// real receipt can advance status, but cannot be overwritten/regressed.
+			const scoped = await tx.wppMessage.updateMany({
+				where: { id: job.messageId, instance: job.instance, clientId: job.clientId, AND: identities },
+				data: { ...fields, id: job.messageId },
+			});
+			if (scoped.count !== 1) throw new Error("Remote reconciliation message identity mismatch");
+			await tx.wppMessage.updateMany({
+				where: { id: job.messageId, status: { notIn: [...CONFIRMED_MESSAGE_STATES] } },
+				data: { status: outcome.status === "FAILED" ? "ERROR" : "SENT" },
+			});
+			const message = await tx.wppMessage.findUniqueOrThrow({ where: { id: job.messageId } });
+			const confirmed = (CONFIRMED_MESSAGE_STATES as readonly string[]).includes(message.status);
+			const status = confirmed ? "SENT" : "FAILED";
+			if (status === "SENT" && finalize) await finalize(tx, message, job.payload);
+			await tx.operatorOutboundSend.update({ where: { id }, data: {
+				status, providerOutcome: json(outcome), error: confirmed ? null : outcome.error?.slice(0, 4_000) ?? null,
+				completedAt: now, lockedBy: null, lockedUntil: null, notificationPending: true, nextAttemptAt: now,
+			} });
+			return true;
+		});
+	}
+
+	async releaseReconciliation(id: string, token: string): Promise<void> {
+		await this.db.operatorOutboundSend.updateMany({
+			where: { id, status: "UNKNOWN", lockedBy: token }, data: { lockedBy: null, lockedUntil: null },
+		});
+	}
 }

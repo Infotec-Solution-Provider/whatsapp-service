@@ -15,6 +15,13 @@ import {
 
 export * from "./operator-outbound.types";
 
+// Separate, read-only budget: at most eight lookup operations/minute per process, one
+// in flight, every five minutes per item and no more than 24h after UNKNOWN.
+export const REMOTE_RECONCILIATION_INTERVAL_MS = 30_000;
+export const REMOTE_RECONCILIATION_DELAY_MS = 5 * 60_000;
+export const REMOTE_RECONCILIATION_MAX_AGE_MS = 24 * 60 * 60_000;
+const REMOTE_RECONCILIATION_BATCH = 4;
+
 interface OperatorOutboundServiceOptions {
 	now?: () => Date;
 	intervalMs?: number;
@@ -31,7 +38,9 @@ interface OperatorOutboundServiceOptions {
 export class OperatorOutboundService {
 	private handler: OperatorOutboundHandler | null = null;
 	private timer: NodeJS.Timeout | null = null;
+	private reconciliationTimer: NodeJS.Timeout | null = null;
 	private processing = false;
+	private reconciling = false;
 	private readonly now: () => Date;
 	private readonly intervalMs: number;
 	private readonly lockMs: number;
@@ -72,11 +81,65 @@ export class OperatorOutboundService {
 		this.timer = setInterval(() => void this.processOnce(), this.intervalMs);
 		this.timer.unref();
 		void this.processOnce();
+		this.reconciliationTimer = setInterval(() => void this.reconcileOnce(), REMOTE_RECONCILIATION_INTERVAL_MS);
+		this.reconciliationTimer.unref();
+		void this.reconcileOnce();
 	}
 
 	stopWorker(): void {
 		if (this.timer) clearInterval(this.timer);
 		this.timer = null;
+		if (this.reconciliationTimer) clearInterval(this.reconciliationTimer);
+		this.reconciliationTimer = null;
+	}
+
+	async stopAndDrain(timeoutMs = 30_000): Promise<void> {
+		this.stopWorker();
+		const deadline = Date.now() + timeoutMs;
+		while ((this.processing || this.reconciling) && Date.now() < deadline) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+	}
+
+	/** UNKNOWN is never admitted to deliver(), even after a process restart. */
+	async reconcileOnce(): Promise<void> {
+		if (this.reconciling || !this.handler?.reconcile) return;
+		this.reconciling = true;
+		try {
+			const now = this.now();
+			const since = new Date(now.getTime() - REMOTE_RECONCILIATION_MAX_AGE_MS);
+			const ids = await this.repository.reconciliationCandidates(now, since, REMOTE_RECONCILIATION_BATCH);
+			for (const id of ids) await this.reconcileItem(id);
+		} catch (error) {
+			this.onError(error);
+		} finally {
+			this.reconciling = false;
+		}
+	}
+
+	private async reconcileItem(id: string): Promise<void> {
+		const token = randomUUID();
+		let heartbeat: NodeJS.Timeout | null = null;
+		try {
+			const now = this.now();
+			const item = await this.repository.claimReconciliation(id, token, now,
+				new Date(now.getTime() - REMOTE_RECONCILIATION_MAX_AGE_MS), new Date(now.getTime() + this.lockMs),
+				new Date(now.getTime() + REMOTE_RECONCILIATION_DELAY_MS));
+			if (!item || !this.handler?.reconcile) return;
+			const handler = this.handler;
+			await withDatabaseTenant(item.instance, async () => {
+				if (item.message.instance !== item.instance || item.message.clientId !== item.clientId) return;
+				heartbeat = this.heartbeat(id, token);
+				const outcome = await handler.reconcile!(item);
+				if (outcome.remoteJobId !== item.remoteJobId) return;
+				await this.repository.completeReconciliation(id, token, this.now(), outcome, handler.finalize);
+			});
+		} catch (error) {
+			this.onError(error);
+		} finally {
+			if (heartbeat) clearInterval(heartbeat);
+			await this.repository.releaseReconciliation(id, token).catch(this.onError);
+		}
 	}
 
 	async processOnce(): Promise<void> {

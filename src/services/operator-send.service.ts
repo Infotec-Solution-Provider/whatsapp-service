@@ -4,6 +4,7 @@ import type { SessionData } from "../sdk-local";
 import { FileDirType } from "../sdk-local";
 import type { Mentions, SendMessageOptions } from "../types/whatsapp-instance.types";
 import { deliverOperatorMessage } from "../utils/operator-send-delivery";
+import { reconcileOperatorMessage } from "../utils/operator-send-reconciliation";
 import { resolveOperatorQuotedMessage } from "../utils/operator-quoted-message";
 import { hashOperatorSendRequest, normalizeOperatorSendRequest, OperatorSendRequestError } from "../utils/operator-send-request";
 import operatorOutboundService from "./operator-outbound.service";
@@ -31,6 +32,7 @@ class OperatorSendService {
 				const payload = item.payload as unknown as OperatorSendPayload;
 				return deliverOperatorMessage(item, payload.options, whatsappService.getClient(item.clientId));
 			},
+			reconcile: (item) => reconcileOperatorMessage(item, whatsappService.getClient(item.clientId)),
 			onMessage: async (message) => {
 				await messagesService.syncMessageToLocal(message, true);
 				await messagesDistributionService.notifyMessage(null, message);
