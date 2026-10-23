@@ -6,7 +6,7 @@ import axios, { AxiosError } from "axios";
 import { RemoteAuthBatch, RemoteSessionDirectoryItem, RemoteSessionInfo } from "../types/remote-client.types";
 import prismaService from "./prisma.service";
 import socketService from "./socket.service";
-import { calculateSessionStability } from "./remote-session-stability";
+import { calculateSessionStability, calculateTransportStability, transportHistory } from "./remote-session-stability";
 import { pickClientSession } from "../utils/remote-session-directory";
 import wwebjsHealthCheckService from "./wwebjs-health-check.service";
 import { ChannelMessageHealthReader } from "./channel-message-health.reader";
@@ -169,13 +169,14 @@ class RemoteSessionMonitorService {
 			orderBy: { name: "asc" }
 		});
 
-		const [disconnections, directory, messageHealth] = await Promise.all([
+		const [disconnections, recentDisconnections, directory, messageHealth] = await Promise.all([
 			this.countUnexpectedDisconnections(clients.map((client) => client.id)),
+			this.countUnexpectedDisconnections(clients.map((client) => client.id), 60 * 60_000),
 			this.loadRemoteSessionDirectory(clients),
 			this.messageHealthReader.read(session.instance, clients.map((client) => client.id))
 		]);
 		return clients.map((client) => ({
-			...this.toClientResponse(client, disconnections.get(client.id) || 0, messageHealth.get(client.id) || null),
+			...this.toClientResponse(client, disconnections.get(client.id) || 0, messageHealth.get(client.id) || null, recentDisconnections.get(client.id) || 0),
 			...this.sessionMetadata(directory.get(client.id))
 		}));
 	}
@@ -191,7 +192,7 @@ class RemoteSessionMonitorService {
 		}
 
 		const since = new Date(Date.now() - STABILITY_WINDOW_MS);
-		const [events, disconnections, messageHealth] = await Promise.all([
+		const [events, disconnections, recentDisconnections, messageHealth] = await Promise.all([
 			prismaService.wppClientSessionEvent.findMany({
 				where: { clientId, occurredAt: { gte: since } },
 				select: { id: true, previousState: true, state: true, reason: true, occurredAt: true, source: true },
@@ -199,10 +200,11 @@ class RemoteSessionMonitorService {
 				take: 200
 			}),
 			this.countUnexpectedDisconnections([clientId]),
+			this.countUnexpectedDisconnections([clientId], 60 * 60_000),
 			this.messageHealthReader.read(session.instance, [clientId])
 		]);
 
-		return { ...this.toClientResponse(client, disconnections.get(clientId) || 0, messageHealth.get(clientId) || null), events };
+		return { ...this.toClientResponse(client, disconnections.get(clientId) || 0, messageHealth.get(clientId) || null, recentDisconnections.get(clientId) || 0), events };
 	}
 
 	public async restart(session: SessionData, clientId: number) {
@@ -452,7 +454,7 @@ class RemoteSessionMonitorService {
 		}
 	}
 
-	private async countUnexpectedDisconnections(clientIds: number[]): Promise<Map<number, number>> {
+	private async countUnexpectedDisconnections(clientIds: number[], windowMs = STABILITY_WINDOW_MS): Promise<Map<number, number>> {
 		if (clientIds.length === 0) {
 			return new Map();
 		}
@@ -461,7 +463,7 @@ class RemoteSessionMonitorService {
 			by: ["clientId"],
 			where: {
 				clientId: { in: clientIds },
-				occurredAt: { gte: new Date(Date.now() - STABILITY_WINDOW_MS) },
+				occurredAt: { gte: new Date(Date.now() - windowMs) },
 				state: { in: ["DISCONNECTED", "ERROR"] }
 			},
 			_count: { _all: true }
@@ -473,7 +475,8 @@ class RemoteSessionMonitorService {
 	private toClientResponse(
 		client: { id: number; name: string; phone: string | null; sessionSnapshot: any },
 		disconnectCount: number,
-		messageHealth: ChannelMessageHealth | null
+		messageHealth: ChannelMessageHealth | null,
+		recentDisconnectCount = 0
 	) {
 		const snapshot = client.sessionSnapshot;
 		const functionalHealth = wwebjsHealthCheckService.getLatest(client.id);
@@ -486,6 +489,8 @@ class RemoteSessionMonitorService {
 			snapshot,
 			functionalHealth,
 			messageHealth,
+			transportHealth: calculateTransportStability(snapshot),
+			transportHistory: transportHistory(disconnectCount, recentDisconnectCount),
 			stability: stability.level,
 			stabilityReason: stability.reason,
 			disconnections24h: disconnectCount,

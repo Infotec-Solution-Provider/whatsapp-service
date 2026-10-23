@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { calculateSessionStability, StabilitySnapshot, FunctionalHealthSnapshot } from "./remote-session-stability";
+import { calculateSessionStability, calculateTransportStability, transportHistory, StabilitySnapshot, FunctionalHealthSnapshot } from "./remote-session-stability";
 import { emptyMessageHealth } from "./channel-message-health";
 
 const now = Date.parse("2026-10-09T12:00:00Z");
@@ -96,4 +96,14 @@ assert.equal(
 for (const dataStatus of ["LIMITED", "UNAVAILABLE"] as const)
 	assert.equal(calculate(snapshot(), { ...healthy, dataStatus }).level, "ATTENTION");
 assert.equal(calculateSessionStability(snapshot(), 0, now, probe).level, "ATTENTION");
+assert.equal(calculateTransportStability(snapshot(), now).level, "STABLE");
+assert.equal(calculateTransportStability(snapshot("CONNECTED", 91), now).level, "UNSTABLE");
+assert.equal(calculateTransportStability(snapshot("DISCONNECTED", 0, 301), now).level, "UNSTABLE");
+assert.equal(calculateTransportStability(snapshot("LOGGED_OUT"), now).level, "LOGGED_OUT");
+assert.equal(calculateTransportStability(null, now).level, "NO_DATA");
+assert.equal(transportHistory(100, 11).frequentDisconnects, true);
+assert.equal(transportHistory(100, 10).frequentDisconnects, false);
+assert.equal(calculate(snapshot(), { ...healthy, receipts: { ...healthy.receipts, pendingEvents: 1000, unmatchedEvents: 1000 } }).level,
+	"ATTENTION", "unmatched receipts show uncertainty, not lost messages or a broken transport");
+assert.equal(calculate(snapshot(), { ...healthy, receipts: { ...healthy.receipts, dataStatus: "UNAVAILABLE" } }).level, "ATTENTION");
 console.log("Session stability: functional checks, real messages, current state and incomplete observations passed");

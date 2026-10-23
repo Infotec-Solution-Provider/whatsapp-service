@@ -2,6 +2,13 @@
 
 A classificação de `/api/whatsapp/session-monitor/clients` e do detalhe de um canal combina observação atual da sessão, último healthcheck funcional e sinais de mensagens reais. As desconexões de 24 horas continuam disponíveis como histórico, mas não rebaixam a saúde atual.
 
+A API também expõe `transportHealth` (estado/idade/falhas da observação do socket,
+sem afirmar entrega) e `transportHistory` (transições DISCONNECTED/ERROR em 1h e
+24h; `frequentDisconnects=true` acima de dez em uma hora). Assim, transporte
+conectado agora pode coexistir com histórico frequente de quedas e saúde
+funcional em atenção. Os campos anteriores continuam presentes. O histórico
+conta transições registradas, não reconstrói quedas que não foram observadas.
+
 ## Regras
 
 - `LOGGED_OUT`: nova autenticação necessária. Sem snapshot: `NO_DATA`.
@@ -18,6 +25,7 @@ O leitor usa a interface de banco do whatsapp-service (`prisma.service.ts`). No 
 - `messages`: saídas `me:`, `bot:` e `user:` com `ERROR`, `UNKNOWN` ou `PENDING` atrasado; relação com `operator_outbound_send` fornece horário de conclusão e categoria da falha. Estados com confirmação posterior deixam de ser considerados erros, mesmo se a tentativa durável ainda guardar resultado antigo.
 - `operator_outbound_send`: o resultado persistido (`provider_outcome`) de novos envios de operador conserva `failureCategory` (`CHANNEL`, `MESSAGE`, `UNCLASSIFIED`). Erros reconhecíveis de transporte/sessão identificam falha técnica; recusas genéricas permanecem sem causa identificada. Os textos do provedor não são adicionados à resposta do monitor.
 - `remote_inbound_event_inbox`: entradas `message-received` com falha ou ainda pendentes/processando, inclusive retries ilimitados. Cada evento canônico é uma mensagem afetada, independentemente de `retry_count`.
+- `messageHealth.receipts`: consulta separada dos eventos `message-status-received:*`, com limite próprio de 1.000 e sem payload. Expõe eventos pendentes/processando há mais de um minuto, quantos têm erro MESSAGE_NOT_FOUND, falhas concluídas nos últimos 15 minutos e a idade do mais antigo. São **eventos/estados**, não mensagens únicas perdidas/não entregues. Recibos atrasados ou consulta parcial/indisponível produzem atenção; não classificam transporte como quebrado. O backlog de recibos não consome o limite da consulta de entradas.
 - `wpp_message_processing_queue`: processamento posterior de entradas, com deduplicação por `message_id` quando o inbox e a fila referem a mesma mensagem. Uma entrada pode aparecer em dois sinais (falha e atraso), mas uma vez em cada contador.
 - `internal_message_processing_queue`: envios a grupos internos da mesma instância e dos canais visíveis. SQL parametrizado extrai apenas `clientId` e `lastRetryAt` do JSON; não transporta o LONGTEXT de mensagem/arquivo para o monitor. Reenvio manual reinicia o relógio de atraso.
 

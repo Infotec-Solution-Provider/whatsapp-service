@@ -61,7 +61,7 @@ export class ChannelMessageHealthReader {
 	private async load(instance: string, ids: number[], now: number): Promise<Map<number, ChannelMessageHealth>> {
 		const since = new Date(now - MESSAGE_HEALTH_WINDOW_MS);
 		const delayed = new Date(now - MESSAGE_DELAY_MS);
-		const [messages, inbox, processing, internal] = await Promise.all([
+		const [messages, inbox, processing, internal, receipts] = await Promise.all([
 			this.db.wppMessage.findMany({
 				where: {
 					instance,
@@ -157,7 +157,18 @@ export class ChannelMessageHealthReader {
 						OR (status IN ('PENDING', 'PROCESSING') AND created_at < ${delayed}))
 				ORDER BY created_at ASC, id ASC
 				LIMIT ${ROW_LIMIT + 1}
-			`)
+			`),
+			// Keep receipts separate: old unmatched callback states must not hide
+			// fresh message-received events behind their independent row limit.
+			this.db.remoteInboundEventInbox.findMany({
+				where: { clientId: { in: ids }, eventType: { startsWith: "message-status-received:" },
+					OR: [
+						{ status: { in: ["PENDING", "PROCESSING"] }, createdAt: { lt: delayed } },
+						{ status: "FAILED", updatedAt: { gte: since } },
+					] },
+				select: { clientId: true, status: true, error: true, createdAt: true },
+				orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: ROW_LIMIT + 1,
+			}).catch(() => null)
 		]);
 		const issues: MessageHealthIssue[] = [];
 		for (const message of messages.slice(0, ROW_LIMIT)) {
@@ -217,6 +228,18 @@ export class ChannelMessageHealthReader {
 			});
 		}
 		const limited = [messages, inbox, processing, internal].some((rows) => rows.length > ROW_LIMIT);
-		return collectMessageHealth(ids, issues, now, limited ? "LIMITED" : "COMPLETE");
+		const health = collectMessageHealth(ids, issues, now, limited ? "LIMITED" : "COMPLETE");
+		for (const entry of health.values()) entry.receipts.dataStatus = receipts === null ? "UNAVAILABLE" :
+			receipts.length > ROW_LIMIT ? "LIMITED" : "COMPLETE";
+		for (const row of receipts?.slice(0, ROW_LIMIT) ?? []) {
+			const entry = health.get(row.clientId)?.receipts;
+			if (!entry) continue;
+			if (row.status === "FAILED") { entry.failedEvents++; continue; }
+			entry.pendingEvents++;
+			if (row.error === "REMOTE_RECEIPT_MESSAGE_NOT_FOUND") entry.unmatchedEvents++;
+			if (!entry.oldestPendingAt || row.createdAt.getTime() < Date.parse(entry.oldestPendingAt))
+				entry.oldestPendingAt = row.createdAt.toISOString();
+		}
+		return health;
 	}
 }

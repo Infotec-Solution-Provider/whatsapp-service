@@ -4,6 +4,14 @@ export const MESSAGE_HEALTH_WINDOW_MS = 15 * 60_000;
 export const MESSAGE_DELAY_MS = 60_000;
 export const MESSAGE_STALLED_MS = 5 * 60_000;
 
+export interface ChannelReceiptHealth {
+	dataStatus: "COMPLETE" | "LIMITED" | "UNAVAILABLE";
+	pendingEvents: number;
+	unmatchedEvents: number;
+	failedEvents: number;
+	oldestPendingAt: string | null;
+}
+
 export interface ChannelMessageHealth {
 	windowMinutes: number;
 	observedAt: string;
@@ -18,6 +26,8 @@ export interface ChannelMessageHealth {
 	receiveDelayed: number;
 	oldestSendPendingAt: string | null;
 	oldestReceivePendingAt: string | null;
+	/** Callback events, not a count of messages lost or undelivered. */
+	receipts: ChannelReceiptHealth;
 }
 
 export interface MessageHealthIssue {
@@ -47,7 +57,8 @@ export function emptyMessageHealth(
 		receiveFailed: 0,
 		receiveDelayed: 0,
 		oldestSendPendingAt: null,
-		oldestReceivePendingAt: null
+		oldestReceivePendingAt: null,
+		receipts: { dataStatus, pendingEvents: 0, unmatchedEvents: 0, failedEvents: 0, oldestPendingAt: null }
 	};
 }
 

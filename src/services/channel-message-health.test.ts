@@ -53,6 +53,8 @@ async function readerChecks() {
 	let time = now;
 	let fail = false;
 	let overflow = false;
+	let receiptFailure = false;
+	let receiptOverflow = false;
 	const messages = [
 		{
 			id: 1,
@@ -82,6 +84,11 @@ async function readerChecks() {
 				findMany: async (args: Record<string, any>) => {
 					calls.push({ source, args });
 					if (fail) throw new Error("database unavailable");
+					if (source === "remoteInboundEventInbox" && typeof args["where"].eventType === "object") {
+						if (receiptFailure) throw new Error("receipt query unavailable");
+						const receipt = { clientId: 1, status: "PENDING", error: "REMOTE_RECEIPT_MESSAGE_NOT_FOUND", createdAt: at(3600) };
+						return receiptOverflow ? Array.from({ length: 1001 }, () => receipt) : [receipt, { ...receipt, status: "FAILED", error: "technical" }];
+					}
 					if (source === "wppMessage")
 						return overflow ? Array.from({ length: 1001 }, (_, id) => ({ ...messages[0], id })) : messages;
 					return queues;
@@ -121,7 +128,7 @@ async function readerChecks() {
 	);
 	const [first, shared] = await Promise.all([reader.read("tenant-a", [1, 2]), reader.read("tenant-a", [2, 1, 1])]);
 	assert.equal(first, shared);
-	assert.equal(calls.length, 4, "concurrent requests for the same scope share all reads");
+	assert.equal(calls.length, 5, "concurrent requests for the same scope share all reads");
 	assert.equal(
 		first.get(1)!.sendTechnicalFailed,
 		1,
@@ -136,6 +143,9 @@ async function readerChecks() {
 	assert.equal(first.get(1)!.receiveDelayed, 1);
 	assert.equal(first.get(1)!.sendDelayed, 0, "manual resend restarts the internal pending clock");
 	assert.equal(first.get(2)!.sendUnclassifiedFailed, 1);
+	assert.deepEqual(first.get(1)!.receipts, { dataStatus: "COMPLETE", pendingEvents: 1,
+		unmatchedEvents: 1, failedEvents: 1, oldestPendingAt: at(3600).toISOString() });
+	assert.equal(first.get(2)!.receipts.pendingEvents, 0, "receipt scope follows visible channels");
 	for (const { source, args } of calls) {
 		if (source === "internal") {
 			assert.equal(args["values"][0], "tenant-a");
@@ -233,11 +243,23 @@ async function readerChecks() {
 	assert.ok(!("message_data" in projected[0]!), "message payload never leaves the database projection");
 	sqlite.close();
 	await reader.read("tenant-a", [1, 2]);
-	assert.equal(calls.length, 4);
+	assert.equal(calls.length, 5);
 	await reader.read("tenant-b", [1, 2]);
-	assert.equal(calls.length, 8, "cache never crosses tenants");
+	assert.equal(calls.length, 10, "cache never crosses tenants");
 	await reader.read("tenant-a", [1]);
-	assert.equal(calls.length, 12, "cache never crosses visible client scopes");
+	assert.equal(calls.length, 15, "cache never crosses visible client scopes");
+	time += 15_001;
+	receiptFailure = true;
+	const receiptUnavailable = (await reader.read("tenant-a", [1, 2])).get(1)!;
+	assert.equal(receiptUnavailable.dataStatus, "COMPLETE", "receipt query failure does not erase other message evidence");
+	assert.equal(receiptUnavailable.receipts.dataStatus, "UNAVAILABLE");
+	time += 15_001;
+	receiptFailure = false;
+	receiptOverflow = true;
+	const receiptLimited = (await reader.read("tenant-a", [1, 2])).get(1)!;
+	assert.equal(receiptLimited.receipts.pendingEvents, 1000);
+	assert.equal(receiptLimited.receipts.dataStatus, "LIMITED");
+	assert.equal(receiptLimited.receiveDelayed, 1, "receipt backlog does not consume the message-received source limit");
 	time += 15_001;
 	overflow = true;
 	assert.equal((await reader.read("tenant-a", [1, 2])).get(1)!.dataStatus, "LIMITED");

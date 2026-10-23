@@ -19,6 +19,28 @@ export interface FunctionalHealthSnapshot {
 	reason: string;
 }
 
+/** Transport observation only; functional delivery and historical flaps are separate. */
+export function calculateTransportStability(snapshot: StabilitySnapshot | null, now = Date.now()): {
+	level: SessionStability; reason: string;
+} {
+	if (!snapshot) return { level: "NO_DATA", reason: "Nenhuma observação da sessão foi recebida." };
+	if (snapshot.state === "LOGGED_OUT") return { level: "LOGGED_OUT", reason: "A sessão precisa de um novo QR code." };
+	const observationAge = now - snapshot.lastObservedAt.getTime();
+	if (!Number.isFinite(observationAge) || observationAge > 90_000 || snapshot.consecutivePollFailures >= 3)
+		return { level: "UNSTABLE", reason: "A sessão remota não está respondendo." };
+	if (["DISCONNECTED", "ERROR"].includes(snapshot.state) && now - snapshot.stateChangedAt.getTime() > 300_000)
+		return { level: "UNSTABLE", reason: "A sessão está desconectada ou com erro há mais de 5 minutos." };
+	if (snapshot.state !== "CONNECTED") return { level: "ATTENTION", reason: "A sessão ainda não está conectada." };
+	if (observationAge > 45_000) return { level: "ATTENTION", reason: "A observação da sessão está atrasada." };
+	return { level: "STABLE", reason: "Transporte conectado com observação recente; entrega não é comprovada pelo socket." };
+}
+
+export function transportHistory(disconnections24h: number, disconnections1h: number) {
+	return { disconnections24h, disconnections1h, frequentDisconnects: disconnections1h > 10,
+		reason: disconnections1h > 10 ? "Mais de 10 transições de desconexão/erro na última hora." :
+			"Histórico de transições observado; não representa a saúde funcional atual nem mensagens perdidas." };
+}
+
 export function calculateSessionStability(
 	snapshot: StabilitySnapshot | null,
 	_disconnectCount: number,
@@ -26,16 +48,9 @@ export function calculateSessionStability(
 	functionalHealth: FunctionalHealthSnapshot | null = null,
 	messageHealth: ChannelMessageHealth | null = null
 ): { level: SessionStability; reason: string } {
-	if (!snapshot) return { level: "NO_DATA", reason: "Nenhuma observação da sessão foi recebida." };
-	if (snapshot.state === "LOGGED_OUT") return { level: "LOGGED_OUT", reason: "A sessão precisa de um novo QR code." };
+	const transport = calculateTransportStability(snapshot, now);
+	if (!snapshot || ["NO_DATA", "LOGGED_OUT", "UNSTABLE"].includes(transport.level)) return transport;
 	const observationAge = now - snapshot.lastObservedAt.getTime();
-	const stateAge = now - snapshot.stateChangedAt.getTime();
-	if (!Number.isFinite(observationAge) || observationAge > 90_000 || snapshot.consecutivePollFailures >= 3) {
-		return { level: "UNSTABLE", reason: "A sessão remota não está respondendo." };
-	}
-	if ((snapshot.state === "DISCONNECTED" || snapshot.state === "ERROR") && stateAge > 5 * 60_000) {
-		return { level: "UNSTABLE", reason: "A sessão está desconectada ou com erro há mais de 5 minutos." };
-	}
 	const messageAttention: string[] = [];
 	if (messageHealth) {
 		const window = `nos últimos ${messageHealth.windowMinutes} minutos`;
@@ -81,6 +96,10 @@ export function calculateSessionStability(
 		if (messageHealth.sendDelayed) messageAttention.push(`${messageHealth.sendDelayed} envio(s) atrasado(s)`);
 		if (messageHealth.receiveDelayed)
 			messageAttention.push(`${messageHealth.receiveDelayed} mensagem(ns) recebida(s) aguardando processamento`);
+		if (messageHealth.receipts.pendingEvents || messageHealth.receipts.failedEvents)
+			messageAttention.push(`${messageHealth.receipts.pendingEvents} evento(s) de recibo atrasado(s), ${messageHealth.receipts.failedEvents} com falha; não são mensagens perdidas`);
+		if (messageHealth.receipts.dataStatus !== "COMPLETE")
+			messageAttention.push("A consulta de recibos está parcial ou indisponível.");
 		if (messageAttention.length)
 			messageAttention.push(
 				`Janela de falhas: ${messageHealth.windowMinutes} minutos; atrasos incluem mensagens ainda pendentes.`
