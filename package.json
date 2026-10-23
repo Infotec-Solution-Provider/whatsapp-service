@@ -4,6 +4,7 @@
   "description": "Service that integrate inPulse with Whatsapp.",
   "main": "dist/main.js",
   "scripts": {
+		"test:operator-outbound:mysql": "ts-node src/services/operator-outbound.mysql.test.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "ts-node-dev --transpile-only --respawn --ignore-watch node_modules --watch .env src/main.ts",
     "dev:frontend": "node scripts/build-frontend.js --watch",
