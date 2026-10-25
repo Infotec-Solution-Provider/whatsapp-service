@@ -27,6 +27,10 @@ test("wallet route requires authentication and refuses a query-selected tenant b
 		const address = server.address() as { port: number };
 		const url = `http://127.0.0.1:${address.port}/api/wallets`;
 		assert.equal((await fetch(`${url}?instance=fixture-b&userId=99`)).status, 401); assert.equal(reads, 0);
+		for (const [method, path] of [["GET", "/manage"], ["GET", "/1"], ["GET", "/1/users"], ["POST", ""], ["PUT", "/1/name"], ["DELETE", "/1"], ["POST", "/1/users"], ["DELETE", "/1/users/7"]] as const) {
+			assert.equal((await fetch(url + path, { method })).status, 401);
+		}
+		assert.equal((await fetch(`http://127.0.0.1:${address.port}/api/users/7/wallets`)).status, 401);
 		assert.equal((await fetch(`${url}?instance=fixture-b`, { headers: { Authorization: "Bearer fixture" } })).status, 400); assert.equal(reads, 0);
 		const valid = await fetch(url, { headers: { Authorization: "Bearer fixture" } }); assert.equal(valid.status, 200);
 		const body = await valid.json() as { data: Array<{ instance: string }> };
