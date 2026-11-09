@@ -108,6 +108,21 @@ WHERE NOT EXISTS (
 
 Cada chave pode ser habilitada ou desabilitada independentemente alterando seu `value` para `true` ou `false`.
 
+### `start_chats_only_for_loyal_operator`
+
+- **Escopo**: exclusivamente `INSTANCE`, consumido por `getInstanceBooleanParam`. Valores `USER` e `SECTOR` não habilitam nem desabilitam esta política.
+- **Padrão**: `false`. Somente o literal `true` habilita; ausência ou valor inválido preserva o comportamento anterior.
+- **Regra**: ao iniciar atendimento manual, um operador não pode iniciar contato vinculado a cliente cuja fidelização pertence a outro operador positivo. A fidelização é a mesma já usada pelo WhatsApp: `campanhas_clientes` do CRM do tenant, filtrado por `CLIENTE` e ordenado por `CODIGO DESC LIMIT 1`, via `ContactsService.getContactLoalty`. Não usa `clientes.OPERADOR` nem acrescenta filtros `FIDELIZA`/`CONCLUIDO`.
+- **Exceções**: perfil autenticado `ADMIN`; contato sem cliente; ausência de fidelização; operador de fidelização nulo, zero ou negativo. `start_chats_as_admin` apenas direciona o novo chat à supervisão e não concede exceção ao operador que inicia.
+- **Momento da validação**: antes de consultar foto, criar/sincronizar chat, inserir mensagem de sistema ou enviar o template inicial. Contato de outro tenant ou desativado é recusado. Falhas nas consultas necessárias ou identificador de fidelização inválido não liberam o início.
+- **Envios manuais**: cobre o endpoint normal, com e sem envio durável, e o endpoint direto de templates. Sob a flag, valida tenant/canal/contato/destinatário e, quando há `chatId`, o atendimento ativo desse contato. O dono atual pode continuar um atendimento recebido por transferência mesmo que a fidelização CRM continue com o dono anterior. Chat ativo de outro operador ou `chatId` inválido não vira uma consulta alternativa de fidelização. Repetições idempotentes devolvem a tentativa já registrada antes da autorização de uma intenção nova.
+- **Transferências**: sob a flag, somente `ADMIN` ou o dono atual pode transferir um atendimento ativo do tenant para um operador positivo existente no CRM desse tenant. Atualização condicional confere novamente dono/tenant/estado; uma alteração concorrente retorna `409` sem sincronizar ou notificar a transferência recusada.
+- **Limites**: não altera o roteamento receptivo, bots, agentes e agendas do sistema. Não redesenha autorização de encaminhamento de mensagens (`forwarding`) ou edição/vínculo cadastral de contatos; esses fluxos continuam com suas próprias regras. A flag não é uma revisão integral de todas as autorizações do produto.
+
+Cadastrar uma única linha `scope='INSTANCE'`, `instance='<tenant>'`, `sectorId=NULL`, `userId=NULL`, `key='start_chats_only_for_loyal_operator'`, `value='true'` após publicar o backend compatível. A ativação é uma alteração de configuração separada do código; não é executada pela compilação ou pelos testes. Para desativar, alterar o valor dessa linha para `false`. Demais tenants permanecem com o padrão anterior.
+
+Validação isolada: `npm run test:manual-chat-authorization` usa os métodos reais com bancos, HTTP e provedores simulados, incluindo recusa sem efeitos, maior `CODIGO`, escopo da flag, transferência e integridade do destinatário.
+
 ### `chat_inactivity_ms`
 
 - **Descrição**: Tempo máximo (em milissegundos) sem atividade antes de o chat ser considerado inativo.

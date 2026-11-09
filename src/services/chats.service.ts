@@ -23,6 +23,7 @@ import getUsersClient from "./users.service";
 import whatsappService, { SendTemplateData } from "./whatsapp.service";
 import parametersService from "./parameters.service";
 import contactsService from "./contacts.service";
+import manualChatAuthorization from "./manual-chat-authorization.service";
 import { withPublicMessageDirection } from "../utils/public-message-direction";
 import {
 	ChatScope,
@@ -801,6 +802,7 @@ class ChatsService {
 
 	public async transferAttendance(token: string, session: SessionData, id: number, userId: number) {
 		const { instance } = session;
+		const restrictToLoyalOperator = await manualChatAuthorization.isEnabled(instance);
 
 		const usersService = getUsersClient();
 		usersService.setAuth(token);
@@ -810,6 +812,12 @@ class ChatsService {
 		});
 		if (!chats) throw new NotFoundError("Atendimento não encontrado ou já encerrado.");
 		await walletsService.assertChatMember(session, chats);
+		if (restrictToLoyalOperator) {
+			if (session.role !== "ADMIN" && chats.userId !== session.userId) {
+				throw new UnauthorizedError("Você só pode transferir seus próprios atendimentos.");
+			}
+			if (!Number.isSafeInteger(userId) || userId <= 0) throw new BadRequestError("Operador de destino inválido.");
+		}
 		if (!isTransferAllowedByTenant(session, userId) || (
 			!chats.walletId && session.role !== "ADMIN" && !(session.userId > 0 && chats.userId === session.userId) &&
 			!(await parametersService.canTransferFromContactSearch(instance, session.userId))
@@ -1437,14 +1445,15 @@ class ChatsService {
 		);
 
 		try {
-			const contact = await prismaService.wppContact.findUnique({
-				where: { id: contactId }
+			const contact = await prismaService.wppContact.findFirst({
+				where: { id: contactId, instance: session.instance }
 			});
 
 			if (!contact) {
-				throw new Error("Contato não encontrado!");
+				throw new NotFoundError("Contato não encontrado!");
 			}
 
+			await manualChatAuthorization.assertCanStart(session, contact);
 			await this.checkIfChatExistsOrThrow(session.instance, contact.id);
 
 			const contactAddress = contactsService.resolveContactAddress(contact);

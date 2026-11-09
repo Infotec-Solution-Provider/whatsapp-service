@@ -4,6 +4,7 @@ import whatsappService from "../services/whatsapp.service";
 import sectorClientsService from "../services/sector-clients.service";
 import { pauseAdmissionFailure } from "../services/operator-pause-admission";
 import { WabaTemplateBodyValuesError } from "../utils/waba-send";
+import { BadRequestError, NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
 
 class WhatsappController {
 	constructor(public readonly router: Router) {
@@ -52,6 +53,10 @@ class WhatsappController {
 			if (pauseAdmissionFailure(err)) throw err;
 			if (err instanceof WabaTemplateBodyValuesError) {
 				res.status(400).send({ message: err.message, error: err.message });
+				return;
+			}
+			if (err instanceof UnauthorizedError || err instanceof NotFoundError || err instanceof BadRequestError) {
+				err.sendResponse(res);
 				return;
 			}
 			res.status(500).send({

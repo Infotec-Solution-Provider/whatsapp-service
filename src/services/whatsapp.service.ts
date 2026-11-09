@@ -37,6 +37,7 @@ import type { HumanBehaviorConfig } from "../utils/human-behavior.simulator";
 import { admitHumanSend } from "./operator-pause-admission.runtime";
 import { tenantSqlEnabled } from "../tenant-sql/registry";
 import { tenantSqlInstanceNames } from "../tenant-sql/router";
+import manualChatAuthorization from "./manual-chat-authorization.service";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -263,6 +264,7 @@ class WhatsappService {
 
 	public async sendMessage(session: SessionData, clientId: number, to: string, data: SendMessageData) {
 		await admitHumanSend(session, data.chatId, data.contactId, to);
+		await manualChatAuthorization.assertCanSend(session, clientId, data.contactId, data.chatId, to);
 		const parseBoolean = (value: unknown): boolean => {
 			if (typeof value === "boolean") {
 				return value;
@@ -824,6 +826,7 @@ class WhatsappService {
 		options: { agentId?: number | null } = {}
 	) {
 		await admitHumanSend(session, chatId, contactId, to);
+		await manualChatAuthorization.assertCanSend(session, clientId, contactId, chatId, to);
 		const process = new ProcessingLogger(session.instance, "send-template", `${to}-${Date.now()}`, data);
 		let stage = "normalize-template";
 

@@ -1,5 +1,5 @@
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
-import { BadRequestError } from "@rgranatodutra/http-errors";
+import { BadRequestError, NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
 import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import onlyLocal from "../middlewares/only-local.middleware";
@@ -254,6 +254,10 @@ class MessagesController {
 				to: req.body.to,
 				hasFile: !!req.file
 			});
+			if (error instanceof UnauthorizedError || error instanceof NotFoundError || error instanceof BadRequestError) {
+				error.sendResponse(res);
+				return;
+			}
 			const statusCode = (error as { statusCode?: number })?.statusCode;
 			res.status(statusCode === 400 || statusCode === 409 ? statusCode : 500).send({
 				message: sanitizeErrorMessage(error),

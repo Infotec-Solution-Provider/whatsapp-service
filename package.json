@@ -4,6 +4,7 @@
   "description": "Service that integrate inPulse with Whatsapp.",
   "main": "dist/main.js",
   "scripts": {
+    "test:manual-chat-authorization": "ts-node --files src/services/manual-chat-authorization.test.ts",
     "test:whatsapp-control": "ts-node --files src/controllers/whatsapp-control.controller.test.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:operator-schedules": "ts-node src/services/operator-schedules.test.ts && ts-node src/services/operator-customer-filters.test.ts && ts-node src/services/operator-profile-batch.test.ts && ts-node --files src/controllers/operator-schedules-http.test.ts",
