@@ -2,7 +2,7 @@ import { Customer, SessionData, SocketEventType, SocketServerMonitorRoom, Socket
 import { Logger } from "@in.pulse-crm/utils";
 import { assertOdimChannelAllowed, isOdimAccessOnly, sameTenantIdentity } from "../utils/odim-access-only";
 import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
-import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
+import { BadRequestError, ConflictError, NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
 import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
 import { CustomerSchedule } from "../message-flow/base/base.step";
 import ProcessingLogger from "../utils/processing-logger";
@@ -15,6 +15,7 @@ import getUsersClient from "./users.service";
 import whatsappService, { SendTemplateData } from "./whatsapp.service";
 import parametersService from "./parameters.service";
 import contactsService from "./contacts.service";
+import manualChatAuthorization from "./manual-chat-authorization.service";
 import { withPublicMessageDirection } from "../utils/public-message-direction";
 import messagePresentationService from "./message-presentation.service";
 import chatUserPreferencesService from "./chat-user-preferences.service";
@@ -699,27 +700,44 @@ class ChatsService {
 	public async transferAttendance(token: string, session: SessionData, id: number, userId: number) {
 		assertOdimChannelAllowed(session.instance);
 		const { instance } = session;
+		const restrictToLoyalOperator = await manualChatAuthorization.isEnabled(instance);
 
 		const usersService = getUsersClient();
 		usersService.setAuth(token);
 
-		const chats = await prismaService.wppChat.findUnique({
-			where: { id }
-		});
+		const chats = restrictToLoyalOperator
+			? await prismaService.wppChat.findFirst({ where: { id, instance, isFinished: false } })
+			: await prismaService.wppChat.findUnique({ where: { id } });
 		if (!chats) {
+			if (restrictToLoyalOperator) throw new NotFoundError("Atendimento ativo não encontrado!");
 			throw new Error("Chat não encontrado!");
+		}
+		if (restrictToLoyalOperator) {
+			if (session.role !== "ADMIN" && chats.userId !== session.userId) {
+				throw new UnauthorizedError("Você só pode transferir seus próprios atendimentos.");
+			}
+			if (!Number.isSafeInteger(userId) || userId <= 0) throw new BadRequestError("Operador de destino inválido.");
+			const targets = await instancesService.executeQuery<Array<{ CODIGO: number }>>(
+				instance, "SELECT CODIGO FROM operadores WHERE CODIGO = ? LIMIT 1", [userId]
+			);
+			if (!targets.some((target) => Number(target.CODIGO) === userId)) throw new BadRequestError("Operador de destino não encontrado.");
 		}
 		if (!chats.userId) {
 			throw new Error("Chat não possui userId!");
 		}
 		const user = await usersService.getUserById(chats.userId);
 
-		const chat = await prismaService.wppChat.update({
-			where: { id },
-			data: {
-				userId
-			}
-		});
+		let chat: WppChat;
+		if (restrictToLoyalOperator) {
+			const updated = await prismaService.wppChat.updateMany({
+				where: { id, instance, isFinished: false, userId: chats.userId },
+				data: { userId }
+			});
+			if (updated.count !== 1) throw new ConflictError("O atendimento foi alterado. Atualize a lista antes de transferir.");
+			chat = { ...chats, userId };
+		} else {
+			chat = await prismaService.wppChat.update({ where: { id }, data: { userId } });
+		}
 
 		await this.syncChatToLocal(chat);
 		await transferHistoryService.recordTransfer({
@@ -1293,14 +1311,15 @@ class ChatsService {
 		);
 
 		try {
-			const contact = await prismaService.wppContact.findUnique({
-				where: { id: contactId }
+			const contact = await prismaService.wppContact.findFirst({
+				where: { id: contactId, instance: session.instance }
 			});
 
 			if (!contact) {
-				throw new Error("Contato não encontrado!");
+				throw new NotFoundError("Contato não encontrado!");
 			}
 
+			await manualChatAuthorization.assertCanStart(session, contact);
 			await this.checkIfChatExistsOrThrow(session.instance, contact.id);
 
 			const contactAddress = contactsService.resolveContactAddress(contact);

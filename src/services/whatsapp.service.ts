@@ -33,6 +33,7 @@ import { WabaDeliveryError } from "../utils/waba-send";
 import { getTemplateAttribution } from "../utils/template-attribution";
 import { getOdimCopiedSectorClients } from "./odim-operational-channel.service";
 import { operatorMessageName } from "../utils/operator-message-name";
+import manualChatAuthorization from "./manual-chat-authorization.service";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -232,6 +233,7 @@ class WhatsappService {
 
 	public async sendMessage(session: SessionData, clientId: number, to: string, data: SendMessageData) {
 		assertOdimChannelAllowed(session.instance);
+		await manualChatAuthorization.assertCanSend(session, clientId, data.contactId, data.chatId, to);
 		const parseBoolean = (value: unknown): boolean => {
 			if (typeof value === "boolean") {
 				return value;
@@ -834,6 +836,8 @@ class WhatsappService {
 		contactId: number
 	) {
 		assertOdimChannelAllowed(session.instance);
+		// Keep authorization outside the provider-error wrapper so a denial stays 403.
+		await manualChatAuthorization.assertCanSend(session, clientId, contactId, chatId, to);
 		const process = new ProcessingLogger(session.instance, "send-template", `${to}-${Date.now()}`, data);
 		let stage = "normalize-template";
 
