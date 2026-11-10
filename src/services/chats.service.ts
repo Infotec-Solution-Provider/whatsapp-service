@@ -610,9 +610,9 @@ class ChatsService {
 		return publicReportFieldsService.withConversationReport(instance, presented);
 	}
 
-	public async getChatById(id: number) {
-		const chat = await prismaService.wppChat.findUnique({
-			where: { id },
+	public async getChatById(id: number, instance?: string) {
+		const chat = await prismaService.wppChat.findFirst({
+			where: { id, ...(instance ? { instance } : {}) },
 			include: {
 				contact: true
 			}

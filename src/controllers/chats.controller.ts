@@ -233,7 +233,7 @@ class ChatsController {
 			throw new BadRequestError("Chat ID is required!");
 		}
 
-		const chat = await chatsService.getChatById(Number(id));
+		const chat = await chatsService.getChatById(Number(id), req.session?.instance);
 
 		if (!chat) {
 			throw new NotFoundError("Chat not found!");
