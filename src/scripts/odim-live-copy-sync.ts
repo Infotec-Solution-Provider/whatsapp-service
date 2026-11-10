@@ -6,6 +6,7 @@ import mysql from "mysql2/promise";
 import { InstancesClient, SocketServerClient, SocketEventType } from "../sdk-local";
 import { OdimLiveCopyWriter, ODIM_COPY_RUN } from "../services/odim-live-copy.core";
 import { createOdimCopyIngress } from "../services/odim-live-copy.ingress";
+import { readOdimAccessOnlyProfile, odimAccessOnlyProfilePath } from "../utils/odim-access-only";
 const source = new InstancesClient("http://127.0.0.1:8000"), socket = new SocketServerClient("http://127.0.0.1:8004");
 const SNAP = "d60d646d-a75b-db65-c5fa-eb346177f2e7";
 let stopping = false, busy = false, sourceVerified = false, lastError: string | null = null, lastSyncAt: string | null = null, loops = 0, config: any, db: mysql.Connection, pool: mysql.Pool;
@@ -47,8 +48,10 @@ async function copyRows(messages: any[], advance: number | null) {
 async function tick() {
  if (busy || stopping) return; busy = true;
  try {
+  const profile = readOdimAccessOnlyProfile(odimAccessOnlyProfilePath);
+  if (!profile.enabled || profile.state !== "valid") { lastError = "COPY_PROFILE_DISABLED"; return; }
   if (!await featureEnabled()) { lastError = "COPY_DISABLED"; return; }
-  if (!sourceVerified) await verifySource();
+  await verifySource();
   const [state] = await db.execute<any[]>("SELECT message_cursor FROM odim_operational_copy_sync_state WHERE instance='odim' AND run_id=?", [ODIM_COPY_RUN]); safe(state.length === 1, "SYNC_STATE_REQUIRED");
   const delta = await querySource("SELECT m.*,CAST(DATA_HORA AS CHAR) DATA_HORA,CAST(old_data_Hora AS CHAR) old_data_Hora FROM w_mensagens m WHERE CODIGO>? ORDER BY CODIGO LIMIT 100", [Number(state[0].message_cursor)]);
   await copyRows(delta, delta.length ? Number(delta.at(-1).CODIGO) : null);
@@ -66,7 +69,7 @@ async function tick() {
    }
   }
   lastError = null; lastSyncAt = new Date().toISOString();
- } catch (e) { sourceVerified = false; lastError = e instanceof Error && /^[A-Z_]{3,64}$/.test(e.message) ? e.message : "COPY_SYNC_RETRY_PENDING"; }
+ } catch (e) { sourceVerified = false; lastError = e instanceof Error && /^[A-Z_]{3,64}$/.test(e.message) ? e.message : "COPY_SYNC_RETRY_PENDING"; if ((e as any)?.fatal || ["PROTOCOL_CONNECTION_LOST", "ECONNRESET", "EPIPE"].includes((e as any)?.code)) process.emit("SIGTERM"); }
  finally { busy = false; }
 }
 async function main() {
