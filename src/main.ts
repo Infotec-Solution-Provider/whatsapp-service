@@ -1,4 +1,5 @@
 import "dotenv/config";
+import odimReadonlyHistoryController from "./controllers/odim-readonly-history.controller";
 import { createOdimBiAccessGuard, odimAccessOnlyEnabled, odimAccessOnlyProfile, OdimAccessOnlyError } from "./utils/odim-access-only";
 import { Logger, logRoutes } from "@in.pulse-crm/utils";
 import { handleRequestError } from "@rgranatodutra/http-errors";
@@ -93,6 +94,7 @@ app.use(express.urlencoded({ extended: true, limit: "2gb" }));
 app.use(express.static("public"));
 
 app.use(logRoute(whatsappController.router));
+app.use(logRoute(odimReadonlyHistoryController.router));
 app.use(logRoute(chatsController.router));
 app.use(logRoute(sessionChangesController.router));
 app.use(logRoute(messagesController.router));

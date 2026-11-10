@@ -7,6 +7,48 @@ datasource db {
   url      = env("WHATSAPP_DATABASE_URL")
 }
 
+// Consultation archive only. Raw civil dates and source IDs are not operational Wpp records.
+// JSON_VALID checks and ASCII identifier collations are defined in the reviewed additive SQL.
+model LegacyReadonlyHistorySnapshot {
+ id String @id @db.Char(36)
+ instance String @db.VarChar(191)
+ manifestSha String @map("manifest_sha") @db.Char(64)
+ sourceSnapshotAt String @map("source_snapshot_at") @db.VarChar(32)
+ manifest String @db.LongText
+ state LegacyReadonlyHistoryState @default(STAGED)
+ createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
+ rows LegacyReadonlyHistoryRow[]
+ @@unique([instance,manifestSha], map:"instance_manifest")
+ @@index([instance,state,createdAt],map:"published_instance")
+ @@map("legacy_readonly_history_snapshots")
+}
+model LegacyReadonlyHistoryRow {
+ snapshotId String @map("snapshot_id") @db.Char(36)
+ domain String @db.VarChar(40)
+ sourceId BigInt @map("source_id")
+ parentId BigInt? @map("parent_id")
+ contactId BigInt? @map("contact_id")
+ operatorId Int? @map("operator_id")
+ isFinished Int? @map("is_finished") @db.TinyInt
+ startedCivil String? @map("started_civil") @db.VarChar(32)
+ nameText String? @map("name_text") @db.VarChar(255)
+ phoneText String? @map("phone_text") @db.VarChar(100)
+ payload String @db.LongText
+ payloadSha String @map("payload_sha") @db.Char(64)
+ snapshot LegacyReadonlyHistorySnapshot @relation(fields:[snapshotId],references:[id],onDelete:Restrict,onUpdate:Restrict,map:"readonly_history_snapshot_fk")
+ @@id([snapshotId,domain,sourceId])
+ @@index([snapshotId,domain,parentId,sourceId],map:"by_parent")
+ @@index([snapshotId,domain,contactId,sourceId],map:"by_contact")
+ @@index([snapshotId,domain,startedCivil,sourceId],map:"by_started")
+ @@index([snapshotId,domain,isFinished,sourceId],map:"by_finished")
+ @@map("legacy_readonly_history_rows")
+}
+enum LegacyReadonlyHistoryState {
+ STAGED
+ VALIDATED
+ PUBLISHED
+}
+
 // Written by transactional MySQL triggers, including raw SQL writers.
 model SessionChangeStream {
   instance      String @id @db.VarChar(191)
