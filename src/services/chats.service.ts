@@ -20,6 +20,8 @@ import messagePresentationService from "./message-presentation.service";
 import chatUserPreferencesService from "./chat-user-preferences.service";
 import publicReportFieldsService from "./public-report-fields.service";
 import { buildConversationActivityQueries, PublicConversationsFilters } from "../utils/public-conversation-activity";
+import { keepsOdimSupervisionAccess, odimSupervisionSharedChatScope } from "../utils/odim-supervision-sharing";
+import { odimSupervisionObservers } from "./odim-supervision-sharing.service";
 export type { PublicConversationsFilters } from "../utils/public-conversation-activity";
 
 interface InpulseResult {
@@ -133,6 +135,7 @@ class ChatsService {
 				instance: session.instance,
 				...(chatIds ? { id: { in: chatIds } } : {}),
 				OR: [
+					...odimSupervisionSharedChatScope(session),
 					{
 						userId: session.userId
 					},
@@ -748,15 +751,20 @@ class ChatsService {
 
 		const transferMsg = `Atendimento transferido por ${user.NOME}.`;
 		await messagesDistributionService.addSystemMessage(chat, transferMsg);
-		await socketService.emit(event, `${instance}:chat:${chat.id}`, {
-			chatId: chat.id
-		});
+		// The current UI removes a chat on transfer. A transfer inside the shared
+		// supervisor pair keeps access; the change journal refreshes its ownership.
+		if (!keepsOdimSupervisionAccess(chats, chat)) {
+			await socketService.emit(event, `${instance}:chat:${chat.id}`, { chatId: chat.id });
+		}
 		await socketService.emit(SocketEventType.WppChatStarted, monitorRoom, {
 			chatId: chat.id
 		});
 		await socketService.emit(SocketEventType.WppChatStarted, userRoom, {
 			chatId: chat.id
 		});
+		for (const observerId of await odimSupervisionObservers(chat)) {
+			await socketService.emit(SocketEventType.WppChatStarted, `${chat.instance}:user:${observerId}`, { chatId: chat.id });
+		}
 	}
 
 	public async finishChatById(

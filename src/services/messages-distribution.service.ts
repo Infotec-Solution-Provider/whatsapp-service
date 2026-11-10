@@ -35,6 +35,7 @@ import socketService from "./socket.service";
 import transferHistoryService from "./transfer-history.service";
 import whatsappService from "./whatsapp.service";
 import botsRegistry from "../bots/bots-registry";
+import { odimSupervisionObservers } from "./odim-supervision-sharing.service";
 
 type MessageStatusProvider = "wwebjs" | "waba";
 
@@ -673,6 +674,9 @@ class MessagesDistributionService {
 				const userRoom: SocketServerUserRoom = `${chat.instance}:user:${chat.userId}`;
 				await socketService.emit(SocketEventType.WppChatStarted, userRoom, data);
 				process.log(`Chat enviado para o socket: /${userRoom}/ room!`);
+				for (const observerId of await odimSupervisionObservers(chat)) {
+					await socketService.emit(SocketEventType.WppChatStarted, `${chat.instance}:user:${observerId}`, data);
+				}
 				void this.sendPushNotification(chat.userId, chat.instance, {
 					event: "new_conversation",
 					title: "Nova conversa",

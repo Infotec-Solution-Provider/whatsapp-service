@@ -4,9 +4,11 @@ import prismaService from "../prisma.service";
 import chatsService from "../chats.service";
 import messagePresentationService from "../message-presentation.service";
 import type { ChangeRepository, JournalRow, StreamHead } from "./session-change-reader";
+import { odimSupervisionPeer } from "../../utils/odim-supervision-sharing";
 
 export function previousChatAccess(session: SessionData, row: JournalRow, wallets: number[]): boolean {
 	return row.previousUserId === session.userId ||
+		(row.previousUserId === odimSupervisionPeer(session) && row.previousUserId !== null && row.previousSectorId === session.sectorId) ||
 		(row.previousWalletId !== null && wallets.includes(row.previousWalletId)) ||
 		(session.role === "ADMIN" && row.previousUserId === -1 && row.previousSectorId === session.sectorId);
 }

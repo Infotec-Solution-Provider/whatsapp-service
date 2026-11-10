@@ -2,6 +2,7 @@ import { BadRequestError } from "@rgranatodutra/http-errors";
 import { Prisma } from "@prisma/client";
 import { SessionData } from "../sdk-local";
 import prismaService from "./prisma.service";
+import { odimSupervisionSharedChatScope } from "../utils/odim-supervision-sharing";
 
 export type ChatPreferenceType = "wpp" | "internal";
 
@@ -47,6 +48,7 @@ class ChatUserPreferencesService {
 				id: chatId,
 				instance: session.instance,
 				OR: [
+					...odimSupervisionSharedChatScope(session),
 					{ userId: session.userId },
 					{ wallet: { WppWalletUser: { some: { userId: session.userId } } } },
 					...(session.role === "ADMIN" ? [{ sectorId: session.sectorId, userId: -1 }] : [])

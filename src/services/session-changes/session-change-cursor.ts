@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import type { SessionData } from "../../sdk-local";
+import { odimSupervisionPeer } from "../../utils/odim-supervision-sharing";
 
 export const CURSOR_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export interface ChangeCursor { version: 1; scope: string; epoch: string; sequence: string; issuedAt: number }
 
 export function cursorScope(session: SessionData, wallets: number[]): string {
 	return createHash("sha256").update(JSON.stringify([
-		session.instance, session.userId, session.sectorId, session.role, [...wallets].sort((a, b) => a - b)
+		session.instance, session.userId, session.sectorId, session.role, [...wallets].sort((a, b) => a - b),
+		...(odimSupervisionPeer(session) === null ? [] : ["odim-supervision-sharing-v1"])
 	])).digest("hex");
 }
 
