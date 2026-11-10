@@ -72,6 +72,13 @@ async function main(){
   const defaultClient=Object.values(config.clientIds)[0];gate(defaultClient,'COPY_CLIENT_REQUIRED');
   async function batch(domain,table,columns,entries){
    const fresh=entries.filter(e=>{const old=maps.get(key(domain,e.sourceId));if(!old)return true;gate(old.target_id===e.targetId&&old.source_fingerprint===e.fingerprint,'RESUME_MAP_MISMATCH');return false});if(!fresh.length)return;
+   if(domain==='messages'){
+    const wi=columns.indexOf('wwebjs_id'),wa=columns.indexOf('waba_id'),ids=fresh.flatMap(e=>[e.values[wi],e.values[wa]]).filter(Boolean);
+    if(ids.length){const [registered]=await db.query('SELECT id,instance,wwebjs_id,waba_id FROM messages WHERE waba_id IN (?) OR wwebjs_id IN (?)',[ids,ids]);const collisions=[];
+     for(const e of fresh.filter(e=>!e.reused))for(const [column,index]of [['wwebjs_id',wi],['waba_id',wa]]){const native=e.values[index];if(!native)continue;const prior=registered.find(r=>r[column]&&r[column].toLowerCase()===native.toLowerCase()&&r.id!==e.targetId);if(prior){collisions.push({sourceId:e.sourceId,targetId:e.targetId,registeredId:prior.id,registeredInstance:prior.instance,column,nativePreservedInSourceArchive:true});e.values[index]=null}}
+     if(collisions.length)await privateWrite(out,'native-registry-collision-'+fresh[0].sourceId+'.json',collisions);
+    }
+   }
    await db.beginTransaction();try{
     const inserting=fresh.filter(e=>!e.reused);if(inserting.length){
      await db.query(`INSERT INTO ${table}(${columns.map(c=>'`'+c+'`').join(',')}) VALUES ?`,[inserting.map(e=>e.values)]);
