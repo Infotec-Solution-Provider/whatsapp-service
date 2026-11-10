@@ -31,7 +31,7 @@ class WhatsappController {
 
 	private async getTemplates(req: Request, res: Response) {
 		const clientId = Number(req.params["clientId"]);
-		const templates = await whatsappService.getTemplates(clientId);
+		const templates = await whatsappService.getTemplates(clientId, req.session);
 
 		res.status(200).json({ templates });
 	}

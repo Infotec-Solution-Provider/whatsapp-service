@@ -1,6 +1,6 @@
 import { SessionData } from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
-import { assertOdimChannelAllowed, isOdimAccessOnly, odimQueueWhere, sameTenantIdentity } from "../utils/odim-access-only";
+import { assertOdimChannelAllowed, odimQueueWhere, sameTenantIdentity } from "../utils/odim-access-only";
 import { InternalMessage, WppChat, WppClientType, WppMessage, WppSector } from "@prisma/client";
 import { BadRequestError, InternalServerError } from "@rgranatodutra/http-errors";
 import "dotenv/config";
@@ -175,7 +175,7 @@ class WhatsappService {
 	}
 
 	public async getClientsBySector(instance: string, sectorId: number) {
-		if (isOdimAccessOnly(instance)) return getOdimCopiedSectorClients(instance, sectorId);
+		if (sameTenantIdentity(instance, "odim")) return getOdimCopiedSectorClients(instance, sectorId);
 		const sector = await prismaService.wppSector.findFirstOrThrow({
 			where: { id: sectorId, instance },
 			include: { clients: { where: { instance } } }
@@ -924,11 +924,12 @@ class WhatsappService {
 		}
 	}
 
-	public async getTemplates(clientId: number) {
+	public async getTemplates(clientId: number, session?: SessionData) {
 		const client = this.getClient(clientId);
 		if (!client) {
 			throw new BadRequestError("Client do WhatsApp não encontrado.");
 		}
+		if (session && !sameTenantIdentity(client.instance, session.instance)) throw new BadRequestError("Client do WhatsApp não encontrado.");
 		const templates = await client.getTemplates();
 
 		return templates;

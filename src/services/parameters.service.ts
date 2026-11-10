@@ -47,10 +47,11 @@ class ParametersService {
 		return userParams;
 	}
 
-	public async getSectorParams(sectorId: number) {
+	public async getSectorParams(sectorId: number, instance?: string) {
 		const sectorParams = await prismaService.parameter.findMany({
 			where: {
 				scope: "SECTOR",
+				...(instance ? { instance } : {}),
 				sectorId
 			}
 		});
@@ -90,7 +91,7 @@ class ParametersService {
 	}) {
 		const [instanceParams, sectorParams, userParams] = await Promise.all([
 			this.getInstanceParams(instance),
-			sectorId && !isOdimAccessOnly(instance) ? this.getSectorParams(sectorId) : [],
+			sectorId && !isOdimAccessOnly(instance) ? this.getSectorParams(sectorId, instance) : [],
 			userId ? this.getUserParams(instance, userId) : []
 		]);
 

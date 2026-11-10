@@ -42,7 +42,7 @@ export class OdimLiveCopyWriter {
   else {
    const [old] = await this.db.execute("SELECT contact_id,user_id,result_id,sector_id,type,priority,is_finished,finished_by FROM chats WHERE id=? AND instance='odim' FOR UPDATE", [id]); if (!old.length) throw Error("CHAT_OWNER_CONFLICT");
    const columns = ["contact_id", "user_id", "result_id", "sector_id", "type", "priority", "is_finished", "finished_by"];
-   if (columns.some((c, i) => String(old[0][c] ?? "") !== String(values[i] ?? ""))) await this.db.execute("UPDATE chats SET contact_id=?,user_id=?,result_id=?,sector_id=?,type=?,priority=?,is_finished=?,finished_by=? WHERE id=? AND instance='odim'", [...values, id]);
+   if (!this.config.preserveCurrentOperations && columns.some((c, i) => String(old[0][c] ?? "") !== String(values[i] ?? ""))) await this.db.execute("UPDATE chats SET contact_id=?,user_id=?,result_id=?,sector_id=?,type=?,priority=?,is_finished=?,finished_by=? WHERE id=? AND instance='odim'", [...values, id]);
   }
   await this.version("w_atendimentos", row); return id!;
  }
@@ -64,6 +64,11 @@ export class OdimLiveCopyWriter {
    value["waba_id"] = old[0].waba_id || value["waba_id"]; value["wwebjs_id"] = old[0].wwebjs_id || value["wwebjs_id"];
    if (!file) { value["file_name"] = old[0].file_name; value["file_type"] = old[0].file_type; }
    if (!quoteId) value["quoted_id"] = old[0].quoted_id;
+   if (this.config.preserveCurrentOperations) {
+    for (const c of ["body", "chat_id", "contact_id", "user_id", "client_id", "quoted_id"]) value[c] = old[0][c];
+    const rank: Record<string,number> = { PENDING:0,UNKNOWN:0,ERROR:0,SENT:1,RECEIVED:2,READ:3 };
+    if ((rank[old[0].status] ?? 0) > (rank[value["status"]] ?? 0)) value["status"] = old[0].status;
+   }
    if (cols.some(c => String(old[0][c] ?? "") !== String(value[c] ?? ""))) { await this.db.query("UPDATE messages SET " + cols.map(c => "`" + c + "`=?").join(",") + " WHERE id=? AND instance='odim'", [...Object.values(value), id]); changed = true; }
   }
   await this.version("w_mensagens", row); if (file) await this.version("w_mensagens_arquivos", file);

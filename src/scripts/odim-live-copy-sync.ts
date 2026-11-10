@@ -53,7 +53,8 @@ async function tick() {
  if (busy || stopping) return; busy = true;
  try {
   const profile = readOdimAccessOnlyProfile(odimAccessOnlyProfilePath);
-  if (!profile.enabled || profile.state !== "valid") { lastError = "COPY_PROFILE_DISABLED"; return; }
+  if (profile.state !== "valid") { lastError = "COPY_PROFILE_INVALID"; return; }
+  config.preserveCurrentOperations = !profile.enabled;
   if (!await featureEnabled()) { lastError = "COPY_DISABLED"; return; }
   await verifySource();
   const [state] = await db.execute<any[]>("SELECT message_cursor FROM odim_operational_copy_sync_state WHERE instance='odim' AND run_id=?", [ODIM_COPY_RUN]); safe(state.length === 1, "SYNC_STATE_REQUIRED");

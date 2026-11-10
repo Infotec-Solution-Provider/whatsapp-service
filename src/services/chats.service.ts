@@ -1,6 +1,6 @@
 import { Customer, SessionData, SocketEventType, SocketServerMonitorRoom, SocketServerUserRoom } from "../sdk-local";
 import { Logger } from "@in.pulse-crm/utils";
-import { assertOdimChannelAllowed, isOdimAccessOnly } from "../utils/odim-access-only";
+import { assertOdimChannelAllowed, isOdimAccessOnly, sameTenantIdentity } from "../utils/odim-access-only";
 import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
 import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
 import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
@@ -124,7 +124,7 @@ class ChatsService {
 	public async getUserChatsBySession(session: SessionData, includeMessages = true, includeContact = true, chatIds?: number[]) {
 		// Parallel CRM access does not expose external chats. Socket bootstrap trusts
 		// each returned chat.instance when joining rooms, so return an explicit empty snapshot.
-		const usableCopy = isOdimAccessOnly(session.instance) && (await parametersService.getSessionParams(session))["feature_odim_usable_copy_enabled"] === "true";
+		const usableCopy = sameTenantIdentity(session.instance, "odim") && (await parametersService.getSessionParams(session))["feature_odim_usable_copy_enabled"] === "true";
 		if (isOdimAccessOnly(session.instance) && !usableCopy) return { chats: [], messages: [] };
 		if (usableCopy) includeMessages = false;
 		const foundChats = await prismaService.wppChat.findMany({
@@ -350,7 +350,7 @@ class ChatsService {
 	}
 
 	public async getChatsMonitor(session: SessionData, includeMessages = true, includeCustomer = true) {
-		const usableCopy = isOdimAccessOnly(session.instance) && (await parametersService.getSessionParams(session))["feature_odim_usable_copy_enabled"] === "true";
+		const usableCopy = sameTenantIdentity(session.instance, "odim") && (await parametersService.getSessionParams(session))["feature_odim_usable_copy_enabled"] === "true";
 		if (usableCopy) includeMessages = false;
 		const isTI = session.sectorId === 3 || session.instance !== "nunes";
 

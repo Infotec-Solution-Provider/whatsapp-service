@@ -1,6 +1,6 @@
 import prismaService from "./prisma.service";
 import parametersService from "./parameters.service";
-import { isOdimAccessOnly } from "../utils/odim-access-only";
+import { isOdimAccessOnly, sameTenantIdentity } from "../utils/odim-access-only";
 
 const RUN = "f3c51f9d-9c0a-4654-a630-36f13ce7df40";
 const ORIGIN = "172.22.139.22/crm_sgr/";
@@ -8,7 +8,7 @@ const ORIGIN = "172.22.139.22/crm_sgr/";
 // CRM sector IDs in the authenticated session are not central WhatsApp sector IDs.
 // Expose only configured channel metadata; inactive channels stay fenced by access-only.
 export async function getOdimCopiedSectorClients(instance: string, sectorId: number) {
-	if (!isOdimAccessOnly(instance) || !Number.isSafeInteger(sectorId) || sectorId <= 0) return [];
+	if (!sameTenantIdentity(instance, "odim") || !Number.isSafeInteger(sectorId) || sectorId <= 0) return [];
 	if (!(await parametersService.getInstanceBooleanParam(instance, "feature_odim_usable_copy_enabled", false))) return [];
 	let sector = await prismaService.wppSector.findFirst({ where: { instance, id: sectorId }, select: { id: true } });
 	if (!sector) {
@@ -21,7 +21,7 @@ export async function getOdimCopiedSectorClients(instance: string, sectorId: num
 	if (!sector) return [];
 	return prismaService.wppClient.findMany({
 		where: {
-			instance, type: "WABA", sectors: { some: { id: sector.id, instance } },
+			instance, type: "WABA", ...(isOdimAccessOnly(instance) ? {} : { isActive: true }), sectors: { some: { id: sector.id, instance } },
 			WABAPhoneId: { not: null }, WABAAccountId: { not: null }, WABAToken: { not: null }
 		},
 		select: { id: true, name: true, type: true }, orderBy: { id: "asc" }
