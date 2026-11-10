@@ -9,6 +9,39 @@ datasource db {
 
 // Consultation archive only. Raw civil dates and source IDs are not operational Wpp records.
 // JSON_VALID checks and ASCII identifier collations are defined in the reviewed additive SQL.
+model OdimOperationalCopySyncState {
+ instance String @id @db.VarChar(191)
+ runId String @map("run_id") @db.VarChar(36)
+ messageCursor BigInt @map("message_cursor")
+ updatedAt DateTime @default(now()) @map("updated_at") @db.DateTime(3)
+ @@map("odim_operational_copy_sync_state")
+}
+
+model OdimOperationalCopyWebhook {
+ id String @id @db.Char(64)
+ providerId String @map("provider_id") @db.VarChar(191)
+ kind String @db.VarChar(16)
+ payload String @db.LongText
+ state String @default("PENDING") @db.VarChar(16)
+ attempts Int @default(0)
+ receivedAt DateTime @default(now()) @map("received_at") @db.DateTime(3)
+ updatedAt DateTime @default(now()) @map("updated_at") @db.DateTime(3)
+ @@index([state,receivedAt],map:"pending_copy_events")
+ @@map("odim_operational_copy_webhooks")
+}
+
+model OdimOperationalCopySourceVersion {
+ id BigInt @id @default(autoincrement())
+ instance String @db.VarChar(191)
+ domain String @db.VarChar(40)
+ sourceId BigInt @map("source_id")
+ payloadSha String @map("payload_sha") @db.Char(64)
+ payload String @db.LongText
+ observedAt DateTime @default(now()) @map("observed_at") @db.DateTime(3)
+ @@unique([instance,domain,sourceId,payloadSha],map:"copy_source_version")
+ @@map("odim_operational_copy_source_versions")
+}
+
 model LegacyReadonlyHistorySnapshot {
  id String @id @db.Char(36)
  instance String @db.VarChar(191)
@@ -1201,5 +1234,6 @@ model InstanceMigrationMap {
 
   @@unique([instance, entity, sourceId])
   @@index([runId, entity])
+  @@index([runId, entity, targetId],map:"copy_run_entity_target")
   @@map("instance_migration_maps")
 }
