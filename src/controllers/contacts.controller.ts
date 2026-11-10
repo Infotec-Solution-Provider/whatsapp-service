@@ -1,4 +1,5 @@
 import { Request, Response, Router } from "express";
+import { isOdimAccessOnly } from "../utils/odim-access-only";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import isAdmin from "../middlewares/is-admin.middleware";
 import protectedRead from "../middlewares/protected-read";
@@ -120,7 +121,7 @@ class ContactsController {
 
 		// Check if local sync is enabled via parameter
 		const parameters = await parametersService.getSessionParams(req.session);
-		const useLocalSync = parameters["use_local_contacts_sync"] === "true";
+		const useLocalSync = parameters["use_local_contacts_sync"] === "true" && !isOdimAccessOnly(req.session.instance);
 
 		let result;
 		if (useLocalSync) {

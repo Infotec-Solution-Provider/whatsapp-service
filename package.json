@@ -5,6 +5,7 @@
 	"main": "dist/main.js",
 	"scripts": {
 		"test": "echo \"Error: no test specified\" && exit 1",
+		"test:odim-access-only": "node scripts/test-odim-access-only.cjs",
 		"dev": "ts-node-dev --transpile-only --respawn --ignore-watch node_modules --watch .env src/main.ts",
 		"dev:frontend": "node scripts/build-frontend.js --watch",
 		"start": "ts-node src/main.ts",

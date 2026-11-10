@@ -1,5 +1,6 @@
 import { Prisma, WppMessage } from "@prisma/client";
 import prismaService, { type DatabaseClient } from "./prisma.service";
+import { assertOdimChannelAllowed, odimQueueWhere } from "../utils/odim-access-only";
 import {
 	assertOperatorOutboundReplay,
 	OperatorOutboundDeliveryResult,
@@ -42,6 +43,7 @@ export default class PrismaOperatorOutboundRepository implements OperatorOutboun
 	}
 
 	async enqueue(input: OperatorOutboundEnqueueInput): Promise<OperatorOutboundEnqueueResult> {
+		assertOdimChannelAllowed(input.instance);
 		const existing = await this.lookup(input, input.idempotencyKey);
 		if (existing) {
 			assertOperatorOutboundReplay(existing.job, input);
@@ -75,7 +77,7 @@ export default class PrismaOperatorOutboundRepository implements OperatorOutboun
 
 	async recoverExpired(now: Date): Promise<void> {
 		const expired = await this.db.operatorOutboundSend.findMany({
-			where: { status: "PROCESSING", lockedUntil: { lte: now } },
+			where: { ...odimQueueWhere(), status: "PROCESSING", lockedUntil: { lte: now } },
 			orderBy: { lockedUntil: "asc" }, take: 100,
 		});
 		for (const item of expired) {
@@ -102,7 +104,7 @@ export default class PrismaOperatorOutboundRepository implements OperatorOutboun
 
 	async candidates(now: Date, limit: number): Promise<string[]> {
 		const rows = await this.db.operatorOutboundSend.findMany({
-			where: { status: "PENDING", nextAttemptAt: { lte: now } },
+			where: { ...odimQueueWhere(), status: "PENDING", nextAttemptAt: { lte: now } },
 			orderBy: { createdAt: "asc" }, take: limit, select: { id: true },
 		});
 		return rows.map((row) => row.id);
@@ -110,7 +112,7 @@ export default class PrismaOperatorOutboundRepository implements OperatorOutboun
 
 	async claim(id: string, token: string, now: Date, lockedUntil: Date) {
 		const updated = await this.db.operatorOutboundSend.updateMany({
-			where: { id, status: "PENDING", nextAttemptAt: { lte: now } },
+			where: { ...odimQueueWhere(), id, status: "PENDING", nextAttemptAt: { lte: now } },
 			data: { status: "PROCESSING", lockedBy: token, lockedUntil },
 		});
 		if (updated.count !== 1) return null;

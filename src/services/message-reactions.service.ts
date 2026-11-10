@@ -1,4 +1,5 @@
 import { Logger } from "@in.pulse-crm/utils";
+import { assertOdimChannelAllowed } from "../utils/odim-access-only";
 import type { SessionData, SocketServerChatRoom } from "../sdk-local";
 import { SocketEventType } from "../sdk-local";
 import type { MessageReactionEvent } from "../types/remote-client.types";
@@ -96,6 +97,7 @@ export class MessageReactionsService {
 	}
 
 	private async dispatch(session: SessionData, message: ReactionMessage, domain: Domain, chatId: number, clientId: number, to: string, emoji: string, getClient: (id: number) => ReactionClient | undefined) {
+		assertOdimChannelAllowed(session.instance);
 		const registered = await this.db.wppClient.findFirst({ where: { id: clientId, instance: session.instance, isActive: true } });
 		const client = getClient(clientId);
 		if (!registered || !client || client.id !== clientId || client.instance !== session.instance) throw new MessageReactionError("Canal indisponível.", 503);

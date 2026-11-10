@@ -1,5 +1,6 @@
 import { SessionData } from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { assertOdimChannelAllowed, isOdimAccessOnly, odimQueueWhere } from "../utils/odim-access-only";
 import { InternalMessage, WppChat, WppClientType, WppMessage, WppSector } from "@prisma/client";
 import { BadRequestError, InternalServerError } from "@rgranatodutra/http-errors";
 import "dotenv/config";
@@ -115,6 +116,7 @@ class WhatsappService {
 	public async buildClients() {
 		const clients = await prismaService.wppClient.findMany({
 			where: {
+				...odimQueueWhere(),
 				isActive: true
 			}
 		});
@@ -166,16 +168,19 @@ class WhatsappService {
 	}
 
 	public getClient(id: number) {
-		return this.clients.get(id);
+		const client = this.clients.get(id);
+		if (client) assertOdimChannelAllowed(client.instance);
+		return client;
 	}
 
-	public async getClientsBySector(sectorId: number) {
-		const sector = await prismaService.wppSector.findUniqueOrThrow({
-			where: { id: sectorId },
+	public async getClientsBySector(instance: string, sectorId: number) {
+		if (isOdimAccessOnly(instance)) return [];
+		const sector = await prismaService.wppSector.findFirstOrThrow({
+			where: { id: sectorId, instance },
 			include: { clients: true }
 		});
 
-		return sector.clients.map((c) => ({
+		return sector.clients.filter((c) => c.instance === instance).map((c) => ({
 			id: c.id,
 			name: c.name,
 			type: c.type
@@ -224,6 +229,7 @@ class WhatsappService {
 	}
 
 	public async sendMessage(session: SessionData, clientId: number, to: string, data: SendMessageData) {
+		assertOdimChannelAllowed(session.instance);
 		const parseBoolean = (value: unknown): boolean => {
 			if (typeof value === "boolean") {
 				return value;
@@ -436,6 +442,7 @@ class WhatsappService {
 		if (!chat || !chat.contact) {
 			throw new BadRequestError("Chat ou contato não encontrado.");
 		}
+		assertOdimChannelAllowed(chat.instance);
 
 		const contactAddress = contactsService.resolveContactAddress(chat.contact);
 		if (!contactAddress) {
@@ -477,6 +484,7 @@ class WhatsappService {
 		if (!chat || !chat.contact) {
 			throw new BadRequestError("Chat ou contato não encontrado.");
 		}
+		assertOdimChannelAllowed(chat.instance);
 
 		const contactAddress = contactsService.resolveContactAddress(chat.contact);
 		if (!contactAddress) {
@@ -540,6 +548,7 @@ class WhatsappService {
 		if (!chat || !chat.contact) {
 			throw new BadRequestError("Chat ou contato não encontrado.");
 		}
+		assertOdimChannelAllowed(chat.instance);
 
 		const contactAddress = contactsService.resolveContactAddress(chat.contact);
 		if (!contactAddress) {
@@ -605,6 +614,7 @@ class WhatsappService {
 	}
 
 	public async sendBotMessage(to: string, clientId: number, data: SendBotMessageData) {
+		assertOdimChannelAllowed(data.chat.instance);
 		const process = new ProcessingLogger(data.chat.instance, "send-bot-message", `${to}-${Date.now()}`, data);
 		let pendingMsg: WppMessage | null = null;
 		const text = data.text ?? "";
@@ -821,6 +831,7 @@ class WhatsappService {
 		chatId: number,
 		contactId: number
 	) {
+		assertOdimChannelAllowed(session.instance);
 		const process = new ProcessingLogger(session.instance, "send-template", `${to}-${Date.now()}`, data);
 		let stage = "normalize-template";
 
@@ -930,6 +941,7 @@ class WhatsappService {
 		whatsappTargets?: WhatsappForwardTarget[],
 		internalTargets?: InternalForwardTarget[]
 	): Promise<void> {
+		assertOdimChannelAllowed(session.instance);
 		const process = new ProcessingLogger(
 			session.instance,
 			"forward-messages-service",
@@ -1107,6 +1119,7 @@ class WhatsappService {
 		text: string,
 		fileId?: number | null
 	) {
+		assertOdimChannelAllowed(instance);
 		const process = new ProcessingLogger(instance, "send-auto-reply", `${to}-${Date.now()}`, { to, text, fileId });
 
 		try {

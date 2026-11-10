@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { assertOdimChannelAllowed } from "../utils/odim-access-only";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import { Request, Response, Router } from "express";
 import CreateMessageDto from "../dtos/create-message.dto";
@@ -52,6 +53,7 @@ class ParsedMessagesController {
 		}
 
 		const msg = data as ProcessMessageBody;
+		assertOdimChannelAllowed(msg.instance);
 
 		if (!msg.instance) {
 			throw new BadRequestError("Field 'instance' is required");
@@ -239,6 +241,10 @@ class ParsedMessagesController {
 			}
 
 			const messages = req.body as unknown[];
+			// Reject the whole Odim batch before any earlier row could be persisted/acknowledged.
+			for (const value of messages) {
+				if (value && typeof value === "object") assertOdimChannelAllowed((value as ProcessMessageBody).instance);
+			}
 			logger.log(`Processando batch de ${messages.length} mensagens`);
 
 			const results: Array<{

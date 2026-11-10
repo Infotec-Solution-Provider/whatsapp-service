@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { Request, Response, Router } from "express";
+import { odimProviderIngress } from "../utils/odim-access-only";
 import { Logger } from "@in.pulse-crm/utils";
 import gupshupWebhookQueueService from "../services/gupshup-webhook-queue.service";
 import ProcessingLogger from "../utils/processing-logger";
@@ -9,10 +10,10 @@ const ENDPOINT_NEW = "/api/whatsapp/gupshup/:instance";
 
 class GupshupController {
 	constructor(public readonly router: Router) {
-		router.post(ENDPOINT + "/webhooks", this.webhookEntry);
-		router.get(ENDPOINT + "/webhooks", this.webhookChallenge);
-		router.post(ENDPOINT_NEW + "/webhooks", this.webhookEntry);
-		router.get(ENDPOINT_NEW + "/webhooks", this.webhookChallenge);
+		router.post(ENDPOINT + "/webhooks", odimProviderIngress, this.webhookEntry);
+		router.get(ENDPOINT + "/webhooks", odimProviderIngress, this.webhookChallenge);
+		router.post(ENDPOINT_NEW + "/webhooks", odimProviderIngress, this.webhookEntry);
+		router.get(ENDPOINT_NEW + "/webhooks", odimProviderIngress, this.webhookChallenge);
 	}
 
 	private webhookEntry = async (req: Request, res: Response) => {

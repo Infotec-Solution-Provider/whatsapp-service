@@ -1,4 +1,5 @@
 import { Request, Response, Router } from "express";
+import { OdimAccessOnlyError } from "../utils/odim-access-only";
 import { Logger } from "@in.pulse-crm/utils";
 import remoteClientService from "../services/remote-client.service";
 import { RemoteClientEvent } from "../types/remote-client.types";
@@ -32,6 +33,10 @@ class RemoteClientController {
 			}
 			res.status(200).send();
 		} catch (err: any) {
+			if (err instanceof OdimAccessOnlyError) {
+				res.status(err.statusCode).json({ message: err.message, code: err.code });
+				return;
+			}
 			Logger.error("[RemoteClientController] Failed to process event", err as Error);
 			if (err instanceof RemoteInboundInboxRequestError) {
 				res.status(err.statusCode).json({ message: err.message });

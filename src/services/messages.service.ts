@@ -1,5 +1,6 @@
 import { SessionData, SocketEventType, SocketServerChatRoom } from "../sdk-local";
 import { Prisma, WppMessage } from "@prisma/client";
+import { assertOdimChannelAllowed } from "../utils/odim-access-only";
 import { NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
 import CreateMessageDto from "../dtos/create-message.dto";
 import prismaService from "./prisma.service";
@@ -136,6 +137,7 @@ class MessagesService {
 	}
 
 	public async insertMessage(data: CreateMessageDto) {
+		assertOdimChannelAllowed(data.instance);
 		delete (data as any)["isGroup"];
 		delete (data as any)["authorName"];
 		delete (data as any)["groupId"];

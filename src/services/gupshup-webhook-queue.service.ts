@@ -2,6 +2,7 @@ import "dotenv/config";
 import { Logger } from "@in.pulse-crm/utils";
 import { GupshupWebhookQueueStatus } from "@prisma/client";
 import prismaService from "./prisma.service";
+import { assertOdimChannelAllowed, odimQueueWhere } from "../utils/odim-access-only";
 import gupshupService from "./gupshup.service";
 
 const QUEUE_POLL_INTERVAL = parseInt(process.env["GUPSHUP_WEBHOOK_QUEUE_POLL_INTERVAL"] || "1000", 10);
@@ -15,6 +16,7 @@ class GupshupWebhookQueueService {
    * Enqueue a webhook for later processing
    */
   async enqueue(instance: string, payload: unknown): Promise<string> {
+    assertOdimChannelAllowed(instance);
     const item = await prismaService.gupshupWebhookQueue.create({
       data: {
         instance,
@@ -80,6 +82,7 @@ class GupshupWebhookQueueService {
   private async getNextPendingItem() {
     return prismaService.gupshupWebhookQueue.findFirst({
       where: {
+        ...odimQueueWhere(),
         status: GupshupWebhookQueueStatus.PENDING
       },
       orderBy: {
@@ -132,6 +135,7 @@ class GupshupWebhookQueueService {
   private async resetProcessingToPending(): Promise<void> {
     const result = await prismaService.gupshupWebhookQueue.updateMany({
       where: {
+        ...odimQueueWhere(),
         status: GupshupWebhookQueueStatus.PROCESSING
       },
       data: {

@@ -1,4 +1,5 @@
 import prismaService from "./prisma.service";
+import { isOdimAccessOnly } from "../utils/odim-access-only";
 
 const DEFAULT_FEATURE_PARAMETERS: Record<string, string> = {
 	require_supervisor_approval_for_contact_reactivation: "false",
@@ -72,6 +73,7 @@ class ParametersService {
 	}
 
 	public async isInternalGroupWhatsappSyncEnabled(instance: string, legacyDefault: boolean) {
+		if (isOdimAccessOnly(instance)) return false;
 		return this.getInstanceBooleanParam(instance, INTERNAL_GROUP_WHATSAPP_SYNC_PARAMETER, legacyDefault);
 	}
 
@@ -86,7 +88,7 @@ class ParametersService {
 	}) {
 		const [instanceParams, sectorParams, userParams] = await Promise.all([
 			this.getInstanceParams(instance),
-			sectorId ? this.getSectorParams(sectorId) : [],
+			sectorId && !isOdimAccessOnly(instance) ? this.getSectorParams(sectorId) : [],
 			userId ? this.getUserParams(instance, userId) : []
 		]);
 
@@ -102,6 +104,11 @@ class ParametersService {
 			...toParamMap(userParams)
 		};
 
+		if (isOdimAccessOnly(instance)) {
+			for (const key of ["feature_ai_enabled", "feature_ai_agents_enabled", "feature_ai_supervisor_enabled", "feature_ai_settings_enabled",
+				"feature_sip_config_enabled", "feature_telephony_dialer_enabled", "feature_funnels_enabled", "feature_mass_messages_enabled",
+				"feature_whatsapp_session_monitoring_enabled", INTERNAL_GROUP_WHATSAPP_SYNC_PARAMETER]) mergedParams[key] = "false";
+		}
 		return mergedParams;
 	}
 }

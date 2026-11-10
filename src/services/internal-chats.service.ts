@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { assertOdimChannelAllowed, isOdimAccessOnly, odimAccessOnlyEnabled } from "../utils/odim-access-only";
 import {
 	FileDirType,
 	InternalChatMember,
@@ -125,6 +126,7 @@ class InternalChatsService {
 		groupId: string | null = null,
 		groupImage: Express.Multer.File | null = null
 	) {
+		if (groupId) assertOdimChannelAllowed(session.instance);
 		const uniqueIds = new Set(participantIds);
 		let fileId: number | null = null;
 
@@ -183,6 +185,10 @@ class InternalChatsService {
 
 	// Sobrescreve os participantes de um grupo interno
 	public async updateInternalGroup(groupId: number, data: UpdateInternalGroupData) {
+		if (odimAccessOnlyEnabled) {
+			const accessOnlyChat = await prismaService.internalChat.findUnique({ where: { id: groupId }, select: { instance: true, wppGroupId: true } });
+			if (accessOnlyChat && (accessOnlyChat.wppGroupId || data.wppGroupId)) assertOdimChannelAllowed(accessOnlyChat.instance);
+		}
 		const currentParticipants = await prismaService.internalChatMember.findMany({
 			where: {
 				internalChatId: groupId
@@ -569,6 +575,7 @@ class InternalChatsService {
 		process: ProcessingLogger,
 		authToken?: string
 	): Promise<void> {
+		if (isOdimAccessOnly(session.instance)) return; // Internal mentions remain local; no external notification is submitted.
 		if (!mentions.length) {
 			return;
 		}
@@ -686,6 +693,11 @@ class InternalChatsService {
 
 	// Envia uma mensagem no chat interno
 	public async sendMessage(session: SessionData, data: InternalSendMessageData) {
+		if (isOdimAccessOnly(session.instance)) {
+			const chat = await prismaService.internalChat.findFirst({ where: { id: +data.chatId, instance: session.instance }, select: { wppGroupId: true } });
+			if (!chat) throw new BadRequestError("Conversa interna não pertence à instância.");
+			if (chat.wppGroupId) assertOdimChannelAllowed(session.instance);
+		}
 		const { file, authToken, ...logData } = data;
 		const sendAsAudio = data.sendAsAudio === true || data.sendAsAudio === "true";
 		const sendAsDocument = data.sendAsDocument === true || data.sendAsDocument === "true";
@@ -1043,6 +1055,7 @@ class InternalChatsService {
 
 			// Verifica se a mensagem existe e pertence à instância do usuário
 			const originalMsg = await this.getInternalMessageById(session, options.messageId);
+			if (originalMsg.chat?.wppGroupId) assertOdimChannelAllowed(session.instance);
 			process.log("Mensagem original encontrada.", originalMsg);
 
 			// Verifica se o usuário que está tentando editar é o autor da mensagem
@@ -1900,6 +1913,7 @@ class InternalChatsService {
 	public async processQueuedWppGroupMessage(
 		item: InternalWhatsappQueueItem
 	): Promise<InternalWhatsappQueueProcessResult> {
+		assertOdimChannelAllowed(item.instance);
 		if (!item.internalMessageId) {
 			return { status: "FAILED", error: "Queue item has no internal message ID" };
 		}

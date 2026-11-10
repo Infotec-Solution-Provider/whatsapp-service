@@ -1,3 +1,4 @@
+import { assertOdimChannelAllowed } from "../utils/odim-access-only";
 import {
 	SocketEventType,
 	SocketServerAdminRoom,
@@ -219,6 +220,7 @@ class MessagesDistributionService {
 	}
 
 	public async getFlow(instance: string, sectorId: number): Promise<MessageFlow> {
+		assertOdimChannelAllowed(instance);
 		const flowKey = `${instance}:${sectorId}`;
 		const flow = this.flows.get(flowKey);
 
@@ -471,6 +473,7 @@ class MessagesDistributionService {
 		contactName?: string | null,
 		strictLocalSync = false
 	) {
+		assertOdimChannelAllowed(instance);
 		const logger = new ProcessingLogger(instance, "message-distribution", `WppMessage-${msg.id}`, msg);
 
 		try {

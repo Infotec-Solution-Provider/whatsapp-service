@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { odimAccessOnlyEnabled, odimAccessOnlyProfile, OdimAccessOnlyError } from "./utils/odim-access-only";
 import { Logger, logRoutes } from "@in.pulse-crm/utils";
 import { handleRequestError } from "@rgranatodutra/http-errors";
 import cors from "cors";
@@ -73,7 +74,8 @@ const logRoute = (r: express.Router) => {
 
 app.use(cors());
 app.use(publicBiServiceTokenGuard);
-app.get("/health", (_req, res) => res.json({ service: "whatsapp", storage: "central", storageVersion: 1 }));
+app.get("/health", (_req, res) => res.json({ service: "whatsapp", storage: "central", storageVersion: 1,
+	...(odimAccessOnlyEnabled ? { odimAccessOnly: true, odimAccessOnlyProfile: odimAccessOnlyProfile.state } : {}) }));
 
 // Respostas da API são dinâmicas e por usuário: sem ETag/304 e sem cache no navegador.
 // Evita o Chrome reaproveitar uma cópia em cache que não decodifica (ERR_CONTENT_DECODING_FAILED 304).
@@ -127,6 +129,10 @@ app.get("/flows", (_req, res) => {
 });
 
 app.use((err: Error, req: Request, _res: Response, next: NextFunction) => {
+	if (err instanceof OdimAccessOnlyError) {
+		_res.status(err.statusCode).json({ message: err.message, code: err.code });
+		return;
+	}
 	recordDatabaseIncident(err, { source: "http", operation: `${req.method} ${req.path}` });
 	console.error(err);
 	next(err);

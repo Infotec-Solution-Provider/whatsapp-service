@@ -15,6 +15,7 @@ import readyMessagesService from "./ready-messages.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
 import { messageMentionPatch, operatorMentionEntities } from "../utils/message-mention-persistence";
 import messagePresentationService from "./message-presentation.service";
+import { assertOdimChannelAllowed } from "../utils/odim-access-only";
 
 interface OperatorSendPayload {
 	options: SendMessageOptions;
@@ -45,6 +46,7 @@ class OperatorSendService {
 
 	async submit(session: SessionData, clientId: number, to: unknown, data: Record<string, unknown>, key: string, file?: Express.Multer.File,
 		onStage: (stage: string) => void = () => undefined) {
+		assertOdimChannelAllowed(session.instance);
 		onStage("validation");
 		const request = normalizeOperatorSendRequest(clientId, to, data, file);
 		const payloadHash = hashOperatorSendRequest(request);

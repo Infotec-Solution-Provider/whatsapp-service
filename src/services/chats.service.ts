@@ -1,5 +1,6 @@
 import { Customer, SessionData, SocketEventType, SocketServerMonitorRoom, SocketServerUserRoom } from "../sdk-local";
 import { Logger } from "@in.pulse-crm/utils";
+import { assertOdimChannelAllowed } from "../utils/odim-access-only";
 import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
 import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
 import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
@@ -661,6 +662,7 @@ class ChatsService {
 		}
 
 		const resolvedClientId = data.clientId ?? chat.sector?.defaultClientId ?? null;
+		assertOdimChannelAllowed(chat.instance);
 
 		if (!resolvedClientId) {
 			throw new BadRequestError("Não foi possível determinar o client do WhatsApp para este chat.");
@@ -679,6 +681,7 @@ class ChatsService {
 	}
 
 	public async transferAttendance(token: string, session: SessionData, id: number, userId: number) {
+		assertOdimChannelAllowed(session.instance);
 		const { instance } = session;
 
 		const usersService = getUsersClient();
@@ -1260,6 +1263,7 @@ class ChatsService {
 		contactId: number,
 		template?: SendTemplateData
 	) {
+		assertOdimChannelAllowed(session.instance);
 		const process = new ProcessingLogger(
 			session.instance,
 			"start-chat",

@@ -1,4 +1,5 @@
 import prismaService from "./prisma.service";
+import { assertOdimChannelAllowed, odimQueueWhere } from "../utils/odim-access-only";
 import ProcessingLogger from "../utils/processing-logger";
 import { Logger } from "@in.pulse-crm/utils";
 
@@ -39,6 +40,7 @@ class MessageQueueService {
    * Adiciona uma mensagem na fila de processamento
    */
   public async enqueue(data: QueueMessageData): Promise<string> {
+    assertOdimChannelAllowed(data.instance);
     try {
       const queueItem = await prismaService.wppMessageProcessingQueue.upsert({
         where: { messageId: data.messageId },
@@ -149,6 +151,7 @@ class MessageQueueService {
       const pendingItems = await prismaService.wppMessageProcessingQueue.findMany({
         where: {
           status: "PENDING",
+          ...odimQueueWhere(),
           OR: [
             { lockedUntil: null },
             { lockedUntil: { lt: new Date() } }
@@ -212,6 +215,7 @@ class MessageQueueService {
           in: queueIds
         },
         status: "PENDING",
+        ...odimQueueWhere(),
         OR: [{ lockedUntil: null }, { lockedUntil: { lt: new Date() } }]
       },
       data: {
@@ -246,6 +250,7 @@ class MessageQueueService {
       const result = await prismaService.wppMessageProcessingQueue.updateMany({
         where: {
           status: "PROCESSING",
+          ...odimQueueWhere(),
           lockedUntil: {
             lt: new Date()
           }
@@ -271,6 +276,7 @@ class MessageQueueService {
     const result = await prismaService.wppMessageProcessingQueue.updateMany({
       where: {
         status: "PROCESSING",
+        ...odimQueueWhere(),
         OR: [
           { lockedUntil: null },
           { lockedUntil: { lt: new Date() } }

@@ -1,4 +1,5 @@
 import { BadRequestError } from "@rgranatodutra/http-errors";
+import { assertOdimChannelAllowed, OdimAccessOnlyError } from "../utils/odim-access-only";
 import { Request, Response, Router } from "express";
 import { ChatPayload } from "../message-flow/base/base.step";
 import messagesDistributionService from "../services/messages-distribution.service";
@@ -36,6 +37,7 @@ class FlowExecutionController {
 
     try {
       const { instance, sectorId, contactId, messageId } = req.body as FlowExecutionRequest;
+      assertOdimChannelAllowed(instance);
 
       // Validação básica
       if (!instance || !sectorId || !contactId) {
@@ -50,6 +52,7 @@ class FlowExecutionController {
       const wppContact = await prismaService.wppContact.findUniqueOrThrow({
         where: { id: contactId }
       });
+      assertOdimChannelAllowed(wppContact.instance);
 
       const wppMessage = messageId
         ? await prismaService.wppMessage.findUnique({ where: { id: messageId } })
@@ -76,6 +79,7 @@ class FlowExecutionController {
       logger.success(response);
       return res.status(200).json(response);
     } catch (err) {
+      if (err instanceof OdimAccessOnlyError) return res.status(err.statusCode).json({ success: false, error: err.message, code: err.code });
       logger.failed(err);
       const errorMessage = err instanceof Error ? err.message : String(err);
 

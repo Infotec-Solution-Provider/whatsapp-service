@@ -11,7 +11,7 @@ class WhatsappController {
 	}
 
 	private async getClients(req: Request, res: Response) {
-		const clients = await whatsappService.getClientsBySector(Number(req.params["sectorId"]));
+		const clients = await whatsappService.getClientsBySector(req.session.instance, Number(req.params["sectorId"]));
 
 		res.status(200).json({
 			message: "Clients retrieved successfully!",

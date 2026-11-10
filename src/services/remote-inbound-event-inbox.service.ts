@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { assertOdimChannelAllowed, odimAccessOnlyEnabled } from "../utils/odim-access-only";
 import { hostname } from "node:os";
 import { Prisma, RemoteInboundEventInbox, RemoteInboundEventInboxStatus, WppMessageStatus } from "@prisma/client";
 import { Logger } from "@in.pulse-crm/utils";
@@ -166,6 +167,10 @@ export class RemoteInboundEventInboxService {
 		payload: RemoteInboundPayload, providerMessageId: string, eventType: string, idempotencyKey: string
 	): Promise<RemoteInboundInboxEnqueueResult> {
 		const clientId = payload.clientId;
+		if (odimAccessOnlyEnabled) {
+			const client = await prismaService.wppClient.findUnique({ where: { id: clientId }, select: { instance: true } });
+			if (client) assertOdimChannelAllowed(client.instance);
+		}
 		const payloadHash = hashRemoteInboundPayload(payload);
 		const jsonPayload = canonicalize(payload) as Prisma.InputJsonValue;
 		const findExisting = () => prismaService.remoteInboundEventInbox.findFirst({
@@ -270,10 +275,12 @@ export class RemoteInboundEventInboxService {
 		if (this.stopping || this.processing || !this.processor) return;
 		this.processing = true;
 		try {
-			await this.releaseExpiredLocks();
 			const now = new Date();
+			const excluded = odimAccessOnlyEnabled
+				? await prismaService.wppClient.findMany({ where: { instance: "odim" }, select: { id: true } }) : [];
+			await this.releaseExpiredLocks(excluded.map(client => client.id));
 			const candidates = await prismaService.remoteInboundEventInbox.findMany({
-				where: { status: "PENDING", nextAttemptAt: { lte: now } },
+				where: { status: "PENDING", nextAttemptAt: { lte: now }, ...(excluded.length ? { clientId: { notIn: excluded.map(client => client.id) } } : {}) },
 				// A retry goes behind events already due, regardless of its original
 				// creation date. Uses the existing (status, next_attempt_at) index.
 				orderBy: [{ nextAttemptAt: "asc" }, { id: "asc" }],
@@ -355,9 +362,9 @@ export class RemoteInboundEventInboxService {
 		Logger.error(`[RemoteInboundInbox] Failed to process ${item.id}: ${message}`, error as Error);
 	}
 
-	private async releaseExpiredLocks(): Promise<void> {
+	private async releaseExpiredLocks(excluded: number[] = []): Promise<void> {
 		await prismaService.remoteInboundEventInbox.updateMany({
-			where: { status: "PROCESSING", lockedUntil: { lt: new Date() } },
+			where: { status: "PROCESSING", lockedUntil: { lt: new Date() }, ...(excluded.length ? { clientId: { notIn: excluded } } : {}) },
 			data: {
 				status: "PENDING",
 				lockedBy: null,

@@ -1,4 +1,5 @@
 import { Logger } from "@in.pulse-crm/utils";
+import { assertOdimChannelAllowed, odimQueueWhere } from "../utils/odim-access-only";
 import { Prisma } from "@prisma/client";
 import prismaService from "./prisma.service";
 import type { InternalWppOutcome } from "../utils/internal-wpp-send-outcome";
@@ -75,6 +76,7 @@ class InternalWhatsappMessageQueueService {
 	}
 
 	public async enqueue(input: EnqueueInput): Promise<string> {
+		assertOdimChannelAllowed(input.instance);
 		const existing = await prismaService.internalMessageProcessingQueue.findFirst({
 			where: { internalMessageId: input.internalMessageId },
 			select: { id: true }
@@ -155,7 +157,7 @@ class InternalWhatsappMessageQueueService {
 	// "Reenviar" (new retry generation) clears it to start a new measurement.
 	private async recoverInterruptedItems(): Promise<void> {
 		const result = await prismaService.internalMessageProcessingQueue.updateMany({
-			where: { status: "PROCESSING" },
+			where: { ...odimQueueWhere(), status: "PROCESSING" },
 			data: {
 				status: "PENDING",
 				lockedBy: null,
@@ -169,6 +171,7 @@ class InternalWhatsappMessageQueueService {
 		const removed = await prismaService.internalMessageProcessingQueue.deleteMany({
 			where: {
 				status: { in: ["COMPLETED", "FAILED", "UNKNOWN"] },
+				...odimQueueWhere(),
 				processedAt: { lt: new Date(Date.now() - this.retentionDays * 24 * 60 * 60 * 1000) }
 			}
 		});
@@ -188,6 +191,7 @@ class InternalWhatsappMessageQueueService {
 			const item = await prismaService.internalMessageProcessingQueue.findFirst({
 				where: {
 					status: "PENDING",
+					...odimQueueWhere(),
 					OR: [{ lockedUntil: null }, { lockedUntil: { lt: now } }]
 				},
 				orderBy: { createdAt: "asc" }
@@ -196,7 +200,7 @@ class InternalWhatsappMessageQueueService {
 
 			const processingStartedAt = item.processingStartedAt ?? new Date();
 			const claimed = await prismaService.internalMessageProcessingQueue.updateMany({
-				where: { id: item.id, status: "PENDING" },
+				where: { ...odimQueueWhere(), id: item.id, status: "PENDING" },
 				data: {
 					status: "PROCESSING",
 					lockedBy: this.workerId,

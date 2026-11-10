@@ -2,6 +2,7 @@ import "dotenv/config";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { randomUUID } from "crypto";
 import prismaService from "./prisma.service";
+import { assertOdimChannelAllowed, odimQueueSql } from "../utils/odim-access-only";
 import wabaService from "./waba.service";
 
 const QUEUE_POLL_INTERVAL = parseInt(process.env["WABA_WEBHOOK_QUEUE_POLL_INTERVAL"] || "1000", 10);
@@ -31,6 +32,7 @@ class WABAWebhookQueueService {
 	private activeProcessing = 0;
 
 	public async enqueue(instance: string, payload: unknown): Promise<string> {
+		assertOdimChannelAllowed(instance);
 		const id = randomUUID();
 		const payloadJson = this.stringifyPayload(payload);
 
@@ -96,7 +98,7 @@ class WABAWebhookQueueService {
 				retry_count AS retryCount,
 				max_retries AS maxRetries
 			 FROM waba_webhook_queue
-			 WHERE status = ?
+			 WHERE status = ?${odimQueueSql()}
 			 ORDER BY created_at ASC
 			 LIMIT 1`,
 			WABA_QUEUE_STATUS.PENDING
@@ -187,7 +189,7 @@ class WABAWebhookQueueService {
 		const updated = await prismaService.$executeRawUnsafe(
 			`UPDATE waba_webhook_queue
 			 SET status = ?, processing_started_at = NOW(3), updated_at = NOW(3)
-			 WHERE id = ? AND status = ?`,
+			 WHERE id = ? AND status = ?${odimQueueSql()}`,
 			WABA_QUEUE_STATUS.PROCESSING,
 			id,
 			WABA_QUEUE_STATUS.PENDING

@@ -1,4 +1,5 @@
 import { Request, Response, Router } from "express";
+import { odimProviderIngress } from "../utils/odim-access-only";
 import { Logger } from "@in.pulse-crm/utils";
 import ProcessingLogger from "../utils/processing-logger";
 import wabaWebhookQueueService from "../services/waba-webhook-queue.service";
@@ -7,8 +8,8 @@ const ENDPOINT = "/api/whatsapp/waba/:instance";
 
 class WABAController {
 	constructor(public readonly router: Router) {
-		router.post(ENDPOINT + "/webhooks", this.webhookEntry);
-		router.get(ENDPOINT + "/webhooks", this.webhookChallenge);
+		router.post(ENDPOINT + "/webhooks", odimProviderIngress, this.webhookEntry);
+		router.get(ENDPOINT + "/webhooks", odimProviderIngress, this.webhookChallenge);
 	}
 
 	private webhookEntry = async (req: Request, res: Response) => {

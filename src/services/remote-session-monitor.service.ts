@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { odimQueueWhere } from "../utils/odim-access-only";
 import { Logger } from "@in.pulse-crm/utils";
 import { SessionData, SocketEventType, SocketServerAdminRoom } from "../sdk-local";
 import { WppClientType } from "@prisma/client";
@@ -230,7 +231,7 @@ class RemoteSessionMonitorService {
 	/** Run the scheduled functional check against every configured remote API. */
 	public async runScheduledFunctionalChecks(): Promise<void> {
 		const clients = await prismaService.wppClient.findMany({
-			where: { type: WppClientType.REMOTE, isActive: true, remoteClientUrl: { not: null } },
+			where: { ...odimQueueWhere(), type: WppClientType.REMOTE, isActive: true, remoteClientUrl: { not: null } },
 			select: { remoteClientUrl: true }
 		});
 		const urls = [...new Set(
@@ -367,7 +368,7 @@ class RemoteSessionMonitorService {
 
 	public async pollAll(): Promise<void> {
 		const clients = await prismaService.wppClient.findMany({
-			where: { type: WppClientType.REMOTE, isActive: true, remoteClientUrl: { not: null } },
+			where: { ...odimQueueWhere(), type: WppClientType.REMOTE, isActive: true, remoteClientUrl: { not: null } },
 			select: { id: true }
 		});
 

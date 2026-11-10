@@ -1,4 +1,5 @@
 import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
+import { assertOdimChannelAllowed, odimAccessOnlyEnabled } from "../utils/odim-access-only";
 import { Logger } from "@in.pulse-crm/utils";
 import { RemoteClientEvent } from "../types/remote-client.types";
 import whatsappService from "./whatsapp.service";
@@ -34,6 +35,10 @@ class RemoteClientService {
 		event: RemoteClientEvent,
 		idempotencyKey?: string
 	): Promise<RemoteInboundInboxEnqueueResult | void> {
+		if (odimAccessOnlyEnabled) {
+			const registered = await prismaService.wppClient.findUnique({ where: { id: clientId }, select: { instance: true } });
+			if (registered) assertOdimChannelAllowed(registered.instance);
+		}
 		Logger.info(`[RemoteClientService] Handling remote event | clientId=${clientId} | type=${event.type}`);
 
 		// Message delivery is acknowledged after the durable inbox write, even
