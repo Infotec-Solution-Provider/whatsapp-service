@@ -90,8 +90,9 @@ async function main() {
  const [[lock]] = await db.query<any[]>("SELECT GET_LOCK('odim-operational-live-copy-v1',0) held"); safe(lock.held === 1, "COPY_WORKER_ALREADY_RUNNING");
  const [[run]] = await db.execute<any[]>("SELECT status,config_json FROM instance_migration_runs WHERE id=? AND instance='odim'", [ODIM_COPY_RUN]); safe(run?.status === "COPY_VALIDATED", "INITIAL_COPY_REQUIRED"); config = typeof run.config_json === "string" ? JSON.parse(run.config_json) : run.config_json;
  const [configuredClients] = await db.execute<any[]>("SELECT id,waba_phone_id FROM clients WHERE instance='odim' AND type='WABA' AND waba_token IS NOT NULL AND LENGTH(waba_token)>0 AND waba_account_id IS NOT NULL AND waba_phone_id IS NOT NULL");
- safe(configuredClients.length === 1 && config.clientIds[configuredClients[0].waba_phone_id] === configuredClients[0].id, "COPY_CONFIGURED_CHANNEL_REQUIRED");
- config.operationalClientId = configuredClients[0].id;
+ const mappedClients = configuredClients.filter(c => config.clientIds[c.waba_phone_id] === c.id);
+ safe(mappedClients.length === 1, "COPY_CONFIGURED_CHANNEL_REQUIRED");
+ config.operationalClientId = mappedClients[0].id;
  const [[cursor]] = await db.execute<any[]>("SELECT MAX(source_id) sourceId FROM legacy_readonly_history_rows WHERE snapshot_id=? AND domain='w_mensagens'", [SNAP]);
  await db.execute("INSERT IGNORE INTO odim_operational_copy_sync_state(instance,run_id,message_cursor) VALUES('odim',?,?)", [ODIM_COPY_RUN, cursor.sourceId]);
  await verifySource();
@@ -106,4 +107,9 @@ async function main() {
  const stop = () => { stopping = true; clearInterval(timer); server.close(); const interval = setInterval(() => { if (!busy) { clearInterval(interval); void Promise.all([db.end(), pool.end()]).then(() => process.exit(0)); } }, 100); };
  process.once("SIGINT", stop); process.once("SIGTERM", stop);
 }
-main().catch(() => { console.error(JSON.stringify({ service: "odim-operational-copy", state: "START_FAILED", providersEnabled: false })); db?.destroy(); void pool?.end(); process.exitCode = 1; });
+main().catch(error => {
+ const code = error instanceof Error && /^[A-Z_]{3,64}$/.test(error.message) ? error.message : "COPY_START_FAILED";
+ console.error(JSON.stringify({ service: "odim-operational-copy", state: "START_FAILED", code, providersEnabled: false }));
+ db?.destroy(); setTimeout(() => process.exit(1), 1500);
+ void (pool?.end() || Promise.resolve()).finally(() => process.exit(1));
+});
