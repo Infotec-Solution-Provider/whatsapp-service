@@ -109,8 +109,8 @@ async function http(h, task) {
   const active = harness(on); const policy = active.load('utils/odim-access-only.ts');
   await check('exact profile and case variants', () => {
     assert.equal(policy.odimAccessOnlyProfile.state, 'valid');
-    for (const instance of ['odim', 'ODIM', ' ODIM ', 'odím', 'ｏｄｉｍ', 'ødim', 'ođim', 'o\u200ddim']) assert.throws(() => policy.assertOdimChannelAllowed(instance), error => error.code === 'ODIM_ACCESS_ONLY');
-    for (const instance of ['tenant-b', 'infotec', 'odim2', 'another-odim']) assert.equal(policy.isOdimAccessOnly(instance), false);
+    for (const instance of ['odim', 'ODIM', ' ODIM ', 'odím', 'ｏｄｉｍ', 'o\u200ddim']) assert.throws(() => policy.assertOdimChannelAllowed(instance), error => error.code === 'ODIM_ACCESS_ONLY');
+    for (const instance of ['tenant-b', 'infotec', 'odim2', 'another-odim', 'ødim', 'ođim', 'odım']) assert.equal(policy.isOdimAccessOnly(instance), false);
     policy.assertOdimChannelAllowed('tenant-b');
   });
   await check('profile links and writable files fail closed', () => {

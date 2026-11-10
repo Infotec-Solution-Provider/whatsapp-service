@@ -41,9 +41,9 @@ export const odimAccessOnlyEnabled = odimAccessOnlyProfile.enabled;
 
 // MySQL tenant identifiers use a case/accent-insensitive Unicode collation.
 // A signed session may retain the login's spelling; plain JS equality is unsafe.
-const tenantComparison = new Intl.Collator("en", { usage: "search", sensitivity: "base" });
+const canonicalTenantSpelling = (value: string) => value.normalize("NFKD").replace(/[\p{M}\p{Cf}]/gu, "").trim().toLowerCase();
 export function sameTenantIdentity(left: string, right: string): boolean {
-	return typeof left === "string" && typeof right === "string" && tenantComparison.compare(left.trim(), right.trim()) === 0;
+	return typeof left === "string" && typeof right === "string" && canonicalTenantSpelling(left) === canonicalTenantSpelling(right);
 }
 
 export function isOdimAccessOnly(instance: string): boolean {
