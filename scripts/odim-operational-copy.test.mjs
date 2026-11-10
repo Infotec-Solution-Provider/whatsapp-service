@@ -8,7 +8,7 @@ test('explicit legacy priority precedence, agreed MEDIA/empty and Unix dates',()
  assert.equal(priority({URGENCIA_SUPERVISOR:'NORMAL',URGENCIA_OPERADOR:'URGENTE'}),'NORMAL');
  assert.equal(priority({URGENCIA_SUPERVISOR:'',URGENCIA_AGENDAMENTO:'MEDIA',URGENCIA_OPERADOR:'ALTA'}),'NORMAL');
  assert.equal(priority({}),'NORMAL');assert.equal(priority({URGENCIA_OPERADOR:'MUITO_ALTA'}),'VERY_HIGH');
- assert.deepEqual(messageTime({TIMESTAMP:1794326400000}),messageTime({TIMESTAMP:'1794326400'}));assert.equal(status('UNKNOWN_4'),'UNKNOWN');assert.equal(status('PLAYED'),'READ');
+ assert.deepEqual(messageTime({TIMESTAMP:1794326400000}),messageTime({TIMESTAMP:'1794326400'}));assert.equal(messageTime({TIMESTAMP:1794326400123}).timestamp,'1794326400123');assert.equal(status('UNKNOWN_4'),'UNKNOWN');assert.equal(status('PLAYED'),'READ');
 });
 test('actual MySQL reserved IDs support newest-first loading alongside independent auto writers',async()=>{
  const schema='odim_copy_fixture_'+crypto.randomBytes(5).toString('hex');const sql=s=>{const r=spawnSync('docker',['exec','-i','homolog-odim-mysql8-20261109','mysql','-uroot','--batch'],{input:s,encoding:'utf8',windowsHide:true});assert.equal(r.status,0,r.stderr)};
