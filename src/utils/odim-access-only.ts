@@ -39,8 +39,15 @@ export function readOdimAccessOnlyProfile(filename: string): OdimAccessOnlyProfi
 export const odimAccessOnlyProfile = readOdimAccessOnlyProfile(odimAccessOnlyProfilePath);
 export const odimAccessOnlyEnabled = odimAccessOnlyProfile.enabled;
 
+// MySQL tenant identifiers use a case/accent-insensitive Unicode collation.
+// A signed session may retain the login's spelling; plain JS equality is unsafe.
+const tenantComparison = new Intl.Collator("en", { usage: "search", sensitivity: "base" });
+export function sameTenantIdentity(left: string, right: string): boolean {
+	return typeof left === "string" && typeof right === "string" && tenantComparison.compare(left.trim(), right.trim()) === 0;
+}
+
 export function isOdimAccessOnly(instance: string): boolean {
-	return odimAccessOnlyEnabled && typeof instance === "string" && instance.trim().toLowerCase() === "odim";
+	return odimAccessOnlyEnabled && sameTenantIdentity(instance, "odim");
 }
 
 export class OdimAccessOnlyError extends Error {

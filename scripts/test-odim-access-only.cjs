@@ -35,6 +35,9 @@ function harness(profile, options = {}) {
   const sessions = {
     odim: { instance: 'odim', userId: 6, sectorId: 1, role: 'ADMIN', name: 'Fixture' },
     upper: { instance: ' ODIM ', userId: 6, sectorId: 1, role: 'ADMIN', name: 'Fixture' },
+    accented: { instance: 'odím', userId: 6, sectorId: 1, role: 'ADMIN', name: 'Fixture' },
+    width: { instance: 'ｏｄｉｍ', userId: 6, sectorId: 1, role: 'ADMIN', name: 'Fixture' },
+    ignorable: { instance: 'o\u200ddim', userId: 6, sectorId: 1, role: 'ADMIN', name: 'Fixture' },
     other: { instance: 'tenant-b', userId: 6, sectorId: 1, role: 'ADMIN', name: 'Fixture' },
     otherUpper: { instance: 'INFOTEC ', userId: 6, sectorId: 1, role: 'ADMIN', name: 'Fixture' },
   };
@@ -106,7 +109,8 @@ async function http(h, task) {
   const active = harness(on); const policy = active.load('utils/odim-access-only.ts');
   await check('exact profile and case variants', () => {
     assert.equal(policy.odimAccessOnlyProfile.state, 'valid');
-    for (const instance of ['odim', 'ODIM', ' ODIM ']) assert.throws(() => policy.assertOdimChannelAllowed(instance), error => error.code === 'ODIM_ACCESS_ONLY');
+    for (const instance of ['odim', 'ODIM', ' ODIM ', 'odím', 'ｏｄｉｍ', 'ødim', 'ođim', 'o\u200ddim']) assert.throws(() => policy.assertOdimChannelAllowed(instance), error => error.code === 'ODIM_ACCESS_ONLY');
+    for (const instance of ['tenant-b', 'infotec', 'odim2', 'another-odim']) assert.equal(policy.isOdimAccessOnly(instance), false);
     policy.assertOdimChannelAllowed('tenant-b');
   });
   await check('profile links and writable files fail closed', () => {
@@ -130,7 +134,7 @@ async function http(h, task) {
   await http(h, async ({ base, mutations }) => {
     const request = (url, method = 'GET', token = 'odim') => fetch(base + url, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(method === 'POST' ? { body: '{}' } : {}) });
     await check('Odim and casing variants cannot create or send, before handlers', async () => {
-      for (const token of ['odim', 'upper']) for (const route of ['/api/whatsapp/chats', '/api/whatsapp/chats/1/transfer', '/api/whatsapp/1/messages', '/api/whatsapp/schedules', '/api/internal/messages/1/whatsapp-retry', '/api/whatsapp/flow-execution/execute']) assert.equal((await request(route, 'POST', token)).status, 423);
+      for (const token of ['odim', 'upper', 'accented', 'width', 'ignorable']) for (const route of ['/api/whatsapp/chats', '/api/whatsapp/chats/1/transfer', '/api/whatsapp/1/messages', '/api/whatsapp/schedules', '/api/internal/messages/1/whatsapp-retry', '/api/whatsapp/flow-execution/execute']) assert.equal((await request(route, 'POST', token)).status, 423);
       assert.equal(mutations(), 0);
     });
     await check('other tenants keep existing mutations; missing auth stays denied', async () => {

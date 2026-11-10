@@ -1,6 +1,6 @@
 import { SessionData } from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
-import { assertOdimChannelAllowed, isOdimAccessOnly, odimQueueWhere } from "../utils/odim-access-only";
+import { assertOdimChannelAllowed, isOdimAccessOnly, odimQueueWhere, sameTenantIdentity } from "../utils/odim-access-only";
 import { InternalMessage, WppChat, WppClientType, WppMessage, WppSector } from "@prisma/client";
 import { BadRequestError, InternalServerError } from "@rgranatodutra/http-errors";
 import "dotenv/config";
@@ -180,7 +180,7 @@ class WhatsappService {
 			include: { clients: { where: { instance } } }
 		});
 
-		return sector.clients.filter((c) => c.instance.trim().toLowerCase() === instance.trim().toLowerCase()).map((c) => ({
+		return sector.clients.filter((c) => sameTenantIdentity(c.instance, instance)).map((c) => ({
 			id: c.id,
 			name: c.name,
 			type: c.type
