@@ -38,6 +38,7 @@ import { admitHumanSend } from "./operator-pause-admission.runtime";
 import { tenantSqlEnabled } from "../tenant-sql/registry";
 import { tenantSqlInstanceNames } from "../tenant-sql/router";
 import manualChatAuthorization from "./manual-chat-authorization.service";
+import { operatorMessageName } from "../utils/operator-message-name";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -311,7 +312,7 @@ class WhatsappService {
 			}
 
 			process.log(`Client obtido | clientId: ${clientId} | instance: ${session.instance}`);
-			const text = `*${session.name}*: ${data.text || ""}`;
+			const text = `*${operatorMessageName(session)}*: ${data.text || ""}`;
 			const now = new Date();
 
 			let message = {

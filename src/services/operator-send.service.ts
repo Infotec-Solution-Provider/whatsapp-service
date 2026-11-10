@@ -18,6 +18,7 @@ import { messageMentionPatch, operatorMentionEntities } from "../utils/message-m
 import messagePresentationService from "./message-presentation.service";
 import { admitHumanSend } from "./operator-pause-admission.runtime";
 import manualChatAuthorization from "./manual-chat-authorization.service";
+import { operatorMessageName } from "../utils/operator-message-name";
 
 interface OperatorSendPayload {
 	options: SendMessageOptions;
@@ -85,7 +86,7 @@ class OperatorSendService {
 			onStage("ready-message.validation");
 			await readyMessagesService.getReadyMessageForSend(session, request.readyMessageId);
 		}
-		const text = `*${session.name}*: ${request.text}`;
+		const text = `*${operatorMessageName(session)}*: ${request.text}`;
 		const now = new Date();
 		const message: Prisma.WppMessageUncheckedCreateInput = {
 			instance: session.instance, userId: session.userId, clientId,
