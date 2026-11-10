@@ -2,6 +2,7 @@ import prismaService from "./prisma.service";
 import { isOdimAccessOnly } from "../utils/odim-access-only";
 
 const DEFAULT_FEATURE_PARAMETERS: Record<string, string> = {
+ feature_odim_usable_copy_enabled: "false",
  feature_legacy_history_enabled: "false",
 	require_supervisor_approval_for_contact_reactivation: "false",
 	require_supervisor_approval_for_contact_deletion: "false",

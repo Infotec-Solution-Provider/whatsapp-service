@@ -80,6 +80,7 @@ export function odimQueueSql(): string {
 // Exact Express templates only. External chat/message/schedule resources and BI exports
 // are not part of CRM-only access, even when their old handlers lack tenant checks.
 const LOCAL_READS = new Set([
+ "/api/whatsapp/session/monitor", "/api/whatsapp/chats/:id", "/api/whatsapp/chats/:id/messages", "/api/whatsapp/messages/:id",
  "/api/whatsapp/odim-history/status", "/api/whatsapp/odim-history/chats", "/api/whatsapp/odim-history/contacts",
  "/api/whatsapp/odim-history/chats/:id/messages", "/api/whatsapp/odim-history/contacts/:id/messages", "/api/whatsapp/odim-history/chats/:id/events",
 	"/api/whatsapp/sectors", "/api/whatsapp/sector/:sectorId/clients",

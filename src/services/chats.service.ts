@@ -124,7 +124,9 @@ class ChatsService {
 	public async getUserChatsBySession(session: SessionData, includeMessages = true, includeContact = true, chatIds?: number[]) {
 		// Parallel CRM access does not expose external chats. Socket bootstrap trusts
 		// each returned chat.instance when joining rooms, so return an explicit empty snapshot.
-		if (isOdimAccessOnly(session.instance)) return { chats: [], messages: [] };
+		const usableCopy = isOdimAccessOnly(session.instance) && (await parametersService.getSessionParams(session))["feature_odim_usable_copy_enabled"] === "true";
+		if (isOdimAccessOnly(session.instance) && !usableCopy) return { chats: [], messages: [] };
+		if (usableCopy) includeMessages = false;
 		const foundChats = await prismaService.wppChat.findMany({
 			where: {
 				isFinished: false,
@@ -152,7 +154,7 @@ class ChatsService {
 			const foundAdminChats = await prismaService.wppChat.findMany({
 				where: {
 					isFinished: false,
-					sectorId: session.sectorId,
+					...(usableCopy ? {} : { sectorId: session.sectorId }),
 					instance: session.instance,
 					userId: -1,
 					...(chatIds ? { id: { in: chatIds } } : {})
@@ -348,6 +350,8 @@ class ChatsService {
 	}
 
 	public async getChatsMonitor(session: SessionData, includeMessages = true, includeCustomer = true) {
+		const usableCopy = isOdimAccessOnly(session.instance) && (await parametersService.getSessionParams(session))["feature_odim_usable_copy_enabled"] === "true";
+		if (usableCopy) includeMessages = false;
 		const isTI = session.sectorId === 3 || session.instance !== "nunes";
 
 		const ongoingChats = await prismaService.wppChat.findMany({
@@ -436,6 +440,12 @@ class ChatsService {
 			chats.push({ ...chat, customer, contact: contact || null });
 		}
 
+		if (usableCopy) {
+		 const contactIds = [...new Set(ongoingChats.flatMap(c => c.contactId === null ? [] : [c.contactId]))];
+		 const grouped = contactIds.length ? await prismaService.wppMessage.groupBy({ by: ["contactId"], where: { instance: session.instance, contactId: { in: contactIds } }, _max: { id: true } }) : [];
+		 const ids = grouped.flatMap(g => g._max.id === null ? [] : [g._max.id]);
+		 if (ids.length) messages.push(...await prismaService.wppMessage.findMany({ where: { instance: session.instance, id: { in: ids } } }));
+		}
 		return { chats, messages: await messagePresentationService.hydrate(session.instance, messages) };
 	}
 

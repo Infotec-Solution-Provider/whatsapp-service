@@ -2,6 +2,7 @@ import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
+import protectOdimCopiedMessage from "../middlewares/odim-copied-message-read.middleware";
 import onlyLocal from "../middlewares/only-local.middleware";
 import upload from "../middlewares/multer.middleware";
 import publicBiRateLimit from "../middlewares/public-bi-rate-limit.middleware";
@@ -20,7 +21,7 @@ import { MessageReactionError, positiveReactionId } from "../utils/message-react
 class MessagesController {
 	constructor(public readonly router: Router) {
 		this.router.get("/api/whatsapp/messages/export", publicBiAuthenticated, publicBiRateLimit, this.exportMessages);
-		this.router.get("/api/whatsapp/messages/:id", this.getMessageById);
+		this.router.get("/api/whatsapp/messages/:id", protectOdimCopiedMessage, this.getMessageById);
 		this.router.patch("/api/whatsapp/messages/mark-as-read", isAuthenticated, this.readContactMessages);
 		this.router.post(
 			"/api/whatsapp/:clientId/messages",
