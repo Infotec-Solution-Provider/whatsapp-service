@@ -7,6 +7,8 @@ import instancesService from "./instances.service";
 import prismaService from "./prisma.service";
 import { safeDecode } from "../utils/safe-encode";
 import parametersService from "./parameters.service";
+import { isOdimAccessOnly } from "../utils/odim-access-only";
+import { searchOdimOperationalMonitor } from "./odim-operational-monitor.service";
 
 interface MonitorSearchInput {
 	page?: number;
@@ -38,6 +40,7 @@ class MonitorService {
 
 		// Verificar se a busca local está ativa
 		const useLocalSearch = params["monitor:use_local_search"] === "true";
+		if (isOdimAccessOnly(session.instance) && params["feature_odim_usable_copy_enabled"] === "true") return searchOdimOperationalMonitor(session, input);
 		if (useLocalSearch) {
 			return this.searchMonitorDataInternalLocal(session, input);
 		}
