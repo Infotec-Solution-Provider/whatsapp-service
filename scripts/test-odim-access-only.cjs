@@ -36,6 +36,7 @@ function harness(profile, options = {}) {
     odim: { instance: 'odim', userId: 6, sectorId: 1, role: 'ADMIN', name: 'Fixture' },
     upper: { instance: ' ODIM ', userId: 6, sectorId: 1, role: 'ADMIN', name: 'Fixture' },
     other: { instance: 'tenant-b', userId: 6, sectorId: 1, role: 'ADMIN', name: 'Fixture' },
+    otherUpper: { instance: 'INFOTEC ', userId: 6, sectorId: 1, role: 'ADMIN', name: 'Fixture' },
   };
   function load(file) {
     if (cache.has(file)) return cache.get(file).exports;
@@ -117,7 +118,7 @@ async function http(h, task) {
   const sectorCalls = [];
   let internalState = { wppGroupId: null };
   const db = {
-    wppSector: { findFirstOrThrow: async args => { sectorCalls.push(args); if (args.where.instance !== 'tenant-b') throw Object.assign(new Error('Not found'), { statusCode: 404 }); return { clients: [{ id: 21, instance: 'tenant-b', name: 'Fixture', type: 'WABA' }, { id: 22, instance: 'other', name: 'Foreign fixture', type: 'WABA' }] }; } },
+    wppSector: { findFirstOrThrow: async args => { sectorCalls.push(args); const owner = args.where.instance.trim().toLowerCase(); if (!['tenant-b', 'infotec'].includes(owner)) throw Object.assign(new Error('Not found'), { statusCode: 404 }); return { clients: [{ id: 21, instance: owner, name: 'Fixture', type: 'WABA' }, { id: 22, instance: 'other', name: 'Foreign fixture', type: 'WABA' }] }; } },
     internalChat: { findFirst: async args => { assert.equal(args.where.instance, 'odim'); return internalState; } },
   };
   let centralSearch = 0; let localSearch = 0;
@@ -142,6 +143,12 @@ async function http(h, task) {
       assert.equal(sectorCalls.length, 0);
       assert.deepEqual((await (await request('/api/whatsapp/sector/1/clients', 'GET', 'other')).json()).data.map(client => client.id), [21]);
       assert.deepEqual(sectorCalls[0].where, { id: 1, instance: 'tenant-b' });
+      assert.deepEqual(sectorCalls[0].include, { clients: { where: { instance: 'tenant-b' } } });
+    });
+    await check('legitimate uppercase and trailing-space tenant retains its channels without foreign links', async () => {
+      assert.deepEqual((await (await request('/api/whatsapp/sector/1/clients', 'GET', 'otherUpper')).json()).data.map(client => client.id), [21]);
+      assert.deepEqual(sectorCalls[1].where, { id: 1, instance: 'INFOTEC ' });
+      assert.deepEqual(sectorCalls[1].include, { clients: { where: { instance: 'INFOTEC ' } } });
     });
     await check('authenticated central contacts override old local-sync without DDL', async () => {
       assert.equal((await request('/api/whatsapp/contacts/customer')).status, 200); assert.equal(centralSearch, 1); assert.equal(localSearch, 0);

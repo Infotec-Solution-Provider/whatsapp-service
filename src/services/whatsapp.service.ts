@@ -177,10 +177,10 @@ class WhatsappService {
 		if (isOdimAccessOnly(instance)) return [];
 		const sector = await prismaService.wppSector.findFirstOrThrow({
 			where: { id: sectorId, instance },
-			include: { clients: true }
+			include: { clients: { where: { instance } } }
 		});
 
-		return sector.clients.filter((c) => c.instance === instance).map((c) => ({
+		return sector.clients.filter((c) => c.instance.trim().toLowerCase() === instance.trim().toLowerCase()).map((c) => ({
 			id: c.id,
 			name: c.name,
 			type: c.type
