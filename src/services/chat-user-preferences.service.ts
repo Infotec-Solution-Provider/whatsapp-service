@@ -6,6 +6,7 @@ import prismaService from "./prisma.service";
 import { tenantSqlEnabled } from "../tenant-sql/registry";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
 import { operatorPauseAdmission, OperatorPauseAdmissionError, type ChatAssignmentAdmission } from "./operator-pause-admission";
+import { odimSupervisionSharedChatScope } from "../utils/odim-supervision-sharing";
 
 export type ChatPreferenceType = "wpp" | "internal";
 
@@ -81,6 +82,7 @@ class ChatUserPreferencesService {
 				id: chatId,
 				instance: session.instance,
 				OR: [
+					...odimSupervisionSharedChatScope(session),
 					{ userId: session.userId },
 					...wallets.map(row => ({ walletId: row.id })),
 					...(session.role === "ADMIN" ? [{ sectorId: session.sectorId, userId: -1, walletId: null }] : [])

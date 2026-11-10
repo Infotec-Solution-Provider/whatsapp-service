@@ -38,6 +38,8 @@ import messagePresentationService from "./message-presentation.service";
 import chatUserPreferencesService from "./chat-user-preferences.service";
 import publicReportFieldsService from "./public-report-fields.service";
 import { buildConversationActivityQueries, PublicConversationsFilters } from "../utils/public-conversation-activity";
+import { keepsOdimSupervisionAccess, odimSupervisionSharedChatScope } from "../utils/odim-supervision-sharing";
+import { odimSupervisionObservers } from "./odim-supervision-sharing.service";
 export type { PublicConversationsFilters } from "../utils/public-conversation-activity";
 
 interface InpulseResult {
@@ -180,6 +182,7 @@ class ChatsService {
 				instance: session.instance,
 				...(chatIds ? { id: { in: chatIds } } : {}),
 				OR: [
+					...odimSupervisionSharedChatScope(session),
 					{ userId: session.userId },
 					...(walletIds.length ? [{ walletId: { in: walletIds } }] : []),
 					...(session.role === "ADMIN" ? [{ userId: -1, walletId: null, sectorId: session.sectorId }] : [])
@@ -878,14 +881,17 @@ class ChatsService {
 			: undefined;
 		await this.runAfterAgentAction(logger, "avisar as telas", async () => {
 			const data = { chatId: chat.id, pushUserId };
-			await socketService.emit(event, `${instance}:chat:${chat.id}`, data);
+			if (!keepsOdimSupervisionAccess(chats, chat)) await socketService.emit(event, `${instance}:chat:${chat.id}`, data);
 			if (chats.walletId) await socketService.emit(event, `${instance}:wallet:${chats.walletId}`, data);
-			if (chats.userId && chats.userId > 0 && chats.userId !== userId) {
+			if (chats.userId && chats.userId > 0 && chats.userId !== userId && !keepsOdimSupervisionAccess(chats, chat)) {
 				await socketService.emit(event, `${instance}:user:${chats.userId}`, data);
 			}
 			await socketService.emit(SocketEventType.WppChatStarted, monitorRoom, data);
 			await socketService.emit(SocketEventType.WppChatStarted, userId === -1 ? `${instance}:${chat.sectorId!}:admin` : userRoom, data);
 		});
+		for (const observerId of await odimSupervisionObservers(chat)) {
+			await socketService.emit(SocketEventType.WppChatStarted, `${chat.instance}:user:${observerId}`, { chatId: chat.id });
+		}
 	}
 
 	public async finishChatById(
