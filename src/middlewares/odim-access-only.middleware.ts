@@ -2,11 +2,13 @@ import type { Request, Response } from "express";
 import prismaService, { type DatabaseClient } from "../services/prisma.service";
 import { odimLocalRequestAllowed, OdimAccessOnlyError } from "../utils/odim-access-only";
 import parameters from "../services/parameters.service";
+import { odimPilotRequestAllowed } from "../utils/odim-pilot-send";
 
 const COPY_READS = new Set(["/api/whatsapp/monitor", "/api/whatsapp/monitor/search", "/api/whatsapp/session/monitor", "/api/whatsapp/chats/:id", "/api/whatsapp/chats/:id/messages", "/api/whatsapp/messages/:id"]);
 
 /** Called only after authentication and only for the Odim access-only profile. */
 export async function enforceOdimAccessOnly(req: Request, res: Response, db: DatabaseClient = prismaService): Promise<boolean> {
+	if (odimPilotRequestAllowed(req)) return true;
 	const route: unknown = req.route?.path;
 	if (typeof route === "string" && COPY_READS.has(route)) {
 	 const flags = await parameters.getSessionParams(req.session);

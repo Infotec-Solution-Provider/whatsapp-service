@@ -50,7 +50,7 @@ export class OdimLiveCopyWriter {
   let id = await this.map("messages", row.CODIGO), external = row.ID ? String(row.ID) : null;
   const field = external?.startsWith("wamid.") ? "waba_id" : "wwebjs_id";
   if (external) { const [registered] = await this.db.execute(`SELECT id FROM messages WHERE ${field}=? LIMIT 1`, [external]); if (registered.length && registered[0].id !== id) external = null; }
-  const clientId = Object.values(this.config.clientIds)[0]; if (!Number.isSafeInteger(clientId)) throw Error("COPY_CLIENT_REQUIRED");
+  const clientId = this.config.operationalClientId ?? Object.values(this.config.clientIds)[0]; if (!Number.isSafeInteger(clientId)) throw Error("COPY_CLIENT_REQUIRED");
   const address = contact ? digits(contact.IDENTIFICADOR) || digits(contact.NUMERO) : "legacy-unlinked", own = Number(row.FROM_ME) === 1, time = liveCopyTime(row);
   const quoteId = quoteSource === null ? null : await this.map("messages", quoteSource) || null;
   const fileName = file ? decode(file.NOME_ORIGINAL || file.NOME_ARQUIVO || "Anexo legado").split(/[\\/]/).pop()!.slice(0, 500) : null;

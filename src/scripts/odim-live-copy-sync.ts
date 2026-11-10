@@ -6,6 +6,7 @@ import mysql from "mysql2/promise";
 import { InstancesClient, SocketServerClient, SocketEventType } from "../sdk-local";
 import { OdimLiveCopyWriter, ODIM_COPY_RUN } from "../services/odim-live-copy.core";
 import { createOdimCopyIngress } from "../services/odim-live-copy.ingress";
+import { applyOdimOwnedProviderStatus } from "../services/odim-copy-provider-status";
 import { readOdimAccessOnlyProfile, odimAccessOnlyProfilePath } from "../utils/odim-access-only";
 const source = new InstancesClient("http://127.0.0.1:8000"), socket = new SocketServerClient("http://127.0.0.1:8004");
 const SNAP = "d60d646d-a75b-db65-c5fa-eb346177f2e7";
@@ -37,6 +38,9 @@ async function copyRows(messages: any[], advance: number | null) {
   if (advance !== null) await db.execute("UPDATE odim_operational_copy_sync_state SET message_cursor=?,updated_at=UTC_TIMESTAMP(3) WHERE instance='odim' AND run_id=?", [advance, ODIM_COPY_RUN]);
   await db.commit();
  } catch (error) { await db.rollback(); throw error; }
+ await emitChanges(emitted);
+}
+async function emitChanges(emitted: { id: number; changed: boolean; chatId: number | null }[]) {
  // Database journal remains the source of truth if an optional UI notification fails.
  for (const e of emitted.filter(e => e.changed && e.chatId !== null)) {
   try {
@@ -59,13 +63,19 @@ async function tick() {
    const recent = await querySource("SELECT m.*,CAST(DATA_HORA AS CHAR) DATA_HORA,CAST(old_data_Hora AS CHAR) old_data_Hora FROM w_mensagens m WHERE CODIGO<=? ORDER BY CODIGO DESC LIMIT 50", [delta.length ? Number(delta.at(-1).CODIGO) : Number(state[0].message_cursor)]);
    await copyRows(recent, null);
   }
-  const [pending] = await db.execute<any[]>("SELECT id,provider_id FROM odim_operational_copy_webhooks WHERE state='PENDING' AND received_at<UTC_TIMESTAMP(3)-INTERVAL 2 SECOND ORDER BY received_at LIMIT 20");
+  const [pending] = await db.execute<any[]>("SELECT id,provider_id,kind,payload FROM odim_operational_copy_webhooks WHERE state='PENDING' AND received_at<UTC_TIMESTAMP(3)-INTERVAL 2 SECOND ORDER BY received_at LIMIT 20");
   if (pending.length) {
    const observed = await querySource("SELECT m.*,CAST(DATA_HORA AS CHAR) DATA_HORA,CAST(old_data_Hora AS CHAR) old_data_Hora FROM w_mensagens m WHERE ID IN (?)", [[...new Set(pending.map(e => e.provider_id))]]);
    await copyRows(observed, null);
    for (const event of pending) {
-    const found = observed.some(m => m.ID === event.provider_id);
-    await db.execute("UPDATE odim_operational_copy_webhooks SET state=?,attempts=attempts+1,updated_at=UTC_TIMESTAMP(3) WHERE id=?", [found ? "APPLIED" : "PENDING", event.id]);
+    let found = observed.some(m => m.ID === event.provider_id), statusChange = null;
+    await db.beginTransaction();
+    try {
+     if (!found && event.kind === "status") { statusChange = await applyOdimOwnedProviderStatus(db, typeof event.payload === "string" ? JSON.parse(event.payload) : event.payload); found = !!statusChange; }
+     await db.execute("UPDATE odim_operational_copy_webhooks SET state=?,attempts=attempts+1,updated_at=UTC_TIMESTAMP(3) WHERE id=?", [found ? "APPLIED" : "PENDING", event.id]);
+     await db.commit();
+    } catch (error) { await db.rollback(); throw error; }
+    if (statusChange) await emitChanges([statusChange]);
    }
   }
   lastError = null; lastSyncAt = new Date().toISOString();
@@ -79,6 +89,9 @@ async function main() {
  pool.on("connection", connection => { connection.query("SET time_zone='+00:00'"); });
  const [[lock]] = await db.query<any[]>("SELECT GET_LOCK('odim-operational-live-copy-v1',0) held"); safe(lock.held === 1, "COPY_WORKER_ALREADY_RUNNING");
  const [[run]] = await db.execute<any[]>("SELECT status,config_json FROM instance_migration_runs WHERE id=? AND instance='odim'", [ODIM_COPY_RUN]); safe(run?.status === "COPY_VALIDATED", "INITIAL_COPY_REQUIRED"); config = typeof run.config_json === "string" ? JSON.parse(run.config_json) : run.config_json;
+ const [configuredClients] = await db.execute<any[]>("SELECT id,waba_phone_id FROM clients WHERE instance='odim' AND type='WABA' AND waba_token IS NOT NULL AND LENGTH(waba_token)>0 AND waba_account_id IS NOT NULL AND waba_phone_id IS NOT NULL");
+ safe(configuredClients.length === 1 && config.clientIds[configuredClients[0].waba_phone_id] === configuredClients[0].id, "COPY_CONFIGURED_CHANNEL_REQUIRED");
+ config.operationalClientId = configuredClients[0].id;
  const [[cursor]] = await db.execute<any[]>("SELECT MAX(source_id) sourceId FROM legacy_readonly_history_rows WHERE snapshot_id=? AND domain='w_mensagens'", [SNAP]);
  await db.execute("INSERT IGNORE INTO odim_operational_copy_sync_state(instance,run_id,message_cursor) VALUES('odim',?,?)", [ODIM_COPY_RUN, cursor.sourceId]);
  await verifySource();

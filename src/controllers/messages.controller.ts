@@ -17,6 +17,8 @@ import messagePresentationService from "../services/message-presentation.service
 import messageSendTrace, { markMessageSendStage } from "../middlewares/message-send-trace.middleware";
 import ProcessingLogger from "../utils/processing-logger";
 import { MessageReactionError, positiveReactionId } from "../utils/message-reaction";
+import { isOdimAccessOnly } from "../utils/odim-access-only";
+import { sendOdimPilotMessage } from "../services/odim-pilot-send.service";
 
 class MessagesController {
 	constructor(public readonly router: Router) {
@@ -160,6 +162,11 @@ class MessagesController {
 		markMessageSendStage(res, "controller");
 		try {
 			const clientId = Number(req.params["clientId"]);
+			if (isOdimAccessOnly(req.session.instance)) {
+				const message = await sendOdimPilotMessage(req.session, clientId, req.body);
+				res.status(201).send({ message: "Pilot message accepted by provider.", data: messagePresentationService.fromStored(message) });
+				return;
+			}
 			const { to, ...data } = req.body;
 			const file = req.file;
 			const idempotencyKey = resolveOperatorIdempotencyKey(req.headers["idempotency-key"], data.idempotencyKey);
