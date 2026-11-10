@@ -31,6 +31,7 @@ import { createUploadTraceLogger } from "../utils/file-upload-trace";
 import readyMessagesService from "./ready-messages.service";
 import { WabaDeliveryError } from "../utils/waba-send";
 import { getTemplateAttribution } from "../utils/template-attribution";
+import { getOdimCopiedSectorClients } from "./odim-operational-channel.service";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -174,7 +175,7 @@ class WhatsappService {
 	}
 
 	public async getClientsBySector(instance: string, sectorId: number) {
-		if (isOdimAccessOnly(instance)) return [];
+		if (isOdimAccessOnly(instance)) return getOdimCopiedSectorClients(instance, sectorId);
 		const sector = await prismaService.wppSector.findFirstOrThrow({
 			where: { id: sectorId, instance },
 			include: { clients: { where: { instance } } }
