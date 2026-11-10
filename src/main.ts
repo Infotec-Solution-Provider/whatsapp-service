@@ -1,9 +1,9 @@
 import "dotenv/config";
-import { odimAccessOnlyEnabled, odimAccessOnlyProfile, OdimAccessOnlyError } from "./utils/odim-access-only";
+import { createOdimBiAccessGuard, odimAccessOnlyEnabled, odimAccessOnlyProfile, OdimAccessOnlyError } from "./utils/odim-access-only";
 import { Logger, logRoutes } from "@in.pulse-crm/utils";
 import { handleRequestError } from "@rgranatodutra/http-errors";
 import cors from "cors";
-import { publicBiServiceTokenGuard } from "./middlewares/public-bi-auth.middleware";
+import { getPublicBiServiceIdentity, publicBiServiceTokenGuard } from "./middlewares/public-bi-auth.middleware";
 import express, { NextFunction, Request, Response } from "express";
 import "express-async-errors";
 import cron from "node-cron";
@@ -74,6 +74,7 @@ const logRoute = (r: express.Router) => {
 
 app.use(cors());
 app.use(publicBiServiceTokenGuard);
+app.use(createOdimBiAccessGuard(getPublicBiServiceIdentity));
 app.get("/health", (_req, res) => res.json({ service: "whatsapp", storage: "central", storageVersion: 1,
 	...(odimAccessOnlyEnabled ? { odimAccessOnly: true, odimAccessOnlyProfile: odimAccessOnlyProfile.state } : {}) }));
 

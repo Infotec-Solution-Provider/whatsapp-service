@@ -1,6 +1,6 @@
 import { Customer, SessionData, SocketEventType, SocketServerMonitorRoom, SocketServerUserRoom } from "../sdk-local";
 import { Logger } from "@in.pulse-crm/utils";
-import { assertOdimChannelAllowed } from "../utils/odim-access-only";
+import { assertOdimChannelAllowed, isOdimAccessOnly } from "../utils/odim-access-only";
 import { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
 import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
 import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
@@ -122,6 +122,9 @@ class ChatsService {
 	}
 
 	public async getUserChatsBySession(session: SessionData, includeMessages = true, includeContact = true, chatIds?: number[]) {
+		// Parallel CRM access does not expose external chats. Socket bootstrap trusts
+		// each returned chat.instance when joining rooms, so return an explicit empty snapshot.
+		if (isOdimAccessOnly(session.instance)) return { chats: [], messages: [] };
 		const foundChats = await prismaService.wppChat.findMany({
 			where: {
 				isFinished: false,

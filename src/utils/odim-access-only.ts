@@ -77,21 +77,36 @@ export function odimQueueSql(): string {
 
 // Match the Express route template rather than an untrusted/encoded request path.
 // Unknown/new operations stay unavailable in this temporary profile.
-const LOCAL_READS = [
-	/^\/api\/whatsapp\/(?:contacts(?:\/|$)|customer\/:id\/contacts$|session\/(?:chats|changes|monitor|parameters)$|chats(?:\/|$)|schedules(?:\/|$)|notifications(?:\/|$)|messages(?:\/|$)|conversations(?:\/|$)|sector\/:sectorId\/clients$)/,
-	/^\/api\/(?:internal\/(?:session\/chats|chats|groups|monitor\/chats|whatsapp-senders)(?:\/|$)|ready-messages(?:\/|$)|wallets$|results(?:\/|$)|parameters(?:\/|$)|customer-profile-tags(?:\/|$))/,
-	/^\/api\/whatsapp\/(?:sectors|users|transfers)$/,
-	/^\/api\/whatsapp\/customers\/profile-tags\//,
-];
+// Exact Express templates only. External chat/message/schedule resources and BI exports
+// are not part of CRM-only access, even when their old handlers lack tenant checks.
+const LOCAL_READS = new Set([
+	"/api/whatsapp/sectors", "/api/whatsapp/sector/:sectorId/clients",
+	"/api/whatsapp/session/parameters", "/api/whatsapp/session/chats", "/api/whatsapp/session/changes",
+	"/api/whatsapp/notifications", "/api/whatsapp/contacts", "/api/whatsapp/contacts/customer",
+	"/api/whatsapp/customer/:id/contacts", "/api/internal/session/chats",
+	"/api/internal/chats/:id/messages", "/api/internal/groups", "/api/internal/whatsapp-senders/names",
+	"/api/ready-messages", "/api/wallets", "/api/results",
+]);
 const INTERNAL_WRITES = [
 	"POST /api/internal/chats", "DELETE /api/internal/chats/:id", "POST /api/internal/chats/:id/finish",
 	"POST /api/internal/chats/:id/messages", "PUT /api/internal/messages/:id", "POST /api/internal/messages/:id/reaction",
 	"PUT /api/internal/groups/:id", "PUT /api/internal/groups/:id/image", "PATCH /api/internal/chat/:id/mark-as-read",
-	"PATCH /api/whatsapp/notifications/mark-all-read", "PATCH /api/whatsapp/notifications/:id/read",
-	"POST /api/whatsapp/customers/profile-tags/summary/batch",
 ];
 
 export function odimLocalRequestAllowed(method: string, route: unknown): boolean {
 	if (typeof route !== "string") return false;
-	return (method === "GET" && LOCAL_READS.some(pattern => pattern.test(route))) || INTERNAL_WRITES.includes(`${method} ${route}`);
+	return (method === "GET" && LOCAL_READS.has(route)) || INTERNAL_WRITES.includes(`${method} ${route}`);
+}
+
+/** Service BI credentials bypass ordinary isAuthenticated; fence them after its trusted global guard. */
+export function createOdimBiAccessGuard(identity: (req: Request) => { instance: string } | undefined) {
+	return (req: Request, res: Response, next: NextFunction): void => {
+		const principal = identity(req);
+		if (principal && isOdimAccessOnly(principal.instance)) {
+			const error = new OdimAccessOnlyError();
+			res.status(error.statusCode).json({ message: error.message, code: error.code });
+			return;
+		}
+		next();
+	};
 }

@@ -74,6 +74,12 @@ async function http(h, task) {
   const app = express(); app.use(express.json());
   const authenticate = h.load('middlewares/is-authenticated.middleware.ts').default;
   const service = h.load('services/whatsapp.service.ts').default;
+  let externalReads = 0;
+  for (const route of ['/api/whatsapp/chats/:id', '/api/whatsapp/chats/:id/messages', '/api/whatsapp/conversations/:id', '/api/whatsapp/messages/:id', '/api/whatsapp/schedules/:id', '/api/whatsapp/contacts/:id/messages', '/api/whatsapp/unknown-read']) {
+    app.get(route, authenticate, (_req, res) => { externalReads++; res.json({ fixture: 'foreign resource must never run for Odim' }); });
+  }
+  for (const route of ['/api/whatsapp/sectors', '/api/whatsapp/session/chats', '/api/whatsapp/session/changes', '/api/whatsapp/notifications', '/api/ready-messages']) app.get(route, authenticate, (_req, res) => res.json({ fixture: true }));
+  app.patch('/api/whatsapp/notifications/mark-all-read', authenticate, (_req, res) => { externalReads++; res.json({ fixture: true }); });
   app.use(h.load('controllers/whatsapp.controller.ts').default.router);
   let mutations = 0;
   for (const route of ['/api/whatsapp/chats', '/api/whatsapp/chats/:id/transfer', '/api/whatsapp/:clientId/messages', '/api/whatsapp/schedules', '/api/internal/messages/:id/whatsapp-retry', '/api/whatsapp/flow-execution/execute']) {
@@ -87,7 +93,7 @@ async function http(h, task) {
   app.use((error, _req, res, _next) => res.status(error.statusCode || 500).json({ message: 'Fixture error' }));
   const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
   const base = `http://127.0.0.1:${server.address().port}`;
-  try { await task({ base, service, mutations: () => mutations }); }
+  try { await task({ base, service, mutations: () => mutations, externalReads: () => externalReads }); }
   finally { await new Promise(resolve => server.close(resolve)); }
 }
 
@@ -131,7 +137,7 @@ async function http(h, task) {
     'services/contacts.service.ts': { default: { getContactsWithCustomerLocally: async () => { localSearch++; throw new Error('Local wpp tables must not be used'); } } },
     'services/parameters.service.ts': { default: { getSessionParams: async () => ({ use_local_contacts_sync: 'true' }) } },
   } });
-  await http(h, async ({ base, mutations }) => {
+  await http(h, async ({ base, mutations, externalReads }) => {
     const request = (url, method = 'GET', token = 'odim') => fetch(base + url, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(method === 'POST' ? { body: '{}' } : {}) });
     await check('Odim and casing variants cannot create or send, before handlers', async () => {
       for (const token of ['odim', 'upper', 'accented', 'width', 'ignorable']) for (const route of ['/api/whatsapp/chats', '/api/whatsapp/chats/1/transfer', '/api/whatsapp/1/messages', '/api/whatsapp/schedules', '/api/internal/messages/1/whatsapp-retry', '/api/whatsapp/flow-execution/execute']) assert.equal((await request(route, 'POST', token)).status, 423);
@@ -158,6 +164,21 @@ async function http(h, task) {
       assert.equal((await request('/api/whatsapp/contacts/customer')).status, 200); assert.equal(centralSearch, 1); assert.equal(localSearch, 0);
       assert.equal((await request('/api/whatsapp/session/parameters')).status, 200);
     });
+    await check('external ID reads, descendants and unknown GETs never reach old handlers for Odim', async () => {
+      const before = externalReads();
+      for (const token of ['odim', 'upper', 'accented', 'width', 'ignorable']) for (const route of ['/api/whatsapp/chats/1', '/api/whatsapp/chats/1/messages', '/api/whatsapp/conversations/1', '/api/whatsapp/messages/1', '/api/whatsapp/schedules/1', '/api/whatsapp/contacts/1/messages', '/api/whatsapp/unknown-read']) assert.equal((await request(route, 'GET', token)).status, 423);
+      assert.equal(externalReads(), before);
+      assert.equal((await request('/api/whatsapp/chats/1', 'GET', 'other')).status, 200);
+      assert.equal(externalReads(), before + 1);
+    });
+    await check('exact bootstrap templates remain available, unsafe notification bulk mutation denied', async () => {
+      for (const route of ['/api/whatsapp/sectors', '/api/whatsapp/session/chats', '/api/whatsapp/session/changes', '/api/whatsapp/notifications', '/api/ready-messages']) assert.equal((await request(route)).status, 200);
+      const before = externalReads();
+      assert.equal((await request('/api/whatsapp/notifications/mark-all-read', 'PATCH')).status, 423);
+      assert.equal(externalReads(), before);
+      assert.equal(policy.odimLocalRequestAllowed('GET', '/api/whatsapp/contacts/:id'), false);
+      assert.equal(policy.odimLocalRequestAllowed('GET', '/api/whatsapp/contacts'), true);
+    });
     await check('local internal CRUD allowed, foreign and WhatsApp-linked resources denied', async () => {
       assert.equal((await request('/api/internal/chats/3/messages', 'POST')).status, 201);
       internalState = null; assert.equal((await request('/api/internal/chats/3/messages', 'POST')).status, 404);
@@ -170,6 +191,18 @@ async function http(h, task) {
         assert.equal((await fetch(`${base}/api/whatsapp/${provider}/odim/webhooks`)).status, 423);
       }
     });
+  });
+  await check('external session chat snapshot is empty for Odim aliases before any DB query or socket join data', async () => {
+    const f = harness(on);const chats = f.load('services/chats.service.ts').default;
+    for (const instance of ['odim', 'ODIM', 'odím', 'ｏｄｉｍ', 'o\u200ddim']) assert.deepEqual(await chats.getUserChatsBySession({ instance }), { chats: [], messages: [] });
+    assert.equal(f.calls.length, 0);
+  });
+  await check('trusted BI service identities for Odim cannot bypass read ACL; other principals unchanged', async () => {
+    const f = harness(on), app = express();let reads = 0;
+    app.use(f.load('utils/odim-access-only.ts').createOdimBiAccessGuard(req => req.headers['x-fixture-bi'] ? { instance: req.headers['x-fixture-bi'] } : undefined));
+    app.get('/api/whatsapp/conversations/1', (_req, res) => { reads++;res.json({ fixture: true }); });
+    const server = app.listen(0,'127.0.0.1');await once(server,'listening');
+    try {const url=`http://127.0.0.1:${server.address().port}/api/whatsapp/conversations/1`;for(const instance of ['odim','ODIM','odím']) assert.equal((await fetch(url,{headers:{'x-fixture-bi':instance}})).status,423);assert.equal(reads,0);assert.equal((await fetch(url,{headers:{'x-fixture-bi':'tenant-b'}})).status,200);assert.equal(reads,1);}finally{await new Promise(resolve=>server.close(resolve));}
   });
   await check('domain calls reject Odim before persistence, providers, queues or flow execution', async () => {
     const f = harness(on); const session = { instance: 'odim' };
