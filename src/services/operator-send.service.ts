@@ -16,6 +16,7 @@ import whatsappService, { getMessageType } from "./whatsapp.service";
 import { messageMentionPatch, operatorMentionEntities } from "../utils/message-mention-persistence";
 import messagePresentationService from "./message-presentation.service";
 import { assertOdimChannelAllowed } from "../utils/odim-access-only";
+import { operatorMessageName } from "../utils/operator-message-name";
 
 interface OperatorSendPayload {
 	options: SendMessageOptions;
@@ -81,7 +82,7 @@ class OperatorSendService {
 			onStage("ready-message.validation");
 			await readyMessagesService.getReadyMessageForSend(session, request.readyMessageId);
 		}
-		const text = `*${session.name}*: ${request.text}`;
+		const text = `*${operatorMessageName(session)}*: ${request.text}`;
 		const now = new Date();
 		const message: Prisma.WppMessageUncheckedCreateInput = {
 			instance: session.instance, userId: session.userId, clientId,

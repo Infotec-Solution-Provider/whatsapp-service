@@ -32,6 +32,7 @@ import readyMessagesService from "./ready-messages.service";
 import { WabaDeliveryError } from "../utils/waba-send";
 import { getTemplateAttribution } from "../utils/template-attribution";
 import { getOdimCopiedSectorClients } from "./odim-operational-channel.service";
+import { operatorMessageName } from "../utils/operator-message-name";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -277,7 +278,7 @@ class WhatsappService {
 			}
 
 			process.log(`Client obtido | clientId: ${clientId} | instance: ${session.instance}`);
-			const text = `*${session.name}*: ${data.text || ""}`;
+			const text = `*${operatorMessageName(session)}*: ${data.text || ""}`;
 			const now = new Date();
 
 			let message = {
