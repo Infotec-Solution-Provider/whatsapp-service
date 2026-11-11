@@ -5,6 +5,7 @@ import type { SendTemplateData } from "./whatsapp.service";
 
 type Row = Record<string, any>;
 const key = "start_chats_only_for_loyal_operator";
+const publicAgendaKey = "start_chats_block_public_agenda";
 const session: SessionData = { instance: "tenant-a", userId: 12, sectorId: 3, name: "Operator", role: "OPERATOR" };
 const template: SendTemplateData = { template: { id: "hello", name: "hello", source: "waba", language: "pt_BR",
 	category: "UTILITY", status: "APPROVED", text: "fixture", raw: {} }, templateVariables: {
@@ -342,6 +343,82 @@ test("transfer compare-and-swap rejects an owner changed concurrently", async (f
 test("disabled flag preserves the existing transfer path without CRM target lookup", async (f, s) => {
 	f.parameters = []; f.chats.push(chat()); f.crmError = new Error("No CRM expected");
 	await s.chats.transferAttendance("fixture-token", session, 100, 55); assert.equal(f.transferChecks.length, 0); assert.ok(f.effects.includes("update-chat"));
+});
+
+function policy(f: World, blockOther: boolean, blockPublic: boolean) {
+	f.parameters = [
+		{ instance: "tenant-a", scope: "INSTANCE", key, value: String(blockOther) },
+		{ instance: "tenant-a", scope: "INSTANCE", key: publicAgendaKey, value: String(blockPublic) }
+	];
+}
+const publicAgendaCases = [
+	{ name: "explicit numeric zero", owner: 0, public: true, other: false },
+	{ name: "explicit string zero", owner: "0", public: true, other: false },
+	{ name: "null owner", owner: null, public: false, other: false },
+	{ name: "negative owner", owner: -1, public: false, other: false },
+	{ name: "same owner", owner: 12, public: false, other: false },
+	{ name: "other owner", owner: 99, public: false, other: true },
+	{ name: "no campaign row", owner: null, public: false, other: false, noCampaign: true },
+	{ name: "unlinked contact", owner: 0, public: false, other: false, unlinked: true }
+];
+for (const blockOther of [false, true]) for (const blockPublic of [false, true]) for (const scenario of publicAgendaCases) {
+	test(`independent flags other=${blockOther}/public=${blockPublic}: ${scenario.name}`, async (f, s) => {
+		policy(f, blockOther, blockPublic);
+		f.loyalties[0]!["OPERADOR"] = scenario.owner;
+		if (scenario.noCampaign) f.loyalties = [];
+		if (scenario.unlinked) f.contact["customerId"] = null;
+		if ((blockOther && scenario.other) || (blockPublic && scenario.public)) {
+			await assert.rejects(start(s), UnauthorizedError); assertNoEffects(f);
+		} else {
+			await start(s); assert.ok(f.effects.includes("provider-template"));
+		}
+	});
+}
+for (const method of ["template", "legacy", "durable"] as const) test(`public-only flag denies alternative ${method} send without chat effects`, async (f, s) => {
+	policy(f, false, true); f.loyalties[0]!["OPERADOR"] = "0";
+	const request = method === "template" ? send(s) : method === "legacy"
+		? s.whatsapp.sendMessage(session, 7, "5511999990000", { contactId: 42, text: "fixture" })
+		: s.operator.submit(session, 7, "5511999990000", { contactId: 42, text: "fixture", fileId: 3 }, "fixture-key");
+	await assert.rejects(request, UnauthorizedError); assertNoEffects(f);
+});
+test("public-only flag preserves existing legitimately assigned chat continuity without CRM", async (f, s) => {
+	policy(f, false, true); f.loyalties[0]!["OPERADOR"] = 0; f.chats.push(chat()); f.crmError = new Error("No CRM for already assigned chat");
+	await send(s, session, 100); assert.ok(f.effects.includes("provider-template")); assert.equal(f.crmReads.length, 0);
+});
+test("public-only flag prevents taking another chat via transfer before the own-chat exception", async (f, s) => {
+	policy(f, false, true); f.loyalties[0]!["OPERADOR"] = 0; f.chats.push(chat({ userId: 99 }));
+	await assert.rejects(s.chats.transferAttendance("fixture-token", session, 100, 12), UnauthorizedError);
+	await assert.rejects(send(s, session, 100), UnauthorizedError); assertNoEffects(f);
+});
+test("public-only flag uses conditional transfer for the legitimate current owner", async (f, s) => {
+	policy(f, false, true); f.chats.push(chat()); await s.chats.transferAttendance("fixture-token", session, 100, 55);
+	assert.deepEqual(f.transferChecks, [{ id: 100, instance: "tenant-a", isFinished: false, userId: 12 }]);
+	assert.equal(f.chats[0]!["userId"], 55);
+});
+test("Supervisor bypasses both enabled flags before parameter or CRM availability", async (f, s) => {
+	policy(f, true, true); f.loyalties[0]!["OPERADOR"] = 0; f.flagError = new Error("No supervisor flag lookup"); f.crmError = new Error("CRM unavailable");
+	await send(s, { ...session, role: "ADMIN" }); assert.ok(f.effects.includes("provider-template"));
+	assert.equal(f.flagReads.length, 0); assert.equal(f.crmReads.length, 0);
+});
+test("public-only CRM failure fails closed before any new chat effects", async (f, s) => {
+	policy(f, false, true); f.crmError = new Error("CRM unavailable"); await assert.rejects(start(s), /CRM unavailable/); assertNoEffects(f);
+});
+test("USER/SECTOR cannot disable the instance public-agenda block", async (f, s) => {
+	policy(f, false, true); f.loyalties[0]!["OPERADOR"] = 0;
+	f.parameters.push({ instance: "tenant-a", scope: "USER", userId: 12, key: publicAgendaKey, value: "false" },
+		{ scope: "SECTOR", sectorId: 3, key: publicAgendaKey, value: "false" });
+	await assert.rejects(start(s), UnauthorizedError); assertNoEffects(f);
+});
+test("USER/SECTOR and another tenant cannot enable a disabled public-agenda block", async (f, s) => {
+	policy(f, false, false); f.loyalties[0]!["OPERADOR"] = 0; f.crmError = new Error("No CRM when both instance flags are off");
+	f.parameters.push({ instance: "tenant-a", scope: "USER", userId: 12, key: publicAgendaKey, value: "true" },
+		{ scope: "SECTOR", sectorId: 3, key: publicAgendaKey, value: "true" },
+		{ instance: "tenant-b", scope: "INSTANCE", key: publicAgendaKey, value: "true" });
+	await start(s); assert.ok(f.effects.includes("provider-template")); assert.equal(f.crmReads.length, 0);
+});
+test("invalid public-agenda flag defaults to false independently of the other disabled flag", async (f, s) => {
+	policy(f, false, false); f.parameters[1]!["value"] = "invalid"; f.loyalties[0]!["OPERADOR"] = 0;
+	f.crmError = new Error("No CRM when both instance flags are off"); await start(s); assert.equal(f.crmReads.length, 0);
 });
 
 async function run() {

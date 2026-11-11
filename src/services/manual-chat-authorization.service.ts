@@ -6,6 +6,12 @@ import parametersService from "./parameters.service";
 import prismaService from "./prisma.service";
 
 export const START_CHATS_ONLY_FOR_LOYAL_OPERATOR = "start_chats_only_for_loyal_operator";
+export const START_CHATS_BLOCK_PUBLIC_AGENDA = "start_chats_block_public_agenda";
+
+interface ManualChatPolicy {
+	blockOtherLoyalOperator: boolean;
+	blockPublicAgenda: boolean;
+}
 
 function canonicalAddress(address: unknown): string | null {
 	if (typeof address !== "string") return null;
@@ -18,24 +24,39 @@ function canonicalAddress(address: unknown): string | null {
 }
 
 class ManualChatAuthorizationService {
-	public async isEnabled(instance: string) {
+	private async getPolicy(instance: string): Promise<ManualChatPolicy> {
 		// An operator/sector override must not disable this instance policy.
-		return parametersService.getInstanceBooleanParam(instance, START_CHATS_ONLY_FOR_LOYAL_OPERATOR, false);
+		const [blockOtherLoyalOperator, blockPublicAgenda] = await Promise.all([
+			parametersService.getInstanceBooleanParam(instance, START_CHATS_ONLY_FOR_LOYAL_OPERATOR, false),
+			parametersService.getInstanceBooleanParam(instance, START_CHATS_BLOCK_PUBLIC_AGENDA, false)
+		]);
+		return { blockOtherLoyalOperator, blockPublicAgenda };
 	}
 
-	private async assertLoyalOperator(session: SessionData, contact: WppContact) {
+	public async isEnabled(instance: string) {
+		// Transfer protections are required when either start policy is enabled.
+		const policy = await this.getPolicy(instance);
+		return policy.blockOtherLoyalOperator || policy.blockPublicAgenda;
+	}
+
+	private async assertCustomerPolicy(session: SessionData, contact: WppContact, policy: ManualChatPolicy) {
 		if (session.role === "ADMIN" || !contact.customerId) return;
 		// Keep the existing WhatsApp definition: greatest campanhas_clientes.CODIGO,
 		// without introducing a FIDELIZA/CONCLUIDO filter or clientes.OPERADOR fallback.
 		const loyalty = await contactsService.getContactLoalty(contact);
 		if (!loyalty) return;
 		const rawUserId: unknown = loyalty.userId;
+		// Public agenda is an explicit zero in an existing campaign row. A null,
+		// missing row or unlinked contact must not acquire that meaning.
+		if (policy.blockPublicAgenda && (rawUserId === 0 || rawUserId === "0")) {
+			throw new UnauthorizedError("Este cliente está na agenda pública. Solicite a atribuição ao supervisor antes de iniciar a conversa.");
+		}
 		const userId = rawUserId === null ? 0 : Number(rawUserId);
 		if ((rawUserId !== null && typeof rawUserId !== "number" &&
 			(typeof rawUserId !== "string" || !/^-?\d+$/.test(rawUserId))) || !Number.isSafeInteger(userId)) {
 			throw new InternalServerError("Não foi possível confirmar a fidelização deste cliente.");
 		}
-		if (userId > 0 && userId !== session.userId) {
+		if (policy.blockOtherLoyalOperator && userId > 0 && userId !== session.userId) {
 			throw new UnauthorizedError("Este cliente está fidelizado com outro operador. Solicite a transferência ao supervisor.");
 		}
 	}
@@ -45,15 +66,17 @@ class ManualChatAuthorizationService {
 		// The CRM's Supervisor profile is ADMIN. This instance policy is only for
 		// ordinary operators; supervisors retain the pre-existing runtime behavior.
 		if (session.role === "ADMIN") return;
-		if (await this.isEnabled(session.instance)) {
+		const policy = await this.getPolicy(session.instance);
+		if (policy.blockOtherLoyalOperator || policy.blockPublicAgenda) {
 			if (contact.isDeleted) throw new NotFoundError("Contato não encontrado!");
-			await this.assertLoyalOperator(session, contact);
+			await this.assertCustomerPolicy(session, contact, policy);
 		}
 	}
 
 	public async assertCanSend(session: SessionData, clientId: number, contactId: number, chatId: number | null | undefined, to: string) {
 		if (session.role === "ADMIN") return;
-		if (!(await this.isEnabled(session.instance))) return;
+		const policy = await this.getPolicy(session.instance);
+		if (!policy.blockOtherLoyalOperator && !policy.blockPublicAgenda) return;
 		const resolvedContactId = Number(contactId);
 		const resolvedChatId = chatId === null || chatId === undefined ? null : Number(chatId);
 		if (!Number.isSafeInteger(resolvedContactId) || resolvedContactId <= 0 ||
@@ -88,7 +111,7 @@ class ManualChatAuthorizationService {
 			if (session.role === "ADMIN" || chat.userId === session.userId) return;
 			if (chat.userId && chat.userId > 0) throw new UnauthorizedError("Este atendimento pertence a outro operador.");
 		}
-		await this.assertLoyalOperator(session, contact);
+		await this.assertCustomerPolicy(session, contact, policy);
 	}
 }
 
