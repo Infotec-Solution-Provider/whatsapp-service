@@ -6,6 +6,7 @@ import onlyLocal from "../middlewares/only-local.middleware";
 import publicBiRateLimit from "../middlewares/public-bi-rate-limit.middleware";
 import publicBiAuthenticated from "../middlewares/public-bi-auth.middleware";
 import protectedRead from "../middlewares/protected-read";
+import sessionChanges from "../services/session-changes/session-changes.service";
 import chatUserPreferencesService, { ChatPreferenceType } from "../services/chat-user-preferences.service";
 import publicReportFieldsService from "../services/public-report-fields.service";
 import transferHistoryService from "../services/transfer-history.service";
@@ -230,11 +231,13 @@ class ChatsController {
 		const includeMessages = Boolean(req.query["messages"] === "true");
 		const includeContact = Boolean(req.query["contact"] === "true");
 
+		// Capture BEFORE the snapshot: concurrent commits are replayed rather than lost.
+		const syncCursor = await sessionChanges.capture(req.session);
 		const data = await chatsService.getUserChatsBySession(req.session, includeMessages, includeContact);
 
 		return {
 			message: "Chats retrieved successfully!",
-			data
+			data: { ...data, syncCursor }
 		};
 	}
 

@@ -182,11 +182,12 @@ class ChatsService {
 		});
 	}
 
-	public async getUserChatsBySession(session: SessionData, includeMessages = true, includeContact = true) {
+	public async getUserChatsBySession(session: SessionData, includeMessages = true, includeContact = true, chatIds?: number[]) {
 		const foundChats = await prismaService.wppChat.findMany({
 			where: {
 				isFinished: false,
 				instance: session.instance,
+				...(chatIds ? { id: { in: chatIds } } : {}),
 				OR: [
 					{
 						userId: session.userId
@@ -211,7 +212,8 @@ class ChatsService {
 					isFinished: false,
 					sectorId: session.sectorId,
 					instance: session.instance,
-					userId: -1
+					userId: -1,
+					...(chatIds ? { id: { in: chatIds } } : {})
 				},
 				include: { contact: true, schedule: true }
 			});
@@ -805,12 +807,12 @@ class ChatsService {
 		}
 		const user = await usersService.getUserById(chats.userId);
 
-		const chat = await prismaService.wppChat.update({
+		const chat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.update({
 			where: { id },
 			data: {
 				userId
 			}
-		});
+		}));
 
 		await this.syncChatToLocal(chat);
 		await transferHistoryService.recordTransfer({
@@ -1505,7 +1507,7 @@ class ChatsService {
 			const profilePicture = contactAddress
 				? await whatsappService.getProfilePictureUrl(instance, contactAddress)
 				: null;
-			const newChat = await prismaService.wppChat.create({
+			const newChat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.create({
 				data: {
 					instance,
 					type: "ACTIVE",
@@ -1524,7 +1526,7 @@ class ChatsService {
 						}
 					}
 				}
-			});
+			}));
 			process.log(`Chat created with ID ${newChat.id}`);
 
 			await this.syncChatToLocal(newChat);
