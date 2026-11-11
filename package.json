@@ -29,6 +29,7 @@
 		"test:contact-identity": "ts-node src/utils/resolve-contact-identity.test.ts",
 		"test:message-send-trace": "ts-node --files src/middlewares/message-send-trace.test.ts",
 		"test:contact-registration": "ts-node src/services/contact-registration.test.ts",
+		"test:assigned-chat-unread": "ts-node src/services/assigned-chat-unread.test.ts",
 		"test:read-protection": "ts-node --files src/middlewares/protected-read.test.ts",
 		"test:session-changes": "ts-node src/services/session-changes/session-change-cursor.test.ts",
 		"test:session-changes:mysql": "ts-node src/services/session-changes/session-changes.mysql.test.ts",

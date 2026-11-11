@@ -685,12 +685,12 @@ class ChatsService {
 		}
 		const user = await usersService.getUserById(chats.userId);
 
-		const chat = await prismaService.wppChat.update({
+		const chat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.update({
 			where: { id },
 			data: {
 				userId
 			}
-		});
+		}));
 
 		await this.syncChatToLocal(chat);
 		await transferHistoryService.recordTransfer({
@@ -1369,7 +1369,7 @@ class ChatsService {
 			const profilePicture = contactAddress
 				? await whatsappService.getProfilePictureUrl(instance, contactAddress)
 				: null;
-			const newChat = await prismaService.wppChat.create({
+			const newChat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.create({
 				data: {
 					instance,
 					type: "ACTIVE",
@@ -1388,7 +1388,7 @@ class ChatsService {
 						}
 					}
 				}
-			});
+			}));
 			process.log(`Chat created with ID ${newChat.id}`);
 
 			await this.syncChatToLocal(newChat);

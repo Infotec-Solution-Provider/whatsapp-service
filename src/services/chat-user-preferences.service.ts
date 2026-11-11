@@ -12,6 +12,26 @@ class ChatUserPreferencesService {
 		return `${type}:${chatId}`;
 	}
 
+	/** Publish the assignment and the recipient's unread preference atomically.
+	 * Message READ status belongs to the conversation, not its new attendant.
+	 */
+	public async withUnreadAssignment<T extends { id: number; instance: string; userId: number | null }>(
+		write: (tx: Prisma.TransactionClient) => Promise<T>
+	): Promise<T> {
+		return prismaService.$transaction(async (tx) => {
+			const chat = await write(tx);
+			if (chat.userId !== null && chat.userId > 0) {
+				const key = { instance: chat.instance, userId: chat.userId, chatType: "wpp", chatId: chat.id };
+				await tx.chatUserPreference.upsert({
+					where: { instance_userId_chatType_chatId: key },
+					create: { ...key, isMarkedUnread: true },
+					update: { isMarkedUnread: true }
+				});
+			}
+			return chat;
+		});
+	}
+
 	public async getMap(session: SessionScope, chatIds: number[], type: ChatPreferenceType) {
 		if (!chatIds.length) return new Map<string, { isPinned: boolean; isMarkedUnread: boolean }>();
 

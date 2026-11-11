@@ -245,6 +245,7 @@ class MessagesService {
 	public async markContactMessagesAsRead(instance: string, contactId: number, userId?: number) {
 		await prismaService.wppMessage.updateMany({
 			where: {
+				instance,
 				OR: [
 					{
 						to: {
@@ -261,6 +262,21 @@ class MessagesService {
 				status: "READ"
 			}
 		});
+
+		const chat = await prismaService.wppChat.findFirst({
+			where: {
+				instance,
+				contactId,
+				isFinished: false
+			}
+		});
+
+		if (chat && userId) await chatUserPreferencesService.markRead({ instance, userId }, "wpp", chat.id);
+
+		if (chat) {
+			const room: SocketServerChatRoom = `${instance}:chat:${chat.id}`;
+			socketService.emit(SocketEventType.WppContactMessagesRead, room, { contactId, ...(userId !== undefined ? { userId } : {}) });
+		}
 
 		try {
 			await instancesService.executeQuery(
@@ -289,22 +305,6 @@ class MessagesService {
 			}
 
 			console.error("[markContactMessagesAsRead] Erro ao sincronizar mensagens locais:", err);
-		}
-
-		const chat = await prismaService.wppChat.findFirst({
-			where: {
-				instance,
-				contactId,
-				isFinished: false
-			}
-		});
-
-		if (chat) {
-			if (userId) await chatUserPreferencesService.markRead({ instance, userId }, "wpp", chat.id);
-			const room: SocketServerChatRoom = `${instance}:chat:${chat.id}`;
-			socketService.emit(SocketEventType.WppContactMessagesRead, room, {
-				contactId
-			});
 		}
 	}
 
