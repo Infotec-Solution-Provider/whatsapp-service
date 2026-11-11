@@ -130,7 +130,13 @@ async function withWorld(f: World, run: (s: Services) => Promise<void>) {
 			stub(path, new Proxy({}, { get() { f.effects.push("external-prepare"); throw new Error(`Unexpected external access: ${path}`); } }));
 		stub("./socket.service", { emit: async () => { f.effects.push("socket"); } });
 		stub("./transfer-history.service", { recordTransfer: async () => { f.effects.push("transfer-history"); } });
-		for (const path of ["./internal-chats.service", "./chat-user-preferences.service",
+		stub("./chat-user-preferences.service", {
+			// The concurrent unread-assignment release wraps the existing chat write
+			// in a transaction. Execute its callback against the same fake delegate:
+			// this keeps all owner-CAS and denied-effect assertions on the real path.
+			withUnreadAssignment: async (write: (tx: Row) => Promise<unknown>) => write(require("./prisma.service").default)
+		});
+		for (const path of ["./internal-chats.service",
 			"./public-report-fields.service", "../bots/exatron-satisfaction.bot", "./message-reactions.service"])
 			stub(path, {});
 		stub("./message-presentation.service", { fromStored: (message: Row) => message });
