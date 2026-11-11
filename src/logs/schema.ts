@@ -13,7 +13,8 @@ export const LOGS_DDL = [
 		created_at DATETIME(3) NOT NULL,
 		INDEX process_logs_instance_process_name_idx (instance, process_name),
 		INDEX process_logs_status_created_at_idx (status, created_at),
-		INDEX process_logs_instance_status_idx (instance, status)
+		INDEX process_logs_instance_status_idx (instance, status),
+		INDEX process_logs_instance_created_at_id_idx (instance, created_at, id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	`CREATE TABLE IF NOT EXISTS process_log_copy_state (
 		id INT PRIMARY KEY, source_identity VARCHAR(64) CHARACTER SET ascii NOT NULL,

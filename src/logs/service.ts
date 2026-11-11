@@ -14,15 +14,21 @@ export interface ProcessLogRecord {
 export class ProcessLogsService {
 	/** Internal signed administration reader. Caller builds only fixed projected SELECTs with bindings. */
 	public async readAdminPage(statement: string, parameters: unknown[]): Promise<Record<string, unknown>[]> {
-		if (this.settings().storage === "legacy") {
-			const database = require("../services/prisma.service").default as typeof import("../services/prisma.service").default;
-			return database.$queryRawUnsafe<Record<string, unknown>[]>(statement, ...parameters);
-		}
-		const connection = await acquire(this.dedicatedPool());
+		// ProcessLog is intentionally outside tenant-sql. Never infer a CRM
+		// connection from the tenant filter used in this administrative SELECT.
+		const pool = this.settings().storage === "legacy" ? this.legacyAdminReadPool() : this.dedicatedPool();
+		const connection = await acquire(pool);
 		try { return await sql<RowDataPacket[]>(connection, statement, parameters); }
 		finally { connection.release(); }
 	}
 	private pool: Pool | undefined;
+	private adminReadPool: Pool | undefined;
+	private legacyAdminReadPool(): Pool {
+		const url = process.env["WHATSAPP_DATABASE_URL"];
+		if (!url) throw new Error("Legacy process log read database URL required");
+		// Separate finite reader capacity; existing log writers are unchanged.
+		return this.adminReadPool ??= createManagedPool(url, 1, 1);
+	}
 	private config: LogsConfig | undefined;
 	private writerConfig: LogsConfig | undefined;
 	private task: ScheduledTask | undefined;
@@ -166,6 +172,7 @@ export class ProcessLogsService {
 		if (this.reporting) clearInterval(this.reporting);
 		await Promise.all([...this.pending, this.cleaning]);
 		if (this.pool) await this.pool.end();
+		if (this.adminReadPool) await this.adminReadPool.end();
 	}
 }
 

@@ -995,6 +995,7 @@ model ProcessLog {
   @@index([instance, processName])
   @@index([status, createdAt])
   @@index([instance, status])
+  @@index([instance, createdAt, id], map: "process_logs_instance_created_at_id_idx")
   @@map("process_logs")
 }
 
