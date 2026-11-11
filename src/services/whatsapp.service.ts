@@ -1,6 +1,6 @@
 import { SessionData } from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
-import { InternalMessage, WppChat, WppClientType, WppMessage, WppSector } from "@prisma/client";
+import { InternalMessage, WppChat, WppClient, WppClientType, WppMessage, WppSector } from "@prisma/client";
 import { BadRequestError, InternalServerError, NotFoundError } from "@rgranatodutra/http-errors";
 import "dotenv/config";
 import { TemplateMessage } from "../adapters/template.adapter";
@@ -30,6 +30,8 @@ import { createUploadTraceLogger } from "../utils/file-upload-trace";
 import readyMessagesService from "./ready-messages.service";
 import { WabaDeliveryError } from "../utils/waba-send";
 import { getTemplateAttribution } from "../utils/template-attribution";
+import humanBehavior from "./human-behavior-config.service";
+import type { HumanBehaviorConfig } from "../utils/human-behavior.simulator";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -111,6 +113,30 @@ export function getMessageType(fileType: string, isAudio: boolean, isDocument: b
 
 class WhatsappService {
 	private readonly clients = new Map<number, WhatsappClient>();
+	/** Explicitly apply only one channel. Never rebuild unrelated provider sessions. */
+	public async reloadClient(instance: string, id: number, configuration?: WppClient): Promise<void> {
+		const row = configuration ?? await prismaService.wppClient.findFirst({ where: { id, instance } });
+		if (!row) throw new NotFoundError("Canal não encontrado no tenant alvo.");
+		if (row.instance !== instance || row.id !== id) throw new BadRequestError("Configuração do canal não pertence ao alvo.");
+		const old = this.clients.get(id);
+		if (old && old.instance !== instance) throw new BadRequestError("Canal pertence a outro tenant.");
+		if (old instanceof WWEBJSWhatsappClient) await old.destroy();
+		this.clients.delete(id);
+		if (!row.isActive) return;
+		let replacement: WhatsappClient;
+		switch (row.type) {
+			case WppClientType.WABA: replacement = new WABAWhatsappClient(id, instance, row.name, row.phone ?? "", row.WABAPhoneId ?? "", row.WABAAccountId ?? "", row.WABAToken ?? ""); break;
+			case WppClientType.GUPSHUP: replacement = new GupshupWhatsappClient(id, instance, row.name, row.phone ?? "", row.gupshupToken ?? "", row.gupshupAppName ?? "", row.gupshupAppId ?? ""); break;
+			case WppClientType.REMOTE: replacement = new RemoteWhatsappClient(id, instance, row.name, row.phone ?? "", row.remoteClientUrl ?? ""); break;
+			case WppClientType.WWEBJS: replacement = new WWEBJSWhatsappClient(id, instance, row.name); break;
+			default: throw new BadRequestError("Provedor não suportado.");
+		}
+		this.clients.set(id, replacement);
+	}
+	public async reloadHumanBehavior(instance: string, configuration?: HumanBehaviorConfig): Promise<void> {
+		const config = configuration ? humanBehavior.applyConfig(instance, configuration) : await humanBehavior.loadConfig(instance, true);
+		for (const client of this.clients.values()) if (client.instance === instance && client instanceof WWEBJSWhatsappClient) client.setHumanBehaviorConfig(config);
+	}
 
 	public async buildClients() {
 		const clients = await prismaService.wppClient.findMany({

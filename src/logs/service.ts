@@ -12,6 +12,16 @@ export interface ProcessLogRecord {
 }
 
 export class ProcessLogsService {
+	/** Internal signed administration reader. Caller builds only fixed projected SELECTs with bindings. */
+	public async readAdminPage(statement: string, parameters: unknown[]): Promise<Record<string, unknown>[]> {
+		if (this.settings().storage === "legacy") {
+			const database = require("../services/prisma.service").default as typeof import("../services/prisma.service").default;
+			return database.$queryRawUnsafe<Record<string, unknown>[]>(statement, ...parameters);
+		}
+		const connection = await acquire(this.dedicatedPool());
+		try { return await sql<RowDataPacket[]>(connection, statement, parameters); }
+		finally { connection.release(); }
+	}
 	private pool: Pool | undefined;
 	private config: LogsConfig | undefined;
 	private writerConfig: LogsConfig | undefined;

@@ -48,6 +48,8 @@ const IGNORED_MESSAGE_TYPES = process.env["WWEBJS_IGNORED_MESSAGE_TYPES"]?.split
 const BROWSER_PATH = process.env["WWEBJS_BROWSER_PATH"]!;
 
 class WWEBJSWhatsappClient implements WhatsappClient {
+	/** Replace the in-memory settings without reconnecting or touching the authenticated session. */
+	public setHumanBehaviorConfig(config: HumanBehaviorConfig): void { this.humanBehaviorConfig = config; }
 	public wwebjs: Client;
 	public isReady: boolean = false;
 	private messageQueue: MessageQueue = new MessageQueue();

@@ -7,6 +7,12 @@ import { Logger } from "@in.pulse-crm/utils";
  * Serviço para gerenciar configurações de comportamento humano via parâmetros
  */
 class HumanBehaviorConfigService {
+	public applyConfig(instance: string, config: HumanBehaviorConfig): HumanBehaviorConfig {
+		this.validateConfig(config);
+		const applied = structuredClone(config);
+		this.configCache.set(instance, applied);
+		return applied;
+	}
 	private configCache = new Map<string, HumanBehaviorConfig>();
 
 	/**
@@ -14,7 +20,7 @@ class HumanBehaviorConfigService {
 	 * @param instance - Nome da instância
 	 * @returns Configuração do comportamento humano
 	 */
-	public async loadConfig(instance: string): Promise<HumanBehaviorConfig> {
+	public async loadConfig(instance: string, strict = false): Promise<HumanBehaviorConfig> {
 		try {
 			const params = await parametersService.getInstanceParams(instance);
 			const paramMap = Object.fromEntries(params.map((p) => [p.key, p.value]));
@@ -65,6 +71,7 @@ class HumanBehaviorConfigService {
 
 			return config;
 		} catch (err) {
+			if (strict) throw err;
 			Logger.error(
 				`[HumanBehaviorConfig] Erro ao carregar configuração para ${instance}, usando padrão: ${err instanceof Error ? err.message : String(err)}`
 			);

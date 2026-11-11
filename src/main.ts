@@ -55,6 +55,8 @@ import processLogs from "./logs/service";
 import { startOpsAlerts, stopOpsAlerts } from "./services/ops-alerts";
 import { tenantSqlEnabled } from "./tenant-sql/registry";
 import database from "./services/prisma.service";
+import { createAdminRouter } from "./admin/router";
+import { adminParserError } from "./admin/parser-error";
 
 whatsappService.buildClients();
 operatorSendService.configureWorker();
@@ -86,8 +88,11 @@ app.use("/api", (_req, res, next) => {
 	next();
 });
 
+app.use("/api/internal/admin", express.json({ limit: "1mb" }));
 app.use(express.json({ limit: "2gb" }));
 app.use(express.urlencoded({ extended: true, limit: "2gb" }));
+app.use(createAdminRouter());
+app.use(adminParserError);
 
 // Serve static files for frontend
 app.use(express.static("public"));
