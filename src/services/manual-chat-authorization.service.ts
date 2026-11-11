@@ -26,11 +26,13 @@ function canonicalAddress(address: unknown): string | null {
 class ManualChatAuthorizationService {
 	private async getPolicy(instance: string): Promise<ManualChatPolicy> {
 		// An operator/sector override must not disable this instance policy.
-		const [blockOtherLoyalOperator, blockPublicAgenda] = await Promise.all([
-			parametersService.getInstanceBooleanParam(instance, START_CHATS_ONLY_FOR_LOYAL_OPERATOR, false),
-			parametersService.getInstanceBooleanParam(instance, START_CHATS_BLOCK_PUBLIC_AGENDA, false)
-		]);
-		return { blockOtherLoyalOperator, blockPublicAgenda };
+		// Resolve both independent keys from one instance snapshot per decision.
+		const params = await parametersService.getInstanceParams(instance);
+		const enabled = (key: string) => params.find((parameter) => parameter.key === key)?.value === "true";
+		return {
+			blockOtherLoyalOperator: enabled(START_CHATS_ONLY_FOR_LOYAL_OPERATOR),
+			blockPublicAgenda: enabled(START_CHATS_BLOCK_PUBLIC_AGENDA)
+		};
 	}
 
 	public async isEnabled(instance: string) {
@@ -46,15 +48,15 @@ class ManualChatAuthorizationService {
 		const loyalty = await contactsService.getContactLoalty(contact);
 		if (!loyalty) return;
 		const rawUserId: unknown = loyalty.userId;
-		// Public agenda is an explicit zero in an existing campaign row. A null,
-		// missing row or unlinked contact must not acquire that meaning.
-		if (policy.blockPublicAgenda && (rawUserId === 0 || rawUserId === "0")) {
-			throw new UnauthorizedError("Este cliente está na agenda pública. Solicite a atribuição ao supervisor antes de iniciar a conversa.");
-		}
 		const userId = rawUserId === null ? 0 : Number(rawUserId);
 		if ((rawUserId !== null && typeof rawUserId !== "number" &&
 			(typeof rawUserId !== "string" || !/^-?\d+$/.test(rawUserId))) || !Number.isSafeInteger(userId)) {
 			throw new InternalServerError("Não foi possível confirmar a fidelização deste cliente.");
+		}
+		// Public agenda is an explicit integer zero in an existing campaign row.
+		// Normalize equivalent integer strings without converting null into public.
+		if (policy.blockPublicAgenda && rawUserId !== null && userId === 0) {
+			throw new UnauthorizedError("Este cliente está na agenda pública. Solicite a atribuição ao supervisor antes de iniciar a conversa.");
 		}
 		if (policy.blockOtherLoyalOperator && userId > 0 && userId !== session.userId) {
 			throw new UnauthorizedError("Este cliente está fidelizado com outro operador. Solicite a transferência ao supervisor.");

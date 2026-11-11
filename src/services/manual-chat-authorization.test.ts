@@ -354,6 +354,8 @@ function policy(f: World, blockOther: boolean, blockPublic: boolean) {
 const publicAgendaCases = [
 	{ name: "explicit numeric zero", owner: 0, public: true, other: false },
 	{ name: "explicit string zero", owner: "0", public: true, other: false },
+	{ name: "zero with leading zero", owner: "00", public: true, other: false },
+	{ name: "zero with minus sign", owner: "-0", public: true, other: false },
 	{ name: "null owner", owner: null, public: false, other: false },
 	{ name: "negative owner", owner: -1, public: false, other: false },
 	{ name: "same owner", owner: 12, public: false, other: false },
@@ -419,6 +421,11 @@ test("USER/SECTOR and another tenant cannot enable a disabled public-agenda bloc
 test("invalid public-agenda flag defaults to false independently of the other disabled flag", async (f, s) => {
 	policy(f, false, false); f.parameters[1]!["value"] = "invalid"; f.loyalties[0]!["OPERADOR"] = 0;
 	f.crmError = new Error("No CRM when both instance flags are off"); await start(s); assert.equal(f.crmReads.length, 0);
+});
+test("both flags share one instance-parameter snapshot for a policy decision", async (f, s) => {
+	policy(f, true, true); f.loyalties[0]!["OPERADOR"] = 0;
+	await assert.rejects(s.authorization.assertCanStart(session, f.contact as any), UnauthorizedError);
+	assert.deepEqual(f.flagReads, [{ instance: "tenant-a", scope: "INSTANCE" }]); assertNoEffects(f);
 });
 
 async function run() {

@@ -110,7 +110,7 @@ Cada chave pode ser habilitada ou desabilitada independentemente alterando seu `
 
 ### `start_chats_only_for_loyal_operator`
 
-- **Escopo**: exclusivamente `INSTANCE`, consumido por `getInstanceBooleanParam`. Valores `USER` e `SECTOR` não habilitam nem desabilitam esta política.
+- **Escopo**: exclusivamente `INSTANCE`, consumido por `getInstanceParams` em uma única consulta para as duas flags. Apenas o literal `true` ativa cada chave. Valores `USER` e `SECTOR` não habilitam nem desabilitam esta política.
 - **Padrão**: `false`. Somente o literal `true` habilita; ausência ou valor inválido preserva o comportamento anterior.
 - **Regra**: ao iniciar atendimento manual, um operador não pode iniciar contato vinculado a cliente cuja fidelização pertence a outro operador positivo. A fidelização é a mesma já usada pelo WhatsApp: `campanhas_clientes` do CRM do tenant, filtrado por `CLIENTE` e ordenado por `CODIGO DESC LIMIT 1`, via `ContactsService.getContactLoalty`. Não usa `clientes.OPERADOR` nem acrescenta filtros `FIDELIZA`/`CONCLUIDO`.
 - **Perfis**: a política é exclusiva de usuários comuns (`ATIVO`, `RECEP` e `AMBOS`). O perfil **Supervisor** cadastrado no CRM é `ADMIN`: pula a nova política antes da consulta à flag ou à fidelização, mantendo as verificações que já existiam no runtime. A validação básica do tenant do contato ao iniciar permanece independente da flag.
@@ -127,7 +127,7 @@ Validação isolada: `npm run test:manual-chat-authorization` usa os métodos re
 ### `start_chats_block_public_agenda`
 
 - **Escopo e padrão**: exclusivamente `INSTANCE`, padrão `false`, sem sobrescrita por `USER`/`SECTOR`. Somente `value='true'` ativa. Pode ser configurada independentemente de `start_chats_only_for_loyal_operator`.
-- **Agenda pública**: somente quando o último registro de `campanhas_clientes` retorna `OPERADOR=0` explicitamente, como número `0` ou string `'0'`. Contato sem cliente, ausência de registro, `OPERADOR=NULL` e operadores negativos não são classificados como agenda pública.
+- **Agenda pública**: somente quando o último registro de `campanhas_clientes` retorna `OPERADOR=0` explicitamente, como número ou string numérica inteira normalizada para zero (`'0'`, `'00'`, `'-0'`). Contato sem cliente, ausência de registro, `OPERADOR=NULL` e operadores negativos não são classificados como agenda pública.
 - **Regra e perfis**: quando ativa, impede usuários comuns de iniciar contato de agenda pública, inclusive por mensagem normal ou template direto sem chat já atribuído ao usuário. O perfil Supervisor (`ADMIN`) conserva o bypass anterior às consultas de flags/CRM. A fidelização continua sendo a mesma do WhatsApp, por maior `CODIGO`, sem novos filtros.
 - **Continuidade e transferência**: atendimento ativo já atribuído legitimamente ao usuário pode continuar, inclusive se criado antes da ativação. Não é um bloqueio retroativo desses atendimentos. As proteções de transferência do helper ficam ativas para usuários comuns quando **qualquer uma** das duas flags está ativa; assim, a transferência não permite tomar chat alheio para contornar a política de início. Preserva a atualização condicional e a exceção do Supervisor.
 - **Falhas e limites**: falhas em consultas necessárias impedem a nova intenção; repetições idempotentes continuam retornando a tentativa existente. Mantém os mesmos limites de recepção/automação/forwarding/cadastro descritos para a política de carteira. A inclusão do parâmetro no código não grava configuração nem define o estado inicial de qualquer tenant.
