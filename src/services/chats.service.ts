@@ -700,7 +700,7 @@ class ChatsService {
 	public async transferAttendance(token: string, session: SessionData, id: number, userId: number) {
 		assertOdimChannelAllowed(session.instance);
 		const { instance } = session;
-		const restrictToLoyalOperator = await manualChatAuthorization.isEnabled(instance);
+		const restrictToLoyalOperator = session.role !== "ADMIN" && await manualChatAuthorization.isEnabled(instance);
 
 		const usersService = getUsersClient();
 		usersService.setAuth(token);

@@ -187,6 +187,26 @@ test("unlinked contact permits without querying CRM", async (f, s) => { f.contac
 test("real ADMIN bypasses loyalty and does not depend on CRM", async (f, s) => {
 	deniedOwner(f); f.crmError = new Error("CRM unavailable"); await start(s, { ...session, role: "ADMIN" }); assert.equal(f.crmReads.length, 0);
 });
+test("Supervisor (ADMIN) bypasses new policy before flag/CRM lookups in both helpers", async (f, s) => {
+	f.flagError = new Error("Flag lookup forbidden for supervisors"); f.crmError = new Error("CRM unavailable"); deniedOwner(f);
+	const supervisor = { ...session, role: "ADMIN" };
+	await s.authorization.assertCanStart(supervisor, f.contact as any);
+	await s.authorization.assertCanSend(supervisor, 999, 999, 999, "original-runtime-validation");
+	assert.equal(f.flagReads.length, 0); assert.equal(f.crmReads.length, 0); assertNoEffects(f);
+});
+test("Supervisor (ADMIN) still rejects a foreign tenant at the universal start boundary", async (f, s) => {
+	f.contact["instance"] = "tenant-b"; f.flagError = new Error("Flag lookup forbidden for supervisors");
+	await assert.rejects(s.authorization.assertCanStart({ ...session, role: "ADMIN" }, f.contact as any), NotFoundError);
+	assert.equal(f.flagReads.length, 0); assertNoEffects(f);
+});
+test("Supervisor (ADMIN) sends templates despite unavailable new-policy flag/CRM", async (f, s) => {
+	f.flagError = new Error("Flag lookup forbidden for supervisors"); f.crmError = new Error("CRM unavailable"); deniedOwner(f);
+	await send(s, { ...session, role: "ADMIN" }); assert.ok(f.effects.includes("provider-template"));
+	assert.equal(f.flagReads.length, 0); assert.equal(f.crmReads.length, 0);
+});
+for (const role of ["ATIVO", "RECEP", "AMBOS"]) test(`ordinary CRM profile ${role} remains subject to loyalty denial`, async (f, s) => {
+	deniedOwner(f); await assert.rejects(start(s, { ...session, role }), UnauthorizedError); assertNoEffects(f);
+});
 test("start_chats_as_admin does not grant an operator a loyalty exception", async (f, s) => {
 	deniedOwner(f); f.parameters.push({ instance: "tenant-a", scope: "INSTANCE", key: "start_chats_as_admin", value: "true" });
 	await assert.rejects(start(s), UnauthorizedError); assertNoEffects(f);
@@ -301,6 +321,11 @@ test("own chat transfer validates target and conditionally updates the original 
 test("ADMIN may transfer another operator's active chat", async (f, s) => {
 	f.chats.push(chat({ userId: 99 })); await s.chats.transferAttendance("fixture-token", { ...session, role: "ADMIN" }, 100, 55);
 	assert.equal(f.chats[0]!["userId"], 55);
+});
+test("Supervisor (ADMIN) retains the original transfer path without new flag/CRM prerequisites", async (f, s) => {
+	f.flagError = new Error("Flag lookup forbidden for supervisors"); f.crmError = new Error("CRM unavailable"); f.chats.push(chat({ userId: 99 }));
+	await s.chats.transferAttendance("fixture-token", { ...session, role: "ADMIN" }, 100, 55);
+	assert.equal(f.chats[0]!["userId"], 55); assert.equal(f.flagReads.length, 0); assert.equal(f.transferChecks.length, 0);
 });
 for (const target of [0, -1, 1.5, 999]) test(`transfer rejects invalid/missing target ${target}`, async (f, s) => {
 	f.chats.push(chat()); await assert.rejects(s.chats.transferAttendance("fixture-token", session, 100, target), BadRequestError); assertNoEffects(f);

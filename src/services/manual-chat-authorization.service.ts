@@ -42,6 +42,9 @@ class ManualChatAuthorizationService {
 
 	public async assertCanStart(session: SessionData, contact: WppContact) {
 		if (contact.instance !== session.instance) throw new NotFoundError("Contato não encontrado!");
+		// The CRM's Supervisor profile is ADMIN. This instance policy is only for
+		// ordinary operators; supervisors retain the pre-existing runtime behavior.
+		if (session.role === "ADMIN") return;
 		if (await this.isEnabled(session.instance)) {
 			if (contact.isDeleted) throw new NotFoundError("Contato não encontrado!");
 			await this.assertLoyalOperator(session, contact);
@@ -49,6 +52,7 @@ class ManualChatAuthorizationService {
 	}
 
 	public async assertCanSend(session: SessionData, clientId: number, contactId: number, chatId: number | null | undefined, to: string) {
+		if (session.role === "ADMIN") return;
 		if (!(await this.isEnabled(session.instance))) return;
 		const resolvedContactId = Number(contactId);
 		const resolvedChatId = chatId === null || chatId === undefined ? null : Number(chatId);
