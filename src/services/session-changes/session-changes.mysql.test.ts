@@ -123,6 +123,28 @@ test("journal migration, atomic publication, late linkage, authorization and ret
 		await db.query("INSERT INTO chat_user_preferences (instance,user_id,chat_type,chat_id,is_pinned,is_marked_unread,updated_at) VALUES ('alpha',2,'wpp',4,1,1,UTC_TIMESTAMP())");
 		page = await reader.read(session, cursor, 100);
 		assert.ok((page.changes as { chats: Array<{ id: number; isPinned: boolean; isUnread: boolean }> }).chats.some((chat) => chat.id === 4 && chat.isPinned && chat.isUnread));
+		// Arrival remains personal after all customer messages have already been read.
+		const { default: preferences } = require("../chat-user-preferences.service") as typeof import("../chat-user-preferences.service");
+		const { default: chatsService } = require("../chats.service") as typeof import("../chats.service");
+		await db.query("UPDATE messages SET status='READ' WHERE instance='alpha'");
+		const recipientCursor = await reader.capture(other);
+		await preferences.withUnreadAssignment((tx) => tx.wppChat.update({ where: { id: 4 }, data: { userId: 3 } }));
+		const received = await reader.read(other, recipientCursor, 100);
+		assert.ok((received.changes as { chats: Array<{ id: number; isUnread: boolean }> }).chats.some((chat) => chat.id === 4 && chat.isUnread));
+		for (let replay = 0; replay < 3; replay++) {
+			assert.equal((await chatsService.getUserChatsBySession(other, false, true, [4])).chats[0]?.isUnread, true);
+		}
+		await preferences.markRead(session, "wpp", 4);
+		assert.equal((await chatsService.getUserChatsBySession(other, false, true, [4])).chats[0]?.isUnread, true, "previous attendant cannot acknowledge recipient arrival");
+		await preferences.markRead(other, "wpp", 4);
+		assert.equal((await chatsService.getUserChatsBySession(other, false, true, [4])).chats[0]?.isUnread, false);
+		const rollbackHead = (await repo.read("alpha", null, 0)).head.sequence;
+		await assert.rejects(preferences.withUnreadAssignment(async (tx) => ({
+			...await tx.wppChat.update({ where: { id: 4 }, data: { userId: 7 } }),
+			userId: 2147483648 // Force a real Prisma/MySQL preference failure after the chat update.
+		})));
+		assert.equal((await prisma.wppChat.findUnique({ where: { id: 4 } }))?.userId, 3);
+		assert.equal((await repo.read("alpha", null, 0)).head.sequence, rollbackHead, "failed preference must roll back assignment and journal");
 		cursor = await reader.capture(session);
 		const durations: number[] = [];
 		for (let i = 0; i < 30; i++) {
