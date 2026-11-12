@@ -1,0 +1,11 @@
+# Reconciliação de leitura da cópia Odim
+
+Implementação de origem: commit `df6cd2762980b9dea6e85a52b5f8c426a04f7726` do serviço WhatsApp.
+
+As fontes `odim-live-copy.core.ts` e `odim-copy-read-reconciliation.ts` e suas regressões ficam disponíveis em homologação. Este ambiente não possui o processo de cópia Odim nem o tenant/banco correspondente. Estes módulos não são importados pelo serviço principal; sua publicação não cria processo, esquema, configuração ou acesso ao legado de produção. O executor `odim-live-copy-sync.ts`, que fixa a identidade dos bancos de produção, não faz parte desta integração de homologação.
+
+O reconciliador promove somente mensagens recebidas copiadas para `READ` quando a origem confirma `READ` ou `PLAYED`. Confere os mapas exatos de mensagem, atendimento e contato da instância/run de migração, o sentido de entrada e o timestamp. O `UPDATE` atômico repete os vínculos e o estado observado, preservando alterações concorrentes. Não altera mensagens nativas, mensagens de saída, preferências pessoais, filas ou provedores. O escritor da cópia conserva `READ` de entrada também quando a origem ainda fornece um estado anterior.
+
+Cada passagem examina uma faixa de até 25 mil IDs e retorna no máximo 50 candidatos. Os mapas e a consulta à origem também ficam limitados ao lote. O cursor avança mesmo quando a origem ainda não confirma leitura e retorna ao começo ao concluir o ciclo, incluindo novos mapas no ciclo seguinte. O intervalo normal é de 10 segundos; erros conservam o cursor para nova tentativa após 60 segundos. Consultas centrais de leitura têm limite de quatro segundos; a integração de produção limita o cliente da origem a cinco segundos. O journal existente registra o `UPDATE`; notificações opcionais informam somente o status individual e não limpam pendências pessoais.
+
+Validação local: `npx tsc --pretty false` e `node --test scripts/odim-copy-read-reconciliation.test.cjs`. A suíte usa dois bancos SQLite descartáveis em memória para executar os predicados e atualizações, testar isolamento, concorrência, repetição, progresso e falhas. A regressão do escritor usa transporte controlado. Nenhuma validação de homologação acessa o CRM Odim ou o banco de produção.
