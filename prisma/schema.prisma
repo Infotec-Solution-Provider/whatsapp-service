@@ -1076,6 +1076,30 @@ model OperatorOutboundSend {
 // Reactions are keyed by provider identity rather than local message IDs. This
 // preserves events arriving before their target and supports both chat domains.
 // Empty emoji values are retained tombstones; deleting them can resurrect old events.
+model WabaReactionOperation {
+  id                   String   @id @db.Char(36)
+  sequence             BigInt   @unique(map: "waba_reaction_operation_sequence") @default(autoincrement()) @db.UnsignedBigInt
+  instance             String   @db.VarChar(191)
+  clientId             Int      @map("client_id")
+  targetMessageId      String   @map("target_message_id") @db.VarChar(191)
+  recipientId          String   @map("recipient_id") @db.VarChar(32)
+  emoji                String   @db.VarChar(64)
+  providerMessageId    String?  @map("provider_message_id") @db.VarChar(191)
+  status               String   @db.VarChar(16)
+  statusAt             DateTime? @map("status_at") @db.DateTime(3)
+  errorCode            String?  @map("error_code") @db.VarChar(64)
+  baselineReactionJson String?  @map("baseline_reaction_json") @db.LongText
+  internalUserId       Int?     @map("internal_user_id")
+  internalUserName     String?  @map("internal_user_name") @db.VarChar(191)
+  createdAt            DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  acceptedAt           DateTime? @map("accepted_at") @db.DateTime(3)
+  updatedAt            DateTime @default(now()) @map("updated_at") @db.DateTime(3)
+
+  @@unique([instance, clientId, providerMessageId], map: "waba_reaction_operation_scope_provider")
+  @@index([instance, clientId, targetMessageId, createdAt], map: "waba_reaction_operation_target")
+  @@map("waba_reaction_operations")
+}
+
 model MessageReaction {
   id               String   @id @default(uuid()) @db.VarChar(191)
   instance         String   @db.VarChar(191)
