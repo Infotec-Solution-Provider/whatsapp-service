@@ -2,6 +2,7 @@ import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
 import type { SessionData } from "../../sdk-local";
 import { safeDecode } from "../../utils/safe-encode";
 import { monitorScope, type MonitorExecute, type MonitorRow } from "./monitor-reader";
+import { monitorMessageTime } from "./monitor-message-time";
 
 export interface MonitorHistoryInput {
 	type: unknown;
@@ -37,9 +38,15 @@ export async function readMonitorMessages(
 	if (!authorized.length) throw new NotFoundError("Conversa não encontrada na monitoria.");
 	const messages = input.type === "internal" ? "internalmessages" : local ? "wpp_messages" : "messages";
 	const foreignKey = input.type === "internal" ? "internalchat_id" : "chat_id";
+	const time = monitorMessageTime("m", input.type === "wpp", local ? new Date().getTimezoneOffset() * 60000 : 0);
+	const anchor = beforeId === null ? null : (await execute(local, {
+		sql: `SELECT ${time} AS cursor_at FROM ${messages} m WHERE m.instance = ? AND m.${foreignKey} = ? AND m.id = ? LIMIT 1`,
+		params: [session.instance, id, beforeId]
+	}))[0];
+	if (beforeId !== null && !anchor) return { messages: [], quotedMessages: [], nextCursor: null };
 	const pageRows = await execute(local, {
-		sql: `SELECT m.* FROM ${messages} m WHERE m.instance = ? AND m.${foreignKey} = ?${beforeId === null ? "" : " AND m.id < ?"} ORDER BY m.id DESC LIMIT ?`,
-		params: [session.instance, id, ...(beforeId === null ? [] : [beforeId]), limit + 1]
+		sql: `SELECT m.* FROM ${messages} m WHERE m.instance = ? AND m.${foreignKey} = ?${beforeId === null ? "" : ` AND (${time} < ? OR (${time} = ? AND m.id < ?))`} ORDER BY ${time} DESC, m.id DESC LIMIT ?`,
+		params: [session.instance, id, ...(beforeId === null ? [] : [anchor!["cursor_at"], anchor!["cursor_at"], beforeId]), limit + 1]
 	});
 	const hasMore = pageRows.length > limit,
 		selected = pageRows.slice(0, limit);

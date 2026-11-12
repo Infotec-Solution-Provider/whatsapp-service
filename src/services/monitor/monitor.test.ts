@@ -28,10 +28,11 @@ const central = new DatabaseSync(":memory:"),
 	tenant = new DatabaseSync(":memory:");
 function prepare(db: DatabaseSync, local: boolean) {
 	db.function("TIMESTAMPDIFF", (_unit, start, end) =>
-		end === null ? null : (Date.parse(String(end)) - Date.parse(String(start))) * 1000
+		end === null ? null : (Date.parse(String(end).replace(/Z?$/, "Z")) - Date.parse(String(start).replace(/Z?$/, "Z"))) * 1000
 	);
 	db.function("CONCAT", { varargs: true }, (...values) => values.join(""));
 	db.function("LEFT", (value, count) => (value === null ? null : String(value).slice(0, Number(count))));
+	db.function("REGEXP", (pattern, value) => Number(new RegExp(String(pattern)).test(String(value))));
 	const prefix = local ? "wpp_" : "";
 	db.exec(`
 		CREATE TABLE ${prefix}chats (id INTEGER, original_id INTEGER, instance TEXT, contact_id INTEGER, user_id INTEGER, sector_id INTEGER, bot_id INTEGER, type TEXT, avatar_url TEXT, is_finished INTEGER, is_schedule INTEGER, started_at TEXT, finished_at TEXT, finished_by INTEGER, result_id INTEGER);
@@ -477,6 +478,28 @@ async function run() {
 		const internal = await readMonitorMessages(execute, session, true, { type: "internal", id: 1 });
 		assert.equal(internal.messages[0]?.["internalChatId"], 1);
 		assert.equal(calls.at(-1)?.local, false);
+	});
+	await test("history pages follow event time across insertion IDs, ties and scoped cursors in both databases", async () => {
+		for (const local of [false, true]) {
+			const db = local ? tenant : central, prefix = local ? "wpp_" : "";
+			insert(db, `${prefix}chats`, { id: 900, original_id: 900, instance: "nunes", sector_id: 2 });
+			for (const [id, seconds, timestamp] of [[901, 6, null], [902, 2, null], [903, 2, null], [904, 5, null], [905, 1, null], [906, 3, String(now.getTime()/1000+3)], [907, 4, "invalid"]] as const) {
+				insert(db, `${prefix}messages`, { id, instance: "nunes", chat_id: 900, timestamp: timestamp ?? String(now.getTime()+seconds*1000), sent_at: new Date(now.getTime()+seconds*1000-(local ? new Date().getTimezoneOffset()*60000 : 0)).toISOString(), body: encodeURIComponent("test body"), quoted_id: id === 904 ? 902 : null });
+			}
+			const pages: number[][] = [], cursors: Array<number|null> = [];
+			let cursor: number | null = null;
+			do {
+				const page = await readMonitorMessages(execute, session, local, { type: "wpp", id: 900, limit: 2, ...(cursor === null ? {} : { beforeId: cursor }) });
+				pages.push(page.messages.map(message => Number(message["id"])));
+				cursor = page.nextCursor;
+				cursors.push(cursor);
+				if (pages.length === 1) assert.deepEqual(page.quotedMessages.map(message => message["id"]), [902]);
+			} while (cursor !== null);
+			assert.deepEqual(pages, [[904,901],[906,907],[902,903],[905]]);
+			assert.deepEqual(cursors, [904,906,902,null]);
+			assert.deepEqual(await readMonitorMessages(execute, session, local, { type: "wpp", id: 900, beforeId: 11 }), { messages: [], quotedMessages: [], nextCursor: null });
+			db.exec(`DELETE FROM ${prefix}messages WHERE chat_id=900; DELETE FROM ${prefix}chats WHERE original_id=900`);
+		}
 	});
 	await test("large histories never enter list responses and cross-source batches stay bounded", async () => {
 		for (let id = 1000; id < 1340; id++)
