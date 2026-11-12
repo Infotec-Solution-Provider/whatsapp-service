@@ -5,6 +5,7 @@ import targets from "./parameter-settings-targets.service";
 import { whatsappParameterSettings } from "../parameters/parameter-settings.catalog";
 import { parseParameterChanges } from "../parameters/parameter-settings.contract";
 import type { ParameterTarget } from "../parameters/parameter-settings.target";
+import { isMonitorWaitThreshold, monitorWaitThresholdsError } from "../parameters/monitor-wait-thresholds";
 
 type ResolvedTarget = Awaited<ReturnType<typeof targets.resolve>>;
 
@@ -105,7 +106,14 @@ class ParameterSettingsService {
 								}
 							});
 					}
-					return this.snapshot(instance, target, tx);
+					const saved = await this.snapshot(instance, target, tx);
+					if (changes.some((change) => isMonitorWaitThreshold(change.key))) {
+						const effective = Object.fromEntries(saved.catalog.map((setting) => [setting.key,
+							saved.values[setting.key] ?? saved.inherited[setting.key]?.value]));
+						const error = monitorWaitThresholdsError(effective);
+						if (error) throw new BadRequestError(error);
+					}
+					return saved;
 				},
 				{ isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
 			);

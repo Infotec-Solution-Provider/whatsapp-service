@@ -1,4 +1,5 @@
 import type { ParameterScope } from "./parameter-settings.target";
+import { MONITOR_WAIT_CRITICAL_KEY, MONITOR_WAIT_DEFAULTS, MONITOR_WAIT_MAX_MINUTES, MONITOR_WAIT_WARNING_KEY } from "./monitor-wait-thresholds";
 
 export interface ParameterSetting {
 	key: string;
@@ -29,6 +30,28 @@ function toggle(
 // Explicit catalog: adding a supported setting here automatically adds its control to the frontend.
 // Provider identity/credentials and experimental tuning are deliberately not editable here.
 export const whatsappParameterSettings: ParameterSetting[] = [
+	{
+		key: MONITOR_WAIT_WARNING_KEY,
+		label: "Espera amarela na monitoria",
+		description: "Minutos sem resposta do atendente para destacar a espera em amarelo. Padrão: 30 minutos. Deve ser menor que o limite vermelho.",
+		group: "Monitoria",
+		type: "number",
+		defaultValue: String(MONITOR_WAIT_DEFAULTS[MONITOR_WAIT_WARNING_KEY]),
+		unit: "minutos",
+		min: 1,
+		max: MONITOR_WAIT_MAX_MINUTES
+	},
+	{
+		key: MONITOR_WAIT_CRITICAL_KEY,
+		label: "Espera vermelha na monitoria",
+		description: "Minutos sem resposta do atendente para destacar a espera em vermelho. Padrão: 1440 minutos (24 horas). Deve ser maior que o limite amarelo.",
+		group: "Monitoria",
+		type: "number",
+		defaultValue: String(MONITOR_WAIT_DEFAULTS[MONITOR_WAIT_CRITICAL_KEY]),
+		unit: "minutos",
+		min: 1,
+		max: MONITOR_WAIT_MAX_MINUTES
+	},
 	toggle(
 		"require_supervisor_approval_for_contact_reactivation",
 		"Aprovar reativação de contatos",

@@ -5,6 +5,7 @@ import { channelCatalog, parameterCatalog } from "./catalog";
 import { validateChannel } from "./channel-contract";
 import { redactLog } from "./processing-logs";
 import { diff, snapshot } from "./settings-utils";
+import { monitorWaitThresholdsError } from "../parameters/monitor-wait-thresholds";
 
 process.env["ADMIN_REVISION_KEY"] = "local-test-revision-key-longer-than-thirty-two";
 const actor = { instance: "infotec" as const, userId: 7, role: "ADMIN" as const, name: "Test" };
@@ -21,6 +22,17 @@ assert.throws(() => verifyAdminCommand(header, command, { ...options, environmen
 for (const key of ["feature_perf_paginated_chat_history_enabled", "feature_perf_stable_socket_listeners_enabled", "feature_perf_virtualized_chat_list_enabled", "monitor:use_local_search", "monitor:sla_minutes", "customer_linking_timeout_ms", "satisfaction_survey_timeout_ms"]) assert.ok(parameterCatalog.some(field => field.key === key), key);
 assert.equal(parameterCatalog.filter(field => field.key.startsWith("human_behavior.")).length, 10);
 assert.deepEqual(parameterCatalog.find(field => field.key === "human_behavior.enabled")!.supportedScopes, ["INSTANCE"]);
+for (const [key, value] of [["monitor:wait_warning_minutes", 30], ["monitor:wait_critical_minutes", 1440]] as const) {
+  const field = parameterCatalog.find(field => field.key === key)!;
+  assert.equal(field.defaultValue, value);
+  assert.equal(field.min, 1);
+  assert.equal(field.unit, "minutos");
+  assert.deepEqual(field.supportedScopes, ["INSTANCE", "SECTOR", "USER"]);
+}
+assert.equal(monitorWaitThresholdsError({}), null);
+assert.equal(monitorWaitThresholdsError({ "monitor:wait_warning_minutes": 60, "monitor:wait_critical_minutes": 120 }), null);
+assert.match(monitorWaitThresholdsError({ "monitor:wait_warning_minutes": "120", "monitor:wait_critical_minutes": "120" })!, /vermelho.*maior/);
+assert.match(monitorWaitThresholdsError({ "monitor:wait_warning_minutes": "1.5" })!, /inteiros/);
 const saved = snapshot(command, { WABAToken: "old-private", remoteClientUrl: "https://private:private@host" }, channelCatalog.map(field => ({ ...field })));
 assert.ok(!JSON.stringify(saved).includes("old-private")); assert.equal(saved.secrets!["WABAToken"]!.configured, true);
 assert.deepEqual(diff(command.changes!, { WABAToken: "old-private" }, { WABAToken: "new-private" }, channelCatalog), [{ key: "WABAToken", secretAction: "replaced" }]);

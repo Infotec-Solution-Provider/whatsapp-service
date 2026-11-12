@@ -259,6 +259,41 @@ async function run() {
 	);
 
 	const app = express();
+	// Wait markers use the effective inherited pair and reject invalid edits atomically.
+	const warning = "monitor:wait_warning_minutes", critical = "monitor:wait_critical_minutes";
+	rows = [];
+	const defaults = await settingsService.get("tenant-a");
+	assert.equal(defaults.inherited[warning]!.value, "30");
+	assert.equal(defaults.inherited[critical]!.value, "1440");
+	for (const value of ["0", "-1", "1.5", "Infinity", "525601"]) {
+		await assert.rejects(() => settingsService.save("tenant-a", {
+			changes: [{ key: warning, value, previousValue: null }]
+		}), /intervalo/);
+	}
+	await assert.rejects(() => settingsService.save("tenant-a", {
+		changes: [{ key: warning, value: "1440", previousValue: null }]
+	}), /vermelho.*maior/);
+	assert.equal(rows.length, 0, "invalid wait pair rolls back its write");
+	await settingsService.save("tenant-a", { changes: [
+		{ key: warning, value: "60", previousValue: null },
+		{ key: critical, value: "120", previousValue: null }
+	] });
+	await assert.rejects(() => settingsService.save("tenant-a", {
+		target: sectorTarget, changes: [{ key: critical, value: "60", previousValue: null }]
+	}), /vermelho.*maior/);
+	assert.equal((await settingsService.get("tenant-a", sectorTarget)).values[critical], null);
+	await settingsService.save("tenant-a", {
+		target: sectorTarget, changes: [{ key: warning, value: "90", previousValue: null }]
+	});
+	await assert.rejects(() => settingsService.save("tenant-a", {
+		target: userTarget, changes: [{ key: critical, value: "80", previousValue: null }]
+	}), /vermelho.*maior/);
+	await settingsService.save("tenant-a", {
+		target: userTarget, changes: [{ key: critical, value: "180", previousValue: null }]
+	});
+	assert.equal((await parametersService.getSessionParams({ instance: "tenant-a", sectorId: 11, userId: 7 }))[critical], "180");
+	await settingsService.save("tenant-a", { target: userTarget, changes: [{ key: critical, value: null, previousValue: "180" }] });
+	assert.equal((await parametersService.getSessionParams({ instance: "tenant-a", sectorId: 11, userId: 7 }))[critical], "120");
 	rows = rows.filter((row) => row.scope !== "INSTANCE" || row.instance !== "tenant-a");
 	app.use(express.json());
 	app.use(controller.router);

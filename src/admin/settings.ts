@@ -9,6 +9,7 @@ import { channelCatalog, parameterCatalog } from "./catalog";
 import { validateChannel } from "./channel-contract";
 import { beginApplyReceipt, completeReceipt, diff, Query, readReceipt, requireTransactional, secretKey, snapshot, tenant, validateChanges, writeReceipt } from "./settings-utils";
 import { DEFAULT_HUMAN_BEHAVIOR_CONFIG as humanDefault, HumanBehaviorConfig } from "../utils/human-behavior.simulator";
+import { isMonitorWaitThreshold, monitorWaitThresholdsError } from "../parameters/monitor-wait-thresholds";
 
 type Db = Pick<Prisma.TransactionClient, "$queryRawUnsafe" | "$executeRawUnsafe">;
 const execute = (db: Db): Query => async <T>(sql: string, params: unknown[] = []) => (/^\s*(SELECT|SHOW)\b/i.test(sql) ? await db.$queryRawUnsafe(sql, ...params) : await db.$executeRawUnsafe(sql, ...params)) as T;
@@ -123,6 +124,12 @@ export async function whatsappSettings(command: AdminCommand): Promise<unknown> 
         const params = before as Awaited<ReturnType<typeof parameterState>>;
         const next = { ...params.state };
         for (const change of changes) next[change.key] = change.action === "set" ? String(change.value) : null;
+        if (changes.some(change => isMonitorWaitThreshold(change.key))) {
+          const effective = Object.fromEntries(params.catalog.map(field => [field.key,
+            next[field.key] ?? params.snapshot.inherited?.[field.key]?.value ?? field.defaultValue]));
+          const error = monitorWaitThresholdsError(effective);
+          if (error) throw new AdminProtocolError(400, error);
+        }
         for (const group of ["reading_speed", "thinking_time", "typing_speed", "typing_state_duration"]) {
           const lowKey = `human_behavior.${group}.min`, highKey = `human_behavior.${group}.max`;
           const low = next[lowKey] ?? params.catalog.find(field => field.key === lowKey)?.defaultValue;

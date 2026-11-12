@@ -1,6 +1,8 @@
 import prismaService from "./prisma.service";
 
 const DEFAULT_FEATURE_PARAMETERS: Record<string, string> = {
+	"monitor:wait_warning_minutes": "30",
+	"monitor:wait_critical_minutes": "1440",
 	require_supervisor_approval_for_contact_reactivation: "false",
 	require_supervisor_approval_for_contact_deletion: "false",
 	feature_ai_enabled: "false",

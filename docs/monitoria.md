@@ -16,6 +16,8 @@ Datas completas ISO mantêm seu instante. Datas `YYYY-MM-DD` incluem o dia civil
 
 ## Espera, SLA e entrega
 
+Os marcadores de cor da espera por atendente usam `monitor:wait_warning_minutes` (padrão **30 minutos**, amarelo) e `monitor:wait_critical_minutes` (padrão **1440 minutos / 24 horas**, vermelho). A configuração fica no grupo **Monitoria** da tela de parâmetros e aceita escopos instância, setor e usuário, com a herança normal da sessão. São minutos inteiros positivos, até 525600; o vermelho deve superar o amarelo no escopo editado, considerando valores herdados. Os limites são inclusivos (`>=`) e usam a mesma origem de `waitingSince`; novas mensagens/leitura não reiniciam esse relógio. Os marcadores aplicam-se somente ao cliente aguardando atendente. Não alteram o SLA, filtros, resumo ou ordenação existentes.
+
 `monitor:sla_minutes` usa a resolução de parâmetros existente (instância, setor, usuário). Ausente, inválido ou não positivo resulta em `slaMinutes: null` e `slaBreached: null`; nenhuma meta universal é criada. SLA mede apenas espera por atendente em conversas WhatsApp. Internos e agendamentos têm SLA nulo.
 
 A última mensagem é associada por `instance + chatId`, nunca pelo contato. O mesmo contato pode ter atendimentos históricos sem que uma mensagem nova contamine todos eles. Mensagens de `bot`, `system` e `thirdparty` não são tratadas como mensagens do cliente. Um bot ativo continua `in_progress`. Sem atendente ou com mensagem do cliente aguardando resposta humana, a conversa fica `waiting_agent`; a espera começa na primeira mensagem do cliente após a última saída humana confirmada (ou no início da conversa sem mensagem pendente). `waiting_customer` começa na última saída humana confirmada.
