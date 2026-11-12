@@ -29,6 +29,8 @@ git diff --check
 
 Compilação e 11 testes locais aprovados. Os três testes HTTP exercitam ingress real, batch, autenticidade, metadata, remoção, payload inválido, acknowledgement durável e ausência de singleton Prisma. Os oito testes existentes do reconciliador preservam leitura, cursores, concorrência, falhas e writer.
 
-`scripts/odim-copy-reactions.mysql.test.cjs` exporta `runOdimCopyReactionSuite({db,compiledRoot,migrationSql,log})` para o adapter QA. Exige banco com nome `homolog-reaction-qa-YYYYMMDD`; cria/amplia somente tabelas fixture desse banco. Os seis grupos cobrem inbound/dedup/remoção/ordem, escopo/foreign, alvo atrasado/legado, rollback sem emissão, precedência do ledger e fallback de status ordinário. O coordenador executou a suíte com MySQL real isolado e informou PASS6; o registro final do plano identifica o artefato exato executado.
+`scripts/odim-copy-reactions.mysql.test.cjs` exporta `runOdimCopyReactionSuite({db,compiledRoot,migrationSql,log})` para o adapter QA. Exige banco com nome `homolog-reaction-qa-YYYYMMDD`; cria/amplia somente tabelas fixture desse banco. Os sete grupos cobrem inbound/dedup/remoção/ordem, escopo/foreign, alvo atrasado/legado, rollback sem emissão, precedência do ledger, callback inválido e fallback de status ordinário. O caso `inpulse:reaction:not-uuid` aponta para wamid de mensagem normal conhecida, inclusive com source observado: exige PENDING, status SENT preservado, nenhuma escrita em mensagem e nenhuma notificação, antes da prova de READ legítimo. Essa adição altera somente teste/documentação e executa contra os JS finais de `857751f`.
+
+O coordenador executou os seis grupos originais com MySQL real isolado e informou PASS6; o registro final do plano identifica o artefato exato executado e o resultado do sétimo grupo direcionado.
 
 Nenhuma DDL de ambiente, publicação, reinício ou reação real é realizada por esses testes.

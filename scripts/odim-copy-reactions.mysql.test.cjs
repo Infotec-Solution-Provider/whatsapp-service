@@ -149,12 +149,22 @@ async function runOdimCopyReactionSuite({ db, compiledRoot, migrationSql, log = 
   assertNoMessageWrites();
   assert.deepEqual(await db.$queryRawUnsafe('SELECT * FROM messages WHERE client_id=? ORDER BY id', clientId), beforeReceipt);
   assert.equal(notifications.at(-1).kind, 'reaction');
+  const beforeInvalidCallback = notifications.length;
+  const invalidCallback = await queued({ id: ownTarget, status: 'read', recipient_id: peer, timestamp: String(timestamp),
+    biz_opaque_callback_data: 'inpulse:reaction:not-uuid', _inpulseWabaScope: metadata }, 'status');
+  assert.equal(await process(invalidCallback, true), false);
+  assert.equal((await queue(invalidCallback)).state, 'PENDING');
+  const [preservedNormal] = await db.$queryRawUnsafe('SELECT status FROM messages WHERE instance=\'odim\' AND client_id=? AND waba_id=?', clientId, ownTarget);
+  assert.equal(preservedNormal.status, 'SENT');
+  assert.equal(notifications.length, beforeInvalidCallback);
+  assertNoMessageWrites();
+  log('PASS invalid inpulse:reaction:not-uuid callback stays PENDING and cannot update a known normal message');
   const status = await queued({ id: ownTarget, status: 'read', recipient_id: peer, timestamp: String(timestamp), _inpulseWabaScope: metadata }, 'status');
   assert.equal(await process(status), true);
   assert.equal(notifications.at(-1).kind, 'message');
   const [normal] = await db.$queryRawUnsafe('SELECT status FROM messages WHERE instance=\'odim\' AND client_id=? AND waba_id=?', clientId, ownTarget);
   assert.equal(normal.status, 'READ');
   log('PASS outgoing receipt ledger precedes normal status; ordinary status path remains functional');
-  return { passed: true, actualMysql: true, clientId, assertions: 6, providerCalls: 0 };
+  return { passed: true, actualMysql: true, clientId, assertions: 7, providerCalls: 0 };
 }
 module.exports = { runOdimCopyReactionSuite };
