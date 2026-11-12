@@ -9,11 +9,16 @@ import prismaService from "./prisma.service";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import functionalHealthProbeRegistry from "./functional-health-probe-registry.service";
 import { isFunctionalHealthStatus } from "../utils/functional-health-status";
+import messageReactionsService from "./message-reactions.service";
+import { splitWabaWebhook } from "../utils/waba-reaction";
+import { WabaReactionReceiptsService } from "./waba-reaction-receipts.service";
 
 interface ValidateEntryResultStatus {
 	type: "status";
 	data: WABAMessageStatusData;
 	appId: string | undefined;
+	phoneNumberId: string | undefined;
+	accountId: string | undefined;
 }
 
 interface ValidateEntryResultMessage {
@@ -21,6 +26,8 @@ interface ValidateEntryResultMessage {
 	data: Message;
 	appId: string | undefined;
 	recipient: string;
+	phoneNumberId: string | undefined;
+	accountId: string | undefined;
 }
 
 interface ValidateEntryResultIgnored {
@@ -63,19 +70,30 @@ class WABAService {
 		if (value.statuses && value.statuses[0]) {
 			const statusData = value.statuses[0] as WABAMessageStatusData;
 			logger.log("Identificado como status de mensagem: " + statusData.status);
-			return { type: "status", data: statusData, appId: undefined };
+			return { type: "status", data: statusData, appId: undefined,
+				phoneNumberId: value.metadata?.phone_number_id, accountId: entry?.id };
 		}
 
 		if (value.messages && value.messages[0]) {
 			const message = value.messages[0] as Message;
 			logger.log("Identificado como mensagem do tipo " + message.type);
-			return { type: "message", data: message, appId: undefined, recipient };
+			return { type: "message", data: message, appId: undefined, recipient,
+				phoneNumberId: value.metadata?.phone_number_id, accountId: entry?.id };
 		}
 
 		return { type: "ignored", reason: "Webhook WABA ignorado: sem mensagem/status processável" };
 	}
 
 	public async handleWebhookEntry(instance: string, input: unknown): Promise<HandleWebhookEntryResult> {
+		const items = splitWabaWebhook(input);
+		if (items.length > 1) {
+			let allIgnored = true;
+			for (const item of items) {
+				const result = await this.handleWebhookEntry(instance, item);
+				allIgnored = allIgnored && result.ignored;
+			}
+			return { ignored: allIgnored };
+		}
 		const logger = new ProcessingLogger(instance, "waba-webhook-entry", Date.now().toString(), input);
 
 		try {
@@ -87,6 +105,32 @@ class WABAService {
 				logger.log("Webhook WABA ignorado", { reason: validated.reason });
 				logger.success("Webhook WABA finalizado como ignored");
 				return { ignored: true, reason: validated.reason };
+			}
+
+			if (validated.type === "message" && validated.data.type === "reaction") {
+				if (!validated.phoneNumberId || !validated.accountId) throw new Error("WABA_REACTION_CHANNEL_REQUIRED");
+				const channels = await prismaService.wppClient.findMany({ where: { instance, type: "WABA", isActive: true,
+					WABAPhoneId: validated.phoneNumberId, WABAAccountId: validated.accountId }, take: 2 });
+				if (channels.length !== 1) throw new Error("WABA_REACTION_CHANNEL_MISMATCH");
+				await messageReactionsService.receiveWaba(channels[0]!, validated.data);
+				logger.success("Reação WABA processada sem inserir mensagem");
+				return { ignored: false };
+			}
+			if (validated.type === "status") {
+				const markedReaction = typeof validated.data.biz_opaque_callback_data === "string" && validated.data.biz_opaque_callback_data.startsWith("inpulse:reaction:");
+				if (markedReaction && (!validated.phoneNumberId || !validated.accountId)) throw new Error("WABA_REACTION_CHANNEL_REQUIRED");
+				if (validated.phoneNumberId && validated.accountId) {
+					const reactionStatus = await prismaService.$transaction(tx => new WabaReactionReceiptsService(tx).applyStatus(instance, validated.data,
+						{ wabaAccountId: validated.accountId!, phoneNumberId: validated.phoneNumberId! }));
+					if (reactionStatus) {
+						if (reactionStatus.reactionChanged) {
+							try { await messageReactionsService.refreshWabaTarget(instance, reactionStatus.clientId, reactionStatus.targetMessageId); }
+							catch (error) { logger.log("Reação persistida; notificação socket pendente", { error: sanitizeErrorMessage(error) }); }
+						}
+						return { ignored: true, reason: "Recibo técnico de reação WABA processado" };
+					}
+				}
+				if (markedReaction) throw new Error("WABA_REACTION_RECEIPT_NOT_FOUND");
 			}
 
 			// Encontrar client WABA pela instance

@@ -43,6 +43,7 @@ export interface SendReactionOptions {
 	messageId: string;
 	emoji: string;
 	isGroup?: boolean;
+	wabaCallbackData?: string;
 }
 
 export interface SendReactionResult {

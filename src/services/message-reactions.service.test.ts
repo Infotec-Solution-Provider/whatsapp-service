@@ -54,7 +54,7 @@ function fixture() {
 	const state = {
 		groupsEnabled: true, emitFails: false, applyFails: false, hydrateFails: false, providerFails: false,
 		providerAvailable: true, providerInstance: "tenant-a", unsupported: false,
-		invalidReceipt: false, receipt: undefined as unknown,
+		invalidReceipt: false, receipt: undefined as unknown, journalFailed: false, journalPrepareFails: false,
 	};
 	const table = (name: string, rows: Row[]) => ({
 		findFirst: async ({ where }: { where: Row }) => {
@@ -65,6 +65,7 @@ function fixture() {
 	const db = {
 		wppMessage: table("wpp", wppMessages), internalMessage: table("internal", internalMessages),
 		wppChat: table("chat", wppChats), wppClient: table("client", clients),
+		$transaction: async (run: (tx: unknown) => Promise<unknown>) => run(db),
 	};
 	const repository = {
 		apply: async (input: ApplyMessageReactionInput) => {
@@ -79,7 +80,7 @@ function fixture() {
 			if (state.hydrateFails) throw new Error("simulated reaction snapshot unavailable");
 			const snapshots = new Map<string, MessageReactionSnapshot>();
 			for (const reference of references) {
-				const rows = [...stored.values()].filter((row) => row.instance === instance && row.clientId === reference.clientId && reference.targetMessageIds.includes(row.targetMessageId));
+				const rows = [...stored.values()].filter((row) => row.instance === instance && row.clientId === reference.clientId && reference.targetMessageIds.includes(row.targetMessageId) && (!reference.allowedActorIds || reference.allowedActorIds.includes(row.actorId)));
 				snapshots.set(`${reference.domain}:${reference.messageId}`, {
 					reactions: rows.filter((row) => row.emoji !== "").map((row) => ({
 						actorId: row.actorId, emoji: row.emoji, fromMe: row.fromMe, reactedAt: row.reactedAt.toISOString(),
@@ -100,6 +101,15 @@ function fixture() {
 			emitted.push({ room, data });
 		},
 		async (instance, fallback) => { groupChecks.push({ instance, fallback }); return state.groupsEnabled; },
+		() => ({
+			prepare: async (input) => { calls.push("prepare"); if (state.journalPrepareFails) throw Error("journal unavailable"); return { id: JSON.stringify(input), callbackData: "reaction-callback", sequence: 1, createdAt: new Date(at).toISOString() }; },
+			accept: async (id, providerMessageId) => {
+				calls.push("accept"); const input = JSON.parse(id);
+				if (!state.journalFailed) await repository.apply({ ...input, fromMe: true, actorId: "self", reactedAt: new Date(at), sourceEventId: providerMessageId });
+				return { ...input, id, providerMessageId, status: state.journalFailed ? "FAILED" : "ACCEPTED" };
+			},
+			unknown: async () => { calls.push("unknown"); }, reject: async () => { calls.push("reject"); },
+		}),
 	);
 	const getClient = (id: number) => !state.providerAvailable || id !== 1 ? undefined : {
 		id: 1, instance: state.providerInstance,
@@ -109,7 +119,7 @@ function fixture() {
 			if (state.invalidReceipt) return state.receipt as SendReactionResult;
 			return {
 				contractVersion: 1, status: "SENT", targetMessageId: canonicalReactionTarget(options.messageId),
-				reaction: options.emoji, removed: options.emoji === "", fromMe: true, timestamp: at, reactionId: "REACTION-OUT",
+				reaction: options.emoji, removed: options.emoji === "", fromMe: true, timestamp: at, reactionId: options.messageId.startsWith("wamid.") ? "wamid.reaction" : "REACTION-OUT",
 			};
 		} }),
 	};
@@ -316,6 +326,91 @@ test("serialized webhook reaction IDs match canonical receipt IDs", async () => 
 	const f = fixture();
 	await f.service.receive({ id: 1, instance: "tenant-a" }, inbound({ reactionId: "true_5511@c.us_REACTION-OUT" }));
 	assert.equal(f.applied[0]!.sourceEventId, "REACTION-OUT");
+});
+
+test("WABA inbound validates peer/channel and updates reaction metadata without creating messages", async () => {
+	const f = fixture();
+	Object.assign(f.wppMessages[0]!, { wabaId: "wamid.target", from: "me:5511888888888", to: "5511999999999" });
+	const raw = { type: "reaction", id: "wamid.reaction", timestamp: "1794487020", from: "5511999999999", reaction: { message_id: "wamid.target", emoji: "👍" } };
+	const client = { id: 1, instance: "tenant-a", phone: "5511888888888" };
+	await f.service.receiveWaba(client, raw);
+	await f.service.receiveWaba(client, raw);
+	assert.equal(f.applied[0]!.targetMessageId, "wamid.target");
+	assert.equal(f.emitted.length, 2);
+	assert.equal(f.wppMessages.length, 1);
+	await f.service.receiveWaba(client, { ...raw, reaction: { message_id: "wamid.target" } });
+	assert.equal(f.applied.at(-1)!.emoji, "");
+	assert.equal(f.emitted.at(-1)!.data.reactions.length, 0);
+	await assert.rejects(f.service.receiveWaba(client, { ...raw, from: "5511000000000" }), errorIs(409));
+	await assert.rejects(f.service.receiveWaba({ ...client, phone: "5511777777777" }, raw), errorIs(409));
+});
+
+test("WABA outgoing chooses only wamid and rejects invalid target states or addresses", async () => {
+	for (const invalid of [{ status: "PENDING" }, { type: "reaction" }, { type: "system" }, { wabaId: null }, { from: "me:5511888888888" }, { timestamp: "1" }]) {
+		const f = fixture();
+		Object.assign(f.clients[0]!, { type: "WABA", phone: "5511888888888" });
+		Object.assign(f.wppMessages[0]!, { from: "5511999999999", to: "me:5511888888888", wabaId: "wamid.target", type: "text", status: "READ", timestamp: String(Date.now()), ...invalid });
+		await assert.rejects(f.service.sendWpp(session, 1, 7, "👍", f.getClient), errorIs(409));
+		assert.equal(f.sent.length, 0);
+	}
+});
+
+test("pending WABA reaction cannot hydrate onto a different peer when the target arrives", async () => {
+	const f = fixture();
+	const client = { id: 1, instance: "tenant-a", phone: "5511888888888" };
+	await f.service.receiveWaba(client, { type: "reaction", id: "wamid.event", from: "5511000000000", timestamp: "1794487020", reaction: { message_id: "wamid.pending", emoji: "👍" } });
+	const [message] = await f.service.hydrate("tenant-a", [{ id: 8, instance: "tenant-a", clientId: 1, wabaId: "wamid.pending", from: "me:5511888888888", to: "5511999999999" }]);
+	assert.deepEqual(message!.reactions, []);
+	assert.equal(message!.reactionsUpdatedAt, null, "wrong peer must not advance the valid message watermark");
+	const [valid] = await f.service.hydrate("tenant-a", [{ id: 8, instance: "tenant-a", clientId: 1, wabaId: "wamid.pending", from: "me:5511888888888", to: "5511000000000" }]);
+	assert.equal(valid!.reactions[0]!.emoji, "👍");
+});
+
+test("WABA copy aliases remain scoped to Odim and another channel cannot publish onto their target", async () => {
+	const f = fixture();
+	Object.assign(f.wppMessages[0]!, { instance: "odim", wabaId: "wamid.copy", from: "me:odim-legacy-copy", to: "5511999999999" });
+	const raw = { type: "reaction", id: "wamid.event", from: "5511999999999", timestamp: "1794487020", reaction: { message_id: "wamid.copy", emoji: "👍" } };
+	await f.service.receiveWaba({ id: 1, instance: "odim", phone: "5511888888888" }, raw);
+	assert.equal(f.emitted[0]!.room, "odim:chat:10");
+	await f.service.receiveWaba({ id: 2, instance: "odim", phone: "5511888888888" }, raw);
+	await f.service.receiveWaba({ id: 1, instance: "tenant-b", phone: "5511888888888" }, raw);
+	assert.equal(f.emitted.length, 1, "out-of-scope target cannot be published");
+	const [message] = await f.service.hydrate("odim", [{ id: 7, instance: "odim", clientId: 1, wabaId: "wamid.copy", from: "me:odim-legacy-copy", to: "5511999999999" }]);
+	assert.equal(message!.reactions.length, 1);
+});
+
+test("WABA journal is prepared before the single POST and exclusively materializes confirmed state", async () => {
+	for (const emoji of ["👍", "❤️", ""]) {
+		const f = fixture();
+		Object.assign(f.clients[0]!, { type: "WABA", phone: "5511888888888" });
+		Object.assign(f.wppMessages[0]!, { from: "5511999999999", to: "me:5511888888888", wabaId: "wamid.target", type: "text", status: "READ", timestamp: String(Date.now()) });
+		const result = await f.service.sendWpp(session, 1, 7, emoji, f.getClient);
+		assert.equal(f.sent[0]!.messageId, "wamid.target", "WABA must not fall back to a populated REMOTE ID");
+		assert.equal(f.sent[0]!.wabaCallbackData, "reaction-callback");
+		assert.ok(f.calls.indexOf("prepare") < f.calls.indexOf("provider"));
+		assert.ok(f.calls.indexOf("provider") < f.calls.indexOf("accept"));
+		assert.equal(f.applied.length, 1, "only the journal materializes WABA, with no later repository.apply");
+		assert.equal(result.reactions.length, emoji ? 1 : 0);
+	}
+	const early = fixture(); early.state.journalFailed = true;
+	Object.assign(early.clients[0]!, { type: "WABA", phone: "5511888888888" });
+	Object.assign(early.wppMessages[0]!, { from: "5511999999999", to: "me:5511888888888", wabaId: "wamid.target", type: "text", status: "READ", timestamp: String(Date.now()) });
+	await assert.rejects(early.service.sendWpp(session, 1, 7, "👍", early.getClient), errorIs(409, "REACTION_REJECTED"));
+	assert.equal(early.sent.length, 1); assert.equal(early.applied.length, 0);
+	const unprepared = fixture(); unprepared.state.journalPrepareFails = true;
+	Object.assign(unprepared.clients[0]!, { type: "WABA", phone: "5511888888888" });
+	Object.assign(unprepared.wppMessages[0]!, { from: "5511999999999", to: "me:5511888888888", wabaId: "wamid.target", type: "text", status: "READ", timestamp: String(Date.now()) });
+	await assert.rejects(unprepared.service.sendWpp(session, 1, 7, "👍", unprepared.getClient), /journal unavailable/);
+	assert.equal(unprepared.sent.length, 0, "missing journal/schema fails before any provider call");
+	for (const malformed of [false, true]) {
+		const unknown = fixture();
+		Object.assign(unknown.clients[0]!, { type: "WABA", phone: "5511888888888" });
+		Object.assign(unknown.wppMessages[0]!, { from: "5511999999999", to: "me:5511888888888", wabaId: "wamid.target", type: "text", status: "READ", timestamp: String(Date.now()) });
+		unknown.state.providerFails = !malformed; unknown.state.invalidReceipt = malformed;
+		await assert.rejects(unknown.service.sendWpp(session, 1, 7, "👍", unknown.getClient), errorIs(502, "REACTION_DELIVERY_UNKNOWN"));
+		assert.equal(unknown.sent.length, 1); assert.equal(unknown.applied.length, 0);
+		assert.equal(unknown.calls.filter(call => call === "unknown").length, 1);
+	}
 });
 
 async function run(): Promise<void> {

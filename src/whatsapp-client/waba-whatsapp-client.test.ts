@@ -74,6 +74,30 @@ async function main() {
 		assert.equal(uploads.length, 0);
 		await client.sendMessage({ to: options.to, text: "HEALTHPROBE:test", wabaCallbackData: "probe-callback" });
 		assert.equal(bodies[1].biz_opaque_callback_data, "probe-callback");
+		for (const emoji of ["👍", "❤️", ""]) {
+			bodies.length = 0;
+			send = () => ({ messages: [{ id: "wamid.reaction" }] });
+			const receipt = await client.sendReaction({ to: options.to, messageId: "wamid.target", emoji, wabaCallbackData: "reaction-callback" });
+			assert.equal(receipt.reactionId, "wamid.reaction");
+			assert.equal(receipt.removed, emoji === "");
+			assert.deepEqual(bodies, [{ messaging_product: "whatsapp", recipient_type: "individual", to: options.to,
+				type: "reaction", reaction: { message_id: "wamid.target", emoji }, biz_opaque_callback_data: "reaction-callback" }]);
+		}
+		for (const response of [undefined, {}, { messages: [] }, { messages: [{ id: "local-uuid" }] }]) {
+			bodies.length = 0; send = () => response;
+			await assert.rejects(client.sendReaction({ to: options.to, messageId: "wamid.target", emoji: "👍" }),
+				(error: any) => error.code === "REACTION_DELIVERY_UNKNOWN");
+			assert.equal(bodies.length, 1);
+		}
+		for (const error of [{ code: "ETIMEDOUT" }, { response: { status: 503 } }, rejected]) {
+			bodies.length = 0; send = () => { throw error; };
+			await assert.rejects(client.sendReaction({ to: options.to, messageId: "wamid.target", emoji: "👍" }),
+				(failure: any) => failure.code === (error === rejected ? "REACTION_REJECTED" : "REACTION_DELIVERY_UNKNOWN"));
+			assert.equal(bodies.length, 1, "reaction failure must never dispatch twice");
+		}
+		bodies.length = 0;
+		await assert.rejects(client.sendReaction({ to: "group@g.us", messageId: "wamid.target", emoji: "👍", isGroup: true }));
+		assert.equal(bodies.length, 0);
 		console.log("waba-whatsapp-client: real client media renewal, caption/type, upload failure, timeout and credential-free logs passed");
 	} finally {
 		for (const [id, cached] of previous) { if (cached) require.cache[id] = cached; else delete require.cache[id]; }

@@ -46,6 +46,8 @@ export interface MessageReactionReference {
 	messageId: number;
 	clientId: number | null;
 	targetMessageIds: readonly string[];
+	/** Optional provider peer constraint; applies to removals/watermarks as well as visible reactions. */
+	allowedActorIds?: readonly string[];
 }
 
 export function messageReactionReferenceKey(reference: Pick<MessageReactionReference, "domain" | "messageId">): string {

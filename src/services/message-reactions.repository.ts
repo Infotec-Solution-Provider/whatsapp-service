@@ -113,9 +113,11 @@ export class MessageReactionsRepository {
 		}
 		for (const reference of references) {
 			const actors = new Map<string, MessageReaction>();
+			const allowedActors = reference.allowedActorIds ? new Set(reference.allowedActorIds) : null;
 			let latest: number | null = null;
 			for (const targetMessageId of reference.targetMessageIds) {
 				for (const row of byTarget.get(JSON.stringify([reference.clientId, targetMessageId])) ?? []) {
+					if (allowedActors && !allowedActors.has(row.actorId)) continue;
 					latest = Math.max(latest ?? -Infinity, row.reactedAt.getTime());
 					const current = actors.get(row.actorId);
 					if (!current || isNewerMessageReaction(row, current)) actors.set(row.actorId, row);

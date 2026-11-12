@@ -34,6 +34,7 @@ export default class WABAMessageParser {
 		logger?: ProcessingLogger
 	): Promise<CreateMessageDto> {
 		try {
+			if (data.type === "reaction") throw new Error("WABA_REACTION_REQUIRES_METADATA_HANDLER");
 			const timestampMs = this.normalizeTimestamp(data.timestamp);
 			const parsed: CreateMessageDto = {
 				instance,
@@ -48,7 +49,7 @@ export default class WABAMessageParser {
 				clientId
 			};
 
-			const referenceMsgId = (data.type === "reaction" && data.reaction.message_id) || data.context?.id;
+			const referenceMsgId = data.context?.id;
 		
 			if (referenceMsgId) {
 				const quotedMsg = await prismaService.wppMessage.findFirst({ where: { wabaId: referenceMsgId } });
@@ -91,11 +92,6 @@ export default class WABAMessageParser {
 				case "location": {
 					const loc = data.location;
 					parsed.body = `Location: ${loc.latitude},${loc.longitude}${loc.name ? " - " + loc.name : ""}`;
-					break;
-				}
-				case "reaction": {
-					parsed.type = "reaction";
-					parsed.body = `(Reação) ${data.reaction.emoji}`;
 					break;
 				}
 				case "interactive": {

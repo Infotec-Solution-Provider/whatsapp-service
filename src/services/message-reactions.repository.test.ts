@@ -269,6 +269,16 @@ test("external reactions cannot expose internal attribution and unknown event ID
 	assert.equal(f.rows[1]!.internalUserId, null);
 });
 
+test("provider peer filtering excludes foreign actor timestamps and retains valid removal watermarks", async () => {
+	const f = fixture();
+	await f.repository.apply(event({ emoji: "", reactedAt: new Date(2_000) }));
+	await f.repository.apply(event({ actorId: "551100000000@s.whatsapp.net", reactedAt: new Date(9_000) }));
+	const snapshots = await f.repository.hydrate("tenant-a", [{ domain: "WPP", messageId: 55, clientId: 1,
+		targetMessageIds: ["provider-message-a"], allowedActorIds: ["self", "551199999999@s.whatsapp.net"] }]);
+	assert.deepEqual(snapshots.get("WPP:55"), { reactions: [], reactionsUpdatedAt: new Date(2_000).toISOString() });
+	assert.equal(f.queries(), 1, "peer validation must not introduce queries per message");
+});
+
 async function run(): Promise<void> {
 	for (const [name, execute] of cases) { await execute(); console.log(`PASS ${name}`); }
 	console.log(`${cases.length} message reaction repository tests passed (isolated; no live database).`);

@@ -9,6 +9,8 @@ import {
 	EditMessageOptions,
 	SendFileOptions,
 	SendMessageOptions,
+	SendReactionOptions,
+	SendReactionResult,
 	SendTemplateOptions,
 	WhatsappGroup
 } from "../types/whatsapp-instance.types";
@@ -16,6 +18,8 @@ import generateUID from "../utils/generate-uid";
 import ProcessingLogger from "../utils/processing-logger";
 import { classifyWabaSendError, sendWabaRequest, wabaPreparationError } from "../utils/waba-send";
 import WhatsappClient from "./whatsapp-client";
+import { MessageReactionError, reactionEmoji } from "../utils/message-reaction";
+import { isWabaMessageId, wabaPhone } from "../utils/waba-reaction";
 
 interface GetTemplateVariablesProps {
 	template: WABAMessageTemplate;
@@ -164,6 +168,31 @@ class WABAWhatsappClient implements WhatsappClient {
 
 	public async editMessage({ }: EditMessageOptions): Promise<void> {
 		throw new Error("Method not implemented.");
+	}
+
+	public async sendReaction(options: SendReactionOptions): Promise<SendReactionResult> {
+		const emoji = reactionEmoji(options.emoji);
+		const to = wabaPhone(options.to);
+		if (options.isGroup || !to || !isWabaMessageId(options.messageId)) {
+			throw new MessageReactionError("Alvo de reação WABA inválido.", 409);
+		}
+		const body = { messaging_product: "whatsapp", recipient_type: "individual", to, type: "reaction",
+			reaction: { message_id: options.messageId, emoji },
+			...(options.wabaCallbackData ? { biz_opaque_callback_data: options.wabaCallbackData } : {}) };
+		try {
+			// No media-renewal argument: transport uncertainty never triggers a second POST.
+			const response = await sendWabaRequest(async () =>
+				(await axios.post(`${GRAPH_API_URL}/${this.wabaPhoneId}/messages`, body, { ...this.reqOptions, timeout: 30_000 })).data);
+			if (!isWabaMessageId(response.id)) throw new MessageReactionError("Recibo de reação WABA inválido; resultado incerto.", 502, "REACTION_DELIVERY_UNKNOWN");
+			return { contractVersion: 1, status: "SENT", targetMessageId: options.messageId, reaction: emoji,
+				removed: emoji === "", fromMe: true, timestamp: Date.now(), reactionId: response.id };
+		} catch (error) {
+			if (error instanceof MessageReactionError) throw error;
+			const failure = classifyWabaSendError(error);
+			throw failure.deliveryStatus === "FAILED"
+				? new MessageReactionError("O WhatsApp oficial rejeitou a reação.", 409, "REACTION_REJECTED")
+				: new MessageReactionError("Resultado da reação incerto; não repetir automaticamente.", 502, "REACTION_DELIVERY_UNKNOWN");
+		}
 	}
 
 	public async forwardMessage(to: string, messageId: string, isGroup: boolean = false): Promise<void> {
