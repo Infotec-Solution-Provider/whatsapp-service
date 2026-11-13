@@ -111,6 +111,9 @@ function fixture(changes: Row = {}) {
 		failCrm: false,
 		failChannel: false,
 		invalid: 0,
+		customerMatches: null as number[] | null,
+		businessResponse: null as number[] | null,
+		failBusiness: false,
 		...changes
 	};
 	const database = {
@@ -178,6 +181,20 @@ function fixture(changes: Row = {}) {
 				return rows.slice(values.at(-1), values.at(-1) + values.at(-2));
 			}
 			if (state.failCrm) throw new Error("crm failed");
+			if (sql.includes("clientes.CODIGO FROM clientes WHERE")) {
+				if (state.failBusiness) throw new Error("business query failed");
+				const count = /clientes\.CODIGO IN \(([^)]+)\)/.exec(sql)?.[1]?.split(",").length ?? 0;
+				const ids = values.slice(0, count);
+				return state.businessResponse
+					? state.businessResponse.map((CODIGO) => ({ CODIGO }))
+					: state.customers
+							.filter(
+								(row: Row) =>
+									ids.includes(row.CODIGO) &&
+									(state.customerMatches === null || state.customerMatches.includes(row.CODIGO))
+							)
+							.map((row: Row) => ({ CODIGO: row.CODIGO }));
+			}
 			if (sql.includes("FROM clientes c"))
 				return state.customers.filter((row: Row) => values[0].includes(row.CODIGO));
 			if (sql.includes("ordered.CLIENTE"))
@@ -501,4 +518,98 @@ test("cross-source paging has deterministic timestamp/channel/id ties in both di
 		);
 		assert.equal(result.pagination.totalRows, 60);
 	}
+});
+test("CRM view performs no automatic profile or repurchase enrichment, with legacy routes preserved", async () => {
+	const { service, state } = fixture();
+	const crm = await service.getMySchedules(actor, { view: "crm", search: "Cliente" });
+	assert.equal(crm.pagination.totalRows, 45);
+	assert.ok(crm.data.every((row) => row.profileSummary === null && row.repurchase === null));
+	assert.equal(state.profileCalls.length, 0);
+	assert.equal(
+		state.crmCalls.some((call: Row) => call.sql.includes("ordered.CLIENTE")),
+		false
+	);
+	assert.equal(
+		(await service.getMySchedules(actor, { view: "crm", search: "muitas compras" })).pagination.totalRows,
+		0
+	);
+	assert.equal((await service.getUnifiedSchedules(actor, { search: "muitas compras" })).pagination.totalRows, 45);
+	assert.equal(
+		(await service.getMySchedules(actor, { view: "crm", purchaseLevel: "muitas_compras" })).pagination.totalRows,
+		45
+	);
+});
+test("business matching is real, scoped, bounded and applied before exact totals and paging", async () => {
+	const { service, state } = fixture({ customerMatches: [44] });
+	for (const perPage of ["10", "25", "50"]) {
+		const result = await service.getMySchedules(actor, { view: "crm", segmentIds: "1,2", groupIds: "10", perPage });
+		assert.deepEqual(
+			result.data.map((row) => row.scheduleId),
+			[44]
+		);
+		assert.equal(result.pagination.totalRows, 1);
+		assert.deepEqual(result.filters.customerCampaigns, [{ id: "1", label: "Campanha Árvore" }]);
+	}
+	const calls = state.crmCalls.filter((call: Row) => call.sql.includes("clientes.CODIGO FROM clientes WHERE"));
+	assert.ok(calls.length >= 3);
+	assert.ok(
+		calls.every(
+			(call: Row) => call.sql.includes("clientes.SEGMENTO IN (?,?)") && call.sql.includes("clientes.GRUPO IN (?)")
+		)
+	);
+	assert.equal(state.profileCalls.length, 0);
+});
+test("business filters exclude absent clients, retain zero and negative CRM ids, and reject foreign matcher rows", async () => {
+	const { service, state } = fixture();
+	state.schedules = [
+		schedule(1, { contact: { ...schedule(1).contact, customerId: 0 } }),
+		schedule(2, { contact: { ...schedule(2).contact, customerId: -1 } }),
+		schedule(3, { contact: { ...schedule(3).contact, customerId: null } }),
+		schedule(4, { contact: { ...schedule(4).contact, customerId: 999 } })
+	];
+	state.customers = [customer(0, { COD_CAMPANHA: 0 }), customer(-1, { COD_CAMPANHA: -1 })];
+	const result = await service.getMySchedules(actor, { view: "crm", groupIds: "0,-1" });
+	assert.deepEqual(
+		result.data.map((row) => row.customerId),
+		[0, -1]
+	);
+	assert.equal(result.data[0]?.customerName, "Cliente 0");
+	assert.deepEqual(result.filters.customerCampaigns.map((option) => option.id).sort(), ["-1", "0"]);
+	state.businessResponse = [9000];
+	await assert.rejects(
+		() => service.getMySchedules(actor, { view: "crm", segmentIds: "1" }),
+		(error) => status(error) === 500
+	);
+});
+test("purchase business filters enforce financial permission before querying purchases and failure never broadens", async () => {
+	const { service, state } = fixture({ financial: false });
+	for (const query of [
+		{ purchaseStatus: "with_purchases" },
+		{ purchaseStatus: "without_purchases" },
+		{ purchaseFrom: "2026-11-13" }
+	])
+		await assert.rejects(
+			() => service.getMySchedules(actor, { view: "crm", ...query }),
+			(error) => status(error) === 403
+		);
+	assert.equal(
+		state.crmCalls.some((call: Row) => call.sql.includes("FROM compras")),
+		false
+	);
+	state.financial = true;
+	state.failBusiness = true;
+	await assert.rejects(
+		() => service.getMySchedules(actor, { view: "crm", segmentIds: "1" }),
+		(error) => status(error) === 500
+	);
+	state.schedules = [];
+	await assert.rejects(
+		() =>
+			service.getMySchedules(actor, {
+				view: "crm",
+				purchaseStatus: "without_purchases",
+				purchaseFrom: "2026-11-13"
+			}),
+		(error) => status(error) === 400
+	);
 });

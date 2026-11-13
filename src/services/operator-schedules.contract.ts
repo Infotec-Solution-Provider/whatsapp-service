@@ -2,6 +2,7 @@ import { BadRequestError, UnauthorizedError } from "@rgranatodutra/http-errors";
 import type { SessionData } from "../sdk-local";
 import type { UnifiedScheduleFilters } from "../types/unified-schedule.types";
 import parseScheduleEdit from "./schedule-edit.contract";
+import { operatorCustomerFilterKeys, parseCrmIdList, pickOperatorCustomerFilters } from "./operator-customer-filters";
 
 export const SCHEDULE_TIME_ZONE = "America/Sao_Paulo";
 const enums = {
@@ -19,7 +20,8 @@ const enums = {
 		"pronto_para_compra"
 	],
 	period: ["all", "overdue", "today", "next7", "custom"],
-	sortOrder: ["asc", "desc"]
+	sortOrder: ["asc", "desc"],
+	view: ["crm"]
 } as const;
 const listFields = new Set(["channels", "customerCampaignIds", "repurchaseStatuses"]);
 const allowedFields = new Set([
@@ -31,7 +33,8 @@ const allowedFields = new Set([
 	"sectorId",
 	"search",
 	"scheduledFrom",
-	"scheduledTo"
+	"scheduledTo",
+	...operatorCustomerFilterKeys
 ]);
 
 export function parseScheduleQuery(input: unknown, session: SessionData, personal = false): UnifiedScheduleFilters {
@@ -39,6 +42,11 @@ export function parseScheduleQuery(input: unknown, session: SessionData, persona
 		throw new BadRequestError("Filtros de agendamento inválidos.");
 	const result: Record<string, string> = {};
 	for (const [key, raw] of Object.entries(input)) {
+		if ((operatorCustomerFilterKeys as readonly string[]).includes(key)) {
+			if (typeof raw !== "string" || raw.length > 1500) throw new BadRequestError(`Filtro inválido: ${key}.`);
+			if (raw.trim()) result[key] = raw.trim();
+			continue;
+		}
 		if (
 			!allowedFields.has(key) ||
 			typeof raw !== "string" ||
@@ -72,15 +80,7 @@ export function parseScheduleQuery(input: unknown, session: SessionData, persona
 			continue;
 		}
 		if (key === "customerCampaignIds") {
-			const parts = value.split(",");
-			if (
-				parts.length > 100 ||
-				parts.some(
-					(part) => !/^\d+$/.test(part.trim()) || !Number.isSafeInteger(Number(part)) || Number(part) < 1
-				)
-			)
-				throw new BadRequestError("Campanhas inválidas.");
-			result[key] = [...new Set(parts.map((part) => String(Number(part))))].join(",");
+			result[key] = parseCrmIdList(value).join(",");
 			continue;
 		}
 		const choices = enums[key as keyof typeof enums] as readonly string[] | undefined;
@@ -98,6 +98,7 @@ export function parseScheduleQuery(input: unknown, session: SessionData, persona
 			throw new BadRequestError("Informe o início e o fim do período, nessa ordem.");
 	} else if (result["scheduledFrom"] || result["scheduledTo"])
 		throw new BadRequestError("Datas personalizadas exigem o período custom.");
+	Object.assign(result, pickOperatorCustomerFilters(result).values);
 	return result as UnifiedScheduleFilters;
 }
 

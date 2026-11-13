@@ -79,6 +79,47 @@ test("personal HTTP contract authenticates, disables caching, validates queries 
 		assert.equal(result["timeZone"], "America/Sao_Paulo");
 		assert.deepEqual(result["capabilities"], { channels: ["WHATSAPP"], commercial: true });
 		assert.equal(result["pagination"].totalRows, 0);
+		for (const values of [
+			{
+				view: "crm",
+				segmentIds: "0,-1",
+				groupIds: "3",
+				loyaltyOperatorIds: "0",
+				states: "RS,SC",
+				phone: "(51) 1234",
+				email: "@example",
+				CODIGO: "-1",
+				CPF_CNPJ: "123.456.789-01",
+				COD_ERP: "ERP",
+				CIDADE: "Porto Alegre",
+				ATIVO: "SIM",
+				PESSOA: "FIS"
+			},
+			{
+				view: "crm",
+				purchaseStatus: "without_purchases",
+				registeredFrom: "2026-11-13",
+				registeredTo: "2026-11-13"
+			},
+			{
+				view: "crm",
+				purchaseFrom: "2026-11-13",
+				purchaseTo: "2026-11-13",
+				brandIds: "2",
+				positionIds: "3",
+				originIds: "4",
+				mediaIds: "5",
+				unitIds: "6"
+			}
+		]) {
+			const query = new URLSearchParams(
+				Object.entries(values).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+			);
+			assert.equal(
+				(await fetch(base + "/mine?" + query, { headers: { Authorization: "operator" } })).status,
+				200
+			);
+		}
 		for (const query of [
 			"userId=7",
 			"sectorId=3",
@@ -86,6 +127,14 @@ test("personal HTTP contract authenticates, disables caching, validates queries 
 			"channels[bad]=WHATSAPP",
 			"search[bad]=x",
 			"unknown=x",
+			"view=legacy",
+			"segmentIds[]=1",
+			"segmentIds=2147483648",
+			"states=rs",
+			"phone=12",
+			"CPF_CNPJ=---",
+			"purchaseStatus=without_purchases&purchaseFrom=2026-11-13",
+			"registeredTo=2026-02-30",
 			"perPage=101",
 			"period=custom&scheduledFrom=2026-02-31T00:00:00Z&scheduledTo=2026-03-04T00:00:00Z"
 		]) {

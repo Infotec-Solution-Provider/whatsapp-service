@@ -6,6 +6,13 @@ import instancesService from "./instances.service";
 import parametersService from "./parameters.service";
 import prismaService from "./prisma.service";
 import {
+	hasOperatorCustomerFilters,
+	hasPurchaseFilters,
+	operatorCustomerMatchQuery,
+	pickOperatorCustomerFilters,
+	type OperatorCustomerFilters
+} from "./operator-customer-filters";
+import {
 	normalizeScheduleSearch,
 	parseScheduleQuery,
 	scheduleCivilBoundary,
@@ -58,6 +65,7 @@ interface Enrichment {
 	profiles: Map<number, CustomerProfileSummaryPayload>;
 	repurchases: Map<number, UnifiedScheduleRepurchaseMetrics>;
 	unavailable: boolean;
+	businessMatches: Set<number> | null;
 }
 const batchSize = 200;
 const profileFields = [
@@ -126,7 +134,11 @@ export class UnifiedSchedulesService {
 						})
 		]);
 		const hasProfileFilter = profileFields.some((field) => Boolean(filters[field]));
-		const commercialFilter = hasProfileFilter || Boolean(filters.repurchaseStatuses);
+		const customerFilters = pickOperatorCustomerFilters(filters);
+		const hasCustomerFilters = hasOperatorCustomerFilters(customerFilters);
+		const oldPredicates = hasProfileFilter || Boolean(filters.repurchaseStatuses);
+		const automaticEnrichment = !(personal && filters.view === "crm") || oldPredicates;
+		const commercialFilter = oldPredicates || hasPurchaseFilters(customerFilters);
 		if (commercialFilter && commercialAccessUnavailable)
 			throw new InternalServerError("Não foi possível verificar o acesso aos dados comerciais. Tente novamente.");
 		if (commercialFilter && !financial)
@@ -171,16 +183,20 @@ export class UnifiedSchedulesService {
 					session,
 					rows,
 					financial,
-					hasProfileFilter || Boolean(filters.search),
+					hasProfileFilter || (automaticEnrichment && Boolean(filters.search)),
 					Boolean(filters.repurchaseStatuses),
 					warnings,
-					Boolean(filters.search) || commercialFilter || Boolean(filters.customerCampaignIds),
-					referenceAt
+					Boolean(filters.search) ||
+						commercialFilter ||
+						Boolean(filters.customerCampaignIds) ||
+						hasCustomerFilters,
+					referenceAt,
+					customerFilters
 				);
 				stage.enrichmentMs += performance.now() - enrichmentStartedAt;
 				for (const row of rows) {
-					const customer = row.customerId ? enrichment.customers.get(row.customerId) : undefined;
-					if (customer?.COD_CAMPANHA && customer.CUSTOMER_CAMPAIGN_NAME)
+					const customer = row.customerId !== null ? enrichment.customers.get(row.customerId) : undefined;
+					if (typeof customer?.COD_CAMPANHA === "number" && customer.CUSTOMER_CAMPAIGN_NAME)
 						campaigns.set(String(customer.COD_CAMPANHA), {
 							id: String(customer.COD_CAMPANHA),
 							label: customer.CUSTOMER_CAMPAIGN_NAME
@@ -202,7 +218,16 @@ export class UnifiedSchedulesService {
 		} catch {
 			throw new InternalServerError("Não foi possível carregar a página de agendamentos. Tente novamente.");
 		}
-		const enrichment = await this.enrich(session, rows, financial, true, true, warnings, false, referenceAt);
+		const enrichment = await this.enrich(
+			session,
+			rows,
+			financial,
+			automaticEnrichment,
+			automaticEnrichment,
+			warnings,
+			false,
+			referenceAt
+		);
 		try {
 			this.observe({
 				instance: session.instance,
@@ -385,14 +410,16 @@ export class UnifiedSchedulesService {
 		needRepurchase: boolean,
 		warnings: Warning[],
 		required: boolean,
-		now: Date
+		now: Date,
+		customerFilters: OperatorCustomerFilters = { values: {}, lists: {} }
 	): Promise<Enrichment> {
-		const ids = [...new Set(rows.flatMap((row) => (row.customerId ? [row.customerId] : [])))],
+		const ids = [...new Set(rows.flatMap((row) => (row.customerId !== null ? [row.customerId] : [])))],
 			enrichment: Enrichment = {
 				customers: new Map(),
 				profiles: new Map(),
 				repurchases: new Map(),
-				unavailable: false
+				unavailable: false,
+				businessMatches: hasOperatorCustomerFilters(customerFilters) ? new Set() : null
 			};
 		if (!ids.length) return enrichment;
 		const unavailable = () => {
@@ -415,6 +442,29 @@ export class UnifiedSchedulesService {
 			if (required) throw new InternalServerError("Não foi possível aplicar os filtros no CRM. Tente novamente.");
 			unavailable();
 			return enrichment;
+		}
+		if (enrichment.businessMatches !== null) {
+			const query = operatorCustomerMatchQuery(ids, customerFilters, {
+				admin: session.role === "ADMIN",
+				allowed: financial
+			});
+			try {
+				const matched = await this.crm.executeQuery<Array<{ CODIGO: number }>>(
+					session.instance,
+					query.sql,
+					query.parameters,
+					{ timeoutMs: 10000 }
+				);
+				if (
+					!Array.isArray(matched) ||
+					matched.length > ids.length ||
+					matched.some((row) => !row || !Number.isInteger(row.CODIGO) || !ids.includes(row.CODIGO))
+				)
+					throw new Error("INVALID_CUSTOMER_MATCH_BATCH");
+				enrichment.businessMatches = new Set(matched.map((row) => row.CODIGO));
+			} catch {
+				throw new InternalServerError("Não foi possível aplicar os filtros de clientes. Tente novamente.");
+			}
 		}
 		const visibleIds = financial
 			? ids.filter((id) => {
@@ -456,8 +506,13 @@ export class UnifiedSchedulesService {
 		admin: boolean
 	): boolean {
 		const visible = Boolean(customer) && financial && (admin || customer?.BLOCK_COMPRAS !== "SIM"),
-			profile = visible && row.customerId ? enrichment.profiles.get(row.customerId) : undefined,
-			repurchase = visible && row.customerId ? enrichment.repurchases.get(row.customerId) : undefined;
+			profile = visible && row.customerId !== null ? enrichment.profiles.get(row.customerId) : undefined,
+			repurchase = visible && row.customerId !== null ? enrichment.repurchases.get(row.customerId) : undefined;
+		if (
+			enrichment.businessMatches !== null &&
+			(row.customerId === null || !enrichment.businessMatches.has(row.customerId))
+		)
+			return false;
 		if (
 			filters.customerCampaignIds &&
 			!filters.customerCampaignIds.split(",").includes(String(customer?.COD_CAMPANHA))
@@ -559,7 +614,7 @@ export class UnifiedSchedulesService {
 	}
 
 	private item(row: ScheduleRow, enrichment: Enrichment, financial: boolean, admin: boolean): UnifiedScheduleItem {
-		const customer = row.customerId ? enrichment.customers.get(row.customerId) : undefined,
+		const customer = row.customerId !== null ? enrichment.customers.get(row.customerId) : undefined,
 			visible = Boolean(customer) && financial && (admin || customer?.BLOCK_COMPRAS !== "SIM");
 		return {
 			id: `${row.channel}-${row.id}`,
@@ -580,8 +635,10 @@ export class UnifiedSchedulesService {
 			customerOriginDescription: customer?.CUSTOMER_ORIGIN_DESCRIPTION ?? null,
 			telephonyCampaignId: row.telephonyCampaignId,
 			telephonyCampaignName: row.telephonyCampaignName,
-			profileSummary: visible && row.customerId ? (enrichment.profiles.get(row.customerId) ?? null) : null,
-			repurchase: visible && row.customerId ? (enrichment.repurchases.get(row.customerId) ?? null) : null,
+			profileSummary:
+				visible && row.customerId !== null ? (enrichment.profiles.get(row.customerId) ?? null) : null,
+			repurchase:
+				visible && row.customerId !== null ? (enrichment.repurchases.get(row.customerId) ?? null) : null,
 			meta: {
 				...(row.wppContactId !== undefined
 					? { wppContactId: row.wppContactId, wppChatId: row.wppChatId ?? null }

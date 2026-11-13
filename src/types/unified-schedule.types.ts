@@ -7,7 +7,7 @@ export type UnifiedScheduleChannel = "WHATSAPP" | "TELEFONIA";
 
 export type UnifiedScheduleRepurchaseStatus = "green" | "yellow" | "red" | "neutral";
 
-export interface UnifiedScheduleFilters extends CustomerProfileSummaryFilters {
+export interface UnifiedScheduleFilters extends Omit<CustomerProfileSummaryFilters, "segmentIds"> {
 	page?: string;
 	perPage?: string;
 	channels?: string;
@@ -20,6 +20,29 @@ export interface UnifiedScheduleFilters extends CustomerProfileSummaryFilters {
 	scheduledFrom?: string;
 	scheduledTo?: string;
 	sortOrder?: "asc" | "desc";
+	view?: "crm";
+	purchaseStatus?: "with_purchases" | "without_purchases";
+	purchaseFrom?: string;
+	purchaseTo?: string;
+	registeredFrom?: string;
+	registeredTo?: string;
+	segmentIds?: string;
+	loyaltyOperatorIds?: string;
+	groupIds?: string;
+	originIds?: string;
+	mediaIds?: string;
+	unitIds?: string;
+	brandIds?: string;
+	positionIds?: string;
+	states?: string;
+	phone?: string;
+	email?: string;
+	CODIGO?: string;
+	CPF_CNPJ?: string;
+	COD_ERP?: string;
+	CIDADE?: string;
+	ATIVO?: "SIM" | "NAO";
+	PESSOA?: "FIS" | "JUR";
 }
 
 export interface UnifiedScheduleRepurchaseMetrics {

@@ -5,7 +5,7 @@
   "main": "dist/main.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "test:operator-schedules": "ts-node src/services/operator-schedules.test.ts && ts-node src/services/operator-profile-batch.test.ts && ts-node --files src/controllers/operator-schedules-http.test.ts",
+    "test:operator-schedules": "ts-node src/services/operator-schedules.test.ts && ts-node src/services/operator-customer-filters.test.ts && ts-node src/services/operator-profile-batch.test.ts && ts-node --files src/controllers/operator-schedules-http.test.ts",
     "dev": "ts-node-dev --transpile-only --respawn --ignore-watch node_modules --watch .env src/main.ts",
     "dev:frontend": "node scripts/build-frontend.js --watch",
     "start": "ts-node src/main.ts",
