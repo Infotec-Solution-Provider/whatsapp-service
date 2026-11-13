@@ -62,3 +62,15 @@ Falha ao verificar permissão fecha acesso comercial: consulta básica recebe av
 `npm run test:operator-schedules` cobre parser, autorização, isolamento, setores, contatos restritos, busca global, filtros, datas, falhas, custo do batch, perfil manual, ordenação/paginação entre fontes e contrato HTTP/cache. Compilar com `node node_modules/typescript/bin/tsc`; não usar o script `build` para ensaio local, pois ele copia `.env`.
 
 Na demanda `INF-20261113-003`, os agregados, a listagem e o adaptador nativo de tenant foram executados também contra MySQL 8.0 e 5.5 descartáveis, com 446 clientes e dados sintéticos. Regressões existentes `test:crm-security`, `test:crm-schedule-sector` e `test:monitor` passaram. As evidências completas ficam no planejamento central, em `artifacts/sql-validation/`. Esses ensaios não representam benchmark p95 da homologação nem navegação autenticada real no ambiente remoto.
+
+## Publicação em homologação — 13/11/2026
+
+Publicado às 14:55 BRT: quatro módulos JavaScript do backend, compilados em Linux sobre as dependências ativas, preservando os outros 330 módulos e os overlays existentes. Fonte funcional `8806bd7`; controle e backups em `/home/inpulse/operator-schedules-20261113-homolog`. Somente `homolog-whatsapp` e `homolog-frontend` foram operados. Produção permaneceu fora do escopo.
+
+Frontend BUILD `xVD9plKkzhNhL4CkuKdeT`, composto sobre a publicação da engrenagem de telefonia `a88ed4f`, preservada integralmente. A primeira tentativa foi recusada antes da instalação porque a baseline mudou durante a preparação. A segunda foi aplicada sob o lock compartilhado `/home/inpulse/.frontend-homolog-deploy.lock`.
+
+Ativação explicitamente autorizada somente em Suprimaxxi: `homolog-crm-suprimaxxi.wpp_runtime_parameters`, linha `3069662`, escopo INSTANCE, `use_old_crm_schedule=true`, sem setor/usuário. Runtime/P04/autoatendimento não foram ativados. A sessão autenticada confirmou o valor resolvido e a capacidade TELEFONIA.
+
+Smoke autenticado em loopback validou consulta pessoal positiva, páginas, busca, período, isolamento e restrições comerciais; uma consulta administrativa conferiu 446 retornos da carteira real contra SQL, limitada a dez itens. Foram usados clientes/agendas futuros e contas efêmeras exclusivos do teste, com remoção por ID/marcador. Testes de navegador da composição usaram HTTP simulado; não houve navegação autenticada visual remota nem benchmark p95.
+
+Registro central: `planejamento/cross-service/INF-20261113-003-meus-agendamentos/deployment.md`, incluindo recibos e SQL de retorno da única linha de parâmetro. O rollback do código é hash-guarded e exige o mesmo lock; não editar o manifesto congelado `release.json`. Reverter configuração e código requer conferir os recibos, os hashes ativos e eventuais alterações posteriores.
