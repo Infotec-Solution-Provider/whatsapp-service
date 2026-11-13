@@ -64,6 +64,7 @@ export const StepEditorFormBasic: React.FC<StepEditorFormBasicProps> = ({
 	onNextStepIdChange,
 	onFallbackStepIdChange
 }) => {
+	const labelsId = React.useId();
 	// Determina se deve mostrar o campo nextStepId
 	const showNextStepId = stepType !== "CONDITION" && stepType !== "ROUTER";
 
@@ -133,8 +134,9 @@ export const StepEditorFormBasic: React.FC<StepEditorFormBasicProps> = ({
 			{/* Próximo Passo - Não mostrar para CONDITION e ROUTER */}
 			{showNextStepId && (
 				<FormControl fullWidth>
-					<InputLabel>Próximo Passo</InputLabel>
+					<InputLabel id={`${labelsId}-next`}>Próximo Passo</InputLabel>
 					<Select
+						labelId={`${labelsId}-next`}
 						value={nextStepId}
 						label="Próximo Passo"
 						onChange={(e) => onNextStepIdChange(e.target.value)}
@@ -143,7 +145,7 @@ export const StepEditorFormBasic: React.FC<StepEditorFormBasicProps> = ({
 						{steps
 							.filter((s) => s.id !== currentStepId)
 							.map((s) => (
-								<MenuItem key={s.id} value={s.id}>
+								<MenuItem key={s.id} value={s.stepNumber}>
 									Passo #{s.stepNumber} - {getStepTypeLabel(s.stepType)}{" "}
 									{s.description && `(${s.description})`}
 								</MenuItem>
@@ -157,8 +159,9 @@ export const StepEditorFormBasic: React.FC<StepEditorFormBasicProps> = ({
 			{/* Fallback Step - Mostrar para steps que podem falhar */}
 			{showFallbackStepId && (
 				<FormControl fullWidth>
-					<InputLabel>Passo Alternativo (Fallback)</InputLabel>
+					<InputLabel id={`${labelsId}-fallback`}>Passo Alternativo (Fallback)</InputLabel>
 					<Select
+						labelId={`${labelsId}-fallback`}
 						value={fallbackStepId}
 						label="Passo Alternativo (Fallback)"
 						onChange={(e) => onFallbackStepIdChange(e.target.value)}
@@ -167,7 +170,7 @@ export const StepEditorFormBasic: React.FC<StepEditorFormBasicProps> = ({
 						{steps
 							.filter((s) => s.id !== currentStepId)
 							.map((s) => (
-								<MenuItem key={s.id} value={s.id}>
+								<MenuItem key={s.id} value={s.stepNumber}>
 									Passo #{s.stepNumber} - {getStepTypeLabel(s.stepType)}{" "}
 									{s.description && `(${s.description})`}
 								</MenuItem>

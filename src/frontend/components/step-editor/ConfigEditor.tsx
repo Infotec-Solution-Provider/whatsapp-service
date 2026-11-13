@@ -17,6 +17,7 @@ import {
 import React from "react";
 import { WppMessageFlowStepType } from "../../types/flow.types";
 import { designSystem } from "../../styles/design-system";
+import { changeQueryMode, CUSTOMER_RESOLUTION_OPERATION, isResolutionStoreAs } from "./step-config";
 
 interface ConfigEditorProps {
 	stepType: WppMessageFlowStepType;
@@ -25,12 +26,42 @@ interface ConfigEditorProps {
 }
 
 export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, onChange }) => {
+	const operationLabelId = React.useId();
 	const updateField = (field: string, value: any) => {
 		onChange({ ...config, [field]: value });
 	};
 
 	// QUERY - Executar SQL
 	if (stepType === "QUERY") {
+		const modeSelector = (
+			<FormControl fullWidth>
+				<InputLabel id={operationLabelId}>Operação da consulta</InputLabel>
+				<Select labelId={operationLabelId} label="Operação da consulta" value={config.operation || "sql"}
+					onChange={(event) => onChange(changeQueryMode(config, event.target.value))}>
+					<MenuItem value="sql">Consultar SQL</MenuItem>
+					<MenuItem value={CUSTOMER_RESOLUTION_OPERATION}>Identificar e vincular cliente pelo telefone</MenuItem>
+				</Select>
+			</FormControl>
+		);
+		if (config.operation === CUSTOMER_RESOLUTION_OPERATION) {
+			return (
+				<Stack spacing={2}>
+					{modeSelector}
+					<TextField label="Variável do resultado" value={config.storeAs || ""} fullWidth required
+						onChange={(event) => updateField("storeAs", event.target.value)}
+						error={!isResolutionStoreAs(config.storeAs)}
+						helperText="Use letras, números e sublinhado. Exemplo: customerResolution. Não use contact ou message." />
+					<Alert severity="info">
+						Procura o telefone no CRM e preenche somente um vínculo vazio quando encontra um único cliente.
+						O responsável continua sendo definido pelas próximas etapas do fluxo.
+					</Alert>
+					<Typography variant="body2">
+						Na etapa de roteamento, use <code>{config.storeAs || "customerResolution"}.status</code> e as rotas
+						{" "}<code>found</code>, <code>not_found</code>, <code>ambiguous</code> e <code>unavailable</code>.
+					</Typography>
+				</Stack>
+			);
+		}
 		const params = config.params || [];
 
 		const addParam = () => {
@@ -51,6 +82,7 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 		return (
 			<>
 				<Stack spacing={2}>
+					{modeSelector}
 					<TextField
 						label="Query SQL"
 						value={config.query || ""}
@@ -553,6 +585,21 @@ export const ConfigEditor: React.FC<ConfigEditorProps> = ({ stepType, config, on
 							},
 						}}
 					/>
+
+					<FormControlLabel label="Validar usuário ativo e setor antes de atribuir"
+						control={<Switch checked={config.validateUser === true} onChange={(event) => onChange({ ...config,
+							validateUser: event.target.checked,
+							...(event.target.checked && config.fallbackRequireAdmin === undefined ? { fallbackRequireAdmin: true } : {}) })} />} />
+					{config.validateUser === true && (
+						<Stack spacing={2}>
+							<TextField label="ID do usuário de contingência" type="number" fullWidth required value={config.fallbackUserId ?? ""}
+								onChange={(event) => updateField("fallbackUserId", event.target.value === "" ? null : Number(event.target.value))}
+								helperText="Recebe o atendimento se o usuário principal estiver inativo, ausente ou em outro setor." />
+							<FormControlLabel label="Exigir administrador na contingência"
+								control={<Switch checked={config.fallbackRequireAdmin === true} onChange={(event) => updateField("fallbackRequireAdmin", event.target.checked)} />} />
+							<Alert severity="info">A indisponibilidade temporária do CRM mantém o destino principal aprovado. Estar offline não impede a atribuição.</Alert>
+						</Stack>
+					)}
 
 					<TextField
 						label="ID da Carteira"

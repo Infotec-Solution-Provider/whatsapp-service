@@ -86,7 +86,9 @@
     "test:ai-integration": "ts-node src/middlewares/only-local.middleware.test.ts && ts-node src/utils/chat-scope.test.ts && ts-node src/utils/public-message-direction.test.ts && ts-node src/utils/ai-agent-request.test.ts && ts-node src/message-flow/message-flow.ai-agent.test.ts",
     "test:message-flow-config": "ts-node src/message-flow/message-flow-cache.test.ts && ts-node src/message-flow/flow-definition.test.ts && ts-node src/message-flow/assignment-target.test.ts && ts-node src/message-flow/configurations/odim-inbound.test.ts && ts-node src/services/message-flows.service.test.ts",
     "test:message-flow-config:mysql": "ts-node src/services/message-flows.mysql.test.ts",
-    "message-flow:prepare": "ts-node src/scripts/prepare-inbound-message-flow.ts"
+    "message-flow:prepare": "ts-node src/scripts/prepare-inbound-message-flow.ts",
+    "test:message-flow-editor": "ts-node src/utils/message-flow-editor-config.test.ts",
+    "test:message-flow-editor:browser": "node scripts/test-flow-editor-ui.cjs"
   },
   "author": "Renan G. Dutra",
   "license": "ISC",

@@ -31,6 +31,7 @@ import { ConfigEditor } from "./ConfigEditor";
 import { ConnectionsEditor } from "./ConnectionsEditor";
 import { StepEditorExamples } from "./StepEditorExamples";
 import { StepEditorFormBasic } from "./StepEditorFormBasic";
+import { stepConfigValidationError } from "./step-config";
 
 interface StepEditorProps {
 	flowId: number;
@@ -67,8 +68,7 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 		severity: "success",
 	});
 
-	// Guardar dados originais para reverter em caso de erro
-	const [originalFormData, setOriginalFormData] = useState(formData);
+	const [saving, setSaving] = useState(false);
 
 	useEffect(() => {
 		loadStepTypes();
@@ -87,7 +87,6 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 			connections: step?.connections || null
 		};
 		setFormData(newFormData);
-		setOriginalFormData(newFormData);
 		setConfigJson(JSON.stringify(step?.config || {}, null, 2));
 	}, [step, steps]);
 
@@ -101,9 +100,13 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 	};
 
 	const handleSubmit = async () => {
+		if (saving) return;
+		setSaving(true);
 		try {
 			// Parse config JSON
 			const config = JSON.parse(configJson);
+			const validationError = stepConfigValidationError(formData.stepType, config);
+			if (validationError) throw new Error(validationError);
 
 			const stepData: any = {
 				type: formData.stepType,
@@ -118,19 +121,12 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 				stepData.description = formData.description;
 			}
 
-			// Add nextStepId if provided
-			if (formData.nextStepId && formData.nextStepId !== "new") {
-				stepData.nextStepId = parseInt(formData.nextStepId);
-			}
+			stepData.nextStepId = formData.nextStepId && formData.nextStepId !== "new" ? parseInt(formData.nextStepId) : null;
+			stepData.fallbackStepId = formData.fallbackStepId && formData.fallbackStepId !== "new" ? parseInt(formData.fallbackStepId) : null;
+			const response = (step ? await flowApiService.updateStep(step.id, stepData) : await flowApiService.createStep(flowId, stepData)) as any;
 
-			// Add fallbackStepId if provided
-			if (formData.fallbackStepId && formData.fallbackStepId !== "new") {
-				stepData.fallbackStepId = parseInt(formData.fallbackStepId);
-			}
-
-			// OPTIMISTIC UPDATE: Usar dados inputados imediatamente
-			const optimisticStep: FlowStep = {
-				id: step?.id || 0,
+			const savedStep: FlowStep = {
+				id: response.id,
 				flowId: flowId,
 				stepNumber: formData.stepNumber,
 				stepType: formData.stepType as WppMessageFlowStepType,
@@ -144,34 +140,7 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 				updatedAt: new Date().toISOString()
 			};
 
-			// Chamar onSave com dados otimistas ANTES de fazer a requisição
-			onSave(optimisticStep);
-
-			// Depois fazer a requisição
-			try {
-				if (step) {
-					// Update existing step
-					await flowApiService.updateStep(step.id, stepData);
-				} else {
-					// Create new step
-					await flowApiService.createStep(flowId, stepData);
-				}
-
-			// Mostrar toast de sucesso
-			setSnackbar({
-				open: true,
-				message: step ? "Passo atualizado com sucesso!" : "Passo criado com sucesso!",
-				severity: "success",
-			});
-		} catch (apiError) {
-			// Erro na requisição: reverter para dados originais
-			setFormData(originalFormData);
-			setSnackbar({
-				open: true,
-				message: apiError instanceof Error ? apiError.message : "Erro ao salvar passo",
-				severity: "error",
-				});
-			}
+			onSave(savedStep);
 		} catch (err) {
 			console.error("Erro ao salvar passo:", err);
 			if (err instanceof SyntaxError) {
@@ -187,6 +156,8 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 					severity: "error",
 				});
 			}
+		} finally {
+			setSaving(false);
 		}
 	};
 
@@ -392,8 +363,8 @@ export const StepEditor: React.FC<StepEditorProps> = ({ flowId, step, steps, onS
 					</Button>
 				)}
 
-				<Button onClick={handleSubmit} startIcon={<SaveIcon />} variant="contained" color="primary">
-					{step ? "Salvar Alterações" : "Criar Passo"}
+				<Button onClick={handleSubmit} disabled={saving} startIcon={<SaveIcon />} variant="contained" color="primary">
+					{saving ? "Salvando…" : step ? "Salvar Alterações" : "Criar Passo"}
 				</Button>
 			</DialogActions>
 

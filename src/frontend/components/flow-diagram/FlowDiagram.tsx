@@ -44,12 +44,12 @@ const getStepTypeColor = (
 };
 
 export const FlowDiagram: React.FC<FlowDiagramProps> = ({ steps, onStepSelect, selectedStepId }) => {
-	// Helper para buscar step pelo ID
-	const getStepName = (stepId: number): string => {
-		const step = steps.find((s) => s.id === stepId);
+	// Stored connections reference step numbers, independently of database row IDs.
+	const getStepName = (stepNumber: number): string => {
+		const step = steps.find((s) => s.stepNumber === stepNumber);
 		const stepDescription = step?.description ? ` - ${step.description}` : "";
 
-		return step ? `Passo ${step.stepNumber}: ${getStepTypeLabel(step.stepType)}${stepDescription}` : `Passo #${stepId}`;
+		return step ? `Passo ${step.stepNumber}: ${getStepTypeLabel(step.stepType)}${stepDescription}` : `Passo #${stepNumber}`;
 	};
 
 	if (steps.length === 0) {
