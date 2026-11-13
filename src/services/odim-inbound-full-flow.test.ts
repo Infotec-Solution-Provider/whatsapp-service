@@ -26,7 +26,12 @@ async function main() {
 		}
 		return true;
 	};
-	const db = {
+	const db: any = {
+		$transaction: async (run: (tx: any) => Promise<unknown>) => run(db),
+		chatUserPreference: { upsert: async ({ create }: any) => {
+			assert.equal(create.instance, "odim"); assert.equal(create.isMarkedUnread, true); assert(create.userId > 0);
+			return create;
+		} },
 		wppContact: {
 			findFirst: async ({ where }: any) => clone([...contacts.values()].find(row => matchContact(row, where)) ?? null),
 			findUnique: async ({ where }: any) => clone(contacts.get(where.id) ?? null),
