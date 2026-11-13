@@ -30,7 +30,9 @@ export class QueryStep extends BaseStep {
 			if (context.message.instance !== this.instance || (context.instance !== undefined && context.instance !== this.instance) || (context.sectorId !== undefined && context.sectorId !== this.sectorId)) throw new Error("CUSTOMER_RESOLUTION_SCOPE_MISMATCH");
 			const started = Date.now();
 			const result = await this.resolveCustomer({ instance: this.instance, sectorId: this.sectorId }, context.contact);
-			context.contact = result.contact;
+			if (result.contact.id !== context.contact.id || result.contact.instance !== this.instance) throw new Error("CUSTOMER_RESOLUTION_SCOPE_MISMATCH");
+			// The caller also uses this object for bot/AI handling of the first message.
+			Object.assign(context.contact, result.contact);
 			context[storeAs] = result.resolution;
 			context.logger.log("[customer-resolution]", { instance: this.instance, sectorId: this.sectorId, contactId: context.contact.id, status: result.resolution.status, reason: result.resolution.reason, durationMs: Date.now() - started });
 			return this.continue(context);
