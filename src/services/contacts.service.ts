@@ -70,7 +70,7 @@ class ContactsService {
 		});
 		const current = await prismaService.wppContact.findFirst({ where: { id: contact.id, instance: contact.instance } });
 		if (!current) return contact;
-		if (count === 1) await this.syncContactToLocal(current);
+		if (count === 1) await this.syncContactToLocal(current, false, 3000);
 		return current;
 	}
 
@@ -207,7 +207,7 @@ class ContactsService {
 						where: { id: contact.id },
 						data: updateData
 					});
-					await this.syncContactToLocal(updated);
+					await this.syncContactToLocal(updated, false, 3000);
 					return this.enrichIncomingName(updated, name);
 				} catch (error) {
 					if (
@@ -257,7 +257,7 @@ class ContactsService {
 			throw error;
 		}
 
-		await this.syncContactToLocal(newContact);
+		await this.syncContactToLocal(newContact, false, 3000);
 
 		return newContact;
 	}
