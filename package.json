@@ -88,7 +88,9 @@
     "test:message-flow-config:mysql": "ts-node src/services/message-flows.mysql.test.ts",
     "message-flow:prepare": "ts-node src/scripts/prepare-inbound-message-flow.ts",
     "test:message-flow-editor": "ts-node src/utils/message-flow-editor-config.test.ts",
-    "test:message-flow-editor:browser": "node scripts/test-flow-editor-ui.cjs"
+    "test:message-flow-editor:browser": "node scripts/test-flow-editor-ui.cjs",
+    "test:inbound-recovery": "ts-node src/services/waba-inbound-recovery.test.ts && ts-node src/services/incoming-contact-name.test.ts && ts-node src/services/contact-customer-resolution.test.ts && ts-node src/message-flow/base/query-customer-resolution.test.ts && ts-node src/sdk-local/instance-query-timeout.test.ts",
+    "test:inbound-flow:mysql": "ts-node src/services/contact-customer-resolution.mysql.test.ts && ts-node src/services/message-flows.mysql.test.ts && ts-node src/services/inbound-flow-installation.mysql.test.ts"
   },
   "author": "Renan G. Dutra",
   "license": "ISC",
