@@ -18,6 +18,8 @@ async function main() {
 	const result = await step({ operation: "resolveContactCustomer", storeAs: "customerResolution" }).execute(normal);
 	assert.equal(result.nextStepNumber, 2);
 	assert.equal(result.context.contact.customerId, 42);
+	assert.equal(result.context.contact, contact, "first-message callers retain the same resolved contact object");
+	assert.equal(contact.customerId, 42, "bot/AI handling after the flow sees the persisted customer link");
 	assert.deepEqual(result.context["customerResolution"], { status: "found", customerId: 42, reason: "linked" });
 	assert.ok(!JSON.stringify(logs).includes("5511987654321"));
 	assert.ok(!JSON.stringify(logs).includes("private-name"));
