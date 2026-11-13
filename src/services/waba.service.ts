@@ -12,6 +12,7 @@ import { isFunctionalHealthStatus } from "../utils/functional-health-status";
 import messageReactionsService from "./message-reactions.service";
 import { splitWabaWebhook } from "../utils/waba-reaction";
 import { WabaReactionReceiptsService } from "./waba-reaction-receipts.service";
+import { wabaContactName } from "../utils/incoming-contact-name";
 
 interface ValidateEntryResultStatus {
 	type: "status";
@@ -28,6 +29,7 @@ interface ValidateEntryResultMessage {
 	recipient: string;
 	phoneNumberId: string | undefined;
 	accountId: string | undefined;
+	contactName: string | null;
 }
 
 interface ValidateEntryResultIgnored {
@@ -43,6 +45,7 @@ interface HandleWebhookEntryResult {
 }
 
 class WABAService {
+	private readonly inboundPeers = new Map<string, Promise<HandleWebhookEntryResult>>();
 	private async validateEntry(
 		_instance: string,
 		logger: ProcessingLogger,
@@ -78,7 +81,8 @@ class WABAService {
 			const message = value.messages[0] as Message;
 			logger.log("Identificado como mensagem do tipo " + message.type);
 			return { type: "message", data: message, appId: undefined, recipient,
-				phoneNumberId: value.metadata?.phone_number_id, accountId: entry?.id };
+				phoneNumberId: value.metadata?.phone_number_id, accountId: entry?.id,
+				contactName: wabaContactName(value.contacts, message.from) };
 		}
 
 		return { type: "ignored", reason: "Webhook WABA ignorado: sem mensagem/status processável" };
@@ -94,6 +98,19 @@ class WABAService {
 			}
 			return { ignored: allIgnored };
 		}
+		const sender = (input as ReceiveMessageBody | null)?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.from;
+		if (typeof sender !== "string") return this.handleSingleWebhookEntry(instance, input);
+		// Serialize one peer, without dropping distinct messages, while contact/chat creation runs.
+		const key = `${instance}:${sender}`;
+		const previous = this.inboundPeers.get(key);
+		const work = (previous ?? Promise.resolve()).catch(() => undefined)
+			.then(() => this.handleSingleWebhookEntry(instance, input));
+		this.inboundPeers.set(key, work);
+		try { return await work; }
+		finally { if (this.inboundPeers.get(key) === work) this.inboundPeers.delete(key); }
+	}
+
+	private async handleSingleWebhookEntry(instance: string, input: unknown): Promise<HandleWebhookEntryResult> {
 		const logger = new ProcessingLogger(instance, "waba-webhook-entry", Date.now().toString(), input);
 
 		try {
@@ -162,21 +179,16 @@ class WABAService {
 							};
 						}
 					}
-					const parsedMsg = await WABAMessageParser.parse(
-						client.id,
-						validated.recipient,
-						instance,
-						validated.data,
-						logger
-					);
-
 					const existingMessage =
-						parsedMsg.wabaId &&
+						validated.data.id &&
 						(await prismaService.wppMessage.findFirst({
-							where: { wabaId: parsedMsg.wabaId }
+							where: { wabaId: validated.data.id }
 						}));
 
-					if (!!existingMessage) {
+					if (existingMessage && (existingMessage.instance !== instance || existingMessage.clientId !== client.id || existingMessage.from !== validated.data.from)) {
+						throw new Error("WABA_MESSAGE_IDENTITY_MISMATCH");
+					}
+					if (existingMessage && existingMessage.chatId !== null) {
 						logger.log("Mensagem WABA já existe no banco de dados, ignorando processamento", {
 							messageId: existingMessage.id,
 							wabaId: existingMessage.wabaId
@@ -185,15 +197,17 @@ class WABAService {
 						return { ignored: true, reason: "Webhook WABA ignorado: mensagem duplicada" };
 					}
 
-					const inserted = await messagesService.insertMessage(parsedMsg);
-					const processed = await messagesDistributionService.processMessage(instance, client.id, inserted);
+					// Retry a saved but undistributed message; dedup must not orphan a failed assignment.
+					const inserted = existingMessage || await messagesService.insertMessage(await WABAMessageParser.parse(
+						client.id, validated.recipient, instance, validated.data, logger));
+					const processed = await messagesDistributionService.processMessage(instance, client.id, inserted, validated.contactName);
 
 					if (processed.contactId) {
 						logger.log("Verificando necessidade de atualizar expiration da conversa");
 						const isUpdated = await this.checkAndUpdateContactConversationExpiration(
 							logger,
 							processed.contactId,
-							+parsedMsg.timestamp
+							+inserted.timestamp
 						);
 
 						if (isUpdated) {

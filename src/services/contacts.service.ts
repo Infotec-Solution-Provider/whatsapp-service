@@ -13,6 +13,7 @@ import { safeEncode } from "../utils/safe-encode";
 import instancesService from "./instances.service";
 import parametersService from "./parameters.service";
 import prismaService from "./prisma.service";
+import { placeholderContactName } from "../utils/incoming-contact-name";
 
 export interface ContactsFilters {
 	ids?: number[] | null;
@@ -59,6 +60,20 @@ export class DeletedContactConflictError extends Error {
 }
 
 class ContactsService {
+	private async enrichIncomingName(contact: WppContact, name: string): Promise<WppContact> {
+		const replacement = placeholderContactName(contact, name);
+		if (!replacement || contact.isDeleted) return contact;
+		const { count } = await prismaService.wppContact.updateMany({
+			where: { id: contact.id, instance: contact.instance, isDeleted: false,
+				name: contact.name, phone: contact.phone, whatsappId: contact.whatsappId },
+			data: { name: replacement }
+		});
+		const current = await prismaService.wppContact.findFirst({ where: { id: contact.id, instance: contact.instance } });
+		if (!current) return contact;
+		if (count === 1) await this.syncContactToLocal(current);
+		return current;
+	}
+
 	private normalizeDigits(value: string) {
 		return value.replace(/\D/g, "");
 	}
@@ -193,7 +208,7 @@ class ContactsService {
 						data: updateData
 					});
 					await this.syncContactToLocal(updated);
-					return updated;
+					return this.enrichIncomingName(updated, name);
 				} catch (error) {
 					if (
 						error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -204,14 +219,14 @@ class ContactsService {
 							where: { instance, whatsappId: normalizedWhatsappId }
 						});
 						if (owner) {
-							return owner;
+							return this.enrichIncomingName(owner, name);
 						}
 					}
 					throw error;
 				}
 			}
 
-			return contact;
+			return this.enrichIncomingName(contact, name);
 		}
 
 		let newContact: WppContact;
