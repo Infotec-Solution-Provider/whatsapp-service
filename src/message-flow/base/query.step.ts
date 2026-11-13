@@ -1,5 +1,8 @@
-import { BaseStep, StepContext, StepResult } from "./base.step";
+import { BaseStep, StepConfig, StepContext, StepResult } from "./base.step";
 import instancesService from "../../services/instances.service";
+import { resolveContactCustomerForFlow } from "../../services/contact-customer-resolution.runtime";
+import type { CustomerResolutionScope, ContactCustomerResolutionResult } from "../../services/contact-customer-resolution.service";
+import type { WppContact } from "@prisma/client";
 
 interface QueryConfig {
 	query: string; // SQL query
@@ -14,7 +17,24 @@ interface QueryConfig {
  * Suporta interpolação de variáveis nos parâmetros.
  */
 export class QueryStep extends BaseStep {
+	constructor(config: StepConfig, private readonly resolveCustomer: (scope: CustomerResolutionScope, contact: WppContact) => Promise<ContactCustomerResolutionResult> = resolveContactCustomerForFlow) {
+		super(config);
+	}
+
 	async execute(context: StepContext): Promise<StepResult> {
+		if (this.config["operation"] !== undefined) {
+			if (this.config["operation"] !== "resolveContactCustomer") throw new Error("UNKNOWN_QUERY_OPERATION");
+			const storeAs = this.config["storeAs"];
+			const reserved = new Set(["__proto__", "prototype", "constructor", "contact", "message", "logger", "instance", "sectorId", "customer", "legacyCampaignType", "legacySchedule"]);
+			if (typeof storeAs !== "string" || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(storeAs) || reserved.has(storeAs) || Object.prototype.hasOwnProperty.call(context, storeAs)) throw new Error("INVALID_CUSTOMER_RESOLUTION_STORE_AS");
+			if (context.message.instance !== this.instance || (context.instance !== undefined && context.instance !== this.instance) || (context.sectorId !== undefined && context.sectorId !== this.sectorId)) throw new Error("CUSTOMER_RESOLUTION_SCOPE_MISMATCH");
+			const started = Date.now();
+			const result = await this.resolveCustomer({ instance: this.instance, sectorId: this.sectorId }, context.contact);
+			context.contact = result.contact;
+			context[storeAs] = result.resolution;
+			context.logger.log("[customer-resolution]", { instance: this.instance, sectorId: this.sectorId, contactId: context.contact.id, status: result.resolution.status, reason: result.resolution.reason, durationMs: Date.now() - started });
+			return this.continue(context);
+		}
 		const config = this.config as QueryConfig;
 
 		const querySummary = config.query.length > 60 

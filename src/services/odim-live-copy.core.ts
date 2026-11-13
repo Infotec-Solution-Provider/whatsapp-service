@@ -24,7 +24,7 @@ export class OdimLiveCopyWriter {
   const phone = digits(row.NUMERO), wa = digits(row.IDENTIFICADOR) || phone; let id = await this.map("contacts", row.CODIGO);
   if (!id) {
    const [same] = wa ? await this.db.execute("SELECT id,customer_id FROM contacts WHERE instance='odim' AND whatsapp_id=? LIMIT 2", [wa]) : [[]];
-   if (same.length === 1 && (same[0].customer_id == null || row.CODIGO_CLIENTE == null || Number(same[0].customer_id) === Number(row.CODIGO_CLIENTE))) id = same[0].id;
+   if (same.length === 1 && (same[0].customer_id == null || Number(same[0].customer_id) <= 0 || row.CODIGO_CLIENTE == null || Number(row.CODIGO_CLIENTE) <= 0 || Number(same[0].customer_id) === Number(row.CODIGO_CLIENTE))) id = same[0].id;
    else if (same.length) throw Error("CONTACT_IDENTITY_CONFLICT");
    if (!id) {
     const [used] = await this.db.execute("SELECT id FROM contacts WHERE instance='odim' AND phone=? LIMIT 1", [phone]);
