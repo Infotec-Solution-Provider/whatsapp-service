@@ -29,9 +29,19 @@ export function registerAllSteps(): void {
 	});
 
 	StepRegistry.register("QUERY", QueryStep, {
-		description: "Executa uma query SQL e armazena resultado no contexto",
-		requiredConfig: ["query", "storeAs"],
-		optionalConfig: ["params", "single", "required"]
+		description: "Consulta SQL ou resolve e vincula o cliente do contato",
+		requiredConfig: ["storeAs"],
+		optionalConfig: ["query", "operation", "params", "single", "required"],
+		validateConfig: (config) => {
+			if (typeof config["storeAs"] !== "string" || !config["storeAs"].trim()) throw new Error("QUERY requires storeAs");
+			if (config["operation"] !== undefined) {
+				if (config["operation"] !== "resolveContactCustomer") throw new Error("Unsupported QUERY operation");
+				if (config["query"] !== undefined) throw new Error("QUERY operation and query are mutually exclusive");
+				if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(config["storeAs"]) ||
+					["__proto__", "prototype", "constructor", "contact", "message", "logger", "instance", "sectorId", "customer", "legacyCampaignType", "legacySchedule"].includes(config["storeAs"]))
+					throw new Error("Invalid QUERY operation storeAs");
+			} else if (typeof config["query"] !== "string" || !config["query"].trim()) throw new Error("QUERY requires query or operation");
+		}
 	});
 
 	StepRegistry.register("ROUTER", RouterStep, {
@@ -43,7 +53,17 @@ export function registerAllSteps(): void {
 	StepRegistry.register("ASSIGN", AssignStep, {
 		description: "Atribui o chat a um usuário, carteira ou admin",
 		requiredConfig: [],
-		optionalConfig: ["userId", "walletId", "priority", "systemMessage", "type"]
+		optionalConfig: ["userId", "walletId", "priority", "systemMessage", "type", "validateUser", "fallbackUserId", "fallbackRequireAdmin", "decisionReason"],
+		validateConfig: (config) => {
+			if (config["validateUser"] !== undefined && typeof config["validateUser"] !== "boolean") throw new Error("ASSIGN validateUser must be boolean");
+			if (config["validateUser"] === true) {
+				if (!Number.isSafeInteger(config["userId"]) || config["userId"] <= 0 ||
+					!Number.isSafeInteger(config["fallbackUserId"]) || config["fallbackUserId"] <= 0 || config["userId"] === config["fallbackUserId"])
+					throw new Error("Validated ASSIGN requires distinct positive userId and fallbackUserId");
+				if (config["walletId"] != null) throw new Error("Validated ASSIGN does not accept walletId");
+				if (config["fallbackRequireAdmin"] !== undefined && typeof config["fallbackRequireAdmin"] !== "boolean") throw new Error("ASSIGN fallbackRequireAdmin must be boolean");
+			}
+		}
 	});
 
 	// ===== BUSINESS STEPS (Específicos - Compatibilidade) =====

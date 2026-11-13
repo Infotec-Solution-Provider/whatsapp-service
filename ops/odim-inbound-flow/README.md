@@ -1,0 +1,15 @@
+# Odim inbound Message Flow
+
+This package prepares configuration only. It never applies SQL, creates a schema or enables a provider. Existing open chats continue through the existing-chat branch before any Message Flow runs.
+
+Run `npx ts-node src/scripts/prepare-inbound-message-flow.ts ops/odim-inbound-flow/production.targets.json` to review the JSON. Optional second input is a preflight evidence JSON checked by `assertInboundFlowPreflight`. The homolog targets are synthetic placeholders; replace them with the isolated QA fixture's own IDs. Never copy production targets into an active homolog tenant.
+
+The first step preserves admin-only precedence. QUERY operation `resolveContactCustomer` updates the context contact using the generic guarded resolver. ROUTER sends identified customers to the current loyalty/availability flow and sends the three other states to separate ASSIGN steps. The destination is an editable flow value. No new enum or DDL is required.
+
+Before applying: save the complete prior flow/steps or prove absence; confirm the exact channel, active status and sector; confirm the primary and fallback are active in that same CRM sector and that supervision can see both destinations. The fallback must be an actual ADMIN, never an assumed `-1`. Archive the read-only preflight evidence without names/phones. An invalid target or unproved visibility blocks activation.
+
+Install all flow and step rows in one transaction, preserving `config`, `connections`, `enabled`, the next/fallback step NUMBERS and timestamps. A partially installed flow must never be activated. For a new absent flow, guard absence again inside the transaction; for replacement, compare the complete saved snapshot before mutation. Invalidate the process-local `instance:sectorId` cache after commit, or perform the explicitly authorized restart when installation occurs outside the CRUD service. Do not apply through separate live step edits. The current production application runs one fork; another process would require its own invalidation/restart. Direct SQL cannot invalidate another process's memory.
+
+ASSIGN `validateUser:true` rechecks both configured IDs. A proven invalid primary uses the valid configured fallback; both invalid raise `ASSIGNMENT_TARGET_UNAVAILABLE` and must follow the durable WABA recovery path. A CRM read failure keeps the primary approved at preflight and logs `validation_unavailable`; this does not classify the contact as new. Offline status does not exclude either target. No random available user is substituted.
+
+Rollback restores the saved configuration (or deletes only this new flow if prior absence was proved), then invalidates/reloads its cache. It never replays webhooks, transfers existing chats, reverts customer links or deletes received messages. Validate both install and rollback in isolated MySQL before production.

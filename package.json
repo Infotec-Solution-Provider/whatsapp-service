@@ -83,7 +83,10 @@
     "test:exatron-survey": "ts-node src/bots/satisfaction-answer-persistence.test.ts && ts-node src/bots/satisfaction-session-store.test.ts && ts-node --files src/bots/exatron-satisfaction.bot.test.ts",
     "test:exatron-mysql": "ts-node src/utils/operator-report-sql.mysql.test.ts && ts-node src/bots/satisfaction-answer-persistence.mysql.test.ts",
     "test:operator-performance": "ts-node src/utils/comparison-range.test.ts && ts-node src/utils/report-rules.test.ts",
-    "test:ai-integration": "ts-node src/middlewares/only-local.middleware.test.ts && ts-node src/utils/chat-scope.test.ts && ts-node src/utils/public-message-direction.test.ts && ts-node src/utils/ai-agent-request.test.ts && ts-node src/message-flow/message-flow.ai-agent.test.ts"
+    "test:ai-integration": "ts-node src/middlewares/only-local.middleware.test.ts && ts-node src/utils/chat-scope.test.ts && ts-node src/utils/public-message-direction.test.ts && ts-node src/utils/ai-agent-request.test.ts && ts-node src/message-flow/message-flow.ai-agent.test.ts",
+    "test:message-flow-config": "ts-node src/message-flow/message-flow-cache.test.ts && ts-node src/message-flow/flow-definition.test.ts && ts-node src/message-flow/assignment-target.test.ts && ts-node src/message-flow/configurations/odim-inbound.test.ts && ts-node src/services/message-flows.service.test.ts",
+    "test:message-flow-config:mysql": "ts-node src/services/message-flows.mysql.test.ts",
+    "message-flow:prepare": "ts-node src/scripts/prepare-inbound-message-flow.ts"
   },
   "author": "Renan G. Dutra",
   "license": "ISC",

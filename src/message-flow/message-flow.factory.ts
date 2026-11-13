@@ -2,6 +2,7 @@ import prismaService from "../services/prisma.service";
 import { BaseStep } from "./base/base.step";
 import MessageFlow from "./message-flow";
 import { StepRegistry } from "./step-registry";
+import { assertFlowDefinition } from "./flow-definition";
 
 export default class MessageFlowFactory {
 	/**
@@ -80,10 +81,11 @@ export default class MessageFlowFactory {
 			if (!flow) {
 				return this.createDefaultMessageFlow(instance, sectorId);
 			}
+			assertFlowDefinition(flow.WppMessageFlowStep);
 
 			const messageFlow = new MessageFlow();
 			// Ordena os steps por stepNumber para garantir a ordem correta
-			const sortedSteps = [...flow.WppMessageFlowStep].sort((a, b) => a.stepNumber - b.stepNumber);
+			const sortedSteps = flow.WppMessageFlowStep.filter((step) => step.enabled !== false).sort((a, b) => a.stepNumber - b.stepNumber);
 
 			for (const step of sortedSteps) {
 				// Usa os valores do banco de dados para next e fallback

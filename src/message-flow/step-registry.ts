@@ -8,6 +8,7 @@ export interface StepMetadata {
 	description?: string;
 	requiredConfig?: string[];
 	optionalConfig?: string[];
+	validateConfig?: (config: Record<string, any>) => void;
 }
 
 /**
@@ -29,9 +30,9 @@ export class StepRegistry {
 		metadata?: Partial<Omit<StepMetadata, "type" | "constructor">>
 	): void {
 		this.steps.set(type, {
+			...metadata,
 			type,
-			constructor,
-			...metadata
+			constructor
 		});
 	}
 
@@ -57,6 +58,7 @@ export class StepRegistry {
 				}
 			}
 		}
+		metadata.validateConfig?.(config.config || {});
 
 		return new metadata.constructor(config);
 	}

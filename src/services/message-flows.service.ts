@@ -1,5 +1,8 @@
 import { WppMessageFlowStepType } from "@prisma/client";
 import prismaService from "./prisma.service";
+import { messageFlowCache } from "../message-flow/message-flow-cache";
+import { validateFlowDefinition } from "../message-flow/flow-definition";
+import { StepRegistry } from "../message-flow/step-registry";
 
 interface CreateFlowDto {
 	instance: string;
@@ -7,12 +10,13 @@ interface CreateFlowDto {
 	description?: string;
 }
 
-interface CreateStepDto {
+export interface CreateStepDto {
 	type: WppMessageFlowStepType;
 	stepNumber: number;
 	nextStepId?: number | null;
 	fallbackStepId?: number | null;
 	config?: Record<string, any> | null;
+	connections?: Record<string, any> | null;
 	enabled?: boolean;
 	description?: string;
 }
@@ -29,10 +33,22 @@ interface UpdateStepDto {
 	config?: Record<string, any> | null;
 	enabled?: boolean;
 	description?: string;
-	connections?: Record<string, number> | null;
+	connections?: Record<string, any> | null;
 }
 
-class MessageFlowsService {
+export class MessageFlowsService {
+	constructor(private readonly db: typeof prismaService = prismaService,
+		private readonly invalidate: (instance: string, sectorId: number) => void = (instance, sectorId) => messageFlowCache.invalidate(instance, sectorId)) {}
+
+	private validateStep(data: { type: string; stepNumber: number; config?: unknown; connections?: unknown }): void {
+		if (!Number.isSafeInteger(data.stepNumber) || data.stepNumber <= 0) throw new Error("Step number must be a positive integer");
+		if (!data.config || typeof data.config !== "object" || Array.isArray(data.config)) {
+			if (data.config != null) throw new Error("Step config must be an object");
+		}
+		if (data.connections != null && (typeof data.connections !== "object" || Array.isArray(data.connections))) throw new Error("Step connections must be an object");
+		StepRegistry.create(data.type, { instance: "validation", sectorId: 1, stepNumber: data.stepNumber, config: (data.config ?? {}) as Record<string, any> });
+	}
+
 	/**
 	 * Lista todos os fluxos
 	 */
@@ -47,7 +63,7 @@ class MessageFlowsService {
 			where.sectorId = sectorId;
 		}
 
-		const flows = await prismaService.wppMessageFlow.findMany({
+		const flows = await this.db.wppMessageFlow.findMany({
 			where,
 			include: {
 				WppMessageFlowStep: {
@@ -66,7 +82,7 @@ class MessageFlowsService {
 	 * Busca um fluxo específico
 	 */
 	async getFlow(flowId: number) {
-		const flow = await prismaService.wppMessageFlow.findUnique({
+		const flow = await this.db.wppMessageFlow.findUnique({
 			where: { id: flowId },
 			include: {
 				WppMessageFlowStep: {
@@ -88,7 +104,7 @@ class MessageFlowsService {
 	 * Busca fluxo por instância e setor
 	 */
 	async getFlowByInstanceAndSector(instance: string, sectorId: number) {
-		const flow = await prismaService.wppMessageFlow.findUnique({
+		const flow = await this.db.wppMessageFlow.findUnique({
 			where: {
 				instance_sectorId: {
 					instance,
@@ -117,7 +133,7 @@ class MessageFlowsService {
 			throw new Error(`Flow already exists for instance ${data.instance} and sector ${data.sectorId}`);
 		}
 
-		const flow = await prismaService.wppMessageFlow.create({
+		const flow = await this.db.wppMessageFlow.create({
 			data: {
 				instance: data.instance,
 				sectorId: data.sectorId,
@@ -128,6 +144,7 @@ class MessageFlowsService {
 			}
 		});
 
+		this.invalidate(flow.instance, flow.sectorId);
 		return flow;
 	}
 
@@ -140,7 +157,7 @@ class MessageFlowsService {
 			updateData.description = data.description || null;
 		}
 
-		const flow = await prismaService.wppMessageFlow.update({
+		const flow = await this.db.wppMessageFlow.update({
 			where: { id: flowId },
 			data: updateData,
 			include: {
@@ -152,6 +169,7 @@ class MessageFlowsService {
 			}
 		});
 
+		this.invalidate(flow.instance, flow.sectorId);
 		return flow;
 	}
 
@@ -159,9 +177,8 @@ class MessageFlowsService {
 	 * Deleta um fluxo (e todos os steps)
 	 */
 	async deleteFlow(flowId: number) {
-		await prismaService.wppMessageFlow.delete({
-			where: { id: flowId }
-		});
+		const flow = await this.db.wppMessageFlow.delete({ where: { id: flowId } });
+		this.invalidate(flow.instance, flow.sectorId);
 	}
 
 	/**
@@ -169,10 +186,11 @@ class MessageFlowsService {
 	 */
 	async createStep(flowId: number, data: CreateStepDto) {
 		// Verifica se o fluxo existe
-		await this.getFlow(flowId);
+		const flow = await this.getFlow(flowId);
+		this.validateStep(data);
 
 		// Verifica se já existe step com esse número
-		const existing = await prismaService.wppMessageFlowStep.findFirst({
+		const existing = await this.db.wppMessageFlowStep.findFirst({
 			where: {
 				messageFlowId: flowId,
 				stepNumber: data.stepNumber
@@ -183,7 +201,7 @@ class MessageFlowsService {
 			throw new Error(`Step number ${data.stepNumber} already exists in flow ${flowId}`);
 		}
 
-		const step = await prismaService.wppMessageFlowStep.create({
+		const step = await this.db.wppMessageFlowStep.create({
 			data: {
 				messageFlowId: flowId,
 				type: data.type,
@@ -191,11 +209,13 @@ class MessageFlowsService {
 				nextStepId: data.nextStepId !== undefined ? data.nextStepId : null,
 				fallbackStepId: data.fallbackStepId !== undefined ? data.fallbackStepId : null,
 				config: data.config !== undefined ? (data.config as any) : null,
+				connections: data.connections !== undefined ? (data.connections as any) : null,
 				enabled: data.enabled ?? true,
 				description: data.description || null
 			}
 		});
 
+		this.invalidate(flow.instance, flow.sectorId);
 		return step;
 	}
 
@@ -203,6 +223,9 @@ class MessageFlowsService {
 	 * Atualiza um step
 	 */
 	async updateStep(stepId: number, data: UpdateStepDto) {
+		const existing = await this.db.wppMessageFlowStep.findUniqueOrThrow({ where: { id: stepId } });
+		const flow = await this.getFlow(existing.messageFlowId);
+		this.validateStep({ ...existing, ...data });
 		const updateData: any = {};
 		if (data.type !== undefined) updateData.type = data.type;
 		if (data.stepNumber !== undefined) updateData.stepNumber = data.stepNumber;
@@ -213,11 +236,12 @@ class MessageFlowsService {
 		if (data.description !== undefined) updateData.description = data.description;
 		if (data.connections !== undefined) updateData.connections = data.connections as any;
 
-		const step = await prismaService.wppMessageFlowStep.update({
+		const step = await this.db.wppMessageFlowStep.update({
 			where: { id: stepId },
 			data: updateData
 		});
 
+		this.invalidate(flow.instance, flow.sectorId);
 		return step;
 	}
 
@@ -225,24 +249,44 @@ class MessageFlowsService {
 	 * Deleta um step
 	 */
 	async deleteStep(stepId: number) {
-		await prismaService.wppMessageFlowStep.delete({
-			where: { id: stepId }
-		});
+		const existing = await this.db.wppMessageFlowStep.findUniqueOrThrow({ where: { id: stepId } });
+		const flow = await this.getFlow(existing.messageFlowId);
+		await this.db.wppMessageFlowStep.delete({ where: { id: stepId } });
+		this.invalidate(flow.instance, flow.sectorId);
 	}
 
 	/**
 	 * Reordena steps de um fluxo
 	 */
-	async reorderSteps(_flowId: number, stepOrders: Array<{ stepId: number; stepNumber: number }>) {
-		// Atualiza cada step em uma transação
-		await prismaService.$transaction(
-			stepOrders.map(({ stepId, stepNumber }) =>
-				prismaService.wppMessageFlowStep.update({
-					where: { id: stepId },
-					data: { stepNumber }
-				})
-			)
-		);
+	async reorderSteps(flowId: number, stepOrders: Array<{ stepId: number; stepNumber: number }>) {
+		const flow = await this.getFlow(flowId);
+		const steps = flow.WppMessageFlowStep;
+		const byId = new Map(steps.map((step) => [step.id, step]));
+		if (new Set(stepOrders.map((item) => item.stepId)).size !== stepOrders.length ||
+			stepOrders.some((item) => !byId.has(item.stepId) || !Number.isSafeInteger(item.stepNumber) || item.stepNumber <= 0))
+			throw new Error("Reorder contains duplicate, foreign or invalid steps");
+		const newNumbers = new Map(steps.map((step) => [step.stepNumber,
+			stepOrders.find((item) => item.stepId === step.id)?.stepNumber ?? step.stepNumber]));
+		if (new Set(newNumbers.values()).size !== steps.length) throw new Error("Reorder creates duplicate step numbers");
+		const remap = (value: number | null) => value === null ? null : newNumbers.get(value) ?? value;
+		const remapConnections = (value: unknown): Record<string, any> => {
+			const result = { ...(value as Record<string, any> ?? {}) };
+			for (const key of ["onTrue", "onFalse", "defaultRoute"]) if (typeof result[key] === "number") result[key] = remap(result[key]);
+			if (result["routes"] && typeof result["routes"] === "object") result["routes"] = Object.fromEntries(Object.entries(result["routes"]).map(([key, target]) => [key, typeof target === "number" ? remap(target) : target]));
+			return result;
+		};
+		const revised = steps.map((step) => ({ ...step, stepNumber: newNumbers.get(step.stepNumber)!,
+			nextStepId: remap(step.nextStepId), fallbackStepId: remap(step.fallbackStepId), connections: remapConnections(step.connections) }));
+		const errors = validateFlowDefinition(revised);
+		if (errors.length) throw new Error(errors.join("; "));
+		await this.db.$transaction(async (tx) => {
+			// Temporary negative numbers allow swaps under the unique(flow,step_number) key.
+			for (const step of steps) await tx.wppMessageFlowStep.update({ where: { id: step.id }, data: { stepNumber: -step.id } });
+			for (const step of revised) await tx.wppMessageFlowStep.update({ where: { id: step.id }, data: {
+				stepNumber: step.stepNumber, nextStepId: step.nextStepId, fallbackStepId: step.fallbackStepId, connections: step.connections as any
+			} });
+		});
+		this.invalidate(flow.instance, flow.sectorId);
 	}
 
 	/**
@@ -250,47 +294,9 @@ class MessageFlowsService {
 	 */
 	async validateFlow(flowId: number): Promise<{ valid: boolean; errors: string[] }> {
 		const flow = await this.getFlow(flowId);
-		const errors: string[] = [];
-
-		// Verifica se existe step #1
-		const hasStepOne = flow.WppMessageFlowStep.some((s) => s.stepNumber === 1);
-		if (!hasStepOne) {
-			errors.push("Flow must have a step with stepNumber = 1");
-		}
-
-		// Verifica next_step_id
-		for (const step of flow.WppMessageFlowStep) {
-			if (step.nextStepId !== null) {
-				const nextStepExists = flow.WppMessageFlowStep.some((s) => s.stepNumber === step.nextStepId);
-				if (!nextStepExists) {
-					errors.push(`Step #${step.stepNumber} references non-existent next step #${step.nextStepId}`);
-				}
-			}
-		}
-
-		// Verifica fallback_step_id
-		for (const step of flow.WppMessageFlowStep) {
-			if (step.fallbackStepId !== null) {
-				const fallbackStepExists = flow.WppMessageFlowStep.some((s) => s.stepNumber === step.fallbackStepId);
-				if (!fallbackStepExists) {
-					errors.push(
-						`Step #${step.stepNumber} references non-existent fallback step #${step.fallbackStepId}`
-					);
-				}
-			}
-		}
-
-		// Verifica steps finais (devem ter nextStepId = null)
-		const stepsWithoutNext = flow.WppMessageFlowStep.filter((s) => s.nextStepId === null);
-		if (stepsWithoutNext.length === 0) {
-			errors.push("Flow must have at least one final step (nextStepId = null)");
-		}
-
-		// Verifica loops infinitos simples
-		for (const step of flow.WppMessageFlowStep) {
-			if (step.nextStepId === step.stepNumber) {
-				errors.push(`Step #${step.stepNumber} references itself (infinite loop)`);
-			}
+		const errors = validateFlowDefinition(flow.WppMessageFlowStep);
+		for (const step of flow.WppMessageFlowStep.filter((item) => item.enabled)) {
+			try { this.validateStep(step); } catch (error) { errors.push(`Step #${step.stepNumber}: ${error instanceof Error ? error.message : "Invalid configuration"}`); }
 		}
 
 		return {
@@ -311,28 +317,17 @@ class MessageFlowsService {
 	 */
 	async duplicateFlow(flowId: number, targetInstance: string, targetSectorId: number) {
 		const sourceFlow = await this.getFlow(flowId);
-
-		// Cria o novo fluxo
-		const newFlow = await this.createFlow({
-			instance: targetInstance,
-			sectorId: targetSectorId,
-			description: `${sourceFlow.description || ""} (cópia)`
-		});
-
-		// Copia todos os steps
-		for (const step of sourceFlow.WppMessageFlowStep) {
-			await this.createStep(newFlow.id, {
-				type: step.type,
-				stepNumber: step.stepNumber,
-				nextStepId: step.nextStepId,
-				fallbackStepId: step.fallbackStepId,
-				config: step.config as any,
-				enabled: step.enabled,
-				description: step.description || ""
-			});
-		}
-		return newFlow.id;
+		const flow = await this.db.wppMessageFlow.create({ data: {
+			instance: targetInstance, sectorId: targetSectorId, description: `${sourceFlow.description || ""} (cópia)`,
+			WppMessageFlowStep: { create: sourceFlow.WppMessageFlowStep.map((step) => ({
+				type: step.type, stepNumber: step.stepNumber, nextStepId: step.nextStepId, fallbackStepId: step.fallbackStepId,
+				config: step.config as any, connections: step.connections as any, enabled: step.enabled, description: step.description
+			})) }
+		} });
+		this.invalidate(flow.instance, flow.sectorId);
+		return flow.id;
 	}
+
 }
 
 export default new MessageFlowsService();

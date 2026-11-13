@@ -21,6 +21,7 @@ import {
 import { InternalServerError } from "@rgranatodutra/http-errors";
 import MessageFlow from "../message-flow/message-flow";
 import MessageFlowFactory from "../message-flow/message-flow.factory";
+import { messageFlowCache } from "../message-flow/message-flow-cache";
 import ProcessingLogger from "../utils/processing-logger";
 import resolveContactIdentity from "../utils/resolve-contact-identity";
 import {
@@ -67,7 +68,6 @@ class MessageStatusTargetNotFoundError extends Error {
 
 
 class MessagesDistributionService {
-	private flows: Map<string, MessageFlow> = new Map();
 
 	private async resolveMessageContact(
 		instance: string,
@@ -226,17 +226,7 @@ class MessagesDistributionService {
 	}
 
 	public async getFlow(instance: string, sectorId: number): Promise<MessageFlow> {
-		const flowKey = `${instance}:${sectorId}`;
-		const flow = this.flows.get(flowKey);
-
-		if (!flow) {
-			const newFlow = await MessageFlowFactory.createMessageFlow(instance, sectorId);
-
-			this.flows.set(flowKey, newFlow);
-			return newFlow;
-		}
-
-		return flow;
+		return messageFlowCache.get(instance, sectorId, () => MessageFlowFactory.createMessageFlow(instance, sectorId));
 	}
 
 	private async getSectors(clientId: number) {
