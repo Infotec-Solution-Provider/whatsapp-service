@@ -1187,6 +1187,162 @@ class CustomerProfileTagsService {
 		);
 	}
 
+	/** Agenda reads must neither rebuild snapshots with N+1 calls nor write during GET. */
+	public async getCustomerProfileSummariesReadOnly(
+		instance: string,
+		input: number[],
+		now = new Date()
+	): Promise<CustomerProfileSummaryPayload[]> {
+		const ids = [...new Set(input.filter((id) => Number.isSafeInteger(id) && id > 0))];
+		if (!ids.length) return [];
+		if (ids.length > 250) throw new Error("PROFILE_READ_BATCH_TOO_LARGE");
+		const snapshots = await prismaService.customerProfileTag.findMany({
+			where: { instance, customerId: { in: ids } }
+		});
+		const byCustomer = new Map<number, Map<CustomerProfileTagType, CustomerProfileTag>>();
+		for (const snapshot of snapshots) {
+			const tags = byCustomer.get(snapshot.customerId) ?? new Map<CustomerProfileTagType, CustomerProfileTag>();
+			tags.set(snapshot.tagType, snapshot);
+			byCustomer.set(snapshot.customerId, tags);
+		}
+		const needs = ids.filter((id) => {
+			const tags = byCustomer.get(id);
+			return (
+				!tags?.has("INTERACTION_LEVEL") ||
+				!tags.has("PURCHASE_LEVEL") ||
+				!tags.has("CUSTOMER_AGE") ||
+				this.shouldRefreshInteractionSnapshot(this.normalizePayload(tags.get("INTERACTION_LEVEL")!)) ||
+				this.shouldRefreshCustomerAgeSnapshot(this.normalizePayload(tags.get("CUSTOMER_AGE")!))
+			);
+		});
+		type Row = Record<string, number | string | Date | null> & { customerId: number };
+		const cutoff = new Date(now.getTime() - INTERACTION_WINDOW_DAYS * 86400000);
+		const purchaseCutoff = new Date(now);
+		purchaseCutoff.setMonth(purchaseCutoff.getMonth() - PURCHASE_WINDOW_MONTHS);
+		const [interactions, chats, purchases, registrations] = needs.length
+			? await Promise.all([
+					prismaService.$queryRaw<
+						Row[]
+					>(Prisma.sql`SELECT /*+ MAX_EXECUTION_TIME(5000) */ ct.customer_id AS customerId,
+			 COUNT(DISTINCT ct.id) AS contactCount, COUNT(m.id) AS allTimeMessageCount, MAX(m.sent_at) AS lastInteractionAt,
+			 SUM(CASE WHEN m.sent_at >= ${cutoff} THEN 1 ELSE 0 END) AS messageCount90d,
+			 COUNT(DISTINCT CASE WHEN m.sent_at >= ${cutoff} THEN DATE(m.sent_at) END) AS recentActiveDays90d,
+			 COUNT(DISTINCT CASE WHEN m.sent_at >= ${cutoff} THEN ct.id END) AS activeContactCount
+			 FROM contacts ct LEFT JOIN messages m ON m.contact_id=ct.id AND m.instance=ct.instance
+			 WHERE ct.instance=${instance} AND ct.is_deleted=0 AND ct.customer_id IN (${Prisma.join(needs)}) GROUP BY ct.customer_id`),
+					prismaService.$queryRaw<
+						Row[]
+					>(Prisma.sql`SELECT /*+ MAX_EXECUTION_TIME(5000) */ ct.customer_id AS customerId,
+			 COUNT(c.id) AS allTimeChatCount,
+			 SUM(CASE WHEN c.started_at >= ${cutoff} OR EXISTS(SELECT 1 FROM messages rm WHERE rm.instance=${instance} AND rm.chat_id=c.id AND rm.sent_at>=${cutoff}) THEN 1 ELSE 0 END) AS chatCount90d
+			 FROM contacts ct JOIN chats c ON c.contact_id=ct.id AND c.instance=ct.instance
+			 WHERE ct.instance=${instance} AND ct.is_deleted=0 AND ct.customer_id IN (${Prisma.join(needs)}) GROUP BY ct.customer_id`),
+					instancesService.executeQuery<Row[]>(
+						instance,
+						"SELECT /*+ MAX_EXECUTION_TIME(5000) */ CLIENTE AS customerId, COUNT(*) AS allTimePurchaseCount, SUM(CASE WHEN DATA>=? THEN 1 ELSE 0 END) AS purchaseCount12m, SUM(CASE WHEN DATA>=? THEN COALESCE(VALOR,0) ELSE 0 END) AS totalPurchaseValue12m, MAX(DATA) AS lastPurchaseAt FROM compras WHERE CLIENTE IN (?) GROUP BY CLIENTE",
+						[purchaseCutoff, purchaseCutoff, needs],
+						{ timeoutMs: 10000 }
+					),
+					instancesService.executeQuery<Row[]>(
+						instance,
+						"SELECT CODIGO AS customerId, DATACAD AS registeredAt FROM clientes WHERE CODIGO IN (?)",
+						[needs],
+						{ timeoutMs: 10000 }
+					)
+				])
+			: [[], [], [], []];
+		const index = (rows: Row[]) => new Map(rows.map((row) => [Number(row.customerId), row]));
+		const im = index(interactions),
+			cm = index(chats),
+			pm = index(purchases),
+			am = index(registrations);
+		const num = (row: Row | undefined, key: string) => Number(row?.[key] ?? 0);
+		const iso = (value: Row[string] | undefined) => {
+			const date = value ? new Date(value) : null;
+			return date && Number.isFinite(date.getTime()) ? date.toISOString() : null;
+		};
+		const virtual = <T>(
+			customerId: number,
+			tagType: string,
+			tagValue: string,
+			config: { label: string; color: string },
+			metadata: T
+		): CustomerProfileTagPayload<T> => ({
+			id: 0,
+			instance,
+			customerId,
+			tagType,
+			tagValue,
+			...config,
+			calculatedAt: now.toISOString(),
+			metadata
+		});
+		return ids.map((customerId) => {
+			const tags = byCustomer.get(customerId),
+				i = im.get(customerId),
+				c = cm.get(customerId),
+				p = pm.get(customerId);
+			const existingInteraction = tags?.get("INTERACTION_LEVEL"),
+				existingPurchase = tags?.get("PURCHASE_LEVEL"),
+				existingAge = tags?.get("CUSTOMER_AGE");
+			const registeredAt = iso(am.get(customerId)?.["registeredAt"]),
+				lastPurchaseAt = iso(p?.["lastPurchaseAt"]);
+			const interactionMetrics: CustomerInteractionTagMetrics = {
+				windowDays: 90,
+				contactCount: num(i, "contactCount"),
+				chatCount90d: num(c, "chatCount90d"),
+				messageCount90d: num(i, "messageCount90d"),
+				recentActiveDays90d: num(i, "recentActiveDays90d"),
+				lastInteractionAt: iso(i?.["lastInteractionAt"]),
+				allTimeMessageCount: num(i, "allTimeMessageCount"),
+				allTimeChatCount: num(c, "allTimeChatCount"),
+				activeContactCount: num(i, "activeContactCount"),
+				reasons: []
+			};
+			interactionMetrics.reasons = this.buildInteractionReasons(interactionMetrics);
+			const purchaseMetrics: CustomerPurchaseTagMetrics = {
+				windowMonths: 12,
+				allTimePurchaseCount: num(p, "allTimePurchaseCount"),
+				purchaseCount12m: num(p, "purchaseCount12m"),
+				totalPurchaseValue12m: num(p, "totalPurchaseValue12m"),
+				lastPurchaseAt,
+				daysSinceLastPurchase: lastPurchaseAt
+					? Math.max(0, Math.floor((now.getTime() - Date.parse(lastPurchaseAt)) / 86400000))
+					: null,
+				reasons: []
+			};
+			purchaseMetrics.reasons = this.buildPurchaseReasons(purchaseMetrics);
+			const ageMetrics: CustomerAgeTagMetrics = {
+				newCustomerWindowDays: 30,
+				registeredAt,
+				customerAgeDays: registeredAt
+					? Math.max(0, Math.floor((now.getTime() - Date.parse(registeredAt)) / 86400000))
+					: null,
+				customerAgeMonths: registeredAt ? this.calculateMonthDiff(new Date(registeredAt), now) : null,
+				reasons: []
+			};
+			ageMetrics.reasons = this.buildCustomerAgeReasons(ageMetrics);
+			const il = this.resolveInteractionLevel(interactionMetrics),
+				pl = this.resolvePurchaseLevel(purchaseMetrics),
+				al = this.resolveCustomerAgeLevel(ageMetrics);
+			const interaction =
+				existingInteraction &&
+				!this.shouldRefreshInteractionSnapshot(this.normalizePayload(existingInteraction))
+					? (this.normalizePayload(
+							existingInteraction
+						) as CustomerProfileTagPayload<CustomerInteractionTagMetrics>)
+					: virtual(customerId, INTERACTION_TAG_TYPE, il, INTERACTION_TAG_CONFIG[il], interactionMetrics);
+			const purchase = existingPurchase
+				? (this.normalizePayload(existingPurchase) as CustomerProfileTagPayload<CustomerPurchaseTagMetrics>)
+				: virtual(customerId, PURCHASE_TAG_TYPE, pl, PURCHASE_TAG_CONFIG[pl], purchaseMetrics);
+			const age =
+				existingAge && !this.shouldRefreshCustomerAgeSnapshot(this.normalizePayload(existingAge))
+					? (this.normalizePayload(existingAge) as CustomerProfileTagPayload<CustomerAgeTagMetrics>)
+					: virtual(customerId, AGE_TAG_TYPE, al, AGE_TAG_CONFIG[al], ageMetrics);
+			return this.buildResolvedProfileSummary(instance, customerId, interaction, purchase, age);
+		});
+	}
+
 	public async findCustomerIdsByProfileFilters(
 		instance: string,
 		filters: CustomerProfileSummaryFilters

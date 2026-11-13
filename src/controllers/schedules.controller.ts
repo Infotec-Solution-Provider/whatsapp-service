@@ -2,15 +2,26 @@ import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import schedulesService from "../services/schedules.service";
 import unifiedSchedulesService from "../services/unified-schedules.service";
-import { BadRequestError } from "@rgranatodutra/http-errors";
+import { BadRequestError, UnauthorizedError } from "@rgranatodutra/http-errors";
 import { CreateScheduleDTO } from "../sdk-local";
 import { UnifiedScheduleFilters } from "../types/unified-schedule.types";
+import protectedRead from "../middlewares/protected-read";
 interface SchedulesFilters {
 	userId?: string;
 	sectorId?: string;
 }
 class SchedulesController {
 	constructor(public readonly router: Router) {
+		this.router.get(
+			"/api/whatsapp/schedules/mine",
+			isAuthenticated,
+			(_req, res, next) => {
+				res.setHeader("Cache-Control", "private, no-store");
+				res.vary("Authorization");
+				next();
+			},
+			protectedRead("schedules.mine", async req => unifiedSchedulesService.getMySchedules(req.session, req.query))
+		);
 		this.router.get("/api/whatsapp/schedules/unified", isAuthenticated, this.getUnifiedSchedulesBySession);
 		this.router.get("/api/whatsapp/schedules", isAuthenticated, this.getSchedulesBySession);
 		this.router.post("/api/whatsapp/schedules", isAuthenticated, this.createSchedule);
@@ -27,6 +38,12 @@ class SchedulesController {
 
 	private async getSchedulesBySession(req: Request, res: Response) {
 		const { userId, sectorId } = req.query as SchedulesFilters;
+		if (req.session.role !== "ADMIN" && (
+			(userId !== undefined && Number(userId) !== req.session.userId) ||
+			(sectorId !== undefined && Number(sectorId) !== req.session.sectorId)
+		)) {
+			throw new UnauthorizedError("Você não pode consultar a agenda de outro operador ou setor.");
+		}
 		let filters = {};
 
 		if (userId && isNaN(Number(userId))) {
@@ -40,6 +57,7 @@ class SchedulesController {
 		} else {
 			filters = { ...filters, sectorId: Number(sectorId) };
 		}
+		if (req.session.role !== "ADMIN") filters = { userId: req.session.userId, sectorId: req.session.sectorId };
 
 		const data = await schedulesService.getSchedulesBySession(req.session, filters);
 

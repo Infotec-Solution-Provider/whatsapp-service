@@ -15,6 +15,11 @@ export interface UnifiedScheduleFilters extends CustomerProfileSummaryFilters {
 	repurchaseStatuses?: string;
 	userId?: string;
 	sectorId?: string;
+	search?: string;
+	period?: "all" | "overdue" | "today" | "next7" | "custom";
+	scheduledFrom?: string;
+	scheduledTo?: string;
+	sortOrder?: "asc" | "desc";
 }
 
 export interface UnifiedScheduleRepurchaseMetrics {
@@ -69,6 +74,8 @@ export interface UnifiedScheduleItem {
 		wppContactId?: number;
 		wppChatId?: number | null;
 		telephonyRecordId?: number;
+		commercialRestricted?: boolean;
+		enrichmentUnavailable?: boolean;
 	};
 }
 
@@ -81,4 +88,8 @@ export interface UnifiedSchedulesResponse {
 	};
 	pagination: UnifiedSchedulePagination;
 	filters: UnifiedScheduleFilterMetadata;
+	referenceAt?: string;
+	timeZone?: string;
+	warnings?: Array<{ code: string; message: string }>;
+	capabilities?: { channels: UnifiedScheduleChannel[]; commercial: boolean };
 }
