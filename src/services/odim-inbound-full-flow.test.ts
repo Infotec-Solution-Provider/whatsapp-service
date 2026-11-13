@@ -97,7 +97,9 @@ async function main() {
 		stub("./transfer-history.service", {});
 		stub("./whatsapp.service", { getProfilePictureUrl: async () => null });
 		stub("../bots/bots-registry", new Map());
-		stub("./odim-supervision-sharing.service", { odimSupervisionObservers: async () => [] }, true);
+		// Production has a separate sharing adapter; homolog implements sharing in its generic reader.
+		try { require.resolve("./odim-supervision-sharing.service"); stub("./odim-supervision-sharing.service", { odimSupervisionObservers: async () => [] }, true); }
+		catch (error) { if ((error as NodeJS.ErrnoException).code !== "MODULE_NOT_FOUND") throw error; }
 		stub("./functional-health-probe-registry.service", { handleOfficialInbound: async () => ({ handled: false }) });
 		stub("./message-reactions.service", { receiveWaba: async () => { reactions++; } });
 		stub("./waba-reaction-receipts.service", { WabaReactionReceiptsService: class {} }, true);
