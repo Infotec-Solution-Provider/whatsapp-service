@@ -19,6 +19,10 @@ import {
 import { readMonitorMessages, type MonitorHistoryInput } from "./monitor/monitor-history";
 import messagePresentationService from "./message-presentation.service";
 import { monitorChannelQuery } from "./monitor/monitor-channels";
+import { useOptimizedCentralMonitor } from "./monitor/optimized-access";
+import { readOptimizedCentralMonitorSearch } from "./monitor/optimized-search";
+import { readOptimizedCentralMonitorSummary } from "./monitor/optimized-summary";
+import { observeMonitorRead, monitorQueryStage } from "./monitor/optimized-observation";
 
 class MonitorService {
 	public async getMonitorChannels(session: SessionData, input: { page?: unknown; search?: unknown }) {
@@ -77,7 +81,11 @@ class MonitorService {
 
 	public async searchMonitorData(session: SessionData, input: MonitorSearchInput) {
 		const { context, request } = await this.context(session, input);
-		const { rows, ...page } = await monitorPage(this.execute(session), monitorSources(context), request);
+		const { rows, ...page } = useOptimizedCentralMonitor(context, tenantSqlEnabled())
+			? await observeMonitorRead(session.instance, "search", context.filters, measure =>
+				readOptimizedCentralMonitorSearch(context, request, (sql, ...params) =>
+					measure(monitorQueryStage(sql), () => this.execute(session)(false, { sql, params }))))
+			: await monitorPage(this.execute(session), monitorSources(context), request);
 		const items = rows.map(mapMonitorRow);
 		const internalIds = rows.filter((row) => row["category"] === "internal").map((row) => Number(row["id"]));
 		const clientIds = [
@@ -137,6 +145,12 @@ class MonitorService {
 
 	public async getMonitorSummary(session: SessionData, input: MonitorSearchInput) {
 		const { context } = await this.context(session, input, true);
+		if (useOptimizedCentralMonitor(context, tenantSqlEnabled())) {
+			return observeMonitorRead(session.instance, "summary", context.filters, measure =>
+				readOptimizedCentralMonitorSummary(context, (sql, ...params) =>
+					measure(sql.includes("AS unread") ? "closedUnread" : "summary", () =>
+						prismaService.$queryRawUnsafe<Array<Record<string, bigint | number | null>>>(sql, ...params))));
+		}
 		return monitorSummary(this.execute(session), monitorSources(context), context.slaMinutes);
 	}
 
