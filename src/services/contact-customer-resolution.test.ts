@@ -32,6 +32,7 @@ async function main() {
 	const query = buildContactCustomerResolutionQuery("5511987654321")!;
 	assert.ok(!query.sql.includes("5511987654321"), "phone values are parameters");
 	assert.match(query.sql, /clientes c.+UNION ALL.+contatos ct/);
+	assert.match(query.sql, /contatos ct INNER JOIN clientes owner ON owner.CODIGO=ct.CLIENTE/, "a contact cannot bind an orphan customer ID");
 	assert.match(query.sql, /^SELECT DISTINCT candidate.customer_id.+LIMIT 2$/);
 	assert.equal((query.sql.match(/LIMIT/g) || []).length, 1, "deduplicate identities before limiting candidates");
 	assert.equal((query.sql.match(/\?/g) || []).length, query.params.length);

@@ -44,7 +44,7 @@ export function buildContactCustomerResolutionQuery(phone: string | null): { sql
 	const customers = [1, 2, 3].map(index => pair(`c.AREA${index}`, `c.FONE${index}`));
 	const contacts = [["AREA_CEL", "CELULAR"], ["AREA_DIRETO", "FONE_DIRETO"], ["AREA_RESI", "FONE_RESIDENCIAL"]].map(([area, value]) => pair(`ct.${area}`, `ct.${value}`));
 	return {
-		sql: `SELECT DISTINCT candidate.customer_id FROM (SELECT c.CODIGO AS customer_id FROM clientes c WHERE c.CODIGO > 0 AND (${customers.join(" OR ")}) UNION ALL SELECT ct.CLIENTE AS customer_id FROM contatos ct WHERE ct.CLIENTE > 0 AND (${contacts.join(" OR ")})) candidate ORDER BY candidate.customer_id LIMIT 2`,
+		sql: `SELECT DISTINCT candidate.customer_id FROM (SELECT c.CODIGO AS customer_id FROM clientes c WHERE c.CODIGO > 0 AND (${customers.join(" OR ")}) UNION ALL SELECT ct.CLIENTE AS customer_id FROM contatos ct INNER JOIN clientes owner ON owner.CODIGO=ct.CLIENTE WHERE ct.CLIENTE > 0 AND (${contacts.join(" OR ")})) candidate ORDER BY candidate.customer_id LIMIT 2`,
 		params
 	};
 }

@@ -633,14 +633,14 @@ class ContactsService {
 		return contact;
 	}
 
-	public async syncContactStateToLocal(contact: WppContact, sectorIds?: number[], requireSync = false) {
-		await this.syncContactToLocal(contact, requireSync);
+	public async syncContactStateToLocal(contact: WppContact, sectorIds?: number[], requireSync = false, timeoutMs?: number) {
+		await this.syncContactToLocal(contact, requireSync, timeoutMs);
 		if (sectorIds) {
 			await this.syncContactSectorsToLocal(contact.id, contact.instance, sectorIds);
 		}
 	}
 
-	private async syncContactToLocal(contact: WppContact, requireSync = false) {
+	private async syncContactToLocal(contact: WppContact, requireSync = false, timeoutMs?: number) {
         if (tenantSqlEnabled()) return;
 		try {
 			const query = `
@@ -660,7 +660,7 @@ class ContactsService {
 				contact.phone,
 				contact.customerId,
 				contact.isDeleted
-			]);
+			], timeoutMs === undefined ? undefined : { timeoutMs });
 		} catch (error) {
 			console.error("[syncContactToLocal] Erro ao sincronizar contato:", error);
 			if (requireSync) throw new InternalServerError("CONTACT_CUSTOMER_SYNC_PENDING");

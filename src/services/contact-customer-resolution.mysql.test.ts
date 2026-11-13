@@ -25,11 +25,12 @@ async function main() {
 		await central.query("DELETE FROM contacts");
 		const lookup = async (phone: string) => { const built = buildContactCustomerResolutionQuery(phone)!; const [rows] = await crm.execute(built.sql, built.params); return rows as Array<{ customer_id: number }>; };
 		await crm.query("INSERT INTO clientes(CODIGO,AREA1,FONE1,AREA2,FONE2) VALUES (42,11,'(9) 8765-4321',11,'8765-4321'),(43,21,'2345-6789',NULL,NULL)");
+		await crm.query("INSERT INTO contatos(CODIGO,CLIENTE,AREA_CEL,CELULAR) VALUES(90,999,'11','98765-4321'),(91,998,'31','99999-9999')");
 		for (let i = 0; i < 20; i++) await crm.execute("INSERT INTO contatos(CODIGO,CLIENTE,AREA_CEL,CELULAR) VALUES(?,?,?,?)", [i + 1, 42, "11", "9 8765-4321"]);
 		assert.deepEqual(await lookup("551187654321"), [{ customer_id: 42 }], "many rows for one customer remain one identity across both sources");
 		await crm.query("INSERT INTO contatos(CODIGO,CLIENTE,AREA_RESI,FONE_RESIDENCIAL) VALUES(99,43,'11','98765-4321')");
 		assert.deepEqual(await lookup("5511987654321"), [{ customer_id: 42 }, { customer_id: 43 }], "second distinct identity is not hidden after duplicate contact rows");
-		assert.deepEqual(await lookup("5531999999999"), []);
+		assert.deepEqual(await lookup("5531999999999"), [], "orphan CRM contacts cannot create a customer link");
 		await crm.query("DELETE FROM contatos WHERE CODIGO=99");
 		await central.query("INSERT INTO contacts(id,instance,customer_id,phone,whatsapp_id,is_deleted,name) VALUES(8,'qa-tenant',NULL,'5511987654321','5511987654321',0,'Manual'),(9,'other-tenant',NULL,'5511987654321','5511987654321',0,'Other')");
 		const getContact = async (instance: string, id: number) => {
