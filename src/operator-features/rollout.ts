@@ -30,9 +30,11 @@ export function operatorFeatures(principal: FeaturePrincipal, readPolicy: () => 
   if (instance !== "odim") return { managed: false as const, instance, operatorId: principal.userId, features: { operator: null, telephony: null, crm: null, whatsapp: null }, revision: null };
   if (!Number.isSafeInteger(principal.userId) || principal.userId < 1) throw new OperatorFeatureError("OPERATOR_FEATURE_POLICY_UNAVAILABLE", 503);
   const policy = readPolicy(), allowed = policy.allowedOperatorIds.includes(principal.userId);
-  return { managed: true as const, instance, operatorId: principal.userId, features: { operator: allowed && policy.features.operator, telephony: allowed && policy.features.telephony, crm: allowed && policy.features.crm, whatsapp: allowed && policy.features.whatsapp }, revision: policy.revision };
+  return { managed: true as const, instance, operatorId: principal.userId, features: { operator: allowed && policy.features.operator, telephony: allowed && policy.features.telephony, crm: allowed && policy.features.crm, whatsapp: true }, revision: policy.revision };
 }
 export function assertOperatorFeature(principal: FeaturePrincipal, feature: OperatorFeature, readPolicy?: () => FeaturePolicy): void {
+  // Existing WhatsApp operations are outside the new telephony pilot.
+  if (feature === "whatsapp") return;
   const access = operatorFeatures(principal, readPolicy);
   if (access.managed && !access.features[feature]) throw new OperatorFeatureError();
 }
@@ -50,8 +52,7 @@ export function requiredWhatsAppFeature(method: string, requestPath: string): Op
   if (method.toUpperCase() === "POST" && (/^\/api\/whatsapp\/[^/]+\/messages\/?$/.test(requestPath) || ["/api/whatsapp/monitor/search", "/api/whatsapp/monitor/summary"].includes(requestPath))) return null;
   return "whatsapp";
 }
-export function whatsappEligibleIds(instance: string, ids: number[], readPolicy: () => FeaturePolicy = readOperatorFeaturePolicy): number[] {
-  if (tenant(instance) !== "odim") return ids;
-  const policy = readPolicy();
-  return ids.filter(id => policy.features.whatsapp && policy.allowedOperatorIds.includes(id));
+export function whatsappEligibleIds(_instance: string, ids: number[], _readPolicy: () => FeaturePolicy = readOperatorFeaturePolicy): number[] {
+  // Preserve the existing distribution; only new telephony capabilities are piloted.
+  return ids;
 }
