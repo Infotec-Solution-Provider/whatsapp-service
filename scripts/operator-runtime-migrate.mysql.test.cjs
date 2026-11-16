@@ -4,11 +4,12 @@ const mysql=require('mysql2/promise'),{PrismaClient}=require('@prisma/client');
 const {createMigration,metadata,parseSchema,sha,TABLES}=require('./operator-runtime-migrate.cjs');
 const sqlFile=process.env.OPERATOR_RUNTIME_SCHEMA_FILE||path.resolve(__dirname,'../src/operator-runtime/schema.sql');
 test('central migration and activation on isolated MySQL8',{skip:process.env.RUN_OPERATOR_RUNTIME_MIGRATION_MYSQL!=='1'},async t=>{
- const admin=await mysql.createConnection({host:'127.0.0.1',port:13480,user:'root'});
+ const mysqlPort=Number(process.env.OPERATOR_RUNTIME_MYSQL_PORT||13480);
+ const admin=await mysql.createConnection({host:'127.0.0.1',port:mysqlPort,user:'root'});
  const identity=(await admin.query('SELECT @@hostname AS hostname,@@port AS port'))[0][0],sql=fs.readFileSync(sqlFile,'utf8'),parsed=parseSchema(sql);
  const made=[],clients=[];let sequence=0;
  const databaseName=label=>'operator_runtime_cli_'+process.pid+'_'+Date.now()+'_'+(++sequence)+'_'+label;
- async function database(label){const name=databaseName(label);assert(/^operator_runtime_cli_[a-z0-9_]+$/.test(name));await admin.query('CREATE DATABASE `'+name+'` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');made.push(name);const db=new PrismaClient({datasources:{db:{url:'mysql://root@127.0.0.1:13480/'+name+'?connection_limit=2'}}});clients.push(db);return{name,db};}
+ async function database(label){const name=databaseName(label);assert(/^operator_runtime_cli_[a-z0-9_]+$/.test(name));await admin.query('CREATE DATABASE `'+name+'` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');made.push(name);const db=new PrismaClient({datasources:{db:{url:'mysql://root@127.0.0.1:'+mysqlPort+'/'+name+'?connection_limit=2'}}});clients.push(db);return{name,db};}
  const reference=await database('reference');for(const s of parsed)await reference.db.$executeRawUnsafe(s.sql);const expected=(await metadata(reference.db)).schema;
  async function fixture(label){const {name,db}=await database(label),control=fs.mkdtempSync(path.join(os.tmpdir(),'operator-runtime-cli-'));
   t.after(()=>{const resolved=path.resolve(control),tempRoot=path.resolve(os.tmpdir());assert(resolved.startsWith(tempRoot+path.sep)&&path.basename(resolved).startsWith('operator-runtime-cli-'));fs.rmSync(resolved,{recursive:true,force:true});});
