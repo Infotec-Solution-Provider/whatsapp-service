@@ -21,6 +21,8 @@ const REFS = {
 };
 const FEATURE = 'operator-feature-rollout.json', PROFILES = ['whatsapp', 'customers', 'users'];
 const AUDIT_SCRIPT_SHA = 'b09e545c7c6f8c59d4a23544537621da9938a517d876a6fb8862f05bf5d582a4';
+const RESTORATION_CONTROL = '/home/inpulse/odim-whatsapp-unblock-20261116';
+const RESTORATION_SCRIPT_SHA = '8400f5b3f12be9f2d4c727cf93d35a6d1e54ce9f5b1fc6679e69793dc5549ff7';
 const AMENDMENTS = [
   { control: 'connection-fix', manifest: 'backend-amendment.json', verification: 'backend-amendment-verification.json', scope: { instances: ['dist/services/tenant-database.service.js', 'dist/tenant-database/mysql-pool.js'] } },
   { control: 'connection-observability', manifest: 'backend-observability-amendment.json', verification: 'backend-observability-amendment-verification.json', scope: { instances: ['dist/tenant-database/mysql-pool.js'] } },
@@ -99,6 +101,7 @@ function createReadiness(options = {}) {
     const derived = JSON.parse(JSON.stringify(base)); derived.staticManifestHash = r.backendStatic.sha256; derived.featureCutover = { effectiveAt: cutover.effectiveAt, profileSha256: cutover.profileSha256 };
     for (const c of derived.components) if (PROFILES.includes(c.name)) { assert.equal(c.files[FEATURE], null); assert.equal(c.before[FEATURE], null); c.files[FEATURE] = cutover.profileSha256; }
     assert.deepEqual(effective, derived, 'READINESS_EFFECTIVE_LINKAGE');
+    assert.equal(review.whatsappPilot, false, 'READINESS_WHATSAPP_EXISTING_PERMISSIONS');
     const liveEffective = JSON.parse(JSON.stringify(effective)); let previousAmendmentSha = null;
     const backendPids = Object.fromEntries(effective.components.map(c => [c.app, verification.afterPids[c.app]]));
     for (const entry of amendments) {
@@ -146,6 +149,30 @@ function createReadiness(options = {}) {
       original(entry.reference.manifest, entry.location.control + '/backend-amendment.json'); original(entry.reference.verification, entry.location.control + '/receipts/verification.json');
       previousAmendmentSha = entry.reference.manifest.sha256;
     }
+    if (r.whatsappRestoration) {
+      assert.equal(amendments.length, 3, 'READINESS_RESTORATION_POSITION'); const refs = r.whatsappRestoration;
+      const release = pinned(plan, refs.manifest, 'whatsapp-restoration-release.json'), receipt = pinned(plan, refs.receipt, 'whatsapp-restoration-receipt.json'), audit = pinned(plan, refs.audit, 'whatsapp-restoration-audit.json');
+      pinnedBytes(plan, refs.auditScript, 'audit-whatsapp-restoration.cjs'); assert.equal(refs.auditScript.sha256, options.restorationScriptSha || RESTORATION_SCRIPT_SHA, 'READINESS_RESTORATION_SCRIPT');
+      const external = options.restorationControl || RESTORATION_CONTROL;
+      for (const [ref, name] of [[refs.manifest, 'release.json'], [refs.receipt, 'receipt.json']]) { const file = safe(external, name); regular(file); assert.equal(fileHash(file), ref.sha256, 'READINESS_RESTORATION_ORIGINAL'); }
+      assert(Array.isArray(release)); assert.deepEqual(release.map(row => row.app), ['whatsapp', 'users', 'customers'], 'READINESS_RESTORATION_SCOPE');
+      assert(receipt.status === 'installed' && receipt.livePolicyChecks === true, 'READINESS_RESTORATION_RECEIPT'); assert.deepEqual(receipt.components.map(row => row.app), release.map(row => row.app));
+      for (const row of release) {
+        const c = liveEffective.components.find(c => c.app === row.app), name = 'dist/operator-features/rollout.js';
+        assert.equal(row.path, path.join(c.live, name), 'READINESS_RESTORATION_PATH'); assert.equal(row.file, row.app + '.js'); assert.equal(row.port, { whatsapp: 8005, users: 8001, customers: 8002 }[row.app]);
+        assert.equal(row.before, c.files[name], 'READINESS_RESTORATION_BEFORE'); assert(/^[a-f0-9]{64}$/.test(row.after) && row.after !== row.before, 'READINESS_RESTORATION_AFTER'); assert.equal(receipt.components.find(item => item.app === row.app).sha256, row.after); c.files[name] = row.after;
+      }
+      assert(audit.version === 1 && audit.ok && audit.environmentContentsRead === false && audit.crmWrites === 0 && audit.providerCalls === 0 && audit.sipCalls === 0, 'READINESS_RESTORATION_AUDIT');
+      assert.equal(audit.restorationManifestSha256, refs.manifest.sha256); assert.equal(audit.restorationReceiptSha256, refs.receipt.sha256); assert.equal(audit.baseEffectiveManifestSha256, r.backendEffective.sha256); assert(Date.parse(audit.at) >= Date.parse(receipt.at), 'READINESS_RESTORATION_TIME');
+      assert.deepEqual(audit.amendments, amendments.map(a => ({ file: a.location.control + '/backend-amendment.json', sha256: a.reference.manifest.sha256 })), 'READINESS_RESTORATION_CHAIN'); assert.deepEqual(audit.components.map(c => c.component), effective.components.map(c => c.name));
+      for (const c of liveEffective.components) {
+        const row = audit.components.find(a => a.component === c.name), expected = { ...Object.fromEntries(Object.entries(c.before).filter(([, h]) => h !== null)), ...c.files, ...c.config };
+        assert(row.ok && row.inventoryMatches && row.environmentMatches && Array.isArray(row.differences) && row.differences.length === 0 && row.verifiedFiles === Object.keys(expected).length, 'READINESS_RESTORATION_BYTE_PINS');
+        assert(/^[1-9][0-9]*$/.test(String(row.pid)), 'READINESS_RESTORATION_PID');
+        if (c.name === 'instances') { assert.equal(String(row.pid), String(backendPids[c.app])); assert.deepEqual(row.capabilities, []); }
+        else { assert.notEqual(String(row.pid), String(backendPids[c.app]), 'READINESS_RESTORATION_RESTART_PID'); assert.deepEqual(row.capabilities, [1, 6, 32, 534, 535].map(id => ({ operatorId: id, features: { operator: id === 534, telephony: id === 534, crm: id === 534, whatsapp: true } })), 'READINESS_RESTORATION_CAPABILITIES'); backendPids[c.app] = row.pid; }
+      }
+    }
     original(r.cutover, 'receipts/cutover.json'); original(r.backendInstallState, 'receipts/install-state.json'); original(r.backendVerification, 'receipts/verification.json'); original(r.frontendManifest, 'frontend/release.json'); original(r.frontendInstallState, 'frontend/receipts/install-state.json');
     assert.equal(backend.phase, 'installed'); assert.equal(backend.staticManifestHash, r.backendStatic.sha256); assert.equal(backend.effectiveManifestHash, r.backendEffective.sha256); assert.deepEqual(backend.beforePids, base.baselinePids);
     assert(backend.cutover.stopRequested && backend.cutover.whatsappHealthy && backend.cutover.profilesReady, 'READINESS_CUTOVER_STATE'); assert.equal(backend.cutover.profileSha256, cutover.profileSha256); assert.equal(backend.cutover.effectiveAt, cutover.effectiveAt);
@@ -170,7 +197,8 @@ function createReadiness(options = {}) {
     for (const name of PROFILES) { const file = safe(targets[name].live, FEATURE); regular(file); assert.equal(fs.readFileSync(file, 'utf8'), cutover.profile, 'READINESS_IDENTICAL_PROFILE');
       const helperFile = safe(targets[name].live, 'dist/operator-features/rollout.js'); assert(effective.components.find(c => c.name === name).files['dist/operator-features/rollout.js'], 'READINESS_PINNED_HELPER');
       const helper = loadHelper(helperFile); assert.equal(typeof helper.operatorFeatures, 'function');
-      for (const [userId, role, allowed] of [[534, 'ATIVO', true], [535, 'ATIVO', false], [6, 'ADMIN', false]]) { const value = helper.operatorFeatures({ instance: 'odim', userId, role }); assert(value.managed && value.operatorId === userId && value.revision === cutover.profileSha256, 'READINESS_HELPER_PRINCIPAL'); assert.deepEqual(value.features, Object.fromEntries(Object.keys(profile.features).map(f => [f, allowed])), 'READINESS_HELPER_FEATURES'); }
+      for (const userId of [1, 6, 32, 534, 535]) { const role = userId === 6 ? 'ADMIN' : 'ATIVO', value = helper.operatorFeatures({ instance: 'odim', userId, role }); assert(value.managed && value.operatorId === userId && value.revision === cutover.profileSha256, 'READINESS_HELPER_PRINCIPAL'); assert.deepEqual(value.features, { operator: userId === 534, telephony: userId === 534, crm: userId === 534, whatsapp: true }, 'READINESS_HELPER_FEATURES'); assert.doesNotThrow(() => helper.assertOperatorFeature({ instance: 'odim', userId }, 'whatsapp', () => { throw Error('READINESS_WHATSAPP_PILOT_DEPENDENCY'); }), 'READINESS_WHATSAPP_EXISTING_PERMISSIONS'); }
+      if (name === 'whatsapp') assert.deepEqual(helper.whatsappEligibleIds('odim', [1, 6, 32, 534, 535], () => { throw Error('READINESS_WHATSAPP_PILOT_DEPENDENCY'); }), [1, 6, 32, 534, 535], 'READINESS_WHATSAPP_ELIGIBILITY');
       const other = helper.operatorFeatures({ instance: 'infotec', userId: 534, role: 'ADMIN' }); assert.equal(other.managed, false); assert.deepEqual(other.features, { operator: null, telephony: null, crm: null, whatsapp: null });
     }
     assert(crm.passed && crm.instance === 'odim' && crm.operatorId === 534 && crm.role === 'ATIVO' && crm.revision === cutover.profileSha256 && crm.transportLedgerReady === true && crm.reviewedTriggerCount === 5, 'READINESS_CRM_PREFLIGHT');
@@ -200,7 +228,7 @@ function createReadiness(options = {}) {
       const statusResponse = await command(534, 'status'), status = responseJson(statusResponse);
       if (!policy.enabled) { assert.equal(statusResponse.status, 503); assert.equal(status.code, 'OPERATOR_FEATURE_PILOT_PENDING'); }
       else { assert.equal(statusResponse.status, 200); assert(status.data?.enabled === true && status.data.authority === 'central-v1' && status.data.policyRevision === plan.review.sha256 && status.data.policyVersion === 4, 'READINESS_ACTIVE_REVIEW'); }
-      return { ok: true, observationsMayInitializeOperatorState: true, components: 6, profileSha256: cutover.profileSha256, policyEnabled: policy.enabled, privateHealth: true, normalTls: true, crmWrites: 0, providerCalls: 0, sipCalls: 0 };
+      return { ok: true, observationsMayInitializeOperatorState: true, whatsappExistingPermissionsPreserved: true, components: 6, profileSha256: cutover.profileSha256, policyEnabled: policy.enabled, privateHealth: true, normalTls: true, crmWrites: 0, providerCalls: 0, sipCalls: 0 };
     } finally { key.fill(0); }
   };
   return async function verifyReadiness(plan) {
@@ -213,4 +241,4 @@ function createReadiness(options = {}) {
   };
 }
 const verifyReadiness = createReadiness();
-module.exports = { verifyReadiness, createReadiness, readinessCode, CONTROL, TARGETS, APPS, REFS, AMENDMENTS, FEATURE, ORIGIN, AUDIT_SCRIPT_SHA };
+module.exports = { verifyReadiness, createReadiness, readinessCode, CONTROL, TARGETS, APPS, REFS, AMENDMENTS, FEATURE, ORIGIN, AUDIT_SCRIPT_SHA, RESTORATION_SCRIPT_SHA };

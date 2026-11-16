@@ -44,7 +44,7 @@ function fixture(t, overrides = {}) {
   const plan = { version: 1, environment: 'production', control, instance: 'odim', operatorId: 534, evidence: {}, readiness: { version: 1, root: control } };
   const pin = (field, doc) => { const file = REFS[field] || (field === 'backendAmendment' ? 'backend-amendment.json' : 'backend-amendment-verification.json'); docs[field] = doc; write(path.join(control, file), doc); const ref = { file, sha256: hash(path.join(control, file)) }; plan.readiness[field] = ref; plan.evidence[file] = ref.sha256; if (originals[field]) write(path.join(control, originals[field]), fs.readFileSync(path.join(control, file))); };
   for (const [field, doc] of Object.entries(docs)) pin(field, doc);
-  const review = { instance: 'odim', allowedOperatorIds: [534], commonProfileSha256: profileSha, features: profile.features }; write(path.join(control, 'review.json'), review); plan.review = { file: 'review.json', sha256: hash(path.join(control, 'review.json')) };
+  const review = { instance: 'odim', allowedOperatorIds: [534], commonProfileSha256: profileSha, features: profile.features, whatsappPilot: false }; write(path.join(control, 'review.json'), review); plan.review = { file: 'review.json', sha256: hash(path.join(control, 'review.json')) };
   const stat = fs.lstatSync(keyFile); plan.readiness.runtimeKeyMetadata = { dev: stat.dev, ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, uid: stat.uid, mode: stat.mode & 0o777 };
   const requests = [], helpers = [];
   const request = async (url, options = {}) => {
@@ -60,7 +60,7 @@ function fixture(t, overrides = {}) {
     if ([535, 6].includes(command.actorId)) return answer(403, { code: 'OPERATOR_FEATURE_PILOT_REQUIRED' });
     assert.equal(command.actorId, 534); return overrides.active ? answer(200, { data: { enabled: true, authority: 'central-v1', policyRevision: overrides.wrongReview ? 'f'.repeat(64) : plan.review.sha256, policyVersion: 4, settings: 0, sipReady: false } }) : answer(503, { code: 'OPERATOR_FEATURE_PILOT_PENDING' });
   };
-  const loadHelper = file => { helpers.push(file); return { operatorFeatures: p => { const managed = p.instance === 'odim'; return { managed, operatorId: p.userId, revision: managed ? profileSha : null, features: Object.fromEntries(Object.keys(profile.features).map(f => [f, managed ? p.userId === 534 || Boolean(overrides.adminBypass && p.role === 'ADMIN') : null])) }; } }; };
+  const loadHelper = file => { helpers.push(file); return { operatorFeatures: p => { const managed = p.instance === 'odim'; return { managed, operatorId: p.userId, revision: managed ? profileSha : null, features: Object.fromEntries(Object.keys(profile.features).map(f => [f, managed ? (f === 'whatsapp' && !overrides.blockWhatsApp) || p.userId === 534 || Boolean(overrides.adminBypass && p.role === 'ADMIN') : null])) }; }, assertOperatorFeature: () => {}, whatsappEligibleIds: (_instance, ids) => ids }; };
   const options = { control, targets, keyFile, owner: () => {}, snapshot: () => ({ ...current }), request, loadHelper, ...overrides };
   const amendments = [];
   let observed;
@@ -101,7 +101,20 @@ function fixture(t, overrides = {}) {
       ...(index ? { previousAmendmentSha256: plan.readiness.backendAmendments[index - 1].manifest.sha256 } : {}), ...(index === 2 && observed ? { observedRestartSha256: plan.readiness.backendObservedRestart.sha256 } : {}), baselinePids, components };
     amendments.push({ manifest: amendment, verification: { ok: true, configUnchanged: true, environmentMetadataUnchanged: true, nonTargetPidsUnchanged: true, baseEffectiveManifestSha256: plan.readiness.backendEffective.sha256, afterPids: { ...current }, health: Object.fromEntries(components.map(c => [c.name, 200])) } }); repinAmendment(index);
   }
-  return { root, control, targets, current, plan, docs, profileRaw, profileSha, requests, helpers, pin, amend, amendments, repinAmendment, observeRestart, repinObserved, options, run: () => createReadiness(options)(plan) };
+  let restoration;
+  function repinRestoration() {
+    const manifest = rawRef('whatsapp-restoration-release.json', restoration.release), receipt = rawRef('whatsapp-restoration-receipt.json', restoration.receipt);
+    restoration.audit.restorationManifestSha256 = manifest.sha256; restoration.audit.restorationReceiptSha256 = receipt.sha256;
+    plan.readiness.whatsappRestoration = { manifest, receipt, audit: rawRef('whatsapp-restoration-audit.json', restoration.audit), auditScript: rawRef('audit-whatsapp-restoration.cjs', restoration.script) };
+    write(path.join(options.restorationControl, 'release.json'), fs.readFileSync(path.join(control, manifest.file))); write(path.join(options.restorationControl, 'receipt.json'), fs.readFileSync(path.join(control, receipt.file)));
+  }
+  function restoreWhatsApp() {
+    assert.equal(amendments.length, 3); options.restorationControl = path.join(root, 'external-authorized-restoration');
+    const release = ['whatsapp', 'users', 'customers'].map(app => { const c = effective.components.find(c => c.app === app), name = 'dist/operator-features/rollout.js', before = c.files[name]; write(path.join(c.live, name), 'authorized restored helper ' + app); const after = hash(path.join(c.live, name)); current[app] = String(Number(current[app]) + 6000); return { app, path: path.join(c.live, name), before, after, file: app + '.js', port: { whatsapp: 8005, users: 8001, customers: 8002 }[app] }; });
+    const components = effective.components.map(c => { const expected = { ...Object.fromEntries(Object.entries(c.before).filter(([, h]) => h !== null)), ...c.files, ...c.config }; for (const entry of amendments) for (const patch of entry.manifest.components) if (patch.name === c.name) Object.assign(expected, patch.files); return { component: c.name, pid: current[c.app], capabilities: c.name === 'instances' ? [] : [1, 6, 32, 534, 535].map(id => ({ operatorId: id, features: { operator: id === 534, telephony: id === 534, crm: id === 534, whatsapp: true } })), verifiedFiles: Object.keys(expected).length, inventoryMatches: true, environmentMatches: true, differences: [], ok: true }; });
+    restoration = { release, receipt: { status: 'installed', at: '2026-11-16T10:04:00Z', livePolicyChecks: true, components: release.map(row => ({ app: row.app, sha256: row.after })) }, script: 'fixed restoration readonly audit fixture', audit: { version: 1, at: '2026-11-16T10:05:00Z', ok: true, baseEffectiveManifestSha256: plan.readiness.backendEffective.sha256, amendments: amendments.map((_, i) => ({ file: AMENDMENTS[i].control + '/backend-amendment.json', sha256: plan.readiness.backendAmendments[i].manifest.sha256 })), components, environmentContentsRead: false, crmWrites: 0, providerCalls: 0, sipCalls: 0 } }; options.restorationScriptSha = sha(restoration.script); repinRestoration(); return restoration;
+  }
+  return { root, control, targets, current, plan, docs, profileRaw, profileSha, requests, helpers, pin, amend, amendments, repinAmendment, observeRestart, repinObserved, restoreWhatsApp, repinRestoration, options, run: () => createReadiness(options)(plan) };
 }
 
 test('native read-only receipts and six live components pass with OFF/PILOT_PENDING; only four fresh public GETs', async t => {
@@ -165,4 +178,16 @@ test('audited orderly WA restart is accepted only between amendment2/3 with immu
     [o => { o.script = 'unreviewed arbitrary script'; }, /READINESS_OBSERVED_RESTART_SCRIPT/],
     [o => { o.receipt.component = 'users'; }, /READINESS_OBSERVED_RESTART_CONTRACT/],
   ]) { const g = fixture(t); g.amend(); g.amend(); const observed = g.observeRestart(); g.amend(); change(observed); g.repinObserved(); await assert.rejects(g.run(), expected); }
+});
+test('authorized external three-helper restoration preserves WhatsApp for all and only advances its three audited PIDs', async t => {
+  const f = fixture(t); f.amend(); f.amend(); f.observeRestart(); f.amend(); f.restoreWhatsApp(); const result = await f.run(); assert(result.ok && result.whatsappExistingPermissionsPreserved); assert.equal(f.current.instances, '3300'); assert.equal(f.current.whatsapp, '11304');
+});
+test('restoration refuses wrong before hashes, extra scope, blocked WhatsApp capabilities or unchanged audit links', async t => {
+  for (const [change, expected] of [
+    [r => { r.release[0].before = 'f'.repeat(64); }, /READINESS_RESTORATION_BEFORE/],
+    [r => { r.release.push({ ...r.release[0], app: 'instances' }); }, /READINESS_RESTORATION_SCOPE/],
+    [r => { r.audit.components[1].capabilities[0].features.whatsapp = false; }, /READINESS_RESTORATION_CAPABILITIES/],
+    [r => { r.script = 'unreviewed audit'; }, /READINESS_RESTORATION_SCRIPT/],
+  ]) { const f = fixture(t); f.amend(); f.amend(); f.amend(); const restored = f.restoreWhatsApp(); change(restored); f.repinRestoration(); await assert.rejects(f.run(), expected); }
+  const g = fixture(t, { blockWhatsApp: true }); g.amend(); g.amend(); g.amend(); g.restoreWhatsApp(); await assert.rejects(g.run(), /READINESS_HELPER_FEATURES/);
 });
