@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { BadRequestError, ConflictError, InternalServerError, NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
 import type { SessionData } from "../sdk-local";
 import type { SendTemplateData } from "./whatsapp.service";
+import { OperatorFeatureError } from "../operator-features/rollout";
 
 type Row = Record<string, any>;
 const key = "start_chats_only_for_loyal_operator";
@@ -312,6 +313,22 @@ test("normal message controller preserves HTTP 403", async (f, s) => {
 	const response = { locals: {}, status(code: number) { status = code; return this; }, send() {}, json() {} };
 	await (s.messagesController as any).sendMessage({ session, params: { clientId: "7" }, headers: {}, body: { to: "5511999990000", contactId: 42, text: "fixture" } }, response);
 	assert.equal(status, 403); assertNoEffects(f);
+});
+test("real message controller propagates typed pilot denial before generic legacy error handling", async (f, s) => {
+	for (const failure of [new OperatorFeatureError(), new OperatorFeatureError("OPERATOR_FEATURE_POLICY_UNAVAILABLE", 503)]) {
+		s.operator.submit = async () => { throw failure; };
+		const response = { locals: {}, status() { throw Error("must reach the common typed error handler"); } };
+		await assert.rejects((s.messagesController as any).sendMessage({ session, params: { clientId: "7" }, headers: { "idempotency-key": "pilot-fixture" }, body: { to: "5511999990000", contactId: 42, text: "fixture" } }, response), error => error === failure);
+	}
+	assertNoEffects(f);
+});
+test("real message controller returns an accepted UNKNOWN replay without another intent", async (f, s) => {
+	let status = 0, sent: Row | undefined;
+	const result = { message: { id: 200, status: "UNKNOWN" }, job: {}, created: false };
+	(s.operator as any).submit = async () => result;
+	const response = { locals: {}, setHeader() {}, status(code: number) { status = code; return this; }, send(value: Row) { sent = value; } };
+	await (s.messagesController as any).sendMessage({ session, params: { clientId: "7" }, headers: { "idempotency-key": "pilot-fixture" }, body: { to: "5511999990000", contactId: 42, text: "fixture" } }, response);
+	assert.equal(status, 200); assert.equal(sent?.["data"].status, "UNKNOWN"); assertNoEffects(f);
 });
 test("operator cannot claim another operator's chat through transfer and then send", async (f, s) => {
 	f.chats.push(chat({ userId: 99 }));

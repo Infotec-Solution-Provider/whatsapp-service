@@ -20,6 +20,7 @@ import ProcessingLogger from "../utils/processing-logger";
 import { MessageReactionError, positiveReactionId } from "../utils/message-reaction";
 import { isOdimAccessOnly } from "../utils/odim-access-only";
 import { sendOdimPilotMessage } from "../services/odim-pilot-send.service";
+import { OperatorFeatureError } from "../operator-features/rollout";
 
 class MessagesController {
 	constructor(public readonly router: Router) {
@@ -247,7 +248,7 @@ class MessagesController {
 				data: messagePresentationService.fromStored(message)
 			});
 		} catch (error) {
-			if (pauseAdmissionFailure(error)) throw error;
+			if (error instanceof OperatorFeatureError || pauseAdmissionFailure(error)) throw error;
 			process?.failed(sanitizeErrorMessage(error));
 			trace.error("request.failed", error, {
 				clientId: req.params["clientId"],
