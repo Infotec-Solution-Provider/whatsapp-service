@@ -490,6 +490,10 @@ class MessagesDistributionService {
 
 		try {
 			// 1. Busca ou cria contato
+			if (msg.wabaId && (msg.type === "thirdparty:meta" || msg.type === "system")) {
+				logger.success("Notificação técnica WABA: distribuição bloqueada sem atividade do cliente");
+				return msg;
+			}
 			logger.log("Buscando contato para a mensagem.");
 			const contact = await this.resolveMessageContact(instance, msg, contactName);
 			logger.log("Contato encontrado!", contact);

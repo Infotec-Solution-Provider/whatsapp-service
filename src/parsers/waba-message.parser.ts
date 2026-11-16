@@ -35,6 +35,7 @@ export default class WABAMessageParser {
 	): Promise<CreateMessageDto> {
 		try {
 			if (data.type === "reaction") throw new Error("WABA_REACTION_REQUIRES_METADATA_HANDLER");
+			if (data.type === "system") throw new Error("WABA_SYSTEM_REQUIRES_EVENT_HANDLER");
 			const timestampMs = this.normalizeTimestamp(data.timestamp);
 			const parsed: CreateMessageDto = {
 				instance,
@@ -96,11 +97,6 @@ export default class WABAMessageParser {
 				}
 				case "interactive": {
 					parsed.body = this.parseInteractiveBody(data);
-					break;
-				}
-				case "system": {
-					parsed.type = "thirdparty:meta";
-					parsed.body = data.system?.body || "";
 					break;
 				}
 				case "unsupported": {
