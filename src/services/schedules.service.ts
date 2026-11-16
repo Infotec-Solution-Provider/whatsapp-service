@@ -7,6 +7,7 @@ import instancesService from "./instances.service";
 import runIdleChatsJob from "../routines/idle-chats.routine";
 import runSchedulesJob from "../routines/schedules.routine";
 import localSyncService from "./local-sync.service";
+import { assertOperatorFeature, operatorFeatures, whatsappEligibleIds, OperatorFeatureError } from "../operator-features/rollout";
 
 interface ChatsFilters {
 	userId?: string;
@@ -93,6 +94,9 @@ class SchedulesService {
 	}
 
 	public async createSchedule(session: SessionData, data: CreateScheduleDTO) {
+		assertOperatorFeature(session, "whatsapp");
+		if (!whatsappEligibleIds(session.instance, [data.scheduledFor || session.userId]).length) throw new OperatorFeatureError();
+		if (operatorFeatures(session).managed && !await prismaService.wppContact.findFirst({ where: { id: data.contactId, instance: session.instance } })) throw new OperatorFeatureError();
 		const chat = await prismaService.wppChat.findFirst({
 			where: {
 				contactId: data.contactId,
@@ -143,8 +147,23 @@ class SchedulesService {
 		return schedules;
 	}
 
-	public async editSchedule(scheduleData: WppSchedule, scheduleId: number) {
-		const schedules = await prismaService.wppSchedule.update({
+	public async editSchedule(scheduleData: WppSchedule, scheduleId: number, session?: SessionData) {
+		if (session) assertOperatorFeature(session, "whatsapp");
+		const schedules = session && operatorFeatures(session).managed ? await prismaService.$transaction(async tx => {
+			const found = await tx.$queryRawUnsafe<Array<{ id: number }>>("SELECT id FROM schedules WHERE id=? AND instance=? FOR UPDATE", scheduleId, session.instance);
+			if (!found.length) throw new OperatorFeatureError();
+			const previous = await tx.wppSchedule.findUniqueOrThrow({ where: { id: scheduleId } });
+			// The durable acceptance timestamp/actor cannot be forged by an edit.
+			for (const key of ["id", "instance", "scheduledAt", "scheduledBy", "chatId"] as const) {
+				if (scheduleData[key] !== undefined && (key === "scheduledAt"
+					? new Date(scheduleData[key]).getTime() !== previous.scheduledAt.getTime()
+					: String(scheduleData[key]) !== String(previous[key]))) throw new OperatorFeatureError();
+			}
+			if (!whatsappEligibleIds(session.instance, [scheduleData.scheduledFor ?? previous.scheduledFor]).length) throw new OperatorFeatureError();
+			if (!await tx.wppContact.findFirst({ where: { id: scheduleData.contactId ?? previous.contactId, instance: session.instance } })) throw new OperatorFeatureError();
+			const { id: _id, instance: _instance, scheduledAt: _at, scheduledBy: _by, chatId: _chat, ...mutable } = scheduleData;
+			return tx.wppSchedule.update({ where: { id: scheduleId }, data: mutable });
+		}) : await prismaService.wppSchedule.update({
 			where: { id: scheduleId },
 			data: scheduleData
 		});
@@ -154,8 +173,13 @@ class SchedulesService {
 		return schedules;
 	}
 
-	public async deleteSchedule(scheduleId: number) {
-		const schedules = await prismaService.wppSchedule.delete({
+	public async deleteSchedule(scheduleId: number, session?: SessionData) {
+		if (session) assertOperatorFeature(session, "whatsapp");
+		const schedules = session && operatorFeatures(session).managed ? await prismaService.$transaction(async tx => {
+			const found = await tx.$queryRawUnsafe<Array<{ id: number }>>("SELECT id FROM schedules WHERE id=? AND instance=? FOR UPDATE", scheduleId, session.instance);
+			if (!found.length) throw new OperatorFeatureError();
+			return tx.wppSchedule.delete({ where: { id: scheduleId } });
+		}) : await prismaService.wppSchedule.delete({
 			where: { id: scheduleId }
 		});
 

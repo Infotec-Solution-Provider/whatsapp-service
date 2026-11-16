@@ -1,3 +1,4 @@
+import { readOperatorFeaturePolicy } from "../operator-features/rollout";
 /** Shared SQL authority. Never opens a connection, contacts CRM or sends to a provider. */
 export interface RuntimeTx {
 	$queryRawUnsafe<T = unknown>(sql: string, ...values: unknown[]): PromiseLike<T>;
@@ -13,6 +14,7 @@ export class OperatorRuntimeError extends Error {
 export const unavailable = (): never => { throw new OperatorRuntimeError("OPERATOR_AVAILABILITY_UNAVAILABLE", 503); };
 export interface CentralRuntimePolicy { revision: number; reviewSha256: string }
 export interface CentralOperatorState {
+	ignored?: boolean;
 	operatorId: number;
 	state: "available" | "pending" | "paused";
 	version: number;
@@ -87,7 +89,14 @@ export async function lockRuntimeAdmission(tx: RuntimeTx, instance: string, acto
 	if (!policy) return { enabled: false, policy, states };
 	if (actorIds.length > 200 || actorIds.some(id => !validActor(id))) return unavailable();
 	try {
+		const pilot = instance === "odim" ? readOperatorFeaturePolicy() : null;
 		for (const id of [...new Set(actorIds)].sort((a,b) => a-b)) {
+			if (pilot && (!pilot.features.operator || !pilot.allowedOperatorIds.includes(id))) {
+				states.set(id, { operatorId: id, ignored: true, state: "available", version: 0, unavailableSince: null,
+					activeCallId: null, pendingScheduleId: null, pendingCallId: null, pendingOperationId: null, pauseId: null,
+					reasonId: null, reasonName: null, reasonSnapshot: null });
+				continue;
+			}
 			await tx.$executeRawUnsafe("INSERT INTO operator_runtime_state(instance,operator_id) VALUES(?,?) ON DUPLICATE KEY UPDATE operator_id=VALUES(operator_id)", instance, id);
 			const rows = await tx.$queryRawUnsafe<RuntimeRow[]>("SELECT * FROM operator_runtime_state WHERE instance=? AND operator_id=? FOR UPDATE", instance, id);
 			if (!rows[0]) return unavailable();

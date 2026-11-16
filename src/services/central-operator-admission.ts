@@ -1,6 +1,7 @@
 import { canonicalRuntimeInstance, centralPolicyRequiresProfile, lockRuntimeAdmission, type RuntimeTx } from "../operator-runtime/core";
 import { isCentralRuntimeConfigured } from "../operator-runtime/config";
 import { pauseSendTargetMatches } from "../utils/operator-pause-peer";
+import { assertOperatorFeature, readOperatorFeaturePolicy, whatsappEligibleIds, OperatorFeatureError } from "../operator-features/rollout";
 
 export type PauseAdmissionTransaction = RuntimeTx;
 export interface ChatAssignmentAdmission {
@@ -8,7 +9,12 @@ export interface ChatAssignmentAdmission {
 	recipientId?: number | null | undefined;
 	/** Human initiating a new attendance, even when its destination is shared. */
 	initiatorId?: number;
+	humanActorId?: number;
 	chatId?: number;
+	/** Trusted schedule worker only; verified from its durable row in this transaction. */
+	acceptedScheduleId?: number;
+	contactId?: number;
+	sectorId?: number;
 }
 export interface HumanSendAdmission {
 	instance: string;
@@ -69,11 +75,14 @@ export class CentralOperatorAdmission {
 	async assert(tx: RuntimeTx, input: ChatAssignmentAdmission): Promise<void> {
 		try {
 			const scope = { ...input, instance: canonicalRuntimeInstance(input.instance) };
+			const rollout = scope.instance === "odim" ? readOperatorFeaturePolicy() : null;
+			if (scope.initiatorId !== undefined) assertOperatorFeature({ instance: scope.instance, userId: scope.initiatorId }, "whatsapp");
+			if (scope.humanActorId !== undefined) assertOperatorFeature({ instance: scope.instance, userId: scope.humanActorId }, "whatsapp");
 			if (scope.initiatorId !== undefined && !humanId(scope.initiatorId)) throw unavailable();
 			const target = recipientId(scope.recipientId);
 			const ids = [...new Set([target, scope.initiatorId].filter(humanId))].sort((a, b) => a - b);
 			const admission = await this.lock(tx, scope.instance, ids);
-			if (!admission.enabled) return;
+			if (!admission.enabled && !rollout) return;
 			// Policy -> sorted operators -> chat is also the pause/assignment lock order.
 			let previousId: number | null = null;
 			let wasOpen = false;
@@ -83,6 +92,19 @@ export class CentralOperatorAdmission {
 				previousId = previous["user_id"] == null ? null : Number(previous["user_id"]);
 				wasOpen = Number(previous["is_finished"]) === 0 && Number(previous["is_schedule"]) === 0 && previous["started_at"] != null;
 			}
+			if (rollout && humanId(target) && (!wasOpen || previousId !== target) && !whatsappEligibleIds(scope.instance, [target]).length) {
+				let grandfathered = false;
+				if (humanId(scope.acceptedScheduleId) && scope.humanActorId === undefined && scope.initiatorId === undefined) {
+					const row = (await tx.$queryRawUnsafe<Row[]>("SELECT scheduled_at,scheduled_by,scheduled_for,contact_id,sector_id,chat_id FROM schedules WHERE id=? AND instance=? AND schedule_date<=UTC_TIMESTAMP(3) FOR UPDATE", scope.acceptedScheduleId, scope.instance))[0];
+					const accepted = row?.["scheduled_at"] instanceof Date ? row["scheduled_at"].getTime() : Date.parse(String(row?.["scheduled_at"]).replace(" ", "T") + (/Z$|[+-]\d\d:\d\d$/.test(String(row?.["scheduled_at"])) ? "" : "Z"));
+					grandfathered = Boolean(row && row["chat_id"] == null && Number(row["contact_id"]) === scope.contactId && Number(row["sector_id"]) === scope.sectorId && (Number(row["scheduled_for"]) || Number(row["scheduled_by"])) === target && Number.isFinite(accepted) && accepted < Date.parse(rollout.effectiveAt));
+				}
+				if (!grandfathered) {
+					if (scope.humanActorId !== undefined || scope.initiatorId !== undefined) throw new OperatorFeatureError();
+					throw unavailable(); // Preserve automatic work for retry instead of assigning an ineligible operator.
+				}
+			}
+			if (!admission.enabled) return;
 			const required = new Set<number>();
 			if (humanId(scope.initiatorId)) required.add(scope.initiatorId);
 			if (humanId(target) && (!wasOpen || previousId !== target)) required.add(target);
@@ -92,11 +114,12 @@ export class CentralOperatorAdmission {
 				if (candidate.state === "pending" || candidate.state === "paused") throw new OperatorPauseAdmissionError("OPERATOR_PAUSED");
 				if (candidate.state !== "available") throw unavailable();
 			}
-		} catch (error) { throw pauseAdmissionFailure(error) ?? unavailable(); }
+		} catch (error) { if (error instanceof OperatorFeatureError) throw error; throw pauseAdmissionFailure(error) ?? unavailable(); }
 	}
 
 	/** Legacy providers run after this transaction; durable sends use their enqueue transaction. */
 	async assertSend(tx: RuntimeTx, input: HumanSendAdmission): Promise<void> {
+		assertOperatorFeature({ instance: input.instance, userId: input.actorId }, "whatsapp");
 		if (!humanId(input.actorId)) return;
 		try {
 			const scope = { ...input, instance: canonicalRuntimeInstance(input.instance) };
@@ -122,14 +145,14 @@ export class CentralOperatorAdmission {
 			const cutoff = millis(state.unavailableSince), started = millis(chat?.["started_at"]);
 			if (open && Number.isFinite(cutoff) && Number.isFinite(started) && started < cutoff) return;
 			throw new OperatorPauseAdmissionError("OPERATOR_PAUSED");
-		} catch (error) { throw pauseAdmissionFailure(error) ?? unavailable(); }
+		} catch (error) { if (error instanceof OperatorFeatureError) throw error; throw pauseAdmissionFailure(error) ?? unavailable(); }
 	}
 
 	/** Advisory only. Every writer repeats eligibility with the same state locks. */
 	async eligible(tx: RuntimeTx, rawInstance: string, ids: number[]): Promise<Set<number>> {
 		try {
 			const instance = canonicalRuntimeInstance(rawInstance);
-			const unique = [...new Set(ids.filter(humanId))].sort((a, b) => a - b), allowed = new Set<number>();
+			const unique = [...new Set(whatsappEligibleIds(instance, ids.filter(humanId)))].sort((a, b) => a - b), allowed = new Set<number>();
 			for (let offset = 0; offset < unique.length; offset += 200) {
 				const batch = unique.slice(offset, offset + 200), admission = await this.lock(tx, instance, batch);
 				if (!admission.enabled) return new Set(unique);

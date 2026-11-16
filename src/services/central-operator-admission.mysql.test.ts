@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createPool } from "mysql2/promise";
 import { PrismaClient } from "@prisma/client";
 import { CentralOperatorAdmission, pauseAdmissionFailure, type ChatAssignmentAdmission } from "./central-operator-admission";
 import { lockRuntimeAdmission } from "../operator-runtime/core";
 import type { OperatorOutboundEnqueueInput } from "./operator-outbound.types";
+import { operatorFeatureProfilePath, OperatorFeatureError } from "../operator-features/rollout";
 
 const barrier = () => { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve; }); return { promise, release }; };
 const tick = () => new Promise<void>(resolve => setTimeout(resolve, 60));
@@ -20,7 +21,7 @@ test("central MySQL8 Prisma: tenant isolation, rollback, concurrent pause, share
 	const gate = new CentralOperatorAdmission();
 	const config = require("../operator-runtime/config") as { isCentralRuntimeConfigured: (instance: string) => boolean };
 	const previousConfigured = config.isCentralRuntimeConfigured;
-	config.isCentralRuntimeConfigured = instance => ["alpha", "beta"].includes(instance);
+	config.isCentralRuntimeConfigured = instance => ["alpha", "beta", "odim"].includes(instance);
 	// Exercise the production wrappers with this isolated Prisma client, without bootstrapping the app.
 	const path = require.resolve("./prisma.service"), previous = require.cache[path];
 	require.cache[path] = { id: path, filename: path, loaded: true, exports: { __esModule: true, default: db } } as NodeModule;
@@ -34,6 +35,7 @@ test("central MySQL8 Prisma: tenant isolation, rollback, concurrent pause, share
 	}), input);
 	const paused = (error: unknown) => pauseAdmissionFailure(error)?.code === "OPERATOR_PAUSED";
 	const count = async (table: string) => Number((await pool.query<any[]>(`SELECT COUNT(*) AS n FROM ${table}`))[0][0].n);
+	let ownsProfile = false;
 	try {
 		for (const sql of readFileSync(join(__dirname, "../operator-runtime/schema.sql"), "utf8").replace(/^--.*$/gm, "").split(";").map(s => s.trim()).filter(Boolean)) await pool.query(sql);
 		await pool.query("CREATE TABLE chats(id INT PRIMARY KEY AUTO_INCREMENT,instance VARCHAR(191),contact_id INT NULL,user_id INT NULL,wallet_id INT NULL,bot_id INT NULL,agent_id INT NULL,result_id INT NULL,sector_id INT NULL,schedule_id INT NULL,type VARCHAR(20),priority VARCHAR(20) NOT NULL DEFAULT 'NORMAL',avatar_url TEXT NULL,is_finished TINYINT NOT NULL DEFAULT 0,started_at DATETIME(3) NULL,finished_at DATETIME(3) NULL,finished_by INT NULL,is_schedule TINYINT NOT NULL DEFAULT 0) ENGINE=InnoDB");
@@ -42,6 +44,10 @@ test("central MySQL8 Prisma: tenant isolation, rollback, concurrent pause, share
 		await pool.query("CREATE TABLE messages(id INT PRIMARY KEY AUTO_INCREMENT,instance VARCHAR(191),wwebjs_id VARCHAR(191) NULL,wwebjs_id_stanza VARCHAR(191) NULL,waba_id VARCHAR(191) NULL,gupshup_id VARCHAR(191) NULL,gupshup_request_id VARCHAR(191) NULL,`from` VARCHAR(191),`to` VARCHAR(191),type VARCHAR(191),quoted_id INT NULL,chat_id INT NULL,contact_id INT NULL,is_forwarded TINYINT NOT NULL DEFAULT 0,is_edited TINYINT NOT NULL DEFAULT 0,body TEXT,mention_metadata JSON NULL,timestamp VARCHAR(191),status_timestamp VARCHAR(191) NULL,sent_at DATETIME(3),status VARCHAR(30),file_id INT NULL,file_name VARCHAR(191) NULL,file_type VARCHAR(191) NULL,file_size VARCHAR(191) NULL,user_id INT NULL,agent_id INT NULL,billing_category VARCHAR(191) NULL,client_id INT NULL) ENGINE=InnoDB");
 		await pool.query("CREATE TABLE operator_outbound_send(id VARCHAR(191) PRIMARY KEY,instance VARCHAR(191),user_id INT,client_id INT,idempotency_key VARCHAR(191),payload_hash CHAR(64),payload JSON,message_id INT UNIQUE,delivery_mode VARCHAR(20),status VARCHAR(20) NOT NULL DEFAULT 'PENDING',remote_job_id VARCHAR(191) NULL,provider_outcome JSON NULL,notification_pending TINYINT NOT NULL DEFAULT 0,attempt_started_at DATETIME(3) NULL,attempt_count INT NOT NULL DEFAULT 0,next_attempt_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),locked_by VARCHAR(191) NULL,locked_until DATETIME(3) NULL,error TEXT NULL,created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),updated_at DATETIME(3) NOT NULL,completed_at DATETIME(3) NULL,UNIQUE KEY scope(instance,user_id,idempotency_key)) ENGINE=InnoDB");
 		await pool.query("INSERT INTO operator_runtime_policy(instance,enabled,revision,review_sha256) VALUES('alpha',1,1,?),('beta',1,2,?)", ["a".repeat(64), "b".repeat(64)]);
+		assert.equal(existsSync(operatorFeatureProfilePath), false, "never overwrite a local rollout profile");
+		writeFileSync(operatorFeatureProfilePath, JSON.stringify({ version: 1, instance: "odim", allowedOperatorIds: [534], effectiveAt: "2026-11-16T12:00:00.123Z", features: { operator: true, telephony: true, crm: true, whatsapp: true } }), { flag: "wx", mode: 0o600 }); ownsProfile = true;
+		await pool.query("INSERT INTO operator_runtime_policy(instance,enabled,revision,review_sha256) VALUES('odim',0,3,?)", ["c".repeat(64)]);
+		await pool.query("CREATE TABLE schedules(id INT PRIMARY KEY,instance VARCHAR(191),scheduled_at DATETIME(3),schedule_date DATETIME(3),scheduled_by INT,scheduled_for INT,contact_id INT,sector_id INT,chat_id INT NULL) ENGINE=InnoDB");
 		await pool.query("INSERT INTO operator_runtime_state(instance,operator_id,state,version) VALUES('alpha',7,'paused',1),('alpha',8,'available',0),('beta',7,'available',0)");
 		await pool.query("INSERT INTO contacts VALUES(1,'alpha','5551999999999','5551999999999'),(2,'beta','5551888888888','5551888888888')");
 		for (const state of ["paused", "pending"]) {
@@ -120,12 +126,47 @@ test("central MySQL8 Prisma: tenant isolation, rollback, concurrent pause, share
 		await assert.rejects(repository.enqueue({ ...input, idempotencyKey: "reject" }));
 		assert.equal(await count("operator_outbound_send"), 1); assert.equal(await count("messages"), 3);
 		await assign(12, scope(7, undefined, "gamma")); // Unlisted tenant with no policy retains legacy behavior.
+
+		// The human pilot is independent from pause-policy OFF. Writes and unread are atomic.
+		const odimScope = (recipientId: number, extra: Partial<ChatAssignmentAdmission> = {}) => ({ instance: "ODIM", recipientId, ...extra });
+		const pilotDenied = (e: unknown) => e instanceof OperatorFeatureError && e.status === 403;
+		await assert.rejects(assign(20, odimScope(-1, { initiatorId: 535 })), pilotDenied);
+		await assert.rejects(assign(20, odimScope(535, { humanActorId: 534 })), pilotDenied);
+		await assert.rejects(assign(20, odimScope(535)), e => pauseAdmissionFailure(e)?.status === 503);
+		await assign(20, odimScope(534, { initiatorId: 534 }));
+		assert.equal(Number((await pool.query<any[]>("SELECT COUNT(*) n FROM chats WHERE id=20 AND user_id=534"))[0][0].n), 1);
+		assert.equal(Number((await pool.query<any[]>("SELECT COUNT(*) n FROM chat_user_preferences WHERE chat_id=20 AND user_id=534"))[0][0].n), 1);
+		await pool.query("UPDATE operator_runtime_policy SET enabled=1,revision=4 WHERE instance='odim'");
+		await pool.query("INSERT INTO operator_runtime_state(instance,operator_id,state,version) VALUES('odim',535,'paused',9)");
+		const ignored = await db.$transaction(tx => lockRuntimeAdmission(tx, "OdIm", [535, 534]));
+		assert.equal(ignored.states.get(535)?.ignored, true); assert.equal(ignored.states.get(535)?.state, "available");
+		assert.equal(Number((await pool.query<any[]>("SELECT version FROM operator_runtime_state WHERE instance='odim' AND operator_id=535"))[0][0].version), 9);
+		assert.deepEqual([...await db.$transaction(tx => gate.eligible(tx, "odim", [535, 534, 1]))], [534]);
+		await pool.query("UPDATE operator_runtime_state SET state='paused',version=1,unavailable_since=UTC_TIMESTAMP(3) WHERE instance='odim' AND operator_id=534");
+		await assert.rejects(assign(21, odimScope(534)), paused);
+		assert.equal(Number((await pool.query<any[]>("SELECT COUNT(*) n FROM chats WHERE id=21"))[0][0].n), 0);
+		// An old durable schedule is preserved; a new or tampered target remains queued.
+		await pool.query("INSERT INTO schedules VALUES(1,'odim','2026-11-16 12:00:00.122','2026-11-16',535,535,1,9,NULL),(2,'odim','2026-11-16 12:00:00.123','2026-11-16',535,535,1,9,NULL),(3,'odim','2026-11-16 12:00:00.122','2099-01-01',535,535,1,9,NULL)");
+		await assign(22, odimScope(535, { acceptedScheduleId: 1, contactId: 1, sectorId: 9 }));
+		for (const extra of [{ acceptedScheduleId: 2, contactId: 1, sectorId: 9 }, { acceptedScheduleId: 3, contactId: 1, sectorId: 9 }, { acceptedScheduleId: 1, contactId: 2, sectorId: 9 }, { acceptedScheduleId: 1, contactId: 1, sectorId: 8 }]) {
+			await assert.rejects(assign(23, odimScope(535, extra)), e => pauseAdmissionFailure(e)?.status === 503);
+		}
+		// Persisted SENT/UNKNOWN receipts replay without re-enqueue/provider attempts after cutoff.
+		for (const status of ["SENT", "UNKNOWN"] as const) {
+			const priorInput = { ...input, instance: "odim", userId: 535, idempotencyKey: `old-${status}`, message: { ...input.message, instance: "odim" } };
+			await db.operatorOutboundSend.create({ data: { instance: "odim", userId: 535, clientId: input.clientId, idempotencyKey: priorInput.idempotencyKey, payloadHash: priorInput.payloadHash, payload: {}, deliveryMode: "DIRECT", status,
+				message: { create: { ...priorInput.message, userId: 535 } } } });
+			const replay = await repository.enqueue(priorInput); assert.equal(replay.created, false); assert.equal(replay.job.status, status);
+			await assert.rejects(repository.enqueue({ ...priorInput, idempotencyKey: `new-${status}` }), pilotDenied);
+		}
+		assert.equal(Number((await pool.query<any[]>("SELECT COUNT(*) n FROM chats WHERE id=23"))[0][0].n), 0);
 		config.isCentralRuntimeConfigured = () => false;
 		await assert.rejects(assign(13, scope(8, undefined, "ALPHA")), error => pauseAdmissionFailure(error)?.status === 503);
 		config.isCentralRuntimeConfigured = instance => ["alpha", "beta"].includes(instance);
 		await pool.query("DROP TABLE operator_runtime_state");
 		await assert.rejects(assign(11, scope(8)), error => pauseAdmissionFailure(error)?.status === 503);
 	} finally {
+		if (ownsProfile) unlinkSync(operatorFeatureProfilePath);
 		config.isCentralRuntimeConfigured = previousConfigured;
 		await db.$disconnect(); await pool.end(); await admin.query(`DROP DATABASE \`${name}\``); await admin.end();
 	}

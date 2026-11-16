@@ -15,7 +15,7 @@ export async function reconcilePhoneFinishes(database:RuntimeDb,dependencies:Rec
   if(!profile.customersApiUrl)throw Error("OPERATOR_RUNTIME_NOT_CONFIGURED");
   for(const instance of profile.instances){
     if(dependencies.shouldStop?.())return;
-    const due=await runCentralRuntime(database,instance,{operation:"operator.runtime",actorId:1,action:"finish.due",input:{}}) as {intents:RuntimeRow[]};
+    const due=await runCentralRuntime(database,instance,{operation:"operator.runtime",actorId:1,action:"finish.due",input:{}},{trustedReconciliation:true}) as {intents:RuntimeRow[]};
     for(const intent of due.intents){
       if(dependencies.shouldStop?.())return;
       const proof=JSON.parse(String(intent["snapshot_json"])) as RuntimeRow,expected=JSON.parse(String(intent["expected_json"])) as RuntimeRow,actorId=Number(intent["operator_id"]),operationId=String(intent["id"]);
@@ -28,7 +28,7 @@ export async function reconcilePhoneFinishes(database:RuntimeDb,dependencies:Rec
         if(response.ok&&result.data&&["VERIFIED","UNKNOWN"].includes(String(result.data["outcome"])))observation=result.data;
       }catch{/* Preserve uncertainty and schedule another read, never another mutation. */}
       if(dependencies.shouldStop?.())return;
-      await runCentralRuntime(database,instance,{operation:"operator.runtime",actorId,action:"finish.verify",input:{operationId,expectedHash:digest(expected["crm"]),proof:{...observation,scheduleId:Number(intent["schedule_id"]),operatorId:actorId}}});
+      await runCentralRuntime(database,instance,{operation:"operator.runtime",actorId,action:"finish.verify",input:{operationId,expectedHash:digest(expected["crm"]),proof:{...observation,scheduleId:Number(intent["schedule_id"]),operatorId:actorId}}},{trustedReconciliation:true});
     }
   }
 }

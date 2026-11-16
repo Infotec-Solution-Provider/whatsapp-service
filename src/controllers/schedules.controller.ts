@@ -96,7 +96,7 @@ class SchedulesController {
 
 		let scheduleData = formData as WppSchedule;
 
-		const result = await schedulesService.editSchedule(scheduleData, +id);
+		const result = await schedulesService.editSchedule(scheduleData, +id, req.session);
 
 		res.status(200).send({
 			message: "Schedule patched successfully!",
@@ -111,7 +111,7 @@ class SchedulesController {
 			throw new BadRequestError("Message ID is required!");
 		}
 
-		const result = await schedulesService.deleteSchedule(+id);
+		const result = await schedulesService.deleteSchedule(+id, req.session);
 
 		res.status(200).send({
 			message: "Schedule deleted successfully!",

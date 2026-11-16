@@ -5,6 +5,7 @@ import { ChatPayload } from "../message-flow/base/base.step";
 import messagesDistributionService from "../services/messages-distribution.service";
 import prismaService from "../services/prisma.service";
 import ProcessingLogger from "../utils/processing-logger";
+import { guardOdimFlowMutation } from "../middlewares/operator-feature-flow.middleware";
 
 interface FlowExecutionRequest {
   instance: string;
@@ -29,7 +30,7 @@ class FlowExecutionController {
 
   private setupRoutes() {
     // Executar flow para um contato
-    this.router.post("/api/whatsapp/flow-execution/execute", this.executeFlow.bind(this));
+    this.router.post("/api/whatsapp/flow-execution/execute", guardOdimFlowMutation("execution"), this.executeFlow.bind(this));
   }
 
   private async executeFlow(req: Request, res: Response): Promise<Response> {

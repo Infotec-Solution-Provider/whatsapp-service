@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { canonicalRuntimeInstance, centralPolicyRequiresProfile, lockRuntimeAdmission, readRuntimePolicy, OperatorRuntimeError, type CentralOperatorState, type CentralRuntimePolicy, type RuntimeDb, type RuntimeRow, type RuntimeTx } from "./core";
 import { boundedText, invalid, iso, positive, uuid, type CentralCommand } from "./contract";
 import { centralRuntimeMetrics } from "./metrics";
+import { assertOperatorFeature, operatorFeatures, OperatorFeatureError } from "../operator-features/rollout";
 
 const fail = (code: string): never => { throw new OperatorRuntimeError("OPERATOR_RUNTIME_"+code); };
 const canonical = (value: unknown): string => value && typeof value === "object" ? Array.isArray(value) ? `[${value.map(canonical).join(",")}]` : `{${Object.keys(value).sort().map(k=>JSON.stringify(k)+":"+canonical((value as RuntimeRow)[k])).join(",")}}` : JSON.stringify(value);
@@ -72,15 +73,22 @@ function finishView(id: string, row?: RuntimeRow) {
 function jsonObject(value: unknown): RuntimeRow {
 	if(!value||typeof value!=="object"||Array.isArray(value)||Buffer.byteLength(JSON.stringify(value))>32768)return invalid();return value as RuntimeRow;
 }
-export async function executeCentralRuntime(tx: RuntimeTx, instance: string, command: CentralCommand): Promise<unknown> {
+export async function executeCentralRuntime(tx: RuntimeTx, instance: string, command: CentralCommand, context: { trustedReconciliation?: boolean } = {}): Promise<unknown> {
 	instance=canonicalRuntimeInstance(instance);
+	// Signed internal activation probes must observe the actual OFF policy.
 	if(command.action==="policy")return{authority:"central-v1",enabled:await centralPolicyRequiresProfile(tx,instance)};
+	if (!(context.trustedReconciliation && ["finish.due", "finish.verify"].includes(command.action))) {
+		assertOperatorFeature({ instance, userId: command.actorId }, ["policy", "status", "pause", "session", "metrics"].includes(command.action) ? "operator" : "telephony");
+	}
 	if(command.action==="finish.due"){
 		if(!await readRuntimePolicy(tx,instance))return{intents:[]};
 		return{intents:await rows(tx,"SELECT id,operator_id,schedule_id,call_id,snapshot_json,expected_json FROM operator_runtime_phone_intents WHERE instance=? AND kind='legacy_finish' AND status IN ('pending','unknown') AND next_attempt_at<=UTC_TIMESTAMP(3) ORDER BY next_attempt_at,id LIMIT 50",instance)};
 	}
 	const {actorId,action,input}=command,locked=await lockRuntimeAdmission(tx,instance,[actorId]);
-	if(!locked.enabled){if(action==="status")return disabledState();return fail("DISABLED");}
+	if(!locked.enabled){
+		if(operatorFeatures({instance,userId:actorId}).managed)throw new OperatorFeatureError("OPERATOR_FEATURE_PILOT_PENDING",503);
+		if(action==="status")return disabledState();return fail("DISABLED");
+	}
 	const policy=locked.policy!,s=locked.states.get(actorId)!;
 	if(action==="status")return stateView(tx,instance,actorId,policy);
 	if(action==="metrics")return centralRuntimeMetrics(tx,instance,actorId,input);
@@ -214,6 +222,6 @@ export async function executeCentralRuntime(tx: RuntimeTx, instance: string, com
 	}
 	return fail("INVALID_REQUEST");
 }
-export async function runCentralRuntime(database: RuntimeDb, instance: string, command: CentralCommand) {
-	return database.$transaction(tx=>executeCentralRuntime(tx,instance,command));
+export async function runCentralRuntime(database: RuntimeDb, instance: string, command: CentralCommand, context: { trustedReconciliation?: boolean } = {}) {
+	return database.$transaction(tx=>executeCentralRuntime(tx,instance,command,context));
 }

@@ -1,5 +1,6 @@
 import { Request, Response, Router } from "express";
 import messageFlowsService from "../services/message-flows.service";
+import { guardOdimFlowMutation } from "../middlewares/operator-feature-flow.middleware";
 
 class MessageFlowsController {
 	public readonly router: Router;
@@ -23,31 +24,31 @@ class MessageFlowsController {
 		);
 
 		// Criar novo fluxo
-		this.router.post("/api/message-flows", this.createFlow.bind(this));
+		this.router.post("/api/message-flows", guardOdimFlowMutation("flow"), this.createFlow.bind(this));
 
 		// Atualizar fluxo
-		this.router.put("/api/message-flows/:id", this.updateFlow.bind(this));
+		this.router.put("/api/message-flows/:id", guardOdimFlowMutation("flow"), this.updateFlow.bind(this));
 
 		// Deletar fluxo
-		this.router.delete("/api/message-flows/:id", this.deleteFlow.bind(this));
+		this.router.delete("/api/message-flows/:id", guardOdimFlowMutation("flow"), this.deleteFlow.bind(this));
 
 		// Validar fluxo
 		this.router.get("/api/message-flows/:id/validate", this.validateFlow.bind(this));
 
 		// Duplicar fluxo
-		this.router.post("/api/message-flows/:id/duplicate", this.duplicateFlow.bind(this));
+		this.router.post("/api/message-flows/:id/duplicate", guardOdimFlowMutation("flow"), this.duplicateFlow.bind(this));
 
 		// Adicionar step ao fluxo
-		this.router.post("/api/message-flows/:id/steps", this.createStep.bind(this));
+		this.router.post("/api/message-flows/:id/steps", guardOdimFlowMutation("flow"), this.createStep.bind(this));
 
 		// Atualizar step
-		this.router.put("/api/message-flows/steps/:stepId", this.updateStep.bind(this));
+		this.router.put("/api/message-flows/steps/:stepId", guardOdimFlowMutation("step"), this.updateStep.bind(this));
 
 		// Deletar step
-		this.router.delete("/api/message-flows/steps/:stepId", this.deleteStep.bind(this));
+		this.router.delete("/api/message-flows/steps/:stepId", guardOdimFlowMutation("step"), this.deleteStep.bind(this));
 
 		// Reordenar steps
-		this.router.post("/api/message-flows/:id/reorder", this.reorderSteps.bind(this));
+		this.router.post("/api/message-flows/:id/reorder", guardOdimFlowMutation("flow"), this.reorderSteps.bind(this));
 
 		// Listar tipos de steps disponíveis
 		this.router.get("/api/message-flows/meta/step-types", this.getStepTypes.bind(this));

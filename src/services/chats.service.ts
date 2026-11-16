@@ -58,6 +58,7 @@ interface ChatsFilters {
 
 
 interface SystemStartNewChatProps {
+	acceptedScheduleId?: number;
 	instance: string;
 	contact: WppContact;
 	systemMessage?: string;
@@ -738,7 +739,7 @@ class ChatsService {
 		} else {
 			return tx.wppChat.update({ where: { id }, data: { userId } });
 		}
-		}, { instance, recipientId: userId, chatId: id });
+		}, { instance, recipientId: userId, chatId: id, humanActorId: session.userId });
 
 		await this.syncChatToLocal(chat);
 		await transferHistoryService.recordTransfer({
@@ -1402,6 +1403,7 @@ class ChatsService {
 	}
 
 	public async systemStartNewChat({
+		acceptedScheduleId,
 		instance,
 		sectorId,
 		userId,
@@ -1443,7 +1445,7 @@ class ChatsService {
 						}
 					}
 				}
-			}), { instance, recipientId: userId });
+			}), { instance, recipientId: userId, ...(acceptedScheduleId === undefined ? {} : { acceptedScheduleId, contactId: contact.id, ...(sectorId == null ? {} : { sectorId }) }) });
 			process.log(`Chat created with ID ${newChat.id}`);
 
 			await this.syncChatToLocal(newChat);

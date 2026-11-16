@@ -2,14 +2,17 @@ import prismaService from "./prisma.service";
 import { centralAdmissionRequired, operatorPauseAdmission } from "./central-operator-admission";
 import { canonicalRuntimeInstance } from "../operator-runtime/core";
 import type { SessionData } from "../sdk-local";
+import { assertOperatorFeature, whatsappEligibleIds } from "../operator-features/rollout";
 
 export async function pauseEligibleOperatorIds(instance: string, ids: number[]): Promise<Set<number>> {
 	instance = canonicalRuntimeInstance(instance);
+	ids = whatsappEligibleIds(instance, ids);
 	if (!await centralAdmissionRequired(prismaService, instance)) return new Set(ids);
 	return prismaService.$transaction(tx => operatorPauseAdmission.eligible(tx, instance, ids));
 }
 
 export async function admitHumanSend(session: Pick<SessionData, "instance" | "userId">, chatId?: unknown, contactId?: unknown, to?: unknown): Promise<void> {
+	assertOperatorFeature(session, "whatsapp");
 	if (session.userId <= 0) return;
 	const instance = canonicalRuntimeInstance(session.instance);
 	if (!await centralAdmissionRequired(prismaService, instance)) return;

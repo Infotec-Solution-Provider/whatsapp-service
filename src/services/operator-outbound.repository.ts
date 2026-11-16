@@ -2,6 +2,7 @@ import { Prisma, WppMessage } from "@prisma/client";
 import prismaService, { type DatabaseClient } from "./prisma.service";
 import { assertOdimChannelAllowed, odimQueueWhere } from "../utils/odim-access-only";
 import { centralAdmissionRequired, operatorPauseAdmission } from "./central-operator-admission";
+import { assertOperatorFeature } from "../operator-features/rollout";
 import {
 	assertOperatorOutboundReplay,
 	OperatorOutboundDeliveryResult,
@@ -50,6 +51,7 @@ export default class PrismaOperatorOutboundRepository implements OperatorOutboun
 			assertOperatorOutboundReplay(existing.job, input);
 			return { ...existing, created: false };
 		}
+		assertOperatorFeature({ instance: input.instance, userId: input.userId }, "whatsapp");
 		try {
 			const create = (db: Pick<DatabaseClient, "operatorOutboundSend">) => db.operatorOutboundSend.create({
 				data: {

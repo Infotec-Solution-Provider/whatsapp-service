@@ -4,6 +4,7 @@ import { canonicalRuntimeInstance, OperatorRuntimeError, type RuntimeDb } from "
 import { parseCommand } from "./contract";
 import { readRuntimeConfig, readRuntimeKey, type OperatorRuntimeConfig } from "./config";
 import { runCentralRuntime } from "./engine";
+import { OperatorFeatureError } from "../operator-features/rollout";
 
 export function createOperatorRuntimeRouter(database: RuntimeDb, readConfig:()=>OperatorRuntimeConfig=readRuntimeConfig, readKey:(config:OperatorRuntimeConfig)=>Buffer=readRuntimeKey) {
 	const router=Router(),nonces=new Map<string,number>();let active=0;
@@ -38,7 +39,7 @@ export function createOperatorRuntimeRouter(database: RuntimeDb, readConfig:()=>
 			try{return res.json({data:await runCentralRuntime(database,instance,command)});}
 			finally{active--;}
 		}catch(error){
-			if(error instanceof OperatorRuntimeError)return reject(error.status,error.code);
+			if(error instanceof OperatorRuntimeError || error instanceof OperatorFeatureError)return reject(error.status,error.code);
 			// Untyped transaction/connection failures can happen after COMMIT. Never claim rollback.
 			return reject(503,authenticated?"OPERATOR_RUNTIME_QUERY_FAILED":"OPERATOR_RUNTIME_NOT_CONFIGURED",authenticated?"UNKNOWN":"NOT_COMMITTED");
 		}

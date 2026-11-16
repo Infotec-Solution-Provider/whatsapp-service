@@ -56,6 +56,7 @@ import processLogs from "./logs/service";
 import { startOpsAlerts, stopOpsAlerts } from "./services/ops-alerts";
 import database from "./services/prisma.service";
 import { pauseAdmissionFailure } from "./services/central-operator-admission";
+import { OperatorFeatureError } from "./operator-features/rollout";
 import { readRuntimeConfig, readRuntimeKey } from "./operator-runtime/config";
 import { createOperatorRuntimeRouter } from "./operator-runtime/router";
 import { startOperatorRuntimeReconciliation } from "./operator-runtime/reconcile";
@@ -147,6 +148,10 @@ app.get("/flows", (_req, res) => {
 });
 
 app.use((err: Error, req: Request, _res: Response, next: NextFunction) => {
+	if (err instanceof OperatorFeatureError) {
+		_res.status(err.status).json({ code: err.code, message: err.message, outcome: err.outcome });
+		return;
+	}
 	const admission = pauseAdmissionFailure(err);
 	if (admission) {
 		_res.status(admission.status).json({ code: admission.code, message: admission.message, outcome: admission.outcome });

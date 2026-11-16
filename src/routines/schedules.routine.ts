@@ -66,6 +66,7 @@ async function getChatForSchedule(process: ProcessingLogger, schedule: WppSchedu
 		}
 		process.log("Not any chat open, creating a new one.");
 		const newChat = await chatsService.systemStartNewChat({
+			acceptedScheduleId: schedule.id,
 			instance: schedule.instance,
 			sectorId: schedule.sectorId!,
 			userId: schedule.scheduledFor || schedule.scheduledBy,
