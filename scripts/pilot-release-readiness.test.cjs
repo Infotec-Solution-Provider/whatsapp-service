@@ -1,6 +1,6 @@
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict'), fs = require('node:fs'), os = require('node:os'), path = require('node:path'), crypto = require('node:crypto');
-const { createReadiness, APPS, REFS, ORIGIN, FEATURE } = require('./pilot-release-readiness.cjs');
+const { createReadiness, readinessCode, APPS, REFS, AMENDMENTS, ORIGIN, FEATURE } = require('./pilot-release-readiness.cjs');
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const write = (file, value) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value, null, 2)); };
 const hash = file => sha(fs.readFileSync(file));
@@ -18,7 +18,7 @@ function fixture(t, overrides = {}) {
       write(path.join(live, 'dist/main.js'), 'approved main ' + name); const files = { 'dist/main.js': hash(path.join(live, 'dist/main.js')) }, before = { 'dist/main.js': sha('old main ' + name) };
       if (name !== 'instances') { write(path.join(live, FEATURE), profileRaw); write(path.join(live, 'dist/operator-features/rollout.js'), 'approved pure helper ' + name); files['dist/operator-features/rollout.js'] = hash(path.join(live, 'dist/operator-features/rollout.js')); before['dist/operator-features/rollout.js'] = null; files[FEATURE] = null; before[FEATURE] = null; }
       if (['whatsapp', 'customers'].includes(name)) { write(path.join(live, 'operator-runtime.config.json'), { authority: 'central-v1', instances: ['odim'], signingKeyFile: keyFile }); config['operator-runtime.config.json'] = hash(path.join(live, 'operator-runtime.config.json')); }
-      if (name === 'instances') for (const file of ['dist/services/tenant-database.service.js', 'dist/tenant-database/mysql-pool.js']) { write(path.join(live, file), 'original connection ' + file); before[file] = hash(path.join(live, file)); }
+      if (['instances', 'customers'].includes(name)) for (const file of AMENDMENTS[2].scope[name]) { write(path.join(live, file), 'original connection ' + file); before[file] = hash(path.join(live, file)); }
       backends.push({ name, app, live, files, before, config, environmentMetadata: makeEnv(live, true), healthStatuses: [200] });
     } else {
       write(path.join(live, 'source.ts'), 'reviewed source ' + name); write(path.join(live, 'preserved.ts'), 'old source');
@@ -62,28 +62,61 @@ function fixture(t, overrides = {}) {
   };
   const loadHelper = file => { helpers.push(file); return { operatorFeatures: p => { const managed = p.instance === 'odim'; return { managed, operatorId: p.userId, revision: managed ? profileSha : null, features: Object.fromEntries(Object.keys(profile.features).map(f => [f, managed ? p.userId === 534 || Boolean(overrides.adminBypass && p.role === 'ADMIN') : null])) }; } }; };
   const options = { control, targets, keyFile, owner: () => {}, snapshot: () => ({ ...current }), request, loadHelper, ...overrides };
-  function amend() {
-    const c = effective.components[0], before = { ...Object.fromEntries(Object.entries(c.before).filter(([, h]) => h !== null)), ...c.files }, files = {};
-    for (const name of ['dist/services/tenant-database.service.js', 'dist/tenant-database/mysql-pool.js']) { write(path.join(c.live, name), 'reviewed latin1 only odim ' + name); files[name] = hash(path.join(c.live, name)); }
-    const amendment = { version: 1, environment: 'production', control: control + '/connection-fix', baseEffectiveManifestSha256: plan.readiness.backendEffective.sha256, components: [{ name: 'instances', app: 'instances', live: c.live, files, before, config: c.config, environmentMetadata: c.environmentMetadata, healthStatuses: [200] }] };
-    pin('backendAmendment', amendment); current.instances = '999'; pin('backendAmendmentVerification', { ok: true, configUnchanged: true, environmentMetadataUnchanged: true, nonTargetPidsUnchanged: true, amendmentSha256: plan.readiness.backendAmendment.sha256, baseEffectiveManifestSha256: plan.readiness.backendEffective.sha256, afterPids: { ...verification.afterPids, instances: current.instances }, health: { instances: 200 } });
+  const amendments = [];
+  let observed;
+  function rawRef(file, bytes) { write(path.join(control, file), bytes); const ref = { file, sha256: hash(path.join(control, file)) }; plan.evidence[file] = ref.sha256; return ref; }
+  function repinObserved() {
+    observed.receipt.audit = rawRef('observed-restart-audit.json', observed.audit);
+    observed.receipt.pm2Evidence = rawRef('observed-restart-pm2.txt', observed.pm2);
+    observed.receipt.auditScript = rawRef('audit-backend-files.cjs', observed.script);
+    plan.readiness.backendObservedRestart = rawRef('backend-observed-restart.json', observed.receipt);
+    if (amendments[2]) { amendments[2].manifest.observedRestartSha256 = plan.readiness.backendObservedRestart.sha256; repinAmendment(2); }
   }
-  return { root, control, targets, current, plan, docs, profileRaw, profileSha, requests, helpers, pin, amend, options, run: () => createReadiness(options)(plan) };
+  function observeRestart() {
+    assert.equal(amendments.length, 2); const previousPid = current.whatsapp; current.whatsapp = String(Number(current.whatsapp) + 5000);
+    const components = effective.components.map(c => { const expected = { ...Object.fromEntries(Object.entries(c.before).filter(([, h]) => h !== null)), ...c.files, ...c.config }; for (const entry of amendments) for (const patch of entry.manifest.components) if (patch.name === c.name) Object.assign(expected, patch.files); return { component: c.name, pid: current[c.app], verifiedFiles: Object.keys(expected).length, inventoryMatches: true, environmentMatches: true, differences: [], ok: true }; });
+    observed = { script: 'fixture audited readonly script', pm2: '2026-11-16T11:41:41: PM2 log: Stopping app:whatsapp id:12\n2026-11-16T11:41:41: PM2 log: App [whatsapp:12] exited with code [0] via signal [SIGINT]\n2026-11-16T11:41:41: PM2 log: App [whatsapp:12] starting in -fork mode-\n2026-11-16T11:41:41: PM2 log: App [whatsapp:12] online\n',
+      audit: { version: 1, ok: true, at: '2026-11-16T10:03:00Z', baseEffectiveManifestSha256: plan.readiness.backendEffective.sha256, amendments: amendments.map((_, i) => ({ file: AMENDMENTS[i].control + '/backend-amendment.json', sha256: plan.readiness.backendAmendments[i].manifest.sha256 })), components, environmentContentsRead: false },
+      receipt: { version: 1, environment: 'production', component: 'whatsapp', previousPid, observedPid: current.whatsapp, cause: 'ORDERLY_PM2_RESTART_INITIATOR_UNATTRIBUTED', baseEffectiveManifestSha256: plan.readiness.backendEffective.sha256, previousAmendmentSha256: plan.readiness.backendAmendments[1].manifest.sha256 } };
+    options.auditScriptSha = sha(observed.script); repinObserved(); return observed;
+  }
+  function repinAmendment(index) {
+    const names = AMENDMENTS[index], entry = amendments[index];
+    write(path.join(control, names.manifest), entry.manifest); const manifestRef = { file: names.manifest, sha256: hash(path.join(control, names.manifest)) };
+    entry.verification.amendmentSha256 = manifestRef.sha256; write(path.join(control, names.verification), entry.verification); const verificationRef = { file: names.verification, sha256: hash(path.join(control, names.verification)) };
+    plan.evidence[names.manifest] = manifestRef.sha256; plan.evidence[names.verification] = verificationRef.sha256;
+    (plan.readiness.backendAmendments ||= [])[index] = { manifest: manifestRef, verification: verificationRef };
+    write(path.join(control, names.control, 'backend-amendment.json'), fs.readFileSync(path.join(control, names.manifest)));
+    write(path.join(control, names.control, 'receipts/verification.json'), fs.readFileSync(path.join(control, names.verification)));
+  }
+  function amend() {
+    const index = amendments.length, names = AMENDMENTS[index], baselinePids = { ...current }, components = [];
+    for (const [componentName, changed] of Object.entries(names.scope)) {
+      const c = effective.components.find(c => c.name === componentName), before = { ...Object.fromEntries(Object.entries(c.before).filter(([, h]) => h !== null)), ...c.files }, files = {};
+      for (const previous of amendments) { const patch = previous.manifest.components.find(c => c.name === componentName); if (patch) Object.assign(before, patch.files); }
+      for (const name of changed) { write(path.join(c.live, name), 'reviewed connection stage ' + index + ' ' + name); files[name] = hash(path.join(c.live, name)); }
+      components.push({ name: c.name, app: c.app, live: c.live, files, before, config: c.config, environmentMetadata: c.environmentMetadata, healthStatuses: c.healthStatuses }); current[c.app] = String(Number(current[c.app]) + 1000);
+    }
+    const amendment = { version: 1, environment: 'production', control: control + '/' + names.control, baseEffectiveManifestSha256: plan.readiness.backendEffective.sha256,
+      ...(index ? { previousAmendmentSha256: plan.readiness.backendAmendments[index - 1].manifest.sha256 } : {}), ...(index === 2 && observed ? { observedRestartSha256: plan.readiness.backendObservedRestart.sha256 } : {}), baselinePids, components };
+    amendments.push({ manifest: amendment, verification: { ok: true, configUnchanged: true, environmentMetadataUnchanged: true, nonTargetPidsUnchanged: true, baseEffectiveManifestSha256: plan.readiness.backendEffective.sha256, afterPids: { ...current }, health: Object.fromEntries(components.map(c => [c.name, 200])) } }); repinAmendment(index);
+  }
+  return { root, control, targets, current, plan, docs, profileRaw, profileSha, requests, helpers, pin, amend, amendments, repinAmendment, observeRestart, repinObserved, options, run: () => createReadiness(options)(plan) };
 }
 
 test('native read-only receipts and six live components pass with OFF/PILOT_PENDING; only four fresh public GETs', async t => {
-  const f = fixture(t); const result = await f.run(); assert(result.ok && result.readOnly && result.components === 6 && result.policyEnabled === false); assert.equal(f.helpers.length, 3); assert.equal(f.requests.filter(r => r.url.startsWith(ORIGIN)).length, 4);
+  const f = fixture(t); const result = await f.run(); assert(result.ok && result.observationsMayInitializeOperatorState && !Object.hasOwn(result, 'readOnly') && result.components === 6 && result.policyEnabled === false); assert.equal(f.helpers.length, 3); assert.equal(f.requests.filter(r => r.url.startsWith(ORIGIN)).length, 4);
   assert(f.requests.filter(r => r.options.method === 'POST').every(r => ['status', 'policy'].includes(JSON.parse(r.options.body).action)));
 });
 test('active review passes with settings0/SIP unavailable and never sends call/CRM/pause commands', async t => { const f = fixture(t, { active: true }); assert((await f.run()).policyEnabled); assert.equal(f.requests.filter(r => r.options.method === 'POST').length, 4); });
-test('only the two explicit instances amendment files and PID override can pass', async t => { const f = fixture(t); f.amend(); assert((await f.run()).ok); assert.equal(f.current.instances, '999'); });
+test('the ordered amendment chain advances instances each step and customers only at compatibility', async t => { const f = fixture(t); f.amend(); f.amend(); f.amend(); assert((await f.run()).ok); assert.equal(f.current.instances, '3300'); assert.equal(f.current.customers, '1301'); assert.equal(f.plan.readiness.backendAmendments.length, 3); });
 test('live code drift fails before requiring helpers or issuing HTTP', async t => { const f = fixture(t); fs.appendFileSync(path.join(f.targets.whatsapp.live, 'dist/main.js'), 'foreign'); await assert.rejects(f.run(), /READINESS_BACKEND_INVENTORY/); assert.equal(f.helpers.length, 0); assert.equal(f.requests.length, 0); });
 test('live common profile drift and review/profile mismatch fail closed', async t => {
   const f = fixture(t); write(path.join(f.targets.users.live, FEATURE), '{}'); await assert.rejects(f.run(), /READINESS_LIVE_HASH/);
   const g = fixture(t); const reviewFile = path.join(g.control, g.plan.review.file), review = JSON.parse(fs.readFileSync(reviewFile)); review.commonProfileSha256 = 'f'.repeat(64); write(reviewFile, review); g.plan.review.sha256 = hash(reviewFile); await assert.rejects(g.run(), /READINESS_REVIEW_PROFILE/);
 });
 test('PID drift in backend, frontend or stable production services is rejected', async t => {
-  for (const app of ['customers', 'frontend', 'odim-copy']) { const f = fixture(t); f.current[app] = '7777'; await assert.rejects(f.run(), /READINESS_.*PID/); assert.equal(f.requests.length, 0); }
+  for (const app of ['whatsapp', 'customers', 'frontend', 'odim-copy']) { const f = fixture(t); f.current[app] = '7777'; await assert.rejects(f.run(), /READINESS_.*PID/); assert.equal(f.requests.length, 0); }
 });
 test('copied native receipt cannot diverge from its actual installed original', async t => { const f = fixture(t); f.pin('backendVerification', { ...f.docs.backendVerification, at: 'changed' }); write(path.join(f.control, 'receipts/verification.json'), '{}'); await assert.rejects(f.run(), /READINESS_ORIGINAL_RECEIPT/); });
 test('readonly CRM preflight must prove no writes and the profile revision', async t => {
@@ -102,11 +135,34 @@ test('private health must reject no-key and accept the preserved original HMAC k
 });
 test('active status must match the reviewed release hash', async t => { const f = fixture(t, { active: true, wrongReview: true }); await assert.rejects(f.run(), /READINESS_ACTIVE_REVIEW/); });
 test('amendment cannot alter unrelated code, cutoff, config or other backend PIDs', async t => {
-  const f = fixture(t); f.amend(); const bad = structuredClone(f.docs.backendAmendment); bad.components[0].files['dist/main.js'] = 'a'.repeat(64); f.pin('backendAmendment', bad); await assert.rejects(f.run(), /READINESS_AMENDMENT_SCOPE/);
-  const g = fixture(t); g.amend(); g.pin('backendAmendment', { ...g.docs.backendAmendment, baseEffectiveManifestSha256: 'f'.repeat(64) }); await assert.rejects(g.run(), /READINESS_AMENDMENT_BASE/);
-  const h = fixture(t); h.amend(); h.pin('backendAmendmentVerification', { ...h.docs.backendAmendmentVerification, afterPids: { ...h.docs.backendAmendmentVerification.afterPids, customers: '888' } }); await assert.rejects(h.run(), /READINESS_AMENDMENT_OTHER_BACKEND_PID/);
+  const f = fixture(t); f.amend(); f.amendments[0].manifest.components[0].files['dist/main.js'] = 'a'.repeat(64); f.repinAmendment(0); await assert.rejects(f.run(), /READINESS_AMENDMENT_SCOPE/);
+  const g = fixture(t); g.amend(); g.amendments[0].manifest.baseEffectiveManifestSha256 = 'f'.repeat(64); g.repinAmendment(0); await assert.rejects(g.run(), /READINESS_AMENDMENT_BASE/);
+  const h = fixture(t); h.amend(); h.amendments[0].verification.afterPids.customers = '888'; h.repinAmendment(0); await assert.rejects(h.run(), /READINESS_AMENDMENT_OTHER_BACKEND_PID/);
+});
+test('amendment order, prior manifest hash, prior resulting files and original receipt are mandatory', async t => {
+  const f = fixture(t); f.amend(); f.amend(); f.amendments[1].manifest.previousAmendmentSha256 = 'f'.repeat(64); f.repinAmendment(1); await assert.rejects(f.run(), /READINESS_AMENDMENT_PREVIOUS/);
+  const g = fixture(t); g.amend(); g.amend(); g.amendments[1].manifest.components[0].before['dist/tenant-database/mysql-pool.js'] = 'f'.repeat(64); g.repinAmendment(1); await assert.rejects(g.run(), /READINESS_AMENDMENT_BEFORE/);
+  const h = fixture(t); h.amend(); h.amend(); h.plan.readiness.backendAmendments.reverse(); await assert.rejects(h.run(), /READINESS_REFERENCE/);
+  const k = fixture(t); k.amend(); write(path.join(k.control, 'connection-fix/receipts/verification.json'), '{}'); await assert.rejects(k.run(), /READINESS_ORIGINAL_RECEIPT/);
 });
 test('evidence is restricted to pinned TOP filenames and env contents are never read', async t => {
   const f = fixture(t); f.plan.readiness.cutover.file = '../cutover.json'; await assert.rejects(f.run(), /READINESS_REFERENCE/);
   const g = fixture(t), read = fs.readFileSync; fs.readFileSync = function(file, ...args) { assert(!path.basename(String(file)).startsWith('.env')); return read.call(this, file, ...args); }; try { assert((await g.run()).ok); } finally { fs.readFileSync = read; }
+});
+test('readiness annotates only a safe guard code; arbitrary messages never enter structured diagnostics', async t => {
+  const secret = 'synthetic-password-or-token';
+  for (const message of [secret, 'READINESS_PRIVATE_KEY ' + secret, 'READINESS_PRIVATE_KEY/' + secret]) assert.equal(readinessCode(Error(message)), 'READINESS_UNCONFIRMED');
+  assert.equal(readinessCode(Error('READINESS_LIVE_HASH:public/source.js\n' + secret)), 'READINESS_LIVE_HASH');
+  const f = fixture(t); f.current['odim-copy'] = '777'; await assert.rejects(f.run(), error => { assert.equal(error.code, 'READINESS_STABLE_PID'); assert(!JSON.stringify({ error: 'PILOT_ACTIVATION_FAILED', code: error.code }).includes(secret)); return true; });
+  const g = fixture(t); g.options.request = async () => { throw Error(secret); }; await assert.rejects(g.run(), error => error.code === 'READINESS_UNCONFIRMED');
+});
+test('audited orderly WA restart is accepted only between amendment2/3 with immutable original evidence', async t => {
+  const f = fixture(t); f.amend(); f.amend(); f.observeRestart(); f.amend(); assert((await f.run()).ok); assert.equal(f.current.whatsapp, '5304');
+  for (const [change, expected] of [
+    [o => { o.receipt.previousPid = 'wrong'; }, /READINESS_OBSERVED_RESTART_OLD_PID/],
+    [o => { o.audit.components[1].verifiedFiles++; }, /READINESS_OBSERVED_RESTART_BYTE_PINS/],
+    [o => { o.pm2 = o.pm2.replace('code [0]', 'code [1]'); }, /READINESS_OBSERVED_RESTART_PM2/],
+    [o => { o.script = 'unreviewed arbitrary script'; }, /READINESS_OBSERVED_RESTART_SCRIPT/],
+    [o => { o.receipt.component = 'users'; }, /READINESS_OBSERVED_RESTART_CONTRACT/],
+  ]) { const g = fixture(t); g.amend(); g.amend(); const observed = g.observeRestart(); g.amend(); change(observed); g.repinObserved(); await assert.rejects(g.run(), expected); }
 });
