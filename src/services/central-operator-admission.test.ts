@@ -9,7 +9,7 @@ function fixture() {
 	let started: Date | null = new Date("2026-11-16T11:00:00Z");
 	const cutoff = new Date("2026-11-16T12:00:00Z"), states = new Map<number, CentralOperatorState>();
 	for (const id of [7, 8]) states.set(id, { operatorId: id, state: id === 7 ? "paused" : "available", version: 1,
-		unavailableSince: cutoff, activeCallId: null, pendingScheduleId: null, pendingCallId: null, pauseId: null, reasonId: null, reasonName: null, reasonSnapshot: null });
+		unavailableSince: cutoff, activeCallId: null, pendingScheduleId: null, pendingCallId: null, pendingOperationId: null, pauseId: null, reasonId: null, reasonName: null, reasonSnapshot: null });
 	const events: string[] = [];
 	const lock: typeof lockRuntimeAdmission = async (_tx, instance, ids) => {
 		events.push(`lock:${instance}:${ids.join(",")}`);
