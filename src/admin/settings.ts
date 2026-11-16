@@ -4,12 +4,14 @@ import targets from "../services/parameter-settings-targets.service";
 import whatsapp from "../services/whatsapp.service";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
 import { tenantSqlEnabled } from "../tenant-sql/registry";
+import { isTenantSqlTargetPrepared } from "../tenant-sql/router";
 import { AdminCommand, AdminMutationResult, AdminProtocolError, AdminSnapshot, Json, requireRevision } from "./admin-protocol";
 import { channelCatalog, parameterCatalog } from "./catalog";
 import { validateChannel } from "./channel-contract";
 import { beginApplyReceipt, completeReceipt, diff, Query, readReceipt, requireTransactional, secretKey, snapshot, tenant, validateChanges, writeReceipt } from "./settings-utils";
 import { DEFAULT_HUMAN_BEHAVIOR_CONFIG as humanDefault, HumanBehaviorConfig } from "../utils/human-behavior.simulator";
 import { isMonitorWaitThreshold, monitorWaitThresholdsError } from "../parameters/monitor-wait-thresholds";
+import { withWhatsappAdminRuntime } from "./runtime-availability";
 
 type Db = Pick<Prisma.TransactionClient, "$queryRawUnsafe" | "$executeRawUnsafe">;
 const execute = (db: Db): Query => async <T>(sql: string, params: unknown[] = []) => (/^\s*(SELECT|SHOW)\b/i.test(sql) ? await db.$queryRawUnsafe(sql, ...params) : await db.$executeRawUnsafe(sql, ...params)) as T;
@@ -61,14 +63,16 @@ async function channels(command: AdminCommand, query: Query, lock = false) {
   return { state: rows[0], catalog, snapshot: result };
 }
 export async function whatsappSettings(command: AdminCommand): Promise<unknown> {
-  return withDatabaseTenant(tenant(command), async () => {
+  const selectedTenant = tenant(command);
+  return withWhatsappAdminRuntime(command, {
+    tenantSql: tenantSqlEnabled(), prepared: isTenantSqlTargetPrepared(prisma, selectedTenant),
+  }, () => withDatabaseTenant(selectedTenant, async () => {
     if (command.action === "getTargets") {
       const selected = command.target?.scope ?? "USER";
       if (selected === "INSTANCE") return { targets: [] };
       const result = await targets.list(command.tenant!, command.search ?? "", selected);
       return { targets: selected === "SECTOR" ? result.sectors.map(item => ({ id: item.id, label: item.name })) : result.users.map(item => ({ id: item.id, label: item.name, active: item.active })), hasMore: result.hasMoreUsers };
     }
-    if (!["whatsapp", "channels"].includes(command.source ?? "")) throw new AdminProtocolError(400, "Fonte WhatsApp inválida.");
     const query = execute(prisma);
     if (command.action === "getReceipt") return await readReceipt(query, command) ?? { found: false };
     const load = (db: Query, lock = false) => command.source === "channels" ? channels(command, db, lock) : parameterState(command, db, lock);
@@ -157,7 +161,7 @@ export async function whatsappSettings(command: AdminCommand): Promise<unknown> 
       if ((error as { code?: string })?.code === "P2034") throw new AdminProtocolError(409, "Houve uma alteração simultânea. Recarregue a configuração.");
       throw error;
     }
-  }).catch((error: unknown) => {
+  })).catch((error: unknown) => {
     const status = (error as { status?: number })?.status;
     if ([400, 403, 404, 409].includes(status ?? 0)) throw new AdminProtocolError(status!, error instanceof Error ? error.message : "Alvo administrativo inválido.");
     throw error;

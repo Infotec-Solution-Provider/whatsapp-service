@@ -7,6 +7,11 @@ import { model, models } from "./metadata";
 import { loadTenantPools } from "./registry";
 
 type Client = Record<string, any>;
+const preparedTenantSets = new WeakMap<Client, ReadonlySet<string>>();
+/** Uses the targets captured by this running router, never a reread of its registry. */
+export function isTenantSqlTargetPrepared(client: Client, tenant: string): boolean {
+	return preparedTenantSets.get(client)?.has(tenant) ?? false;
+}
 interface Operation { model: string; operation: string; args: any; }
 const ROUTED_OPERATION = Symbol("tenant-sql-operation");
 const reads = new Set(["findMany", "findFirst", "findFirstOrThrow", "findUnique", "findUniqueOrThrow", "count", "aggregate", "groupBy"]);
@@ -207,7 +212,7 @@ export function createTenantSqlRouter(pools: Map<string, Pool> = loadTenantPools
 			throw error;
 		}
 	};
-	return new Proxy({}, { get: (_target, key: string) => {
+	const router: Client = new Proxy({}, { get: (_target, key: string) => {
 		if (key === "$transaction") return transaction;
 		if (key === "$disconnect") return async () => { await Promise.all([...pools.values()].map(pool => pool.end())); };
 		if (key === "$connect") return async () => { await Promise.all([...pools.values()].map(pool => pool.query("SELECT 1"))); };
@@ -215,6 +220,8 @@ export function createTenantSqlRouter(pools: Map<string, Pool> = loadTenantPools
 		if (!models.some(item => item.delegate === key)) throw new Error(`TENANT_SQL_UNSUPPORTED_MODEL: ${key}`);
 		return new Proxy({}, { get: (_inner, operation: string) => (args: any = {}) => query({ model: key, operation, args }) });
 	} });
+	preparedTenantSets.set(router, new Set(clients.keys()));
+	return router;
 }
 
 export async function withTenantSql<T>(tenant: string, execute: () => Promise<T>): Promise<T> {
