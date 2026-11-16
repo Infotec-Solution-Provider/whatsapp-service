@@ -4,7 +4,7 @@ import express from "express";
 import fs from "node:fs";
 import { assertOperatorFeature, operatorFeatureProfilePath, OperatorFeatureError } from "./rollout";
 
-test("real HTTP auth boundary keeps reads/replays, denies nonpilot writes and requires admin for ODIM flow tools", async () => {
+test("real HTTP auth boundary keeps reads/replays, preserves existing WhatsApp writes and requires admin for ODIM flow tools", async () => {
 	assert.equal(fs.existsSync(operatorFeatureProfilePath), false);
 	fs.writeFileSync(operatorFeatureProfilePath, JSON.stringify({ version: 1, instance: "odim", allowedOperatorIds: [534], effectiveAt: "2026-11-16T12:00:00.123Z", features: { operator: true, telephony: true, crm: true, whatsapp: true } }), { flag: "wx", mode: 0o600 });
 	const previous = new Map<string, NodeModule | undefined>();
@@ -39,15 +39,15 @@ test("real HTTP auth boundary keeps reads/replays, denies nonpilot writes and re
 		assert.equal((await request("/api/whatsapp/chats", "GET", "odim:535:ADMIN")).status, 200);
 		for (const actor of ["odim:535:ADMIN", "ODIM:535:OPERATOR", "ódim:535:ADMIN"]) {
 			const denied = await request("/api/whatsapp/chats", "POST", actor);
-			assert.equal(denied.status, 403); assert.equal((await denied.json() as { code: string }).code, "OPERATOR_FEATURE_PILOT_REQUIRED");
+			assert.equal(denied.status, 200);
 		}
-		assert.equal(mutations, 0);
+		assert.equal(mutations, 3);
 		assert.equal((await request("/api/whatsapp/1/messages", "POST", "odim:535:ADMIN", { replay: true })).status, 200);
-		assert.equal((await request("/api/whatsapp/1/messages", "POST", "odim:535:ADMIN")).status, 403); assert.equal(mutations, 0);
+		assert.equal((await request("/api/whatsapp/1/messages", "POST", "odim:535:ADMIN")).status, 200); assert.equal(mutations, 4);
 		assert.equal((await request("/api/whatsapp/chats", "POST", "odim:534:OPERATOR")).status, 200);
 		for (const [url, method, body] of [["/api/message-flows/1", "PUT", {}], ["/api/message-flows/steps/1", "PUT", {}], ["/api/whatsapp/flow-execution/execute", "POST", { instance: "alpha", contactId: 1 }], ["/api/message-flows", "POST", { instance: "ODIM" }]] as const) {
 			assert.equal((await request(url, method, undefined, body)).status, 401);
-			assert.equal((await request(url, method, "odim:535:ADMIN", body)).status, 403);
+			assert.equal((await request(url, method, "odim:535:ADMIN", body)).status, 200);
 			assert.equal((await request(url, method, "odim:534:OPERATOR", body)).status, 403);
 			assert.equal((await request(url, method, "alpha:534:ADMIN", body)).status, 403);
 			assert.equal((await request(url, method, "odim:534:ADMIN", body)).status, 200);

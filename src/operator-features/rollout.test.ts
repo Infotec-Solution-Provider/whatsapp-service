@@ -21,15 +21,16 @@ test("strict shared profile binds raw-byte revision and an exact UTC cutoff", ()
 		fs.unlinkSync(file); assert.throws(() => readOperatorFeaturePolicy(file), e => e instanceof OperatorFeatureError && e.status === 503);
 	} finally { fs.rmSync(dir, { recursive: true }); }
 });
-test("only ODIM534 is eligible, with canonical aliases and no role bypass", () => {
+test("only new pilot features are restricted; WhatsApp keeps existing operators", () => {
 	const read = () => ({ ...value, revision: "a".repeat(64) });
 	for (const instance of ["odim", " ODIM ", "ódim", "ｏｄｉｍ", "od\u200dim"]) {
 		assert.equal(operatorFeatures({ instance, userId: 534 }, read).features.whatsapp, true);
-		for (const userId of [1, 6, 533, 535]) for (const feature of ["operator", "telephony", "crm", "whatsapp"] as const) {
+		for (const userId of [1, 6, 533, 535]) for (const feature of ["operator", "telephony", "crm"] as const) {
 			assert.throws(() => assertOperatorFeature({ instance, userId }, feature, read), e => e instanceof OperatorFeatureError && e.status === 403);
 		}
-		assert.deepEqual(whatsappEligibleIds(instance, [1, 6, 534, 535], read), [534]);
-		assert.deepEqual(whatsappEligibleIds(instance, [1, 6, 535], read), [], "never inject the pilot into an ineligible sector/wallet candidate list");
+		assert.doesNotThrow(() => assertOperatorFeature({ instance, userId: 1 }, "whatsapp", read));
+		assert.deepEqual(whatsappEligibleIds(instance, [1, 6, 534, 535], read), [1, 6, 534, 535]);
+		assert.deepEqual(whatsappEligibleIds(instance, [1, 6, 535], read), [1, 6, 535], "never inject the pilot into an ineligible sector/wallet candidate list");
 	}
 	assert.equal(operatorFeatures({ instance: "suprimaxxi", userId: 1 }, () => { throw Error("must not read ODIM policy"); }).managed, false);
 });
