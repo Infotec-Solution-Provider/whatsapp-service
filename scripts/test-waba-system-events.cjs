@@ -3,9 +3,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const ts = require('typescript');
 const root = path.resolve(__dirname, '..');
 const compiled = process.argv.includes('--compiled');
+const ts = compiled ? null : require('typescript');
 function load(file, dependencies = {}) {
   const source = fs.readFileSync(path.join(root, compiled ? `dist/${file}.js` : `src/${file}.ts`), 'utf8');
   const code = compiled ? source : ts.transpileModule(source, { compilerOptions: {
@@ -54,6 +54,8 @@ async function run() {
     assert.equal(row.timestamp, '1793971556000'); assert.equal(row.sentAt.toISOString(), '2026-11-06T13:25:56.000Z');
     assert.equal(h.state.channelQuery.where.instance, 'odim');
     assert.equal(h.state.channelQuery.where.isActive, true);
+    assert.equal(h.state.channelQuery.where.WABAPhoneId, 'phone-id');
+    assert.equal(h.state.channelQuery.where.WABAAccountId, 'account-id');
     assert.equal(h.state.contactQueries[0].where.instance, 'odim');
     assert.equal(h.state.contactQueries[0].where.OR[0].phone, peer);
   });
