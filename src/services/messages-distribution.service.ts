@@ -22,9 +22,11 @@ import {
 import { InternalServerError } from "@rgranatodutra/http-errors";
 import MessageFlow from "../message-flow/message-flow";
 import MessageFlowFactory from "../message-flow/message-flow.factory";
+import { messageFlowCache } from "../message-flow/message-flow-cache";
 import ProcessingLogger from "../utils/processing-logger";
 import resolveContactIdentity from "../utils/resolve-contact-identity";
 import chatsService from "./chats.service";
+import chatUserPreferencesService from "./chat-user-preferences.service";
 import contactsService from "./contacts.service";
 import messageQueueService from "./message-queue.service";
 import messagesService from "./messages.service";
@@ -62,7 +64,6 @@ class MessageStatusTargetNotFoundError extends Error {
 
 
 class MessagesDistributionService {
-	private flows: Map<string, MessageFlow> = new Map();
 
 	private async resolveMessageContact(
 		instance: string,
@@ -222,17 +223,7 @@ class MessagesDistributionService {
 
 	public async getFlow(instance: string, sectorId: number): Promise<MessageFlow> {
 		assertOdimChannelAllowed(instance);
-		const flowKey = `${instance}:${sectorId}`;
-		const flow = this.flows.get(flowKey);
-
-		if (!flow) {
-			const newFlow = await MessageFlowFactory.createMessageFlow(instance, sectorId);
-
-			this.flows.set(flowKey, newFlow);
-			return newFlow;
-		}
-
-		return flow;
+		return messageFlowCache.get(instance, sectorId, () => MessageFlowFactory.createMessageFlow(instance, sectorId));
 	}
 
 	private async getSectors(clientId: number) {
@@ -394,7 +385,7 @@ class MessagesDistributionService {
 		// Múltiplos setores: ativa bot de escolha de setor
 		if (sectors.length > 1) {
 			logger.log("Mais de um setor encontrado, iniciando o fluxo de escolha de setor.");
-			const chat = await prismaService.wppChat.create({
+			const chat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.create({
 				data: {
 					instance,
 					type: "RECEPTIVE",
@@ -403,7 +394,7 @@ class MessagesDistributionService {
 					startedAt: new Date(),
 					botId: 1
 				}
-			});
+			}));
 			await chatsService.syncChatToLocal(chat);
 			return { chat, systemMessage: null };
 		}
@@ -442,9 +433,9 @@ class MessagesDistributionService {
 					logger.log("Bot Vollo detectado. Atribuindo userId=15 (operador padrão Vollo).");
 				}
 
-				const chat = await prismaService.wppChat.create({
+				const chat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.create({
 					data: chatData
-				});
+				}));
 				await chatsService.syncChatToLocal(chat);
 				return { chat, systemMessage: null };
 			}
@@ -456,12 +447,12 @@ class MessagesDistributionService {
 		const result = await flow.getChatPayload(logger, contact, message);
 		const { systemMessage, ...chatData } = result;
 
-		const chat = await prismaService.wppChat.create({
+		const chat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.create({
 			data: {
 				...chatData,
 				startedAt: new Date()
 			}
-		});
+		}));
 		await chatsService.syncChatToLocal(chat);
 
 		return { chat, systemMessage: systemMessage || null };
@@ -574,10 +565,10 @@ class MessagesDistributionService {
 		try {
 			const flow = await this.getFlow(sector.instance, sector.id);
 			const data = await flow.getChatPayload(logger, contact, message);
-			const updatedChat = await prismaService.wppChat.update({
+			const updatedChat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.update({
 				where: { id: chat.id },
 				data: { ...data, botId: null }
-			});
+			}));
 			await chatsService.syncChatToLocal(updatedChat);
 			await transferHistoryService.recordTransfer({
 				previousChat: {
@@ -618,10 +609,10 @@ class MessagesDistributionService {
 			const flow = await this.getFlow(sector.instance, sector.id);
 			const data = await flow.getChatPayload(logger, contact, message);
 
-			const updatedChat = await prismaService.wppChat.update({
+			const updatedChat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.update({
 				where: { id: chat.id },
 				data: { ...data, userId: operador.CODIGO, botId: null }
-			});
+			}));
 			await chatsService.syncChatToLocal(updatedChat);
 			await transferHistoryService.recordTransfer({
 				previousChat: {

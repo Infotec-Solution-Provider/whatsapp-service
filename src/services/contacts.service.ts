@@ -9,6 +9,7 @@ import { safeEncode } from "../utils/safe-encode";
 import instancesService from "./instances.service";
 import parametersService from "./parameters.service";
 import prismaService from "./prisma.service";
+import { placeholderContactName } from "../utils/incoming-contact-name";
 
 export interface ContactsFilters {
 	ids?: number[] | null;
@@ -55,6 +56,20 @@ export class DeletedContactConflictError extends Error {
 }
 
 class ContactsService {
+	private async enrichIncomingName(contact: WppContact, name: string): Promise<WppContact> {
+		const replacement = placeholderContactName(contact, name);
+		if (!replacement || contact.isDeleted) return contact;
+		const { count } = await prismaService.wppContact.updateMany({
+			where: { id: contact.id, instance: contact.instance, isDeleted: false,
+				name: contact.name, phone: contact.phone, whatsappId: contact.whatsappId },
+			data: { name: replacement }
+		});
+		const current = await prismaService.wppContact.findFirst({ where: { id: contact.id, instance: contact.instance } });
+		if (!current) return contact;
+		if (count === 1) await this.syncContactToLocal(current, false, 3000);
+		return current;
+	}
+
 	private normalizeDigits(value: string) {
 		return value.replace(/\D/g, "");
 	}
@@ -188,8 +203,8 @@ class ContactsService {
 						where: { id: contact.id },
 						data: updateData
 					});
-					await this.syncContactToLocal(updated);
-					return updated;
+					await this.syncContactToLocal(updated, false, 3000);
+					return this.enrichIncomingName(updated, name);
 				} catch (error) {
 					if (
 						error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -200,14 +215,14 @@ class ContactsService {
 							where: { instance, whatsappId: normalizedWhatsappId }
 						});
 						if (owner) {
-							return owner;
+							return this.enrichIncomingName(owner, name);
 						}
 					}
 					throw error;
 				}
 			}
 
-			return contact;
+			return this.enrichIncomingName(contact, name);
 		}
 
 		let newContact: WppContact;
@@ -238,7 +253,7 @@ class ContactsService {
 			throw error;
 		}
 
-		await this.syncContactToLocal(newContact);
+		await this.syncContactToLocal(newContact, false, 3000);
 
 		return newContact;
 	}
@@ -634,14 +649,14 @@ class ContactsService {
 		return contact;
 	}
 
-	public async syncContactStateToLocal(contact: WppContact, sectorIds?: number[], requireSync = false) {
-		await this.syncContactToLocal(contact, requireSync);
+	public async syncContactStateToLocal(contact: WppContact, sectorIds?: number[], requireSync = false, timeoutMs?: number) {
+		await this.syncContactToLocal(contact, requireSync, timeoutMs);
 		if (sectorIds) {
 			await this.syncContactSectorsToLocal(contact.id, contact.instance, sectorIds);
 		}
 	}
 
-	private async syncContactToLocal(contact: WppContact, requireSync = false) {
+	private async syncContactToLocal(contact: WppContact, requireSync = false, timeoutMs?: number) {
 		try {
 			const query = `
 				INSERT INTO wpp_contacts (id, instance, name, phone, customer_id, is_deleted)
@@ -660,7 +675,7 @@ class ContactsService {
 				contact.phone,
 				contact.customerId,
 				contact.isDeleted
-			]);
+			], timeoutMs === undefined ? undefined : { timeoutMs });
 		} catch (error) {
 			console.error("[syncContactToLocal] Erro ao sincronizar contato:", error);
 			if (requireSync) throw new InternalServerError("CONTACT_CUSTOMER_SYNC_PENDING");

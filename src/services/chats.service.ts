@@ -727,17 +727,18 @@ class ChatsService {
 		}
 		const user = await usersService.getUserById(chats.userId);
 
-		let chat: WppChat;
+		const chat = await chatUserPreferencesService.withUnreadAssignment(async (tx) => {
 		if (restrictToLoyalOperator) {
-			const updated = await prismaService.wppChat.updateMany({
+			const updated = await tx.wppChat.updateMany({
 				where: { id, instance, isFinished: false, userId: chats.userId },
 				data: { userId }
 			});
 			if (updated.count !== 1) throw new ConflictError("O atendimento foi alterado. Atualize a lista antes de transferir.");
-			chat = { ...chats, userId };
+			return { ...chats, userId };
 		} else {
-			chat = await prismaService.wppChat.update({ where: { id }, data: { userId } });
+			return tx.wppChat.update({ where: { id }, data: { userId } });
 		}
+		});
 
 		await this.syncChatToLocal(chat);
 		await transferHistoryService.recordTransfer({
@@ -1423,7 +1424,7 @@ class ChatsService {
 			const profilePicture = contactAddress
 				? await whatsappService.getProfilePictureUrl(instance, contactAddress)
 				: null;
-			const newChat = await prismaService.wppChat.create({
+			const newChat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.create({
 				data: {
 					instance,
 					type: "ACTIVE",
@@ -1442,7 +1443,7 @@ class ChatsService {
 						}
 					}
 				}
-			});
+			}));
 			process.log(`Chat created with ID ${newChat.id}`);
 
 			await this.syncChatToLocal(newChat);
