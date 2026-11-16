@@ -133,7 +133,10 @@ class GupshupService {
 						data.message,
 						logger
 					);
-					const msg = await messagesService.insertMessage(parsedMsg);
+					const saved = parsedMsg.gupshupId ? await prismaService.wppMessage.findFirst({ where: { gupshupId: parsedMsg.gupshupId } }) : null;
+					if (saved && (saved.instance !== instance || saved.clientId !== client.id || saved.from !== parsedMsg.from)) throw new Error("GUPSHUP_MESSAGE_IDENTITY_MISMATCH");
+					if (saved?.chatId != null) break;
+					const msg = saved || await messagesService.insertMessage(parsedMsg);
 					await mdservice.processMessage(instance, client.id, msg);
 					logger.log("mensagem processada com sucesso");
 					break;

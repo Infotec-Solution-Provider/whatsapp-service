@@ -1,5 +1,6 @@
 import { User } from "../../sdk-local";
 import instancesService from "../../services/instances.service";
+import { pauseEligibleOperatorIds } from "../../services/operator-pause-admission.runtime";
 import { BaseStep, StepConfig, StepContext, StepResult } from "../base/base.step";
 
 export default class SendToSectorUserStep extends BaseStep {
@@ -10,11 +11,13 @@ export default class SendToSectorUserStep extends BaseStep {
 	public async execute(ctx: StepContext): Promise<StepResult> {
 		ctx.logger.log("Enviando mensagem para um usuário do setor...");
 
-		const users = await instancesService.executeQuery<User[]>(
+		const candidates = await instancesService.executeQuery<User[]>(
 			this.instance,
 			"SELECT * FROM operadores WHERE SETOR = ?",
 			[this.sectorId]
 		);
+		const eligible = await pauseEligibleOperatorIds(this.instance, candidates.map(user => user.CODIGO));
+		const users = candidates.filter(user => eligible.has(user.CODIGO));
 
 		// Configuração: preferir admin se configurado
 		const preferAdmin = this.config['preferAdmin'] !== false;

@@ -812,7 +812,7 @@ class ChatsService {
 			data: {
 				userId
 			}
-		}));
+		}), { instance, recipientId: userId, chatId: id });
 
 		await this.syncChatToLocal(chat);
 		await transferHistoryService.recordTransfer({
@@ -1392,7 +1392,7 @@ class ChatsService {
 			session.instance,
 			"start-chat",
 			`${session.userId}-${contactId}_${Date.now()}`,
-			{ session, contactId, token }
+			{ session, contactId }
 		);
 
 		try {
@@ -1418,7 +1418,7 @@ class ChatsService {
 				userId = -1;
 			}
 
-			const newChat = await prismaService.wppChat.create({
+			const newChat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.create({
 				data: {
 					instance: session.instance,
 					type: "ACTIVE",
@@ -1436,7 +1436,7 @@ class ChatsService {
 						}
 					}
 				}
-			});
+			}), { instance: session.instance, recipientId: userId, initiatorId: session.userId });
 			await this.syncChatToLocal(newChat);
 
 			const usersService = getUsersClient();
@@ -1526,7 +1526,7 @@ class ChatsService {
 						}
 					}
 				}
-			}));
+			}), { instance, recipientId: userId });
 			process.log(`Chat created with ID ${newChat.id}`);
 
 			await this.syncChatToLocal(newChat);
@@ -1616,16 +1616,14 @@ class ChatsService {
 
 			const userName = await this.findOperatorName(instance, userId, logger);
 
-			const updateResult = await prismaService.wppChat.updateMany({
-				where: { id: chatId, instance, isFinished: false },
-				data: { userId, agentId: null, botId: null }
-			});
-
-			if (updateResult.count === 0) {
-				throw new NotFoundError("Chat não encontrado ou já finalizado.");
-			}
-
-			const chat = await prismaService.wppChat.findUniqueOrThrow({ where: { id: chatId } });
+			const chat = await chatUserPreferencesService.withUnreadAssignment(async (tx) => {
+				const updated = await tx.wppChat.updateMany({
+					where: { id: chatId, instance, isFinished: false },
+					data: { userId, agentId: null, botId: null }
+				});
+				if (!updated.count) throw new NotFoundError("Chat não encontrado ou já finalizado.");
+				return tx.wppChat.findUniqueOrThrow({ where: { id: chatId } });
+			}, { instance, recipientId: userId, chatId });
 			logger.log(`Chat ${chat.id} atribuído ao operador ${userId} (antes: ${previousChat.userId ?? "sem dono"}).`);
 
 			// A transferência já foi gravada: falhas daqui em diante só são registradas,

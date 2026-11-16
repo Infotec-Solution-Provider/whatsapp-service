@@ -16,6 +16,7 @@ import readyMessagesService from "./ready-messages.service";
 import whatsappService, { getMessageType } from "./whatsapp.service";
 import { messageMentionPatch, operatorMentionEntities } from "../utils/message-mention-persistence";
 import messagePresentationService from "./message-presentation.service";
+import { admitHumanSend } from "./operator-pause-admission.runtime";
 
 interface OperatorSendPayload {
 	options: SendMessageOptions;
@@ -61,6 +62,7 @@ class OperatorSendService {
 			}
 			return { ...existing, created: false };
 		}
+		await admitHumanSend(session, request.chatId, request.contactId, request.to);
 		onStage("destination.lookup");
 		const [registeredClient, contact, chat, quoted] = await Promise.all([
 			prismaService.wppClient.findFirst({ where: { id: clientId, instance: session.instance, isActive: true } }),

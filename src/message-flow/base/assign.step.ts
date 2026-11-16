@@ -2,6 +2,8 @@ import { WppChatPriority } from "@prisma/client";
 import { BaseStep, ChatPayload, StepContext, StepResult } from "./base.step";
 import instancesService from "../../services/instances.service";
 import { resolveAssignmentTarget, AssignmentOperator } from "../assignment-target";
+import { pauseEligibleOperatorIds } from "../../services/operator-pause-admission.runtime";
+import { OperatorPauseAdmissionError } from "../../services/operator-pause-admission";
 
 interface AssignConfig {
 	userId?: number | string; // ID do usuário (ou -1 para admin) ou campo para resolver
@@ -32,8 +34,13 @@ export class AssignStep extends BaseStep {
 			const result = await resolveAssignmentTarget({
 				userId: userId as number, fallbackUserId: config.fallbackUserId!,
 				...(config.fallbackRequireAdmin !== undefined ? { fallbackRequireAdmin: config.fallbackRequireAdmin } : {})
-			}, this.sectorId, (ids) => instancesService.executeQuery<AssignmentOperator[]>(this.instance,
-				"SELECT CODIGO,SETOR,ATIVO,NIVEL FROM operadores WHERE CODIGO IN (?,?) LIMIT 2", ids, { timeoutMs: 3000 }));
+			}, this.sectorId, async (ids) => {
+				const rows = await instancesService.executeQuery<AssignmentOperator[]>(this.instance,
+					"SELECT CODIGO,SETOR,ATIVO,NIVEL FROM operadores WHERE CODIGO IN (?,?) LIMIT 2", ids, { timeoutMs: 3000 });
+				const eligible = await pauseEligibleOperatorIds(this.instance, ids);
+				if (!eligible.size) throw new OperatorPauseAdmissionError("OPERATOR_PAUSED");
+				return rows.filter(row => eligible.has(row.CODIGO));
+			});
 			userId = result.userId;
 			context.logger.log("Assignment target validation", { reason: result.reason, userId, sectorId: this.sectorId });
 		}

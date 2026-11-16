@@ -2,6 +2,9 @@ import { Prisma, WppChatPriority, WppChatType, WppMessageStatus } from "@prisma/
 import prismaService from "../services/prisma.service";
 import LegacyReader, { LegacyScanResult } from "./legacy-reader";
 import MigrationStore from "./migration-store";
+import { tenantSqlEnabled } from "../tenant-sql/registry";
+import { withDatabaseTenant } from "../utils/database-tenant-context";
+import { operatorPauseAdmission } from "../services/operator-pause-admission";
 import {
 	LegacyRow,
 	MigrationInstanceConfig,
@@ -289,9 +292,12 @@ class InstanceDataMigrator {
 					isSchedule: Boolean(dateValue(row, "DATA_AGENDAMENTO")),
 				};
 				const mappedId = maps.get(id);
-				const chat = mappedId
-					? await prismaService.wppChat.update({ where: { id: mappedId }, data: chatData })
-					: await prismaService.wppChat.create({ data: chatData });
+				const chat = await withDatabaseTenant(config.targetInstance, () => prismaService.$transaction(async tx => {
+					if (!finished) await operatorPauseAdmission.assert(tx, {
+						instance: config.targetInstance, recipientId: userId, ...(mappedId === undefined ? {} : { chatId: mappedId })
+					}, tenantSqlEnabled());
+					return mappedId ? tx.wppChat.update({ where: { id: mappedId }, data: chatData }) : tx.wppChat.create({ data: chatData });
+				}));
 				maps.set(id, chat.id);
 				await this.store.upsertMap(runId, config.targetInstance, "chats", id, chat.id);
 			}

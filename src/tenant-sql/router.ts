@@ -10,6 +10,9 @@ type Client = Record<string, any>;
 interface Operation { model: string; operation: string; args: any; }
 const ROUTED_OPERATION = Symbol("tenant-sql-operation");
 const reads = new Set(["findMany", "findFirst", "findFirstOrThrow", "findUnique", "findUniqueOrThrow", "count", "aggregate", "groupBy"]);
+let registeredInstances: string[] = [];
+/** Identity only; uses the clients already configured at startup, never credentials. */
+export function tenantSqlInstanceNames(): string[] { return [...registeredInstances]; }
 
 class RoutedQuery implements PromiseLike<any> {
 	private started: Promise<any> | undefined;
@@ -50,6 +53,7 @@ function page(rows: any[], args: any): any[] {
 
 export function createTenantSqlRouter(pools: Map<string, Pool> = loadTenantPools(), injected?: Map<string, Client>): Client {
 	const clients = injected ?? new Map([...pools].map(([tenant, pool]) => [tenant, createNativeTenantClient(tenant, pool) as Client]));
+	registeredInstances = [...clients.keys()].sort();
 	const scoped = (op: Operation): string | null => {
 		const context = currentDatabaseTenant();
 		let tenant = op.model === "$raw" ? null : resolveDatabaseOperationTenant(model(op.model).name, op.operation, op.args).tenant;

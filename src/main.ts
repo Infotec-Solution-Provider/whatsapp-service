@@ -57,6 +57,8 @@ import { tenantSqlEnabled } from "./tenant-sql/registry";
 import database from "./services/prisma.service";
 import { createAdminRouter } from "./admin/router";
 import { adminParserError } from "./admin/parser-error";
+import { tenantSqlInstanceNames } from "./tenant-sql/router";
+import { pauseAdmissionFailure } from "./services/operator-pause-admission";
 
 whatsappService.buildClients();
 operatorSendService.configureWorker();
@@ -78,7 +80,11 @@ const logRoute = (r: express.Router) => {
 
 app.use(cors());
 app.use(publicBiServiceTokenGuard);
-app.get("/health", (_req, res) => res.json({ service: "whatsapp", storage: tenantSqlEnabled() ? "tenant-sql" : "central", storageVersion: 1 }));
+app.get("/health", (_req, res) => {
+	const native = tenantSqlEnabled();
+	res.json({ service: "whatsapp", storage: native ? "tenant-sql" : "central", storageVersion: 1,
+		operatorPauseAdmission: { version: native ? 1 : 0, storage: native ? "tenant-sql" : "central", sharedCrmTransaction: native, instances: native ? tenantSqlInstanceNames() : [] } });
+});
 
 // Respostas da API são dinâmicas e por usuário: sem ETag/304 e sem cache no navegador.
 // Evita o Chrome reaproveitar uma cópia em cache que não decodifica (ERR_CONTENT_DECODING_FAILED 304).
@@ -141,6 +147,14 @@ app.use((err: Error, req: Request, _res: Response, next: NextFunction) => {
 	next(err);
 });
 
+app.use((error: Error, _req: Request, res: Response, next: NextFunction) => {
+	const admission = pauseAdmissionFailure(error);
+	if (admission) {
+		res.status(admission.status).json({ code: admission.code, message: admission.message, outcome: admission.outcome });
+		return;
+	}
+	next(error);
+});
 // @ts-ignore
 app.use(handleRequestError);
 

@@ -4,6 +4,7 @@ import { GupshupWebhookQueueStatus } from "@prisma/client";
 import prismaService from "./prisma.service";
 import gupshupService from "./gupshup.service";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
+import { pauseAdmissionFailure, PAUSE_ADMISSION_CODES } from "./operator-pause-admission";
 
 const QUEUE_POLL_INTERVAL = parseInt(process.env["GUPSHUP_WEBHOOK_QUEUE_POLL_INTERVAL"] || "1000", 10);
 const MAX_CONCURRENT_PROCESSING = parseInt(process.env["GUPSHUP_WEBHOOK_MAX_CONCURRENT"] || "5", 10);
@@ -81,7 +82,8 @@ class GupshupWebhookQueueService {
   private async getNextPendingItem() {
     return prismaService.gupshupWebhookQueue.findFirst({
       where: {
-        status: GupshupWebhookQueueStatus.PENDING
+        status: GupshupWebhookQueueStatus.PENDING,
+        OR: [{ error: null }, { error: { notIn: [...PAUSE_ADMISSION_CODES] } }, { updatedAt: { lte: new Date(Date.now() - 30_000) } }]
       },
       orderBy: {
         createdAt: "asc"
@@ -111,6 +113,14 @@ class GupshupWebhookQueueService {
         }
       });
     } catch (err: any) {
+      const deferred = pauseAdmissionFailure(err);
+      if (deferred) {
+        await prismaService.gupshupWebhookQueue.updateMany({
+          where: { id, status: GupshupWebhookQueueStatus.PROCESSING },
+          data: { status: GupshupWebhookQueueStatus.PENDING, error: deferred.code, processedAt: null, processingStartedAt: null }
+        });
+        return;
+      }
       const newRetryCount = item.retryCount + 1;
       const shouldRetry = newRetryCount < item.maxRetries;
 

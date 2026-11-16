@@ -1,6 +1,7 @@
 import instances from "../../services/instances.service";
 import instancesService from "../../services/instances.service";
 import { User } from "../../sdk-local";
+import { pauseEligibleOperatorIds } from "../../services/operator-pause-admission.runtime";
 import { BaseStep, StepConfig, StepContext, StepResult, CustomerSchedule } from "../base/base.step";
 
 const CHECK_LOALTY_QUERY = `SELECT * FROM campanhas_clientes cc
@@ -38,6 +39,7 @@ export default class CheckLoaltyStep extends BaseStep {
 			ctx.logger.log("O usuário não está no mesmo setor.");
 			return this.continue(ctx);
 		}
+		if (!(await pauseEligibleOperatorIds(this.instance, [customerSchedule.OPERADOR])).has(customerSchedule.OPERADOR)) return this.continue(ctx);
 
 		const chatData = {
 			instance: this.instance,

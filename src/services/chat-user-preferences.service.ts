@@ -2,6 +2,9 @@ import { BadRequestError } from "@rgranatodutra/http-errors";
 import { Prisma } from "@prisma/client";
 import { SessionData } from "../sdk-local";
 import prismaService from "./prisma.service";
+import { tenantSqlEnabled } from "../tenant-sql/registry";
+import { withDatabaseTenant } from "../utils/database-tenant-context";
+import { operatorPauseAdmission, OperatorPauseAdmissionError, type ChatAssignmentAdmission } from "./operator-pause-admission";
 
 export type ChatPreferenceType = "wpp" | "internal";
 
@@ -16,9 +19,12 @@ class ChatUserPreferencesService {
 	 * Message READ status belongs to the conversation, not its new attendant.
 	 */
 	public async withUnreadAssignment<T extends { id: number; instance: string; userId: number | null }>(
-		write: (tx: Prisma.TransactionClient) => Promise<T>
+		write: (tx: Prisma.TransactionClient) => Promise<T>,
+		admission?: ChatAssignmentAdmission
 	): Promise<T> {
-		return prismaService.$transaction(async (tx) => {
+		if (tenantSqlEnabled() && !admission) throw new OperatorPauseAdmissionError("OPERATOR_AVAILABILITY_UNAVAILABLE");
+		const run = () => prismaService.$transaction(async (tx) => {
+			if (admission) await operatorPauseAdmission.assert(tx, admission, tenantSqlEnabled());
 			const chat = await write(tx);
 			if (chat.userId !== null && chat.userId > 0) {
 				const key = { instance: chat.instance, userId: chat.userId, chatType: "wpp", chatId: chat.id };
@@ -30,6 +36,7 @@ class ChatUserPreferencesService {
 			}
 			return chat;
 		});
+		return admission ? withDatabaseTenant(admission.instance, run) : run();
 	}
 
 	public async getMap(session: SessionScope, chatIds: number[], type: ChatPreferenceType) {

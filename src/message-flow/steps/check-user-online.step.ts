@@ -1,4 +1,5 @@
 import authService from "../../services/auth.service";
+import { pauseEligibleOperatorIds } from "../../services/operator-pause-admission.runtime";
 import { BaseStep, StepConfig, StepContext, StepResult } from "../base/base.step";
 
 interface CheckUserOnlineConnections {
@@ -31,7 +32,8 @@ export default class CheckUserOnlineStep extends BaseStep {
 	 */
 	private async isUserOnline(userId: number): Promise<boolean> {
 		const sessions = await authService.getOnlineSessions(this.instance);
-		return sessions.some((session) => session.data.userId === userId && session.onlineTokens.length > 0);
+		if (!sessions.some((session) => session.data.userId === userId && session.onlineTokens.length > 0)) return false;
+		return (await pauseEligibleOperatorIds(this.instance, [userId])).has(userId);
 	}
 
 	/**

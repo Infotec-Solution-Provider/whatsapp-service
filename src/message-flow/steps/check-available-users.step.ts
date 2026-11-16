@@ -1,6 +1,7 @@
 import { UserOnlineSession } from "../../sdk-local";
 import authService from "../../services/auth.service";
 import prismaService from "../../services/prisma.service";
+import { pauseEligibleOperatorIds } from "../../services/operator-pause-admission.runtime";
 import { BaseStep, StepConfig, StepContext, StepResult } from "../base/base.step";
 
 interface UserChatCount {
@@ -48,7 +49,9 @@ export default class CheckAvailableUsersStep extends BaseStep {
 	 */
 	private async getSectorOnlineSessions(): Promise<UserOnlineSession[]> {
 		const sessions = await authService.getOnlineSessions(this.instance);
-		return sessions.filter((s) => s.data.sectorId === this.sectorId);
+		const sectorSessions = sessions.filter((s) => s.data.sectorId === this.sectorId);
+		const eligible = await pauseEligibleOperatorIds(this.instance, sectorSessions.map(session => session.data.userId));
+		return sectorSessions.filter(session => eligible.has(session.data.userId));
 	}
 
 	/**

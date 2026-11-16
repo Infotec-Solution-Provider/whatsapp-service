@@ -34,6 +34,7 @@ import chatsService from "./chats.service";
 import chatUserPreferencesService from "./chat-user-preferences.service";
 import contactsService from "./contacts.service";
 import messageQueueService from "./message-queue.service";
+import { pauseAdmissionFailure } from "./operator-pause-admission";
 import messagesService from "./messages.service";
 import messagePresentationService from "./message-presentation.service";
 import messageMentionsService from "./message-mentions.service";
@@ -409,7 +410,7 @@ class MessagesDistributionService {
 					startedAt: new Date(),
 					botId: 1
 				}
-			}));
+			}), { instance });
 			await chatsService.syncChatToLocal(chat);
 			return { chat, systemMessage: null };
 		}
@@ -450,7 +451,7 @@ class MessagesDistributionService {
 
 				const chat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.create({
 					data: chatData
-				}));
+				}), { instance, recipientId: chatData.userId });
 				await chatsService.syncChatToLocal(chat);
 				return { chat, systemMessage: null };
 			}
@@ -472,7 +473,7 @@ class MessagesDistributionService {
 				...chatData,
 				startedAt: new Date()
 			}
-		}));
+		}), { instance, recipientId: chatData.userId });
 		await chatsService.syncChatToLocal(chat);
 
 		return { chat, systemMessage: systemMessage || null };
@@ -549,6 +550,7 @@ class MessagesDistributionService {
 			}
 			return outputMsg;
 		} catch (err) {
+			if (pauseAdmissionFailure(err)) throw err;
 			const msg = sanitizeErrorMessage(err);
 			logger.log(`Erro ao processar mensagem: ${msg}`);
 			logger.failed(err);
@@ -597,7 +599,7 @@ class MessagesDistributionService {
 			const updatedChat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.update({
 				where: { id: chat.id },
 				data: { ...data, botId: null }
-			}));
+			}), { instance: sector.instance, recipientId: data.userId, chatId: chat.id });
 			await chatsService.syncChatToLocal(updatedChat);
 			await transferHistoryService.recordTransfer({
 				previousChat: {
@@ -623,6 +625,7 @@ class MessagesDistributionService {
 		} catch (err) {
 			logger.log(`Erro ao processar mensagem!`);
 			logger.failed(err);
+			if (pauseAdmissionFailure(err)) throw err;
 		}
 	}
 
@@ -642,7 +645,7 @@ class MessagesDistributionService {
 			const updatedChat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.update({
 				where: { id: chat.id },
 				data: { ...data, userId: operador.CODIGO, botId: null }
-			}));
+			}), { instance: sector.instance, recipientId: operador.CODIGO, chatId: chat.id });
 			await chatsService.syncChatToLocal(updatedChat);
 			await transferHistoryService.recordTransfer({
 				previousChat: {
@@ -668,6 +671,7 @@ class MessagesDistributionService {
 		} catch (err) {
 			logger.log(`Erro ao processar mensagem!`);
 			logger.failed(err);
+			if (pauseAdmissionFailure(err)) throw err;
 		}
 	}
 	public async notifyChatStarted(process: ProcessingLogger, chat: WppChat) {

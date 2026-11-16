@@ -11,6 +11,7 @@ import socketService from "./socket.service";
 import parametersService from "./parameters.service";
 import { assertWabaReactionTarget, parseWabaReaction, wabaPhone, wabaReactionActorIds } from "../utils/waba-reaction";
 import { WabaReactionReceiptsService, type WabaReactionReceiptDatabase } from "./waba-reaction-receipts.service";
+import { admitHumanSend } from "./operator-pause-admission.runtime";
 
 type Domain = "wpp" | "internal";
 type ReactionMessage = {
@@ -95,6 +96,7 @@ export class MessageReactionsService {
 		} });
 		if (!chat || chat.isFinished) throw new MessageReactionError("Conversa indisponível para reação.", 403);
 		const to = (message.from.startsWith("me:") ? message.to : message.from).replace(/^me:/, "");
+		await admitHumanSend(session, chat.id, message.contactId, to);
 		return this.dispatch(session, message, "wpp", message.chatId, clientId, to, emoji, getClient);
 	}
 

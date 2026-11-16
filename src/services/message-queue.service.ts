@@ -2,6 +2,7 @@ import prismaService from "./prisma.service";
 import ProcessingLogger from "../utils/processing-logger";
 import { Logger } from "@in.pulse-crm/utils";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
+import { pauseAdmissionFailure } from "./operator-pause-admission";
 
 interface QueueMessageData {
   instance: string;
@@ -354,6 +355,14 @@ class MessageQueueService {
       await this.markAsCompleted(queueId, this.workerId);
       logger.success("Mensagem processada com sucesso");
     } catch (error: any) {
+      const deferred = pauseAdmissionFailure(error);
+      if (deferred) {
+        await prismaService.wppMessageProcessingQueue.updateMany({
+          where: { id: queueId, status: "PROCESSING", lockedBy: this.workerId },
+          data: { status: "PENDING", error: deferred.code, lockedUntil: new Date(Date.now() + 30_000), lockedBy: null, processingStartedAt: null }
+        });
+        return; // Pauses and CRM outages do not consume the message's retry budget.
+      }
       logger.log(`Erro ao processar item da fila: ${error.message}`);
       logger.failed(error);
 

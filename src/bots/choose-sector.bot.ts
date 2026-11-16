@@ -9,6 +9,8 @@ import prismaService from "../services/prisma.service";
 import chatsService from "../services/chats.service";
 import transferHistoryService from "../services/transfer-history.service";
 import contactsService from "../services/contacts.service";
+import chatUserPreferencesService from "../services/chat-user-preferences.service";
+import { pauseEligibleOperatorIds } from "../services/operator-pause-admission.runtime";
 
 class ChooseSectorBot {
 	private readonly running: { step: number; chatId: number }[] = [];
@@ -99,6 +101,8 @@ class ChooseSectorBot {
 				if (chooseSector) {
 					let query = `SELECT * FROM operadores WHERE SETOR = ${chooseSector.id} ORDER BY NOME`;
 					let operadores = await instancesService.executeQuery<Array<User>>(chat.instance, query, []);
+					const eligible = await pauseEligibleOperatorIds(chat.instance, operadores.map(operator => operator.CODIGO));
+					operadores = operadores.filter(operator => eligible.has(operator.CODIGO));
 
 					if (chat.instance === "nunes" && chooseSector.name === "Financeiro") {
 						operadores = operadores.filter((o) => o.NOME !== "Andréia");
@@ -153,8 +157,8 @@ class ChooseSectorBot {
 					const answer = `Estamos te redirecionado para o atendente ${chooseOp.NOME}.\nVocê será atendido em breve!`;
 					const operatoranswer = `*${chooseOp.NOME}*: Olá, em que posso ajudar?`;
 
-					this.removeRunningStep(chat.id);
 					await messagesDistributionService.transferChatOperator(sector, chooseOp, contact, chat, message);
+					this.removeRunningStep(chat.id);
 					whatsappService.sendBotMessage(message.from, message.clientId!, {
 						chat,
 						text: answer
@@ -215,12 +219,12 @@ class ChooseSectorBot {
 						break;
 
 					case 3:
-						this.removeRunningStep(chat.id);
 						const user = this.getOperadorOld(chat.id);
-						const transferedChat = await prismaService.wppChat.update({
+						const transferedChat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.update({
 							where: { id: chat.id },
 							data: { userId: user, botId: null }
-						});
+						}), { instance: chat.instance, recipientId: user, chatId: chat.id });
+						this.removeRunningStep(chat.id);
 						await chatsService.syncChatToLocal(transferedChat);
 						await transferHistoryService.recordTransfer({
 							previousChat: {
