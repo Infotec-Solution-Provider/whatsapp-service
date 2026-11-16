@@ -54,6 +54,19 @@ import operatorSendService from "./services/operator-send.service";
 import { flushDatabaseIncidentLog, recordDatabaseIncident } from "./utils/database-incident-log";
 import processLogs from "./logs/service";
 import { startOpsAlerts, stopOpsAlerts } from "./services/ops-alerts";
+import database from "./services/prisma.service";
+import { pauseAdmissionFailure } from "./services/central-operator-admission";
+import { readRuntimeConfig, readRuntimeKey } from "./operator-runtime/config";
+import { createOperatorRuntimeRouter } from "./operator-runtime/router";
+import { startOperatorRuntimeReconciliation } from "./operator-runtime/reconcile";
+import type { RuntimeDb } from "./operator-runtime/core";
+
+// This production adapter is installed with its own reviewed profile/key.
+// Missing configuration cannot silently turn central admission into legacy mode.
+const operatorRuntimeProfile = readRuntimeConfig();
+readRuntimeKey(operatorRuntimeProfile);
+const operatorRuntimeDatabase = database as unknown as RuntimeDb;
+let stopOperatorRuntimeReconciliation = () => {};
 
 whatsappService.buildClients();
 operatorSendService.configureWorker();
@@ -77,6 +90,7 @@ app.use(cors());
 app.use(publicBiServiceTokenGuard);
 app.use(createOdimBiAccessGuard(getPublicBiServiceIdentity));
 app.get("/health", (_req, res) => res.json({ service: "whatsapp", storage: "central", storageVersion: 1,
+	operatorPauseAdmission: { version: 1, authority: "central-v1", storage: "central", sharedCrmTransaction: true, instances: operatorRuntimeProfile.instances },
 	...(odimAccessOnlyEnabled ? { odimAccessOnly: true, odimAccessOnlyProfile: odimAccessOnlyProfile.state } : {}) }));
 
 // Respostas da API são dinâmicas e por usuário: sem ETag/304 e sem cache no navegador.
@@ -89,6 +103,7 @@ app.use("/api", (_req, res, next) => {
 
 app.use(express.json({ limit: "2gb" }));
 app.use(express.urlencoded({ extended: true, limit: "2gb" }));
+app.use(createOperatorRuntimeRouter(operatorRuntimeDatabase));
 
 // Serve static files for frontend
 app.use(express.static("public"));
@@ -132,6 +147,11 @@ app.get("/flows", (_req, res) => {
 });
 
 app.use((err: Error, req: Request, _res: Response, next: NextFunction) => {
+	const admission = pauseAdmissionFailure(err);
+	if (admission) {
+		_res.status(admission.status).json({ code: admission.code, message: admission.message, outcome: admission.outcome });
+		return;
+	}
 	if (err instanceof OdimAccessOnlyError) {
 		_res.status(err.statusCode).json({ message: err.message, code: err.code });
 		return;
@@ -154,6 +174,7 @@ process.on("uncaughtExceptionMonitor", (error, origin) => {
 });
 
 const server = app.listen(serverPort, () => {
+	stopOperatorRuntimeReconciliation = startOperatorRuntimeReconciliation(operatorRuntimeDatabase);
 	registerAllSteps();
 	gupshupWebhookQueueService.startProcessor();
 	wabaWebhookQueueService.startProcessor();
@@ -185,6 +206,7 @@ const shutdown = async (signal: string): Promise<void> => {
 	if (shuttingDown) return;
 	shuttingDown = true;
 	Logger.info(`[Shutdown] ${signal} received; draining durable workers`);
+	stopOperatorRuntimeReconciliation();
 
 	remoteInboundEventInboxService.stopWorker();
 	internalWhatsappMessageQueueService.stopWorker();
