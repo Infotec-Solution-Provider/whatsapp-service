@@ -738,7 +738,7 @@ class ChatsService {
 		} else {
 			return tx.wppChat.update({ where: { id }, data: { userId } });
 		}
-		});
+		}, { instance, recipientId: userId, chatId: id });
 
 		await this.syncChatToLocal(chat);
 		await transferHistoryService.recordTransfer({
@@ -1308,7 +1308,7 @@ class ChatsService {
 			session.instance,
 			"start-chat",
 			`${session.userId}-${contactId}_${Date.now()}`,
-			{ session, contactId, token }
+			{ session, contactId }
 		);
 
 		try {
@@ -1335,7 +1335,7 @@ class ChatsService {
 				userId = -1;
 			}
 
-			const newChat = await prismaService.wppChat.create({
+			const newChat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.create({
 				data: {
 					instance: session.instance,
 					type: "ACTIVE",
@@ -1353,7 +1353,7 @@ class ChatsService {
 						}
 					}
 				}
-			});
+			}), { instance: session.instance, recipientId: userId, initiatorId: session.userId });
 			await this.syncChatToLocal(newChat);
 
 			const usersService = getUsersClient();
@@ -1443,7 +1443,7 @@ class ChatsService {
 						}
 					}
 				}
-			}));
+			}), { instance, recipientId: userId });
 			process.log(`Chat created with ID ${newChat.id}`);
 
 			await this.syncChatToLocal(newChat);

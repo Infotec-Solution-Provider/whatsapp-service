@@ -18,6 +18,7 @@ import messagePresentationService from "./message-presentation.service";
 import { assertOdimChannelAllowed } from "../utils/odim-access-only";
 import { operatorMessageName } from "../utils/operator-message-name";
 import manualChatAuthorization from "./manual-chat-authorization.service";
+import { admitHumanSend } from "./central-operator-admission.runtime";
 
 interface OperatorSendPayload {
 	options: SendMessageOptions;
@@ -64,6 +65,7 @@ class OperatorSendService {
 			return { ...existing, created: false };
 		}
 		await manualChatAuthorization.assertCanSend(session, clientId, request.contactId, request.chatId, request.to);
+		await admitHumanSend(session, request.chatId, request.contactId, request.to);
 		onStage("destination.lookup");
 		const [registeredClient, contact, chat, quoted] = await Promise.all([
 			prismaService.wppClient.findFirst({ where: { id: clientId, instance: session.instance, isActive: true } }),

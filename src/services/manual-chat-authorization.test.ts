@@ -64,6 +64,7 @@ async function withWorld(f: World, run: (s: Services) => Promise<void>) {
 		replace("@in.pulse-crm/utils", { Logger: { log() {}, info() {}, debug() {}, error() {}, warn() {} },
 			sanitizeErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error) });
 		stub("../utils/processing-logger", SilentProcess);
+		replace("./central-operator-admission.runtime", { admitHumanSend: async () => undefined });
 		stub("./prisma.service", {
 			parameter: { findMany: async ({ where }: Row) => {
 				f.flagReads.push(where);

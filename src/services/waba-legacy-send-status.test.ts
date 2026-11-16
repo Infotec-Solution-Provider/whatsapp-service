@@ -26,6 +26,7 @@ async function run(): Promise<void> {
 		});
 		stub("../utils/processing-logger", SilentProcess);
 		stub("./manual-chat-authorization.service", { assertCanSend: async () => undefined });
+		isolate("./central-operator-admission.runtime", { admitHumanSend: async () => undefined });
 		for (const path of ["./prisma.service", "./files.service", "./instances.service", "./internal-chats.service", "./contacts.service", "./ready-messages.service"])
 			stub(path, new Proxy({}, { get() { throw new Error(`Unexpected external dependency: ${path}`); } }));
 		for (const provider of ["gupshup", "remote", "waba", "wwebjs"])

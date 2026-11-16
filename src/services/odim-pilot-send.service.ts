@@ -8,6 +8,7 @@ import { WabaDeliveryError } from "../utils/waba-send";
 import WABAWhatsappClient from "../whatsapp-client/waba-whatsapp-client";
 import prisma from "./prisma.service";
 import socket from "./socket.service";
+import { admitHumanSend } from "./central-operator-admission.runtime";
 const conflict = (code: string) => Object.assign(new Error(code), { statusCode: 409 });
 
 /** One fixed text/recipient/actor/expiry. Never registers a provider or a queue worker. */
@@ -23,16 +24,21 @@ export async function sendOdimPilotMessage(session: SessionData, clientId: numbe
 	if (!contact || !chat || !client?.WABAToken || !client.WABAAccountId || !client.WABAPhoneId) throw conflict("PILOT_IDENTITY_CHANGED");
 	if (!recentIncoming) throw conflict("PILOT_REQUIRES_RECENT_INCOMING");
 	const receipt = resolve(dirname(odimPilotSendPath), `odim-pilot-${p.traceId}.receipt.json`);
-	let fd: number;
-	try { fd = openSync(receipt, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW || 0), 0o600); }
-	catch (e) {
-		if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw conflict("PILOT_RESERVATION_FAILED");
+	const replay = async () => {
 		const prior = JSON.parse(readFileSync(receipt, "utf8"));
 		if (prior.state === "SENT" && Number.isSafeInteger(prior.messageId)) {
 			const saved = await prisma.wppMessage.findFirst({ where: { id: prior.messageId, instance: "odim", clientId: p.clientId, contactId: p.contactId, chatId: p.chatId } });
 			if (saved) return saved;
 		}
 		throw conflict("PILOT_ALREADY_RESERVED_DO_NOT_RESEND");
+	};
+	try { return await replay(); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+	await admitHumanSend(session, p.chatId, p.contactId, p.recipient);
+	let fd: number;
+	try { fd = openSync(receipt, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW || 0), 0o600); }
+	catch (e) {
+		if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw conflict("PILOT_RESERVATION_FAILED");
+		return replay();
 	}
 	const record = (state: string, messageId?: number) => ({ state, messageId, traceId: p.traceId, at: new Date().toISOString(), legacyRemainsOwner: true });
 	try { writeFileSync(fd, JSON.stringify(record("RESERVED"))); fsyncSync(fd); } finally { closeSync(fd); }

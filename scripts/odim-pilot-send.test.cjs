@@ -2,7 +2,8 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const root=path.resolve(__dirname,'../config'),profile=path.join(root,'odim-access-only.json'),config=path.join(root,'odim-pilot-send.json');
 assert(!fs.existsSync(profile)&&!fs.existsSync(config),'Do not replace existing local configuration');fs.mkdirSync(root,{recursive:true});fs.writeFileSync(profile,JSON.stringify({version:1,enabled:true,instance:'odim'}),{flag:'wx',mode:0o600});
 const stub=(p,value)=>{const id=require.resolve(p);require.cache[id]={id,filename:id,loaded:true,exports:{__esModule:true,...value}}};
-let recent=true,calls=0,fail=false,socketCalls=0,server;const rows=new Map(),traces=[];
+let recent=true,calls=0,fail=false,socketCalls=0,server,paused=false,admissions=0;const rows=new Map(),traces=[];
+stub('../dist/services/central-operator-admission.runtime',{admitHumanSend:async(session,chatId,contactId,to)=>{admissions++;assert.equal(session.userId,6);assert.equal(chatId,8);assert.equal(contactId,5);assert.equal(to,'5511999999999');if(paused)throw Object.assign(Error('OPERATOR_PAUSED'),{statusCode:409})}});
 stub('../dist/services/auth.service',{default:{fetchSessionData:async token=>({instance:token==='foreign'?'foreign':'odim',userId:token==='other'?7:6,role:token==='operator'?'USER':'ADMIN',name:'Fixture'})}});
 stub('../dist/services/parameters.service',{default:{getSessionParams:async()=>({})}});
 stub('../dist/services/socket.service',{default:{emit:async(type,room)=>{assert.equal(room,'odim:chat:8');socketCalls++}}});
@@ -17,8 +18,10 @@ assert.equal((await post()).status,423);save();assert.equal((await post(body(),n
 for(const change of [{to:'5511888888888'},{contactId:6},{chatId:9},{text:'another text'},{fileId:1},{quotedId:1}])assert.equal((await post({...body(),...change})).status,423);
 assert.equal((await post(body(),'admin',12)).status,423);assert.equal((await post(body(),'admin',13,{'Idempotency-Key':'do-not-queue'})).status,423);assert.equal(calls,0);
 recent=false;assert.equal((await post()).status,409);assert.equal(calls,0);recent=true;
+paused=true;assert.equal((await post()).status,409);assert.equal(calls,0);assert.equal(rows.size,0);assert.equal(fs.existsSync(path.join(root,'odim-pilot-'+p.traceId+'.receipt.json')),false);paused=false;
 const first=await post();assert.equal(first.status,201);const result=await first.json();assert.equal(result.status,'SENT');assert.equal(calls,1);assert.equal((await post()).status,201);assert.equal(calls,1);assert.equal(rows.size,1);assert.equal(socketCalls,1);
+paused=true;const beforeReplay=admissions;assert.equal((await post()).status,201);assert.equal(admissions,beforeReplay);assert.equal(calls,1);paused=false;
 p.traceId=crypto.randomUUID();save();fail=true;assert.equal((await post()).status,409);assert.equal((await post()).status,409);assert.equal(calls,2);assert.equal([...rows.values()].at(-1).status,'UNKNOWN');
 p.expiresAt=new Date(Date.now()-1000).toISOString();save();assert.equal((await post()).status,423);assert.equal(calls,2);
-console.log(JSON.stringify({passed:true,actualHttp:true,onlyFixedRecipientActorText:true,defaultOffAndExpiry:true,recentIncomingRequired:true,idempotentReplay:true,unknownNotRetried:true,providerBootstrap:false,realMessagesSent:0}));
+console.log(JSON.stringify({passed:true,actualHttp:true,onlyFixedRecipientActorText:true,defaultOffAndExpiry:true,recentIncomingRequired:true,idempotentReplay:true,pauseDenialHasNoReservation:true,acceptedReplayPreservedDuringPause:true,unknownNotRetried:true,providerBootstrap:false,realMessagesSent:0}));
 })().catch(e=>{console.error(e);process.exitCode=1}).finally(()=>{server?.close();for(const f of [profile,config,...new Set(traces.map(t=>path.join(root,'odim-pilot-'+t+'.receipt.json')))])if(fs.existsSync(f))fs.unlinkSync(f)});

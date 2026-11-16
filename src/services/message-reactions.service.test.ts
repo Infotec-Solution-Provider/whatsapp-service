@@ -319,8 +319,13 @@ test("serialized webhook reaction IDs match canonical receipt IDs", async () => 
 });
 
 async function run(): Promise<void> {
-	for (const [name, execute] of tests) { await execute(); console.log(`PASS ${name}`); }
-	console.log(`${tests.length} message reaction service tests passed (isolated; no live database/provider/socket).`);
+	const admission = require("./central-operator-admission.runtime") as { admitHumanSend: (...args: unknown[]) => Promise<void> };
+	const previousAdmission = admission.admitHumanSend;
+	admission.admitHumanSend = async () => undefined;
+	try {
+		for (const [name, execute] of tests) { await execute(); console.log(`PASS ${name}`); }
+		console.log(`${tests.length} message reaction service tests passed (isolated; no live database/provider/socket).`);
+	} finally { admission.admitHumanSend = previousAdmission; }
 }
 
 void run().catch((error) => { console.error(error); process.exitCode = 1; });

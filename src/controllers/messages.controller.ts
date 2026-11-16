@@ -10,6 +10,7 @@ import publicBiAuthenticated from "../middlewares/public-bi-auth.middleware";
 import messagesService from "../services/messages.service";
 import whatsappService from "../services/whatsapp.service";
 import operatorSendService from "../services/operator-send.service";
+import { pauseAdmissionFailure } from "../services/central-operator-admission";
 import { resolveOperatorIdempotencyKey } from "../utils/operator-send-request";
 import { createUploadTraceLogger, resolveUploadTraceId } from "../utils/file-upload-trace";
 import messageReactionsService from "../services/message-reactions.service";
@@ -246,6 +247,7 @@ class MessagesController {
 				data: messagePresentationService.fromStored(message)
 			});
 		} catch (error) {
+			if (pauseAdmissionFailure(error)) throw error;
 			process?.failed(sanitizeErrorMessage(error));
 			trace.error("request.failed", error, {
 				clientId: req.params["clientId"],

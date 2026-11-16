@@ -2,6 +2,7 @@ import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import whatsappService from "../services/whatsapp.service";
 import { BadRequestError, NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
+import { pauseAdmissionFailure } from "../services/central-operator-admission";
 
 class WhatsappController {
 	constructor(public readonly router: Router) {
@@ -51,6 +52,7 @@ class WhatsappController {
 				err.sendResponse(res);
 				return;
 			}
+			if (pauseAdmissionFailure(err)) throw err;
 			res.status(500).send({
 				message: "failed to send template",
 				error: err?.message || err

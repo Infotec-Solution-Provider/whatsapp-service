@@ -144,6 +144,7 @@ class IsolatedDatabase {
 		};
 		return {
 			wppMessage: delegate("messages"), operatorOutboundSend: delegate("jobs"),
+			$queryRawUnsafe: async (sql: string) => { assert.match(sql, /information_schema.TABLES/); return []; },
 			$transaction: async (callback: (tx: Row) => Promise<unknown>) => this.locked(async () => {
 				if (this.failTransactions) throw new Prisma.PrismaClientKnownRequestError("Transaction already closed: expired", { code: "P2028", clientVersion: "test" });
 				const snapshot = structuredClone(this.state);

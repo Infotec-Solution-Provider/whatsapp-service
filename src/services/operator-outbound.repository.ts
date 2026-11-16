@@ -1,6 +1,7 @@
 import { Prisma, WppMessage } from "@prisma/client";
 import prismaService, { type DatabaseClient } from "./prisma.service";
 import { assertOdimChannelAllowed, odimQueueWhere } from "../utils/odim-access-only";
+import { centralAdmissionRequired, operatorPauseAdmission } from "./central-operator-admission";
 import {
 	assertOperatorOutboundReplay,
 	OperatorOutboundDeliveryResult,
@@ -50,9 +51,7 @@ export default class PrismaOperatorOutboundRepository implements OperatorOutboun
 			return { ...existing, created: false };
 		}
 		try {
-			// A nested write commits message + job atomically without an interactive
-			// transaction's callback/timeout between the two dependent inserts.
-			const { message, ...job } = await this.db.operatorOutboundSend.create({
+			const create = (db: Pick<DatabaseClient, "operatorOutboundSend">) => db.operatorOutboundSend.create({
 				data: {
 					instance: input.instance, userId: input.userId, clientId: input.clientId,
 					idempotencyKey: input.idempotencyKey, payloadHash: input.payloadHash,
@@ -64,6 +63,12 @@ export default class PrismaOperatorOutboundRepository implements OperatorOutboun
 				},
 				include: { message: true },
 			});
+			const { message, ...job } = await centralAdmissionRequired(this.db, input.instance)
+				? await this.db.$transaction(async tx => {
+					await operatorPauseAdmission.assertSend(tx, { instance: input.instance, actorId: input.userId,
+						chatId: input.message.chatId ?? null, contactId: input.message.contactId ?? null, to: input.message.to });
+					return create(tx);
+				}) : await create(this.db);
 			return { message, job, created: true };
 		} catch (error) {
 			if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;

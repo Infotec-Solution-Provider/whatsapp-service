@@ -1,7 +1,7 @@
 import { SessionData } from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { assertOdimChannelAllowed, odimQueueWhere, sameTenantIdentity } from "../utils/odim-access-only";
-import { InternalMessage, WppChat, WppClientType, WppMessage, WppSector } from "@prisma/client";
+import { InternalMessage, WppChat, WppContact, WppClientType, WppMessage, WppSector } from "@prisma/client";
 import { BadRequestError, InternalServerError } from "@rgranatodutra/http-errors";
 import "dotenv/config";
 import { TemplateMessage } from "../adapters/template.adapter";
@@ -34,6 +34,7 @@ import { getTemplateAttribution } from "../utils/template-attribution";
 import { getOdimCopiedSectorClients } from "./odim-operational-channel.service";
 import { operatorMessageName } from "../utils/operator-message-name";
 import manualChatAuthorization from "./manual-chat-authorization.service";
+import { admitHumanSend } from "./central-operator-admission.runtime";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -234,6 +235,7 @@ class WhatsappService {
 	public async sendMessage(session: SessionData, clientId: number, to: string, data: SendMessageData) {
 		assertOdimChannelAllowed(session.instance);
 		await manualChatAuthorization.assertCanSend(session, clientId, data.contactId, data.chatId, to);
+		await admitHumanSend(session, data.chatId, data.contactId, to);
 		const parseBoolean = (value: unknown): boolean => {
 			if (typeof value === "boolean") {
 				return value;
@@ -275,7 +277,7 @@ class WhatsappService {
 			process.log("Obtendo client do whatsapp...");
 			const client = this.getClient(clientId);
 
-			if (!client) {
+			if (!client || !sameTenantIdentity(client.instance, session.instance)) {
 				throw new BadRequestError("Client do WhatsApp não encontrado.");
 			}
 
@@ -838,6 +840,7 @@ class WhatsappService {
 		assertOdimChannelAllowed(session.instance);
 		// Keep authorization outside the provider-error wrapper so a denial stays 403.
 		await manualChatAuthorization.assertCanSend(session, clientId, contactId, chatId, to);
+		await admitHumanSend(session, chatId, contactId, to);
 		const process = new ProcessingLogger(session.instance, "send-template", `${to}-${Date.now()}`, data);
 		let stage = "normalize-template";
 
@@ -873,7 +876,7 @@ class WhatsappService {
 			stage = "resolve-client";
 			const client = this.getClient(clientId);
 
-			if (!client) {
+			if (!client || !sameTenantIdentity(client.instance, session.instance)) {
 				throw new BadRequestError("Client do WhatsApp não encontrado.");
 			}
 
@@ -979,12 +982,22 @@ class WhatsappService {
 			process.log("Nenhuma mensagem original foi encontrada para encaminhar.");
 			return;
 		}
+		// Admit every external destination before persisting/sending any member of this batch.
+		const destinations = new Map<WhatsappForwardTarget, { contact: WppContact | null; chat: WppChat | null }>();
+		for (const target of whatsappTargets ?? []) {
+			const contact = await contactsService.findContactByAddress(session.instance, target.id);
+			const chat = contact ? await prismaService.wppChat.findFirst({ where: {
+				instance: session.instance, contactId: contact.id, isFinished: false
+			} }) : null;
+			await admitHumanSend(session, chat?.id, contact?.id, target.id);
+			destinations.set(target, { contact, chat });
+		}
 
 		if (whatsappTargets && whatsappTargets.length > 0) {
 			try {
 				const client = await this.getClient(clientId);
 
-				if (!client) {
+				if (!client || !sameTenantIdentity(client.instance, session.instance)) {
 					throw new BadRequestError("Client do WhatsApp não encontrado.");
 				}
 
@@ -999,15 +1012,7 @@ class WhatsappService {
 
 				for (const target of whatsappTargets) {
 					try {
-						const contact = await contactsService.findContactByAddress(session.instance, target.id);
-						const chat = contact
-							? await prismaService.wppChat.findFirst({
-								where: {
-									instance: session.instance,
-									contactId: contact.id
-								}
-							})
-							: null;
+						const { contact, chat } = destinations.get(target)!;
 
 						for (const originalMsg of originalMessages) {
 							const now = new Date();

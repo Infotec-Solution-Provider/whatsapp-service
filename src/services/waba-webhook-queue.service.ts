@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import prismaService from "./prisma.service";
 import { assertOdimChannelAllowed, odimQueueSql } from "../utils/odim-access-only";
 import wabaService from "./waba.service";
+import { pauseAdmissionFailure } from "./central-operator-admission";
 
 const QUEUE_POLL_INTERVAL = parseInt(process.env["WABA_WEBHOOK_QUEUE_POLL_INTERVAL"] || "1000", 10);
 const MAX_CONCURRENT_PROCESSING = parseInt(process.env["WABA_WEBHOOK_MAX_CONCURRENT"] || "5", 10);
@@ -99,6 +100,7 @@ class WABAWebhookQueueService {
 				max_retries AS maxRetries
 			 FROM waba_webhook_queue
 			 WHERE status = ?${odimQueueSql()}
+               AND (error IS NULL OR error NOT IN ('OPERATOR_PAUSED','OPERATOR_AVAILABILITY_UNAVAILABLE') OR updated_at <= DATE_SUB(NOW(3), INTERVAL 30 SECOND))
 			 ORDER BY created_at ASC
 			 LIMIT 1`,
 			WABA_QUEUE_STATUS.PENDING
@@ -136,6 +138,13 @@ class WABAWebhookQueueService {
 				id
 			);
 		} catch (err: any) {
+			const deferred = pauseAdmissionFailure(err);
+			if (deferred) {
+				await prismaService.$executeRawUnsafe(
+					"UPDATE waba_webhook_queue SET status='PENDING',error=?,processed_at=NULL,processing_started_at=NULL,updated_at=NOW(3) WHERE id=? AND status='PROCESSING'",
+					deferred.code, id);
+				return;
+			}
 			const newRetryCount = item.retryCount + 1;
 			const shouldRetry = newRetryCount < item.maxRetries;
 			const safeError = sanitizeErrorMessage(err);

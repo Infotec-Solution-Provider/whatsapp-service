@@ -2,6 +2,7 @@ import { BadRequestError } from "@rgranatodutra/http-errors";
 import { Prisma } from "@prisma/client";
 import { SessionData } from "../sdk-local";
 import prismaService from "./prisma.service";
+import { operatorPauseAdmission, OperatorPauseAdmissionError, type ChatAssignmentAdmission } from "./central-operator-admission";
 import { odimSupervisionSharedChatScope } from "../utils/odim-supervision-sharing";
 
 export type ChatPreferenceType = "wpp" | "internal";
@@ -17,9 +18,12 @@ class ChatUserPreferencesService {
 	 * Message READ status belongs to the conversation, not its new attendant.
 	 */
 	public async withUnreadAssignment<T extends { id: number; instance: string; userId: number | null }>(
-		write: (tx: Prisma.TransactionClient) => Promise<T>
+		write: (tx: Prisma.TransactionClient) => Promise<T>,
+		admission: ChatAssignmentAdmission
 	): Promise<T> {
+		if (!admission) throw new OperatorPauseAdmissionError("OPERATOR_AVAILABILITY_UNAVAILABLE");
 		return prismaService.$transaction(async (tx) => {
+			await operatorPauseAdmission.assert(tx, admission);
 			const chat = await write(tx);
 			if (chat.userId !== null && chat.userId > 0) {
 				const key = { instance: chat.instance, userId: chat.userId, chatType: "wpp", chatId: chat.id };
