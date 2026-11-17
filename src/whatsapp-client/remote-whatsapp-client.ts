@@ -402,6 +402,26 @@ class RemoteWhatsappClient implements WhatsappClient {
 			const currentMessage = candidates[0];
 
 			if (!currentMessage) {
+				const groupEvent = await prismaService.remoteInboundEventInbox.findFirst({
+					where: {
+						clientId: this.id, eventType: "message-received", providerMessageId: messageId,
+						status: "COMPLETED", payload: { path: "$.message.isGroup", equals: true }
+					},
+					select: { id: true }
+				});
+				if (groupEvent) return;
+
+				const groupMessage = await prismaService.internalMessage.findFirst({
+					where: {
+						clientId: this.id, instance: this.instance,
+						OR: [{ wwebjsIdStanza: messageId }, { wwebjsIdStanza: null, wwebjsId: messageId }]
+					},
+					select: { id: true }
+				});
+				// A participant receipt is not a status for the entire group.
+				// The internal outbound queue already owns its send outcome.
+				if (groupMessage) return;
+
 				// The durable inbox retries after the outbound job links the provider ID.
 				// No detached timer or successful completion before the update exists.
 				throw new Error("REMOTE_RECEIPT_MESSAGE_NOT_FOUND");

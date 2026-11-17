@@ -5,7 +5,10 @@ const mock = (path: string, exports: unknown) => {
 	require.cache[id] = { id, filename: id, loaded: true, exports } as NodeModule;
 };
 const now = Date.now();
+const day = 86_400_000;
 const rows: any[] = [];
+const errorLogs: string[] = [];
+const infoLogs: string[] = [];
 const delegate = {
 	findMany: async ({ where, orderBy, take }: any) => {
 		const orders = Array.isArray(orderBy) ? orderBy : [orderBy];
@@ -34,7 +37,9 @@ const delegate = {
 	}
 };
 mock("./prisma.service", { __esModule: true, default: { remoteInboundEventInbox: delegate } });
-mock("@in.pulse-crm/utils", { Logger: { error() {} } });
+mock("@in.pulse-crm/utils", {
+	Logger: { error: (message: string) => errorLogs.push(message), info: (message: string) => infoLogs.push(message) }
+});
 const { RemoteInboundEventInboxService, calculateRemoteInboundRetryDelayMs } =
 	require("./remote-inbound-event-inbox.service") as typeof import("./remote-inbound-event-inbox.service");
 
@@ -77,8 +82,23 @@ async function main(): Promise<void> {
 		const oldRows = rows.filter((row) => row.id.startsWith("old-"));
 		assert.equal(oldRows.length, 1200, "No historical event is deleted");
 		assert.ok(oldRows.every((row) => row.status === "PENDING" && row.retryCount === 2304 &&
-			row.nextAttemptAt.getTime() >= now + 3_600_000 && row.lockedBy === null),
-			"Unmatched historical receipts are retained and deferred, never falsely completed");
+			row.nextAttemptAt.getTime() >= now + day && row.nextAttemptAt.getTime() < Date.now() + day * 1.25 &&
+			row.lockedBy === null), "Unmatched historical receipts are retained with daily, jittered retries");
+		assert.equal(errorLogs.length, 0, "Known historical misses must not flood the error log");
+		assert.equal(infoLogs.length, 0, "An already deferred receipt is not logged again");
+
+		const recentMiss = item("old-recent", now - 240_000, now - 1000, 7, "message-status-received:READ");
+		rows.push(recentMiss);
+		await service.processOnce();
+		assert.ok(recentMiss.nextAttemptAt.getTime() >= now + 3_600_000);
+		assert.equal(infoLogs.length, 1, "The first defer is logged once");
+		const terminal = item("old-terminal", now - day * 2, now - 1000, 9, "message-status-received:READ");
+		terminal.maxRetries = 10;
+		rows.push(terminal);
+		await service.processOnce();
+		assert.equal(terminal.status, "FAILED");
+		assert.equal(errorLogs.length, 1, "A terminal failure remains an error");
+
 		const recovery = oldRows[0]!;
 		recovery.nextAttemptAt = new Date(now - 1000); // Simulate its next scheduled attempt.
 		recovered = true;
@@ -89,9 +109,9 @@ async function main(): Promise<void> {
 		assert.equal(calculateRemoteInboundRetryDelayMs(1, "message-status-received:READ", "REMOTE_RECEIPT_MESSAGE_NOT_FOUND"), 2000);
 		assert.equal(calculateRemoteInboundRetryDelayMs(7, "message-status-received:READ", "REMOTE_RECEIPT_MESSAGE_NOT_FOUND"), 128000);
 		assert.equal(calculateRemoteInboundRetryDelayMs(8, "message-status-received:READ", "REMOTE_RECEIPT_MESSAGE_NOT_FOUND"), 3600000);
-		assert.equal(calculateRemoteInboundRetryDelayMs(100, "message-received", "REMOTE_RECEIPT_MESSAGE_NOT_FOUND"), 256000);
-		assert.equal(calculateRemoteInboundRetryDelayMs(100, "message-status-received:READ", "P2024"), 256000);
-		assert.equal(calculateRemoteInboundRetryDelayMs(100, "message-status-received:READ", "REMOTE_RECEIPT_AMBIGUOUS_MESSAGE"), 256000);
+		assert.equal(calculateRemoteInboundRetryDelayMs(100, "message-received", "REMOTE_RECEIPT_MESSAGE_NOT_FOUND", day), 256000);
+		assert.equal(calculateRemoteInboundRetryDelayMs(100, "message-status-received:READ", "P2024", day), 256000);
+		assert.equal(calculateRemoteInboundRetryDelayMs(100, "message-status-received:READ", "REMOTE_RECEIPT_AMBIGUOUS_MESSAGE", day), 256000);
 		console.log("PASS: 1200 historical retries, fresh receipt/inbound progress in two batches, bounded concurrency, durable late recovery and scoped backoff");
 	} finally {
 		if (priorConcurrency === undefined) delete process.env["REMOTE_INBOUND_EVENT_CONCURRENCY"];

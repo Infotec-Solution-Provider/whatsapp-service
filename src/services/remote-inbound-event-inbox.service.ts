@@ -10,6 +10,9 @@ import { AsyncConcurrencyLimiter } from "../utils/async-concurrency-limiter";
 const DEFAULT_PROCESSING_INTERVAL_MS = 250;
 const DEFAULT_LOCK_DURATION_MS = 60_000;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 191;
+const UNMATCHED_RECEIPT_RETRY_THRESHOLD = 8;
+const ONE_HOUR_MS = 3_600_000;
+const ONE_DAY_MS = 24 * ONE_HOUR_MS;
 
 export class RemoteInboundInboxRequestError extends Error {
 	constructor(message: string, public readonly statusCode: 400 | 409) {
@@ -93,11 +96,19 @@ export function resolveRemoteInboundIdempotencyKey(
 	return key;
 }
 
-export function calculateRemoteInboundRetryDelayMs(retryCount: number, eventType?: string, errorMessage?: string): number {
-	// Keep early retries fast while an outbound job links its provider ID. Old
-	// unmatched receipts remain durable, but must not consume the worker forever.
-	if (retryCount >= 8 && eventType?.startsWith("message-status-received:") &&
-		errorMessage === "REMOTE_RECEIPT_MESSAGE_NOT_FOUND") return 3_600_000;
+function isUnmatchedRemoteReceipt(eventType?: string, errorMessage?: string): boolean {
+	return eventType?.startsWith("message-status-received:") === true &&
+		errorMessage === "REMOTE_RECEIPT_MESSAGE_NOT_FOUND";
+}
+
+export function calculateRemoteInboundRetryDelayMs(
+	retryCount: number, eventType?: string, errorMessage?: string, ageMs = 0
+): number {
+	// Recent receipts can race provider-ID persistence. Retry older misses
+	// daily with jitter so an existing burst does not recur at the same minute.
+	if (retryCount >= UNMATCHED_RECEIPT_RETRY_THRESHOLD && isUnmatchedRemoteReceipt(eventType, errorMessage)) {
+		return ageMs >= ONE_DAY_MS ? ONE_DAY_MS + Math.floor(Math.random() * 6 * ONE_HOUR_MS) : ONE_HOUR_MS;
+	}
 	return Math.min(300_000, 1_000 * 2 ** Math.min(Math.max(retryCount, 0), 8));
 }
 
@@ -341,18 +352,24 @@ export class RemoteInboundEventInboxService {
 		const retryCount = item.retryCount + 1;
 		const terminal = item.maxRetries > 0 && retryCount >= item.maxRetries;
 		const message = (error instanceof Error ? error.message : String(error)).slice(0, 4_000);
+		const now = Date.now();
+		const delay = calculateRemoteInboundRetryDelayMs(retryCount, item.eventType, message, now - item.createdAt.getTime());
 		await prismaService.remoteInboundEventInbox.updateMany({
 			where: { id: item.id, status: "PROCESSING", lockedBy: this.workerId },
 			data: {
 				status: terminal ? "FAILED" : "PENDING",
 				retryCount,
 				error: message,
-				nextAttemptAt: new Date(Date.now() + calculateRemoteInboundRetryDelayMs(retryCount, item.eventType, message)),
+				nextAttemptAt: new Date(now + delay),
 				lockedBy: null,
 				lockedUntil: null
 			}
 		});
-		Logger.error(`[RemoteInboundInbox] Failed to process ${item.id}: ${message}`, error as Error);
+		if (terminal || !isUnmatchedRemoteReceipt(item.eventType, message)) {
+			Logger.error(`[RemoteInboundInbox] Failed to process ${item.id}: ${message}`, error as Error);
+		} else if (retryCount === UNMATCHED_RECEIPT_RETRY_THRESHOLD) {
+			Logger.info(`[RemoteInboundInbox] Receipt deferred after ${retryCount} unmatched attempts | clientId=${item.clientId} | eventId=${item.id}`);
+		}
 	}
 
 	private async releaseExpiredLocks(): Promise<void> {
