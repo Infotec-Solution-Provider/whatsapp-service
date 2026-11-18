@@ -23,6 +23,25 @@ flag("feature_perf_virtualized_chat_list_enabled", "Lista de conversas virtualiz
 flag("is_official", "Comportamento de canal oficial no frontend", "Canais");
 flag("feature_legacy_history_enabled", "Histórico legado", "Histórico");
 parameterCatalog.find(field => field.key === "feature_legacy_history_enabled")!.description = "Acesso à rota de histórico legado quando ela existe no frontend publicado. A rota atual restringe seu uso a administradores da Odim.";
+for (const [key, label] of [
+  ["customers", "Clientes e catálogos do CRM"],
+  ["users", "Catálogos de usuários"],
+  ["units_campaigns", "Unidades e campanhas"],
+  ["sales", "Vendas e propostas"],
+  ["imports", "Importações do CRM"],
+  ["email", "E-mail do CRM"],
+  ["satisfaction", "Pesquisas de satisfação"],
+  ["administration", "Administração do CRM"],
+] as const) flag(`feature_crm_${key}_enabled`, label, "CRM");
+flag("feature_telephony_monitoring_enabled", "Monitoria de telefonia", "Telefonia");
+flag("feature_contact_requests_enabled", "Solicitações sobre contatos", "Contatos");
+flag("feature_parameter_settings_enabled", "Tela de parâmetros do CRM", "Recursos");
+flag("feature_new_frontend_enabled", "Interface nova do CRM", "Interface");
+flag("feature_frontend_switch_enabled", "Troca de interface", "Interface");
+for (const field of parameterCatalog) {
+  if (["feature_new_frontend_enabled", "feature_frontend_switch_enabled"].includes(field.key))
+    field.description = "Disponível somente quando a interface nova está publicada para o tenant.";
+}
 flag("monitor:use_local_search", "Monitoria no CRM local", "Monitoria");
 number("monitor:sla_minutes", "SLA de atendimento", "Monitoria", null, 0.1, 525600, scopes, "minutos");
 number("customer_linking_timeout_ms", "Tempo limite da vinculação de cliente", "Contatos", null, 1000, 2147483647, ["INSTANCE", "SECTOR"], "milissegundos");
