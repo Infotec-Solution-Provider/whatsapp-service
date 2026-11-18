@@ -19,6 +19,11 @@ export interface TenantSqlRegistry {
 	tenants: TenantSqlTarget[];
 }
 
+function allocationIncrement(registry: TenantSqlRegistry, target: TenantSqlTarget): number {
+	// Keep the even series for Suprimaxxi. With three targets split the odd series.
+	return registry.tenants.length === 3 && target.instance !== "suprimaxxi" ? 4 : 2;
+}
+
 export function tenantSqlEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
 	const mode = env["WHATSAPP_STORAGE"] ?? "central";
 	if (mode !== "central" && mode !== "tenant-sql") throw new Error("Invalid WHATSAPP_STORAGE");
@@ -31,15 +36,19 @@ export function validateRegistry(input: unknown): TenantSqlRegistry {
 		registry.user !== "homolog" || registry.sourceDatabase !== "homolog-whatsapp" ||
 		registry.credentialFile !== "/home/inpulse/htdocs/homolog/.db-password" ||
 		registry.tablePrefix !== "wpp_runtime_" || registry.autoIncrementIncrement !== 2 ||
-		!Array.isArray(registry.tenants) || registry.tenants.length !== 2) {
+		!Array.isArray(registry.tenants) || ![2, 3].includes(registry.tenants.length)) {
 		throw new Error("Tenant SQL registry is not a prepared homolog registry");
 	}
-	const targets: Record<string, string> = { homolog: "homolog-crm", suprimaxxi: "homolog-crm-suprimaxxi" };
+	const targets: Record<string, { database: string; offset: number }> = {
+		homolog: { database: "homolog-crm", offset: 1 },
+		suprimaxxi: { database: "homolog-crm-suprimaxxi", offset: 2 },
+		...(registry.tenants.length === 3 ? { infotec: { database: "homolog-infotec-whatsapp-runtime", offset: 3 } } : {}),
+	};
 	const names = new Set<string>();
 	const slots = new Set<number>();
 	for (const target of registry.tenants) {
-		if (targets[target.instance] !== target.database || target.prepared !== true || names.has(target.instance) ||
-			!Number.isInteger(target.autoIncrementOffset) || target.autoIncrementOffset < 1 || target.autoIncrementOffset > 2 ||
+		const identity = targets[target.instance];
+		if (identity?.database !== target.database || identity.offset !== target.autoIncrementOffset || target.prepared !== true || names.has(target.instance) ||
 			slots.has(target.autoIncrementOffset)) throw new Error("Tenant SQL target identity or preparation is invalid");
 		names.add(target.instance);
 		slots.add(target.autoIncrementOffset);
@@ -61,7 +70,7 @@ export function loadTenantPools(): Map<string, Pool> {
 			bigNumberStrings: true, decimalNumbers: true, enableKeepAlive: true,
 		});
 		pool.on("connection", (connection) => {
-			(connection as unknown as import("mysql2").PoolConnection).query(`SET time_zone = '+00:00', auto_increment_increment = 2, auto_increment_offset = ${target.autoIncrementOffset}, sql_mode = IF(FIND_IN_SET('STRICT_ALL_TABLES', @@sql_mode), @@sql_mode, CONCAT_WS(',', @@sql_mode, 'STRICT_ALL_TABLES'))`,
+			(connection as unknown as import("mysql2").PoolConnection).query(`SET time_zone = '+00:00', auto_increment_increment = ${allocationIncrement(registry, target)}, auto_increment_offset = ${target.autoIncrementOffset}, sql_mode = IF(FIND_IN_SET('STRICT_ALL_TABLES', @@sql_mode), @@sql_mode, CONCAT_WS(',', @@sql_mode, 'STRICT_ALL_TABLES'))`,
 				(error: Error | null) => { if (error) connection.destroy(); });
 		});
 		return [target.instance, pool] as const;

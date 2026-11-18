@@ -96,4 +96,8 @@ test("registry requires both verified homolog destinations and unique ID offsets
 	assert.equal(validateRegistry(registry).tenants.length, 2);
 	assert.throws(() => validateRegistry({ ...registry, host: "production" }), /homolog/);
 	assert.throws(() => validateRegistry({ ...registry, tenants: [registry.tenants[0], registry.tenants[0]] }), /invalid/);
+	const infotec = { instance: "infotec", database: "homolog-infotec-whatsapp-runtime", autoIncrementOffset: 3, prepared: true };
+	assert.equal(validateRegistry({ ...registry, tenants: [...registry.tenants, infotec] }).tenants.length, 3);
+	assert.throws(() => validateRegistry({ ...registry, tenants: [...registry.tenants, { ...infotec, database: "crm-sgr-infotec-prod" }] }), /invalid/);
+	assert.throws(() => validateRegistry({ ...registry, tenants: [...registry.tenants, { ...infotec, autoIncrementOffset: 1 }] }), /invalid/);
 });
