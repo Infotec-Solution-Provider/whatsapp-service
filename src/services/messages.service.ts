@@ -1,3 +1,4 @@
+import { assertChatReportSize, buildChatReportQuery } from "./chat-report-export";
 import { tenantSqlEnabled } from "../tenant-sql/registry";
 import { SessionData, SocketEventType, SocketServerChatRoom } from "../sdk-local";
 import { Prisma, WppMessage } from "@prisma/client";
@@ -406,6 +407,13 @@ class MessagesService {
 			}
 		});
 
+		return messages;
+	}
+
+	public async exportChatReport(session: SessionData, filters: Record<string, unknown>) {
+		const query = buildChatReportQuery(session, filters);
+		const messages = await prismaService.wppMessage.findMany(query);
+		assertChatReportSize(messages.length);
 		return messages;
 	}
 
