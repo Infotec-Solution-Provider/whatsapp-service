@@ -44,7 +44,9 @@ A chave primária `(instance,sequence)` atende a paginação por intervalo. Exis
 - `npm run test:read-protection`, `npm run test:remote-inbound`, `npx tsc --noEmit --pretty false`.
 - Frontend: `npm run test:message-sync`, `npm run test:message-sync:e2e`, testes existentes de mensagens e `npx tsc --noEmit --pretty false --incremental false`.
 
-Antes de publicar: integrar os commits em `homolog`, revisar/aplicar a migration no **banco central homolog do WhatsApp**, verificar as nove triggers e executar smoke com socket interrompido e HTTP disponível. Não executar DDL nos bancos CRM dos tenants. Conferir latência p95, leituras/vazão, espera pelo contador, deadlocks e capacidade da retenção sob tráfego equivalente. Os testes locais não medem o tráfego real ou o custo da rede até os CRMs.
+Em modo central, aplicar a migration no **banco central do WhatsApp**. Em modo `tenant-sql`, o leitor usa as tabelas do CRM efetivamente roteado. Para um destino homolog MySQL 8 com suporte a `CREATE TRIGGER IF NOT EXISTS`, gerar o SQL nativo com `node scripts/render-tenant-session-changes.cjs <tenant>`. Conferir o destino pelo catálogo e pelo registro de runtime, confirmar as três tabelas escritoras InnoDB e rodar o SQL no banco desse tenant. O gerador usa a mesma migration central como fonte e preserva a época e a sequência numa reaplicação. Verificar as duas tabelas, os nove gatilhos e as rotas de snapshot e delta em sessão autenticada.
+
+Conferir latência p95, leituras/vazão, espera pelo contador, deadlocks e capacidade da retenção sob tráfego equivalente. Os testes locais não medem o tráfego real ou o custo da rede até os CRMs.
 
 Ordem: migration completa → backend → frontend. Não há DDL no startup. A criação dos triggers adquire metadata locks; fazer a ativação em janela controlada. O novo lock de contador pode aumentar contenção e deadlocks em transações que atualizem várias linhas: avaliar em homologação antes de produção.
 
