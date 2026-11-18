@@ -4,6 +4,10 @@ import { FETCH_CUSTOMERS_QUERY } from "./chats.service";
 import operatorPerformanceService, { parseBoundaryDate } from "./operator-performance.service";
 import { getReportMessageType } from "../utils/report-rules";
 import { Prisma } from "@prisma/client";
+import {
+	buildMessagesPerContactQuery,
+	CONTACTS_WAITING_RESPONSE_SQL
+} from "../utils/dashboard-report-sql";
 
 interface OperatorRow {
 	CODIGO: number;
@@ -39,15 +43,6 @@ interface MessagesPerContactRow {
 	receivedMessagesCount: number;
 	attendancesCount: number;
 }
-
-const SYSTEM_OR_THIRDPARTY_SQL_CONDITION = (alias: string) =>
-	`(${alias}.\`from\` LIKE 'system%' OR ${alias}.\`to\` LIKE 'system%' OR ${alias}.\`from\` LIKE 'thirdparty:%' OR ${alias}.\`to\` LIKE 'thirdparty:%' OR ${alias}.\`from\` LIKE 'bot%' OR ${alias}.\`to\` LIKE 'bot%')`;
-
-const OPERATION_MESSAGE_SQL_CONDITION = (alias: string) =>
-	`(${alias}.user_id IS NOT NULL OR ${alias}.\`from\` LIKE 'me:%' OR ${alias}.\`from\` LIKE 'user:%')`;
-
-const CUSTOMER_MESSAGE_SQL_CONDITION = (alias: string) =>
-	`(NOT ${SYSTEM_OR_THIRDPARTY_SQL_CONDITION(alias)} AND NOT ${OPERATION_MESSAGE_SQL_CONDITION(alias)} AND ${alias}.\`from\` REGEXP '^[0-9]')`;
 
 // "YYYY-MM-DD" vira início/fim do dia local, igual ao card de desempenho (não meia-noite UTC).
 const parseDate = (value: string | null | undefined, boundary: "start" | "end"): Date | null => {
@@ -104,50 +99,10 @@ class DashboardService {
 	}
 
 	public async contactsWaitingResponseService(instance: string) {
-		const query = `
-			SELECT
-				ch.id AS CODIGO_ATENDIMENTO,
-				ct.name AS CONTATO,
-				ct.customer_id AS customerId,
-				ch.user_id AS userId,
-				ch.sector_id AS sectorId,
-				(
-					SELECT msg1.sent_at
-					FROM messages msg1
-					WHERE msg1.chat_id = ch.id
-						AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg1")}
-					ORDER BY msg1.sent_at ASC
-					LIMIT 1
-				) AS DATA_MENSAGEM_CLIENTE
-			FROM chats ch
-			JOIN contacts ct ON ch.contact_id = ct.id
-			WHERE ch.instance = ?
-				AND ch.is_finished = 0
-				AND EXISTS (
-					SELECT 1
-					FROM messages msg2
-					WHERE msg2.chat_id = ch.id
-						AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg2")}
-					LIMIT 1
-				)
-				AND NOT EXISTS (
-					SELECT 1
-					FROM messages msg3
-					WHERE msg3.chat_id = ch.id
-						AND ${OPERATION_MESSAGE_SQL_CONDITION("msg3")}
-						AND msg3.sent_at > (
-							SELECT msg4.sent_at
-							FROM messages msg4
-							WHERE msg4.chat_id = ch.id
-								AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg4")}
-							ORDER BY msg4.sent_at ASC
-							LIMIT 1
-						)
-				)
-			ORDER BY DATA_MENSAGEM_CLIENTE ASC;
-		`;
-
-		const rows = await prismaService.$queryRawUnsafe<AwaitingResponseRow[]>(query, instance);
+		const rows = await prismaService.$queryRawUnsafe<AwaitingResponseRow[]>(
+			CONTACTS_WAITING_RESPONSE_SQL,
+			instance
+		);
 
 		const customerIds = Array.from(
 			new Set(rows.map((row) => row.customerId).filter((id): id is number => Number.isFinite(id)))
@@ -162,7 +117,7 @@ class DashboardService {
 		const [customersMap, operatorsMap, sectors] = await Promise.all([
 			this.fetchCustomers(instance, customerIds),
 			this.fetchOperators(instance, operatorIds),
-			prismaService.wppSector.findMany({ where: { id: { in: sectorIds } } })
+			prismaService.wppSector.findMany({ where: { instance, id: { in: sectorIds } } })
 		]);
 
 		const sectorsMap = new Map(sectors.map((sector) => [sector.id, sector.name]));
@@ -197,64 +152,8 @@ class DashboardService {
 	) {
 		const { minDate, maxDate } = this.parseDateRange(dateFilter);
 
-		const joinConditions: string[] = ["ch.instance = c.instance"];
-		const joinValues: any[] = [];
-
-		if (minDate) {
-			joinConditions.push("ch.started_at >= ?");
-			joinValues.push(minDate);
-		}
-
-		if (maxDate) {
-			joinConditions.push("ch.finished_at <= ?");
-			joinValues.push(maxDate);
-		}
-
-		if (userId) {
-			joinConditions.push("ch.user_id = ?");
-			joinValues.push(userId);
-		}
-
-		const whereConditions: string[] = ["c.instance = ?"];
-		const whereValues: any[] = [instance];
-
-		if (minDate) {
-			whereConditions.push("msg.sent_at >= ?");
-			whereValues.push(minDate);
-		}
-
-		if (maxDate) {
-			whereConditions.push("msg.sent_at <= ?");
-			whereValues.push(maxDate);
-		}
-
-		if (userId) {
-			whereConditions.push("COALESCE(msg.user_id, ch.user_id) = ?");
-			whereValues.push(userId);
-		}
-
-		const query = `
-			SELECT
-				c.id AS contactId,
-				c.name AS contactName,
-				c.customer_id AS customerId,
-				SUM(CASE WHEN msg.id IS NOT NULL AND (${OPERATION_MESSAGE_SQL_CONDITION("msg")} OR ${CUSTOMER_MESSAGE_SQL_CONDITION("msg")}) THEN 1 ELSE 0 END) AS messagesCount,
-				SUM(CASE WHEN msg.id IS NOT NULL AND ${OPERATION_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS sentMessagesCount,
-				SUM(CASE WHEN msg.id IS NOT NULL AND ${CUSTOMER_MESSAGE_SQL_CONDITION("msg")} THEN 1 ELSE 0 END) AS receivedMessagesCount,
-				COUNT(DISTINCT ch.id) AS attendancesCount
-			FROM contacts c
-			LEFT JOIN messages msg ON msg.contact_id = c.id AND msg.instance = c.instance
-			LEFT JOIN chats ch ON ch.contact_id = c.id AND ${joinConditions.join(" AND ")}
-			WHERE ${whereConditions.join(" AND ")}
-			GROUP BY contactId, contactName, customerId
-			ORDER BY contactName;
-		`;
-
-		const rows = await prismaService.$queryRawUnsafe<MessagesPerContactRow[]>(
-			query,
-			...joinValues,
-			...whereValues
-		);
+		const { query, values } = buildMessagesPerContactQuery(instance, minDate, maxDate, userId);
+		const rows = await prismaService.$queryRawUnsafe<MessagesPerContactRow[]>(query, ...values);
 
 		const customerIds = Array.from(
 			new Set(rows.map((row) => row.customerId).filter((id): id is number => Number.isFinite(id)))
@@ -331,34 +230,20 @@ class DashboardService {
 			};
 		}
 
-		if (operatorIds && operatorIds.length) {
+		if (operatorIds) {
 			where.OR = [
 				{ userId: { in: operatorIds } },
-				{ WppChat: { userId: { in: operatorIds } } }
+				{ userId: null, WppChat: { instance, userId: { in: operatorIds } } }
 			];
 		}
 
-		const messages = await prismaService.wppMessage.findMany({
-			where,
-			select: {
-				id: true,
-				from: true,
-				to: true,
-				userId: true,
-				sentAt: true,
-				WppChat: { select: { userId: true } }
-			}
-		});
-
-		const messageOperatorIds = Array.from(
-			new Set(
-				messages
-					.map((message) => message.userId ?? message.WppChat?.userId)
-					.filter((id): id is number => typeof id === "number" && Number.isFinite(id))
-			)
-		);
-
-		const operatorsMap = await this.fetchOperators(instance, messageOperatorIds);
+		const selectedOperators = operatorIds && new Set(operatorIds);
+		const selectedSectors = sectorIds && new Set(sectorIds);
+		const operatorsMap = new Map<number, OperatorRow>();
+		const lookedUpOperatorIds = new Set<number>();
+		const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+		const batchSize = 2000;
+		let cursor: number | undefined;
 
 		const aggregated = new Map<
 			string,
@@ -372,44 +257,69 @@ class DashboardService {
 			}
 		>();
 
-		for (const message of messages) {
-			const operatorId = message.userId ?? message.WppChat?.userId;
-			if (!operatorId) continue;
+		while (true) {
+			const messages = await prismaService.wppMessage.findMany({
+				where,
+				orderBy: [{ sentAt: "asc" }, { id: "asc" }],
+				take: batchSize,
+				...(cursor === undefined ? {} : { cursor: { id: cursor }, skip: 1 }),
+				select: {
+					id: true,
+					from: true,
+					to: true,
+					userId: true,
+					sentAt: true,
+					contactId: true,
+					WppChat: { select: { instance: true, contactId: true, userId: true } }
+				}
+			});
 
-			const operator = operatorsMap.get(operatorId);
-			if (!operator) continue;
+			const eligible = messages.flatMap((message) => {
+				const type = getReportMessageType(message);
+				if (type !== "SENT" && type !== "RECEIVED") return [];
+				const chat = message.WppChat;
+				const assignedUserId =
+					chat?.instance === instance && chat.contactId === message.contactId ? chat.userId : null;
+				const operatorId = message.userId ?? assignedUserId;
+				if (!operatorId || (selectedOperators && !selectedOperators.has(operatorId))) return [];
+				return [{ type, operatorId, sentAt: message.sentAt }];
+			});
 
-			if (sectorIds && operator.SETOR && !sectorIds.includes(operator.SETOR)) {
-				continue;
+			const newOperatorIds = [...new Set(eligible.map((message) => message.operatorId))]
+				.filter((id) => !lookedUpOperatorIds.has(id));
+			for (const id of newOperatorIds) lookedUpOperatorIds.add(id);
+			for (const [id, operator] of await this.fetchOperators(instance, newOperatorIds)) {
+				operatorsMap.set(id, operator);
 			}
 
-			const messageDate = message.sentAt;
-			if (!messageDate) continue;
+			for (const message of eligible) {
+				const operator = operatorsMap.get(message.operatorId);
+				if (!operator || (selectedSectors && (operator.SETOR == null || !selectedSectors.has(operator.SETOR)))) {
+					continue;
+				}
 
-			const hour = messageDate.getHours();
-			const weekDay = messageDate.getDay() + 1;
-			const sectorName = operator.SETOR_NOME || null;
-			const key = `${sectorName || ""}|${hour}|${weekDay}`;
+				const hour = message.sentAt.getHours();
+				const weekDay = message.sentAt.getDay() + 1;
+				const sector = operator.SETOR_NOME || null;
+				const key = JSON.stringify([sector, hour, weekDay]);
+				const row = aggregated.get(key) ?? {
+					sector,
+					hour,
+					weekDay,
+					messagesCount: 0,
+					sentMessagesCount: 0,
+					receivedMessagesCount: 0
+				};
 
-			const row = aggregated.get(key) || {
-				sector: sectorName,
-				hour,
-				weekDay,
-				messagesCount: 0,
-				sentMessagesCount: 0,
-				receivedMessagesCount: 0
-			};
-
-			const reportType = getReportMessageType(message);
-			if (reportType === "SENT") {
 				row.messagesCount++;
-				row.sentMessagesCount++;
-			} else if (reportType === "RECEIVED") {
-				row.messagesCount++;
-				row.receivedMessagesCount++;
+				if (message.type === "SENT") row.sentMessagesCount++;
+				else row.receivedMessagesCount++;
+				aggregated.set(key, row);
 			}
 
-			aggregated.set(key, row);
+			const lastMessage = messages.at(-1);
+			if (!lastMessage || messages.length < batchSize) break;
+			cursor = lastMessage.id;
 		}
 
 		const messagesPerHourDay = Array.from(aggregated.values()).sort((a, b) => {
@@ -418,7 +328,7 @@ class DashboardService {
 			return String(a.sector || "").localeCompare(String(b.sector || ""));
 		});
 
-		return { messagesPerHourDay };
+		return { messagesPerHourDay, timeZone };
 	}
 }
 
