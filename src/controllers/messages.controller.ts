@@ -22,6 +22,7 @@ import { parseOptionalInstance } from "../utils/chat-scope";
 class MessagesController {
 	constructor(public readonly router: Router) {
 		this.router.get("/api/whatsapp/messages/export", publicBiAuthenticated, publicBiRateLimit, this.exportMessages);
+		this.router.get("/api/whatsapp/messages/report-export", isAuthenticated, this.exportChatReport);
 		this.router.get("/api/whatsapp/messages/:id", this.getMessageById);
 		this.router.patch("/api/whatsapp/messages/mark-as-read", isAuthenticated, this.readContactMessages);
 		this.router.post(
@@ -71,6 +72,12 @@ class MessagesController {
 			}
 			throw error;
 		}
+	}
+
+	private async exportChatReport(req: Request, res: Response) {
+		res.set("Cache-Control", "private, no-store");
+		const data = await messagesService.exportChatReport(req.session, req.query);
+		res.status(200).send({ data });
 	}
 
 	private async exportMessages(req: Request, res: Response) {
