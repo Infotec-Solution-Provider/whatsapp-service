@@ -43,7 +43,7 @@ export function buildChatReportQuery(session: SessionData, filters: Record<strin
 		where: {
 			instance,
 			WppChat: { is: { instance, sectorId, ...(chatId ? { id: chatId } : {}), ...(contactId ? { contactId } : {}), ...(userId ? { userId } : {}) } },
-			WppContact: { is: { instance, ...(contactId ? { id: contactId } : {}) } },
+			WppContact: { is: { instance, ...(contactId ? { id: contactId } : {}), ...(role === "ADMIN" ? {} : { isOnlyAdmin: false }) } },
 			...(start && end ? { sentAt: { gte: start, lte: end } } : {}),
 		},
 		select: {

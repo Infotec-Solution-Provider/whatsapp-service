@@ -10,7 +10,7 @@ const dates = { start: "2026-11-01T03:00:00.000Z", end: "2026-11-02T02:59:59.999
 test("exports only the session tenant and sector through the actual chat relationship", () => {
 	const query = buildChatReportQuery(session, { ...sector, ...dates, userId: "1", instance: "other" });
 	assert.deepEqual(query.where.WppChat, { is: { instance: "tenant-a", sectorId: 9, userId: 1 } });
-	assert.deepEqual(query.where.WppContact, { is: { instance: "tenant-a" } });
+	assert.deepEqual(query.where.WppContact, { is: { instance: "tenant-a", isOnlyAdmin: false } });
 	assert.equal(query.where.instance, "tenant-a");
 	assert.equal(query.where.sentAt?.lte.toISOString(), dates.end);
 	assert.equal(query.take, 20_001);
