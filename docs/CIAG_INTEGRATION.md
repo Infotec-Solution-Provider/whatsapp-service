@@ -19,6 +19,8 @@ A branch de publicação parte da revisão em produção, preservando as correç
 
 Por padrão, todos os webhooks exigem assinatura. Durante a migração de uma instalação anterior, `WABA_LEGACY_UNSIGNED_INSTANCES` pode listar explicitamente instâncias que ainda não têm App Secret configurado. Essa exceção temporária preserva o recebimento legado; nunca se aplica a uma instância CIAG provisionada. Assim que existir um App Secret para o número, sua assinatura passa a ser obrigatória mesmo nessa lista. Remova as entradas após configurar todos os secrets. A exceção não dispensa validar instância, conexão, persistência, lotes e deduplicação.
 
+Em ambientes que receberam ajustes diretamente no JavaScript compilado, preserve o runtime ativo. A publicação CIAG foi validada também sobre esse runtime: o delta afeta somente os módulos necessários, mantém os demais arquivos idênticos e confere hashes antes de instalar. Preserve os controles de acesso, rotas administrativas, reações, tratamento de recibos e políticas operacionais existentes. Não substitua todo o `dist` nem rode instalação de dependências sobre o processo em uso. A referência TypeScript, os artefatos, o manifesto de hashes e os backups da publicação devem ser mantidos juntos. `CIAG_TEST_COMPILED_ENTRY` permite executar a mesma suíte CIAG contra o arquivo JavaScript de testes de um candidato compilado, com banco descartável.
+
 O ambiente existente não possui histórico Prisma de migrações. Nesse caso, execute somente o SQL aditivo das seis tabelas CIAG após backup; não execute migrações históricas sobre um banco já em uso. Confirme as tabelas e gere o cliente Prisma antes de iniciar a release.
 
 ## Contrato HTTP
