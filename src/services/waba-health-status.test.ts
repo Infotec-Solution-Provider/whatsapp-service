@@ -95,7 +95,7 @@ async function run(): Promise<void> {
 			"inpulse:health-probe:v1:6:", createFunctionalHealthCallbackData(7, correlationId)]) {
 			assert.equal((await waba.handleWebhookEntry("tenant", payload("delivered", data))).ignored, false);
 			assert.deepEqual(statusCalls.at(-1), ["waba", "wamid.health", "RECEIVED", {
-				statusTimestamp: "1789864207", throwIfNotFound: true,
+				statusTimestamp: "1789864207", throwIfNotFound: true, throwOnFailure: true,
 			}]);
 		}
 		missingMessage = true;

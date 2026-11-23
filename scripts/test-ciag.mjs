@@ -27,7 +27,9 @@ try {
 	if (schema.status !== 0) throw new Error("Não foi possível criar o schema descartável de testes.");
 	const test = spawnSync(
 		process.execPath,
-		["-r", "ts-node/register/transpile-only", "src/integrations/ciag/service-mysql.test.ts"],
+		process.env.CIAG_TEST_COMPILED_ENTRY
+			? [process.env.CIAG_TEST_COMPILED_ENTRY]
+			: ["-r", "ts-node/register/transpile-only", "src/integrations/ciag/service-mysql.test.ts"],
 		{ env, stdio: "inherit", timeout: 120_000 }
 	);
 	process.exitCode = test.status ?? 1;
