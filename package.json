@@ -43,7 +43,9 @@
 		"redis:keys": "bash scripts/redis.sh keys",
 		"redis:clear": "bash scripts/redis.sh clear",
 		"redis:monitor": "bash scripts/redis.sh monitor",
-		"redis:ui": "bash scripts/redis.sh ui"
+		"redis:ui": "bash scripts/redis.sh ui",
+		"test:ciag": "node scripts/test-ciag.mjs",
+		"ciag:provision": "ts-node src/scripts/provision-ciag.ts"
 	},
 	"author": "Renan G. Dutra",
 	"license": "ISC",

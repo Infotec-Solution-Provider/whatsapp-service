@@ -1,3 +1,5 @@
+import ciagController from "./integrations/ciag/controller";
+import ciagService from "./integrations/ciag/service";
 import { Logger, logRoutes } from "@in.pulse-crm/utils";
 import { handleRequestError } from "@rgranatodutra/http-errors";
 import cors from "cors";
@@ -64,6 +66,8 @@ const logRoute = (r: express.Router) => {
 };
 
 app.use(cors());
+app.use(ciagController);
+app.use(wabaController.router);
 // Telemetry has its own 64 KiB parser after authentication/rate limiting. It
 // must be mounted before the legacy 2 GiB parsers used by the remaining APIs.
 app.use(logRoute(frontendPerformanceController.router));
@@ -93,7 +97,7 @@ app.use(logRoute(monitorController.router));
 app.use(logRoute(parametersController.router));
 app.use(logRoute(gupshupController.router));
 app.use(logRoute(autoResponseController.router));
-app.use(logRoute(wabaController.router));
+
 app.use(logRoute(messageFlowsController.router));
 app.use(logRoute(flowExecutionController.router));
 app.use(logRoute(remoteClientController.router));
@@ -120,6 +124,7 @@ const serverPort = Number(process.env["LISTEN_PORT"]) || 8005;
 
 const server = app.listen(serverPort, () => {
 	registerAllSteps();
+	ciagService.startWorker();
 	gupshupWebhookQueueService.startProcessor();
 	wabaWebhookQueueService.startProcessor();
 	messageQueueService.startWorker();
@@ -159,6 +164,7 @@ const shutdown = async (signal: string): Promise<void> => {
 
 	const serverClosed = new Promise<void>((resolve) => server.close(() => resolve()));
 	const graceful = Promise.all([
+    ciagService.stop(),
 		serverClosed,
 		remoteInboundEventInboxService.stopAndDrain(30_000),
 		messageQueueService.stopAndDrain(30_000)

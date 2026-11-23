@@ -106,6 +106,25 @@ class WhatsappAudioConverter {
 		}
 	}
 
+	static async convertToVoice(input: Buffer, originalMime: string): Promise<WhatsappConvertedAudio> {
+		if (!input.length || !/^(audio\/|video\/webm)/.test(originalMime)) throw new Error("Gravação de áudio inválida.");
+		const dir = join(tmpdir(), "ciag-voice");
+		await fs.mkdir(dir, { recursive: true });
+		const inputPath = join(dir, randomUUID() + ".input"), outputPath = join(dir, randomUUID() + ".ogg");
+		try {
+			await fs.writeFile(inputPath, input, { mode: 0o600 });
+			const probe = await this.ffprobeSafe(inputPath);
+			if (!probe.streams?.some((s: {codec_type:string}) => s.codec_type === "audio") || Number(probe.format?.duration || 0) > 125) throw new Error("Gravação inválida ou acima de dois minutos.");
+			await new Promise<void>((resolve, reject) => {
+				const command = Ffmpeg(inputPath).noVideo().audioChannels(1).audioFrequency(48000).audioCodec("libopus").audioBitrate("32k").format("ogg").outputOptions(["-application", "voip", "-t", "125"]);
+				const timer = setTimeout(() => command.kill("SIGKILL"), 60_000);
+				command.on("error", (error) => { clearTimeout(timer); reject(error); }).on("end", () => { clearTimeout(timer); resolve(); }).save(outputPath);
+			});
+			const buffer = await fs.readFile(outputPath);
+			return { buffer, mimeType:"audio/ogg", extension:"ogg", size:buffer.length, duration:Number(probe.format?.duration) || null };
+		} finally { await Promise.all([this.safeUnlink(inputPath), this.safeUnlink(outputPath)]); }
+	}
+
 	private static ffprobeSafe(path: string): Promise<any> {
 		return new Promise((resolve, reject) => {
 			Ffmpeg.ffprobe(path, (err, data) => {

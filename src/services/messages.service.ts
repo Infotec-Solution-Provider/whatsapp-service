@@ -264,6 +264,12 @@ class MessagesService {
 		return message;
 	}
 
+    public async syncCurrentMessage(id: number) {
+        const message = await prismaService.wppMessage.findUniqueOrThrow({where:{id}});
+        await this.syncMessageToLocal(message);
+        return message;
+    }
+
 	public async markContactMessagesAsRead(instance: string, contactId: number) {
 		await prismaService.wppMessage.updateMany({
 			where: {

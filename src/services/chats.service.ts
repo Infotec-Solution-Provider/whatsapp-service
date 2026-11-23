@@ -71,7 +71,7 @@ interface SystemStartNewChatProps {
 interface EnsureActiveChatForAgentProps {
 	instance: string;
 	contactId: number;
-	agentId: number;
+	agentId: number | null;
 	systemMessage?: string;
 	sectorId?: number | null;
 	userId?: number | null;

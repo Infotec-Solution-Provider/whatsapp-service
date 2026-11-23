@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
-import { randomUUID } from "crypto";
+import { createHash } from "crypto";
 import prismaService from "./prisma.service";
 import wabaService from "./waba.service";
 
@@ -31,11 +31,11 @@ class WABAWebhookQueueService {
 	private activeProcessing = 0;
 
 	public async enqueue(instance: string, payload: unknown): Promise<string> {
-		const id = randomUUID();
+		const id = createHash("sha256").update(instance + ":" + JSON.stringify(payload)).digest("hex").slice(0, 36);
 		const payloadJson = this.stringifyPayload(payload);
 
 		await prismaService.$executeRawUnsafe(
-			`INSERT INTO waba_webhook_queue (
+			`INSERT IGNORE INTO waba_webhook_queue (
 				id, instance, payload, status, retry_count, max_retries, created_at, updated_at
 			) VALUES (?, ?, CAST(? AS JSON), ?, 0, ?, NOW(3), NOW(3))`,
 			id,
