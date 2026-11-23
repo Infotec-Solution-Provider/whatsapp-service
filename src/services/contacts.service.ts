@@ -123,9 +123,12 @@ class ContactsService {
 		});
 	}
 
-	public async getOrCreateContact(instance: string, name: string, phone?: string | null, whatsappId?: string | null) {
+	public async getOrCreateContact(instance: string, name: string, phone?: string | null, whatsappId?: string | null, strictIdentity = false) {
 		const normalizedPhone = this.normalizePhone(phone);
 		const normalizedWhatsappId = this.normalizeWhatsappId(whatsappId ?? phone) ?? normalizedPhone;
+		if (strictIdentity && normalizedPhone && normalizedWhatsappId) {
+			return prismaService.wppContact.upsert({ where:{instance_phone:{instance,phone:normalizedPhone}}, create:{instance,name,phone:normalizedPhone,whatsappId:normalizedWhatsappId}, update:{} });
+		}
 
 		if (!normalizedPhone && !normalizedWhatsappId) {
 			throw new BadRequestError("Não foi possível identificar o contato sem telefone ou whatsappId.");
@@ -521,8 +524,8 @@ class ContactsService {
 
 	private async fetchCustomerSchedule(instance: string, customerId: number): Promise<CustomerSchedule | null> {
 		const CHECK_LOALTY_QUERY = `SELECT * FROM campanhas_clientes cc
-            WHERE cc.CLIENTE = ?
-            ORDER BY CODIGO DESC LIMIT 1;`;
+			WHERE cc.CLIENTE = ?
+			ORDER BY CODIGO DESC LIMIT 1;`;
 		const result = await instancesService.executeQuery<Array<CustomerSchedule>>(instance, CHECK_LOALTY_QUERY, [
 			customerId
 		]);

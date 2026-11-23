@@ -93,7 +93,8 @@ class WABAService {
 			const client = await prismaService.wppClient.findFirstOrThrow({
 				where: {
 					instance,
-					type: "WABA"
+					type: "WABA",
+					WABAPhoneId: (input as ReceiveMessageBody).entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id ?? ""
 				}
 			});
 			logger.log("Client WABA encontrado. id: " + client.id);
@@ -132,7 +133,7 @@ class WABAService {
 							where: { wabaId: parsedMsg.wabaId }
 						}));
 
-					if (!!existingMessage) {
+					if (existingMessage && existingMessage.contactId && existingMessage.chatId) {
 						logger.log("Mensagem WABA já existe no banco de dados, ignorando processamento", {
 							messageId: existingMessage.id,
 							wabaId: existingMessage.wabaId
@@ -141,8 +142,16 @@ class WABAService {
 						return { ignored: true, reason: "Webhook WABA ignorado: mensagem duplicada" };
 					}
 
-					const inserted = await messagesService.insertMessage(parsedMsg);
-					const processed = await messagesDistributionService.processMessage(instance, client.id, inserted);
+					const inserted = existingMessage || (await messagesService.insertMessage(parsedMsg));
+					const integration =
+						process.env["CIAG_INTEGRATION_ENABLED"] === "true"
+							? await prismaService.ciagIntegration.findFirst({
+									where: { instance, clientId: client.id, active: true }
+								})
+							: null;
+					const processed = integration
+						? await (require("../integrations/ciag/service") as typeof import("../integrations/ciag/service")).default.receiveInbound(integration, inserted)
+						: await messagesDistributionService.processMessage(instance, client.id, inserted);
 
 					if (processed.contactId) {
 						logger.log("Verificando necessidade de atualizar expiration da conversa");
@@ -173,7 +182,8 @@ class WABAService {
 					const status = WABAMessageParser.parseStatus(validated.data);
 					await messagesDistributionService.processMessageStatus("waba", validated.data.id, status, {
 						statusTimestamp: validated.data.timestamp,
-						throwIfNotFound: true
+						throwIfNotFound: true,
+						throwOnFailure: true
 					});
 
 					if (validated.data.errors && validated.data.errors[0]) {

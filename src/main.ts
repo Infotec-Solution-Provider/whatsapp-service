@@ -1,4 +1,6 @@
 import "dotenv/config";
+import ciagController from "./integrations/ciag/controller";
+import ciagService from "./integrations/ciag/service";
 import { Logger, logRoutes } from "@in.pulse-crm/utils";
 import { handleRequestError } from "@rgranatodutra/http-errors";
 import cors from "cors";
@@ -83,6 +85,8 @@ app.use("/api", (_req, res, next) => {
 	next();
 });
 
+app.use(ciagController);
+app.use(wabaController.router);
 app.use(express.json({ limit: "2gb" }));
 app.use(express.urlencoded({ extended: true, limit: "2gb" }));
 
@@ -111,7 +115,7 @@ app.use(logRoute(monitorController.router));
 app.use(logRoute(parametersController.router));
 app.use(logRoute(gupshupController.router));
 app.use(logRoute(autoResponseController.router));
-app.use(logRoute(wabaController.router));
+
 app.use(logRoute(messageFlowsController.router));
 app.use(logRoute(flowExecutionController.router));
 app.use(logRoute(remoteClientController.router));
@@ -146,6 +150,7 @@ process.on("uncaughtExceptionMonitor", (error, origin) => {
 
 const server = app.listen(serverPort, () => {
 	registerAllSteps();
+	ciagService.startWorker();
 	gupshupWebhookQueueService.startProcessor();
 	wabaWebhookQueueService.startProcessor();
 	messageQueueService.startWorker();
@@ -187,6 +192,7 @@ const shutdown = async (signal: string): Promise<void> => {
 
 	const serverClosed = new Promise<void>((resolve) => server.close(() => resolve()));
 	const graceful = Promise.all([
+    ciagService.stop(),
 		serverClosed,
 		remoteInboundEventInboxService.stopAndDrain(30_000),
 		messageQueueService.stopAndDrain(30_000)

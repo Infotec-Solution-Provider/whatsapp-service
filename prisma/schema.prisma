@@ -1161,3 +1161,71 @@ model InstanceMigrationMap {
   @@index([runId, entity])
   @@map("instance_migration_maps")
 }
+
+// Server-to-server integration. Keys are provisioned separately and never returned by APIs.
+model CiagIntegration {
+  id        String @id @db.VarChar(100)
+  keyHash   String @unique @map("key_hash") @db.Char(64)
+  instance  String @db.VarChar(100)
+  clientId  Int @map("client_id")
+  sectorId  Int @map("sector_id")
+  active    Boolean @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  @@index([instance, clientId])
+  @@map("ciag_integrations")
+}
+model CiagOutbound {
+  id            String @id @db.Char(36)
+  integrationId String @map("integration_id") @db.VarChar(100)
+  externalId    String @map("external_id") @db.VarChar(160)
+  requestHash   String @map("request_hash") @db.Char(64)
+  phone         String @db.VarChar(20)
+  data          Json
+  state         String @default("queued") @db.VarChar(20)
+  messageId     Int? @map("message_id")
+  attempts      Int @default(0)
+  nextAt        DateTime @default(now()) @map("next_at")
+  leaseUntil    DateTime? @map("lease_until")
+  error         String? @db.Text
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  @@unique([integrationId, externalId])
+  @@index([state, nextAt])
+  @@map("ciag_outbound")
+}
+model CiagContactState {
+  integrationId String @map("integration_id") @db.VarChar(100)
+  phone         String @db.VarChar(20)
+  consent       String @default("unknown") @db.VarChar(20)
+  evidence      String? @db.Text
+  readAt        DateTime? @map("read_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  @@id([integrationId, phone])
+  @@map("ciag_contact_state")
+}
+model CiagMedia {
+  integrationId String @map("integration_id") @db.VarChar(100)
+  fileId        Int @map("file_id")
+  voice         Boolean @default(false)
+  @@id([integrationId, fileId])
+  @@map("ciag_media")
+}
+model CiagAudit {
+  id            String @id @db.Char(36)
+  integrationId String @map("integration_id") @db.VarChar(100)
+  actorId       String @map("actor_id") @db.VarChar(100)
+  actorName     String @map("actor_name") @db.VarChar(200)
+  action        String @db.VarChar(100)
+  data          Json
+  createdAt     DateTime @default(now()) @map("created_at")
+  @@index([integrationId, createdAt])
+  @@map("ciag_audit")
+}
+model CiagContactLock {
+  integrationId String @map("integration_id") @db.VarChar(100)
+  phone         String @db.VarChar(20)
+  owner         String @db.Char(36)
+  expiresAt     DateTime @map("expires_at")
+  @@id([integrationId, phone])
+  @@map("ciag_contact_locks")
+}

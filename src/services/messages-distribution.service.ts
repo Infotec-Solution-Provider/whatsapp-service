@@ -1,3 +1,4 @@
+import { shouldApplyStatus } from "../integrations/ciag/policy";
 import {
 	SocketEventType,
 	SocketServerAdminRoom,
@@ -38,6 +39,7 @@ import botsRegistry from "../bots/bots-registry";
 type MessageStatusProvider = "wwebjs" | "waba";
 
 interface ProcessMessageStatusOptions {
+	throwOnFailure?: boolean;
 	statusTimestamp?: string | number | Date | null;
 	throwIfNotFound?: boolean;
 }
@@ -784,7 +786,7 @@ class MessagesDistributionService {
 			const incomingTimestamp = this.normalizeStatusTimestamp(options?.statusTimestamp);
 			const currentTimestamp = this.normalizeStatusTimestamp(message.statusTimestamp);
 
-			if (!this.shouldApplyStatus(message.status, status, currentTimestamp, incomingTimestamp)) {
+			if (!(type === "waba" ? shouldApplyStatus(message.status, status, currentTimestamp, incomingTimestamp) : this.shouldApplyStatus(message.status, status, currentTimestamp, incomingTimestamp))) {
 				return;
 			}
 
@@ -792,22 +794,32 @@ class MessagesDistributionService {
 				? String(incomingTimestamp)
 				: message.statusTimestamp;
 
-			await messagesService.updateMessage(message.id, {
-				status,
-				statusTimestamp: nextStatusTimestamp
-			});
+			if (type === "waba") {
+				const applied = await prismaService.$transaction(async (tx) => {
+					const rows = await tx.$queryRawUnsafe<Array<{status:WppMessageStatus;statusTimestamp:string|null}>>("SELECT status,status_timestamp AS statusTimestamp FROM messages WHERE id=? FOR UPDATE",message.id);
+					const current = rows[0];
+					if (!current || !shouldApplyStatus(current.status,status,this.normalizeStatusTimestamp(current.statusTimestamp),incomingTimestamp)) return false;
+					await tx.wppMessage.update({where:{id:message.id},data:{status,statusTimestamp:nextStatusTimestamp}});
+					return true;
+				});
+				if (!applied) return;
+				await messagesService.syncCurrentMessage(message.id);
+			} else {
+				await messagesService.updateMessage(message.id, {status,statusTimestamp:nextStatusTimestamp});
+			}
 
 			if (message.chatId === null || message.contactId === null) {
 				return;
 			}
 
 			const chatRoom: SocketServerChatRoom = `${message.instance}:chat:${message.chatId}`;
-			socketService.emit(SocketEventType.WppMessageStatus, chatRoom, {
+			void socketService.emit(SocketEventType.WppMessageStatus, chatRoom, {
 				messageId: message.id,
 				contactId: message.contactId,
 				status
-			});
+			}).catch(() => { console.error("Notificação de status indisponível."); });
 		} catch (err) {
+			if (options?.throwOnFailure) throw err;
 			if (options?.throwIfNotFound && err instanceof MessageStatusTargetNotFoundError) {
 				throw err;
 			}
