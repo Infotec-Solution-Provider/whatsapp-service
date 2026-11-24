@@ -17,6 +17,17 @@ interface ExtendedUploadFileOptions {
 }
 
 class ExtendedFilesClient extends FilesClient {
+	public async fetchFileForInstance(fileId: number, instance: string, maxBytes: number): Promise<Buffer> {
+		const response = await this.ax.get<ArrayBuffer>(`/api/files/${fileId}/scoped`, {
+			params: { instance },
+			responseType: "arraybuffer",
+			maxContentLength: maxBytes,
+			maxRedirects: 0,
+			timeout: 30_000,
+		});
+		return Buffer.from(response.data);
+	}
+
 	public getPublicFileUrl(instance: string, publicId: string, baseUrl?: string): string {
 		const origin = baseUrl || FILES_PUBLIC_BASE_URL;
 		const normalizedOrigin = origin.endsWith("/") ? origin : `${origin}/`;

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type FormData from "form-data";
 import { createHash } from "node:crypto";
 import type { SendFileOptions, SendTemplateOptions } from "../types/whatsapp-instance.types";
 import { currentDatabaseTenant, withDatabaseTenant } from "../utils/database-tenant-context";
@@ -18,12 +19,30 @@ async function main() {
 	const catalog = [{ id: "300", name: "pedido_pronto", language: "pt_BR", category: "UTILITY", status: "APPROVED",
 		components: [{ type: "BODY", text: templateBody }] }];
 	let variableReads = 0;
+	const voiceUploads: Buffer[] = [];
+	const downloads: number[] = [];
+	const storedAudio = Buffer.from("stored MP3 fixture");
+	const opus = Buffer.from("OggS encoded voice fixture");
+	let encode = (source: Buffer) => {
+		assert.deepEqual(source, storedAudio);
+		return opus;
+	};
 	let send: () => unknown = () => ({ messages: [{ id: "wamid.sent" }] });
 	let upload: (rejected?: string) => string = (rejected) => rejected ? "222" : "111";
 	try {
 		stub("../services/files.service", { __esModule: true, default: {
 			getWabaMedia: async (fileId: number, rejected?: string) => { uploads.push([fileId, rejected]); return upload(rejected); },
+			fetchFileForInstance: async (fileId: number, instance: string, maxBytes: number) => {
+				assert.equal(instance, "tenant");
+				assert.equal(maxBytes, 16 * 1024 * 1024);
+				downloads.push(fileId);
+				return storedAudio;
+			},
 		} });
+		stub("../utils/waba-voice-note", {
+			encodeWabaVoiceNote: async (source: Buffer) => encode(source),
+			WABA_VOICE_NOTE_MIME_TYPE: "audio/ogg",
+		});
 		stub("../services/prisma.service", { __esModule: true, default: { metaTemplateVariableBinding: {
 			findMany: async ({ where }: { where: object }) => {
 				variableReads++;
@@ -39,7 +58,14 @@ async function main() {
 				assert.match(url, /\/200\/message_templates\?/);
 				return { data: { data: catalog } };
 			},
-			post: async (_url: string, body: unknown) => {
+			post: async (url: string, body: unknown) => {
+				if (url.endsWith("/phone-id/media")) {
+					const multipart = (body as FormData).getBuffer();
+					assert.match(multipart.toString(), /filename="audio.ogg"\r\nContent-Type: audio\/ogg/);
+					assert.ok(multipart.includes(opus));
+					voiceUploads.push(multipart);
+					return { data: { id: String(300 + voiceUploads.length) } };
+				}
 				bodies.push(structuredClone(body));
 				return { data: await send() };
 			}
@@ -91,6 +117,36 @@ async function main() {
 		await assert.rejects(() => client.sendMessage(options), (e: unknown) => e instanceof WabaDeliveryError && e.deliveryStatus === "UNKNOWN");
 		assert.equal(bodies.length, 1);
 		assert.equal(uploads.length, 1, "timeout cannot renew media or send again");
+
+		const audio = { ...options, file: { ...options.file, name: "audio.mp3", mime_type: "audio/mpeg" } };
+		bodies.length = uploads.length = 0;
+		send = () => ({ messages: [{ id: "wamid.audio" }] });
+		await client.sendMessage({ ...audio, sendAsAudio: false });
+		assert.deepEqual(bodies[0].audio, { id: "111" });
+		assert.deepEqual(uploads, [[42, undefined]]);
+		assert.equal(voiceUploads.length, 0);
+
+		bodies.length = uploads.length = 0;
+		const rejectedVoice = { response: { status: 400, data: { error: {
+			code: 100, message: "Param audio.id is not a valid whatsapp business account media attachment ID",
+		} } } };
+		send = () => {
+			if (bodies.length === 1) throw rejectedVoice;
+			return { messages: [{ id: "wamid.voice" }] };
+		};
+		assert.equal((await client.sendMessage({ ...audio, sendAsAudio: true })).wabaId, "wamid.voice");
+		assert.deepEqual(bodies.map((body) => body.audio), [{ id: "301", voice: true }, { id: "302", voice: true }]);
+		assert.deepEqual(downloads, [42], "media renewal reuses the encoded note");
+		assert.equal(voiceUploads.length, 2);
+		assert.equal(uploads.length, 0, "MP3 media IDs must not be used for voice notes");
+		assert.doesNotMatch(JSON.stringify(logs), /never-log-this-token|Authorization/);
+
+		bodies.length = 0;
+		encode = () => { throw new Error("invalid source"); };
+		await assert.rejects(() => client.sendMessage({ ...audio, sendAsAudio: true }),
+			(error: unknown) => error instanceof WabaDeliveryError && error.deliveryStatus === "FAILED");
+		assert.equal(bodies.length, 0);
+		assert.equal(voiceUploads.length, 2, "failed encoding must not upload or dispatch the message");
 
 		bodies.length = uploads.length = 0;
 		send = () => ({ messages: [{ id: "wamid.text" }] });

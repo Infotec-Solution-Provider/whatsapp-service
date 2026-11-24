@@ -6,15 +6,22 @@ async function main() {
 	const previousSdk = require.cache[sdkPath];
 	const previousService = require.cache[servicePath];
 	const calls: Array<{ path: string; body: unknown }> = [];
+	const downloads: Array<{ path: string; options: unknown }> = [];
 	let mediaId: unknown = "111";
 	try {
 		// Exercise the real HTTP adapter without loading SDK service clients or making requests.
 		require.cache[sdkPath] = { id: sdkPath, filename: sdkPath, loaded: true, exports: {
 			FilesClient: class {
-				ax = { post: async (path: string, body: unknown) => {
-					calls.push({ path, body });
-					return { data: { data: { mediaId } } };
-				} };
+				ax = {
+					post: async (path: string, body: unknown) => {
+						calls.push({ path, body });
+						return { data: { data: { mediaId } } };
+					},
+					get: async (path: string, options: unknown) => {
+						downloads.push({ path, options });
+						return { data: Buffer.from("voice source") };
+					},
+				};
 			},
 		} } as NodeModule;
 		delete require.cache[servicePath];
@@ -30,6 +37,14 @@ async function main() {
 			mediaId = invalid;
 			await assert.rejects(() => client.getWabaMedia(42), /identificador válido/);
 		}
+		assert.deepEqual(await client.fetchFileForInstance(42, "tenant", 10_000), Buffer.from("voice source"));
+		assert.deepEqual(downloads, [{
+			path: "/api/files/42/scoped",
+			options: {
+				params: { instance: "tenant" }, responseType: "arraybuffer", maxContentLength: 10_000,
+				maxRedirects: 0, timeout: 30_000,
+			},
+		}]);
 		console.log("files-waba-media: renewal request compatibility, unchanged/invalid ID rejection and fresh ID accepted");
 	} finally {
 		if (previousSdk) require.cache[sdkPath] = previousSdk; else delete require.cache[sdkPath];

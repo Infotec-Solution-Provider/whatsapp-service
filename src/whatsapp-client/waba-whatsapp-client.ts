@@ -1,5 +1,6 @@
 import { Logger } from "@in.pulse-crm/utils";
 import axios from "axios";
+import FormData from "form-data";
 import TemplateAdapter, { type WABATemplateMessage } from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
 import filesService from "../services/files.service";
@@ -18,6 +19,7 @@ import {
 import generateUID from "../utils/generate-uid";
 import ProcessingLogger from "../utils/processing-logger";
 import { classifyWabaSendError, sendWabaRequest, wabaPreparationError, WabaTemplateBodyValuesError } from "../utils/waba-send";
+import { encodeWabaVoiceNote, WABA_VOICE_NOTE_MIME_TYPE } from "../utils/waba-voice-note";
 import WhatsappClient from "./whatsapp-client";
 import { MessageReactionError, reactionEmoji } from "../utils/message-reaction";
 import { isWabaMessageId, wabaPhone } from "../utils/waba-reaction";
@@ -76,6 +78,7 @@ class WABAWhatsappClient implements WhatsappClient {
 			}
 
 			let msgType = this.getSendMessageType(options);
+			let media: Parameters<typeof sendWabaRequest>[1];
 			process.log("Tipo de mensagem determinado: " + msgType);
 
 			if (msgType !== "text" && "fileId" in options) {
@@ -102,7 +105,16 @@ class WABAWhatsappClient implements WhatsappClient {
 						fileSize
 					});
 
-					const mediaId = await filesService.getWabaMedia(options.fileId);
+					const voiceNote = msgType === "audio" && options.sendAsAudio === true && !options.sendAsDocument
+						? await encodeWabaVoiceNote(
+							await filesService.fetchFileForInstance(options.fileId, this.instance, WABA_MAX_MEDIA_UPLOAD_BYTES),
+							WABA_MAX_MEDIA_UPLOAD_BYTES,
+						)
+						: undefined;
+					const getMediaId = (rejectedId?: string) => voiceNote
+						? this.uploadVoiceNote(voiceNote, rejectedId)
+						: filesService.getWabaMedia(options.fileId, rejectedId);
+					const mediaId = await getMediaId();
 
 					process.log("Montando corpo da mensagem de mídia...");
 					reqBody["type"] = msgType;
@@ -113,8 +125,20 @@ class WABAWhatsappClient implements WhatsappClient {
 
 					reqBody[msgType] = {
 						id: mediaId,
+						...(voiceNote ? { voice: true } : {}),
 						...(options.text ? { caption: options.text } : {}),
 						...(msgType === "document" ? { filename: options.file.name } : {})
+					};
+					const mediaBody = reqBody[msgType];
+					media = {
+						type: msgType,
+						renew: async (rejection) => {
+							const rejectedMediaId: string = mediaBody.id;
+							process.log("Meta rejeitou a mídia. Renovando o anexo antes de uma única nova tentativa.", {
+								fileId: options.fileId, rejectedMediaId, error: rejection.message, details: rejection.details,
+							});
+							mediaBody.id = await getMediaId(rejectedMediaId);
+						},
 					};
 				}
 			} else {
@@ -123,16 +147,6 @@ class WABAWhatsappClient implements WhatsappClient {
 				reqBody["text"] = { body: options.text };
 			}
 
-			const media = msgType !== "text" && "fileId" in options ? {
-				type: msgType,
-				renew: async (rejection: import("../utils/waba-send").WabaDeliveryError) => {
-					const rejectedMediaId: string = reqBody[msgType].id;
-					process.log("Meta rejeitou a mídia. Renovando o anexo antes de uma única nova tentativa.", {
-						fileId: options.fileId, rejectedMediaId, error: rejection.message, details: rejection.details,
-					});
-					reqBody[msgType].id = await filesService.getWabaMedia(options.fileId, rejectedMediaId);
-				},
-			} : undefined;
 			const response = await sendWabaRequest(async () => {
 				process.log("Enviando mensagem a Graph API...", { url: reqUrl, body: structuredClone(reqBody) });
 				dispatchStarted = true;
@@ -165,6 +179,23 @@ class WABAWhatsappClient implements WhatsappClient {
 			process.failed(failure);
 			throw failure;
 		}
+	}
+
+	private async uploadVoiceNote(audio: Buffer, rejectedMediaId?: string): Promise<string> {
+		const form = new FormData();
+		form.append("messaging_product", "whatsapp");
+		form.append("type", WABA_VOICE_NOTE_MIME_TYPE);
+		form.append("file", audio, { filename: "audio.ogg", contentType: WABA_VOICE_NOTE_MIME_TYPE });
+
+		const { data } = await axios.post<{ id?: string }>(`${GRAPH_API_URL}/${this.wabaPhoneId}/media`, form, {
+			headers: { ...form.getHeaders(), ...this.reqOptions.headers },
+			timeout: 30_000,
+			maxRedirects: 0,
+		});
+		if (typeof data?.id !== "string" || !/^\d{1,255}$/.test(data.id) || data.id === rejectedMediaId) {
+			throw new Error("A Meta não retornou um novo identificador válido para a nota de voz.");
+		}
+		return data.id;
 	}
 
 	public async editMessage({ }: EditMessageOptions): Promise<void> {
