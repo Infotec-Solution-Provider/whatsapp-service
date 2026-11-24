@@ -126,6 +126,51 @@ async function main() {
 	assert.equal((await service.authenticate("Bearer " + key)).id, scope.id);
 	await assert.rejects(service.authenticate("Bearer wrong-key"), /Chave/);
 	assert.ok(!(await service.contacts(scope)).some((c) => c.id === other.id));
+	const previewContact = await service.contact(scope, "5551999990040", "Prévia de anexos");
+	assert.equal((await service.summary(scope, previewContact)).lastMessageAt, null);
+	const mediaAt = new Date(Date.now() - 1000);
+	const previewMessage = await prisma.wppMessage.create({ data: {
+		instance: scope.instance, clientId: scope.clientId, contactId: previewContact.id,
+		from: "me:555130000000", to: previewContact.phone!, type: "image", body: "",
+		fileId: 9500, fileName: "foto.png", fileType: "image/png", fileSize: "100",
+		timestamp: String(mediaAt.getTime()), sentAt: mediaAt, status: "SENT"
+	} });
+	for (const [type, mime, name, expected] of [
+		["image", "image/png", "foto.png", "Imagem"],
+		["ptt", "audio/ogg", "gravacao.ogg", "Áudio"],
+		["video", "video/mp4", "video.mp4", "Vídeo"],
+		["document", "application/pdf", "contrato.pdf", "Documento: contrato.pdf"]
+	] as const) {
+		await prisma.wppMessage.update({ where: { id: previewMessage.id }, data: { type, fileType: mime, fileName: name } });
+		const summary = await service.summary(scope, previewContact);
+		assert.equal(summary.lastMessageAt, mediaAt.toISOString());
+		assert.equal(summary.lastMessage, expected);
+		assert.equal(summary.lastInboundAt, null, "outbound activity does not open the Meta service window");
+	}
+	await prisma.wppMessage.create({ data: {
+		instance: scope.instance, clientId: null, contactId: previewContact.id,
+		from: "me:other", to: previewContact.phone!, type: "text", body: "Another connection's private message",
+		timestamp: String(Date.now()), sentAt: new Date(), status: "SENT"
+	} });
+	assert.equal((await service.summary(scope, previewContact)).lastMessage, "Documento: contrato.pdf");
+	assert.equal((await service.summary(scope, previewContact)).lastMessageAt, mediaAt.toISOString());
+	await prisma.wppMessage.update({ where: { id: previewMessage.id }, data: { body: "Legenda preservada" } });
+	assert.equal((await service.summary(scope, previewContact)).lastMessage, "Legenda preservada");
+	const readStateBefore = await prisma.ciagContactState.findUnique({ where: { integrationId_phone: { integrationId: scope.id, phone: previewContact.phone! } } });
+	await prisma.wppMessage.createMany({ data: Array.from({ length: 52 }, (_, i) => ({
+		instance: scope.instance, clientId: scope.clientId, contactId: previewContact.id,
+		from: previewContact.phone!, to: "me:555130000000", type: "text", body: `Histórico ${i}`,
+		timestamp: String(Date.now()), sentAt: new Date(), status: "RECEIVED" as const
+	})) });
+	const firstPage = await service.messages(scope, previewContact.phone);
+	assert.equal(firstPage.items.length, 50);
+	assert.ok(firstPage.beforeId);
+	const secondPage = await service.messages(scope, previewContact.phone, firstPage.beforeId);
+	assert.equal(secondPage.items.length, 3);
+	assert.equal(secondPage.beforeId, null);
+	assert.ok(!firstPage.items.some((m) => secondPage.items.some((older) => older.id === m.id)));
+	assert.ok(!firstPage.items.some((m) => m.text.includes("Another connection")));
+	assert.deepEqual(await prisma.ciagContactState.findUnique({ where: { integrationId_phone: { integrationId: scope.id, phone: previewContact.phone! } } }), readStateBefore);
 	const exactVariant = await service.contact(scope, "555199990001", "Outro número");
 	assert.notEqual(exactVariant.id, contact.id);
 	const input = {

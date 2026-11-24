@@ -33,6 +33,7 @@ export interface WhatsAppContact {
 	blocked: boolean;
 	consent: ConsentStatus;
 	lastInboundAt: string | null;
+	lastMessageAt: string | null;
 	unread: number;
 	lastMessage?: string;
 }

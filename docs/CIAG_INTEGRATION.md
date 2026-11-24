@@ -42,7 +42,7 @@ Prefixo `/api/integrations/ciag/v1`, com `Authorization: Bearer CHAVE_DE_SERVICO
 | Método | Rota | Uso |
 | --- | --- | --- |
 | GET | `/status` | Estado e número, sem segredos; `?test=true` verifica a conexão Meta. |
-| GET | `/contacts` | Contatos do número/setor, autorização, bloqueios, não lidas e última entrada. |
+| GET | `/contacts` | Contatos do número/setor, autorização, bloqueios, não lidas, última entrada e última atividade (`lastMessageAt`). |
 | POST | `/contacts/upsert` | `{phone,name}`, com correspondência exata do número internacional. |
 | POST | `/contacts/consent` | `{phone,status,evidence,actor}`, para autorização ou descadastro auditado. |
 | GET | `/templates` | Modelos e componentes; `?refresh=true` atualiza o cache de até 60 segundos. |
@@ -58,6 +58,8 @@ Prefixo `/api/integrations/ciag/v1`, com `Authorization: Bearer CHAVE_DE_SERVICO
 `content` é `{kind:"text",text}`, `{kind:"media",text?,media:{id,...}}` ou `{kind:"template",template:{id,name,language,variables,media?}}`. Metadados do arquivo são conferidos no files-service. `variables` usa chaves `header:1`, `body:1`, nomes dos parâmetros ou `button:0:1` para URL dinâmica; códigos de cupom usam `button:0:coupon_code`. A mídia deve corresponder ao cabeçalho aprovado. Nome e identificação do operador CIAG ficam na auditoria e histórico; o texto digitado não ganha prefixo automático.
 
 ## Filas, falhas e segurança
+
+O resumo de contato inclui `lastMessageAt` (ISO ou `null`) para ordenar conversas pela última mensagem enviada ou recebida. `lastMessage` apresenta uma descrição legível quando a mensagem contém somente mídia. A janela de atendimento continua dependendo exclusivamente de `lastInboundAt`; uma mensagem enviada não reabre essa janela. A extensão é compatível com os clientes anteriores e não exige migração de banco.
 
 - `ciag_outbound` armazena a requisição antes do envio; `(integration_id,external_id)` é único. A mesma chave com conteúdo diferente retorna 409. Repetir uma requisição ou consulta após perder a resposta HTTP não cria outra mensagem.
 - Os workers usam leases e locks persistidos por contato. Mensagem pendente e vínculo com o item da fila são gravados atomicamente. Antes de chamar a Meta, o worker registra `sending`. Uma interrupção após esse ponto é `unknown`, sem reenvio automático. Recusas explícitas por limite podem ser repetidas com espera progressiva.

@@ -47,6 +47,17 @@ function delivery(status: WppMessageStatus): DeliveryStatus {
 					? "failed"
 					: "sending";
 }
+function messagePreview(message: WppMessage | null): string {
+	if (!message) return "";
+	if (message.body.trim()) return message.body;
+	const mime = message.fileType?.toLowerCase() ?? "",
+		type = message.type.toLowerCase();
+	if (mime.startsWith("image/") || type === "image") return "Imagem";
+	if (mime.startsWith("audio/") || ["audio", "ptt", "voice"].includes(type)) return "Áudio";
+	if (mime.startsWith("video/") || type === "video") return "Vídeo";
+	if (message.fileId || type === "document") return message.fileName ? `Documento: ${message.fileName}` : "Documento";
+	return message.type === "system" ? "Evento da conversa" : "Mensagem";
+}
 export const keyHash = (key: string) => createHash("sha256").update(key).digest("hex");
 
 class CiagService {
@@ -140,8 +151,9 @@ class CiagService {
 			blocked: contact.isBlocked,
 			consent: (state?.consent ?? "unknown") as WhatsAppContact["consent"],
 			lastInboundAt: last?.sentAt.toISOString() ?? null,
+			lastMessageAt: latest?.sentAt.toISOString() ?? null,
 			unread,
-			lastMessage: latest?.body ?? ""
+			lastMessage: messagePreview(latest)
 		};
 	}
 	async contacts(scope: CiagIntegration) {
