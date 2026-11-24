@@ -1,6 +1,7 @@
 import { File, FilesClient, FileDirType } from "../sdk-local";
 import "dotenv/config";
 import FormData from "form-data";
+import { downloadCiagMedia, uploadCiagMedia } from "../integrations/ciag/media";
 
 const DEFAULT_FILES_BASE_URL = "https://inpulse.infotecrs.inf.br";
 const FILES_API_URL = process.env["FILES_API_URL"] || `${DEFAULT_FILES_BASE_URL}/api`;
@@ -17,6 +18,11 @@ interface ExtendedUploadFileOptions {
 }
 
 class ExtendedFilesClient extends FilesClient {
+	constructor(baseUrl: string) {
+		super(baseUrl);
+		const key = process.env["CIAG_FILES_SERVICE_KEY"];
+		if (key) this.ax.defaults.headers.common["x-ciag-files-key"] = key;
+	}
 	public getPublicFileUrl(instance: string, publicId: string, baseUrl?: string): string {
 		const origin = baseUrl || FILES_PUBLIC_BASE_URL;
 		const normalizedOrigin = origin.endsWith("/") ? origin : `${origin}/`;
@@ -53,7 +59,23 @@ class ExtendedFilesClient extends FilesClient {
 		return response.data.data;
 	}
 
-	public async getWabaMedia(fileId: number, rejectedMediaId?: string): Promise<string> {
+	public override async uploadWabaMedia(instance: string, wabaMediaId: string): Promise<File> {
+		const file = await downloadCiagMedia(instance, wabaMediaId, ({ buffer, mime, name }) => this.uploadFile({
+			instance, dirType: FileDirType.MODELS, fileName: name, mimeType: mime, buffer
+		}));
+		return file ?? super.uploadWabaMedia(instance, wabaMediaId);
+	}
+
+	public async getWabaMedia(fileId: number, rejectedMediaId?: string, clientId?: number): Promise<string> {
+		if (clientId !== undefined) {
+			const media = await uploadCiagMedia(clientId, fileId, async (id) => ({
+				file: await this.fetchFileMetadata(id), buffer: await this.fetchFile(id)
+			}));
+			if (media !== null) {
+				if (media === rejectedMediaId) throw new Error("A Meta não renovou o identificador de mídia CIAG.");
+				return media;
+			}
+		}
 		const { data } = await this.ax.post<{ data: { mediaId: string } }>("/api/waba/get-media-id", {
 			fileId,
 			...(rejectedMediaId ? { rejectedMediaId } : {}),

@@ -23,6 +23,12 @@ Em ambientes que receberam ajustes diretamente no JavaScript compilado, preserve
 
 O ambiente existente não possui histórico Prisma de migrações. Nesse caso, execute somente o SQL aditivo das seis tabelas CIAG após backup; não execute migrações históricas sobre um banco já em uso. Confirme as tabelas e gere o cliente Prisma antes de iniciar a release.
 
+### Mídias no armazenamento central
+
+Cadastre um armazenamento `server` padrão exclusivo para a instância `ciag` no serviço de arquivos. O adaptador CIAG faz o upload e o download na Meta pela conexão WABA vinculada, com a versão Graph do número, e mantém os arquivos no armazenamento central existente. Não é necessário um agente Windows para esse número. Outras instâncias conservam seu transporte anterior.
+
+Instale o middleware compilado de `src/integrations/ciag/files-guard.ts` no serviço de arquivos, antes das rotas de arquivos, fornecendo consultas do proprietário real do arquivo e de seu identificador público. A rota multipart deve também chamar `allowCiagFilesAccess` após o parser. Defina `CIAG_FILES_SERVICE_KEY` no ambiente privado do WhatsApp e seu SHA-256 como `CIAG_FILES_SERVICE_KEY_HASH` no serviço de arquivos. Não exponha essa chave no frontend. A proteção abrange download, visualização, metadados, consulta por hash, exclusão, upload e os caminhos públicos legados dos arquivos CIAG; o proxy autenticado sozinho não protege essas URLs antigas. Valide acesso sem chave tanto pelo proxy quanto pelas URLs antigas. Preserve os clientes de armazenamento dos demais tenants ao publicar.
+
 ## Contrato HTTP
 
 Prefixo `/api/integrations/ciag/v1`, com `Authorization: Bearer CHAVE_DE_SERVICO`. A chave é armazenada somente como SHA-256. Respostas são JSON direto, sem envelope `data`; erros são `{ "error": "..." }` com status HTTP. Chaves inválidas retornam 401; dados de outro escopo não são expostos.

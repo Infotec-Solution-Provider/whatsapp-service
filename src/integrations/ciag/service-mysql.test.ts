@@ -21,10 +21,34 @@ import WABAWhatsappClient from "../../whatsapp-client/waba-whatsapp-client";
 import { shouldApplyStatus, validateMedia, verifySignature } from "./policy";
 import { splitWebhook } from "./webhook";
 import AudioConverter from "../../utils/whatsapp-audio-converter";
+import { uploadCiagMedia, downloadCiagMedia } from "./media";
+import { createCiagFilesGuard, allowCiagFilesAccess } from "./files-guard";
+import { createHash } from "crypto";
 import type { Prisma } from "@prisma/client";
 
 async function main() {
 	assert.match(new URL(process.env["WHATSAPP_DATABASE_URL"]!).pathname, /^\/ciag_autotest_[a-f0-9]{32}$/);
+	const fileKey = "test-ciag-files-key", fileHash = createHash("sha256").update(fileKey).digest("hex");
+	const filesApp = express(); filesApp.use(express.json());
+	filesApp.use(createCiagFilesGuard({ file: async (id) => id === 1 ? "ciag" : "other",
+		publicFile: async (id) => id === "ciag-private" ? "ciag" : "other", keyHash: () => fileHash }));
+	filesApp.post("/api/files", (req, res) => {
+		if (allowCiagFilesAccess(req, res, req.body.instance, fileHash)) res.json({ ok: true });
+	});
+	filesApp.use((_req, res) => res.json({ ok: true }));
+	const fileServer = filesApp.listen(0); await new Promise<void>((resolve) => fileServer.once("listening", resolve));
+	const fileOrigin = `http://127.0.0.1:${(fileServer.address() as import("net").AddressInfo).port}`;
+	try {
+		for (const path of ["/api/files/1", "/api/files/1/metadata", "/api/files/1/view", "/api/files/1/scoped?instance=other", "/public/other/files/ciag-private", "/api/files/exists?instance=ciag&hash=abc"]) {
+			assert.equal((await fetch(fileOrigin + path)).status, 401);
+			assert.equal((await fetch(fileOrigin + path, { headers: { "x-ciag-files-key": fileKey } })).status, 200);
+			assert.equal((await fetch(fileOrigin + path, { headers: { "x-ciag-files-key": "wrong" } })).status, 401);
+		}
+		assert.equal((await fetch(fileOrigin + "/api/files/2")).status, 200);
+		assert.equal((await fetch(fileOrigin + "/api/files/1", { method: "DELETE" })).status, 401);
+		assert.equal((await fetch(fileOrigin + "/api/files", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ instance: "ciag" }) })).status, 401);
+		assert.equal((await fetch(fileOrigin + "/api/waba/get-media-id", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileId: 1 }) })).status, 401);
+	} finally { await new Promise<void>((resolve) => fileServer.close(() => resolve())); }
 	const sector = await prisma.wppSector.create({
 		data: { name: "CIAG test", instance: "ciag", startChats: true, receiveChats: true }
 	});
@@ -317,6 +341,50 @@ async function main() {
 	await assert.rejects(service.allowedMedia(scope, 123), /indisponível/);
 	await prisma.ciagMedia.create({ data: { integrationId: scope.id, fileId: 123 } });
 	assert.equal((await service.download(scope, 123)).data.toString(), "%PDF-testing");
+	const originalMediaPost = axios.post, originalMediaGet = axios.get;
+	try {
+		let uploads = 0;
+		axios.post = (async (url: string, _body: unknown, options: { headers: { Authorization: string }; maxRedirects: number }) => {
+			assert.match(url, /\/phone-ciag\/media$/);
+			assert.equal(options.headers.Authorization, "Bearer test-only");
+			assert.equal(options.maxRedirects, 0);
+			uploads++;
+			return { data: { id: "123456789" } };
+		}) as typeof axios.post;
+		assert.equal(await files.getWabaMedia(123, undefined, client.id), "123456789");
+		await assert.rejects(files.getWabaMedia(123, "123456789", client.id), /não renovou/);
+		assert.equal(uploads, 2);
+		await assert.rejects(uploadCiagMedia(client.id, 999, async () => { throw Error("must not read private bytes"); }), /não pertence/);
+		assert.equal(await uploadCiagMedia(999999, 123, async () => { throw Error("must not read another connection"); }), null);
+		axios.post = (async () => { throw Error("Sensitive upstream token: test-only"); }) as typeof axios.post;
+		await assert.rejects(files.getWabaMedia(123, undefined, client.id), (error: Error) =>
+			error.message.includes("preparar a mídia CIAG") && !error.message.includes("test-only"));
+		let hostile = false, wrongSize = false, stored = 0, downloaded = 0;
+		axios.get = (async (url: string, options: { maxRedirects: number; params?: { phone_number_id: string } }) => {
+			assert.equal(options.maxRedirects, 0);
+			if (url.includes("graph.facebook.com")) {
+				assert.equal(options.params?.phone_number_id, "phone-ciag");
+				return { data: { url: hostile ? "https://attacker.test/private" : "https://lookaside.fbsbx.com/whatsapp_business/attachments/test",
+					mime_type: "application/pdf", file_size: wrongSize ? 50 : 12 } };
+			}
+			downloaded++;
+			return { data: Buffer.from("%PDF-testing") };
+		}) as typeof axios.get;
+		const store = async ({ buffer, mime }: { buffer: Buffer; mime: string; name: string }) => {
+			assert.equal(buffer.toString(), "%PDF-testing"); assert.equal(mime, "application/pdf"); stored++;
+			return fakeFile as Awaited<ReturnType<typeof files.fetchFileMetadata>>;
+		};
+		assert.equal((await downloadCiagMedia("ciag", "123456789", store))?.id, 123);
+		hostile = true;
+		await assert.rejects(downloadCiagMedia("ciag", "123456789", store), /Endereço/);
+		assert.equal(downloaded, 1);
+		hostile = false; wrongSize = true;
+		await assert.rejects(downloadCiagMedia("ciag", "123456789", store), /incompleta/);
+		assert.equal(stored, 1);
+		assert.equal(await downloadCiagMedia("other", "123456789", store), null);
+	} finally {
+		axios.post = originalMediaPost; axios.get = originalMediaGet;
+	}
 	await service.consent(scope, {
 		phone: contact.phone,
 		status: "granted",

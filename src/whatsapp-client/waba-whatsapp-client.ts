@@ -102,7 +102,7 @@ class WABAWhatsappClient implements WhatsappClient {
 						: 100;
 				if (fileSize === null || fileSize > limit * 1024 * 1024)
 					throw new Error(`Arquivo excede o limite de ${limit} MB.`);
-				const mediaId = await filesService.getWabaMedia(options.fileId);
+				const mediaId = await filesService.getWabaMedia(options.fileId, undefined, this.id);
 				reqBody["type"] = msgType;
 				reqBody[msgType] = {
 					id: mediaId,
@@ -136,7 +136,7 @@ class WABAWhatsappClient implements WhatsappClient {
 										details: rejection.details
 									}
 								);
-								reqBody[msgType].id = await filesService.getWabaMedia(options.fileId, rejectedMediaId);
+								reqBody[msgType].id = await filesService.getWabaMedia(options.fileId, rejectedMediaId, this.id);
 							}
 						}
 					: undefined;
@@ -466,7 +466,7 @@ class WABAWhatsappClient implements WhatsappClient {
 						{
 							type: mediaType,
 							[mediaType]: {
-								id: await filesService.getWabaMedia(fileId),
+								id: await filesService.getWabaMedia(fileId, undefined, this.id),
 								...(mediaType === "document" ? { filename: file.name } : {})
 							}
 						}
