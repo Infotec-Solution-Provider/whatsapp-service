@@ -503,6 +503,8 @@ class MessagesService {
 	}
 
 	public async syncMessageToLocal(message: WppMessage, strict = false) {
+		if (process.env["CIAG_INTEGRATION_ENABLED"] === "true" && message.clientId &&
+			await prismaService.ciagIntegration.findFirst({ where: { instance: message.instance, clientId: message.clientId, active: true }, select: { id: true } })) return;
 		const query = `
 				INSERT INTO wpp_messages (
 					id, instance, wwebjs_id, wwebjs_id_stanza, waba_id, gupshup_id, gupshup_request_id,

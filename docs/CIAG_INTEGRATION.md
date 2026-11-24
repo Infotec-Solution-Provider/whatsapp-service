@@ -2,6 +2,8 @@
 
 O CIAG usa a instância, setor e conexão WABA exclusivos do seu número. Contatos, histórico, arquivos e comunicação com a Meta permanecem no Inpulse. Listas, agendamentos e seleção de usuários permanecem no CIAG. Esta integração não inicia bots ou fluxos automáticos no número do CIAG.
 
+As conversas CIAG são criadas no histórico central sob o lock do contato e no setor vinculado. As mensagens dessa conexão não são replicadas para um banco CRM de tenant: não cadastre um espelho do banco CIAG no serviço legado de instâncias. Os testes exercitam os serviços reais de persistência e proíbem consultas ao CRM legado. Uploads cujo conteúdo já existe no serviço de arquivos reutilizam seu vínculo sem erro de duplicidade.
+
 ## Publicação e ativação
 
 1. Faça backup do banco e dos arquivos. Instale dependências com o lockfile, execute `npx prisma generate` e `npx prisma migrate deploy` e compile com `npx tsc --noEmit`. A migração `20261123190000_add_ciag_integration` adiciona seis tabelas, sem alterar as tabelas atuais.

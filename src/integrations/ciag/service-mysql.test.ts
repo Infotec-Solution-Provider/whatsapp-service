@@ -12,8 +12,7 @@ import router from "./controller";
 import wabaController from "../../controllers/waba.controller";
 import queue from "../../services/waba-webhook-queue.service";
 import whatsapp from "../../services/whatsapp.service";
-import messages from "../../services/messages.service";
-import chats from "../../services/chats.service";
+import instances from "../../services/instances.service";
 import distribution from "../../services/messages-distribution.service";
 import socket from "../../services/socket.service";
 import files from "../../services/files.service";
@@ -24,9 +23,10 @@ import AudioConverter from "../../utils/whatsapp-audio-converter";
 import { uploadCiagMedia, downloadCiagMedia } from "./media";
 import { createCiagFilesGuard, allowCiagFilesAccess } from "./files-guard";
 import { createHash } from "crypto";
-import type { Prisma } from "@prisma/client";
 
 async function main() {
+	let legacyQueries = 0;
+	instances.executeQuery = async () => { legacyQueries++; throw Error("CIAG has no legacy CRM database"); };
 	assert.match(new URL(process.env["WHATSAPP_DATABASE_URL"]!).pathname, /^\/ciag_autotest_[a-f0-9]{32}$/);
 	const fileKey = "test-ciag-files-key", fileHash = createHash("sha256").update(fileKey).digest("hex");
 	const filesApp = express(); filesApp.use(express.json());
@@ -101,34 +101,7 @@ async function main() {
 			wabaId: "wamid.test." + randomUUID()
 		};
 	};
-	messages.insertMessage = async (data) =>
-		prisma.wppMessage.create({
-			data: data as unknown as Prisma.WppMessageUncheckedCreateInput,
-			include: { WppChat: true }
-		});
-	messages.updateMessage = async (id, data) =>
-		prisma.wppMessage.update({
-			where: { id },
-			data: data as unknown as Prisma.WppMessageUncheckedUpdateInput,
-			include: { WppChat: true }
-		});
 	distribution.notifyMessage = async () => {};
-	chats.ensureActiveChatForAgent = async (input) => {
-		let chat = await prisma.wppChat.findFirst({
-			where: { instance: input.instance, contactId: input.contactId, isFinished: false }
-		});
-		const existed = Boolean(chat);
-		chat ??= await prisma.wppChat.create({
-			data: {
-				instance: input.instance,
-				contactId: input.contactId,
-				sectorId: input.sectorId ?? null,
-				type: "ACTIVE",
-				startedAt: new Date()
-			}
-		});
-		return { chat, existed };
-	};
 	const contact = await service.contact(scope, "5551999990001", "Cliente");
 	await prisma.wppMessage.create({
 		data: {
@@ -176,7 +149,6 @@ async function main() {
 	assert.equal(sent?.status, "sent");
 	assert.equal(sent?.text, "Resposta sem prefixo");
 	assert.equal(sent?.actor?.id, "admin");
-	messages.syncCurrentMessage = async (id) => prisma.wppMessage.findUniqueOrThrow({ where: { id } });
 	socket.emit = async () => ({ message: "ok" });
 	const storedMessage = await prisma.wppMessage.findUniqueOrThrow({ where: { id: sent!.id } });
 	const stamp = Date.now();
@@ -248,6 +220,9 @@ async function main() {
 		const response = await fetch(`http://127.0.0.1:${port}/api/integrations/ciag/v1/media`, { method: "POST", headers: { Authorization: "Bearer " + key }, body: form });
 		assert.equal(response.status, 200, "Native recording multipart includes a file and the voice flag");
 		assert.equal(((await response.json()) as { voice: boolean }).voice, true);
+		const duplicate = await fetch(`http://127.0.0.1:${port}/api/integrations/ciag/v1/media`, { method: "POST", headers: { Authorization: "Bearer " + key }, body: form });
+		assert.equal(duplicate.status, 200, "The file service may return an existing deduplicated asset");
+		assert.equal(((await duplicate.json()) as { id: number }).id, 9877);
 		form.append("extra", "not-allowed");
 		const rejected = await fetch(`http://127.0.0.1:${port}/api/integrations/ciag/v1/media`, { method: "POST", headers: { Authorization: "Bearer " + key }, body: form });
 		assert.equal(rejected.status, 400);
@@ -485,6 +460,7 @@ async function main() {
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
+	assert.equal(legacyQueries, 0, "CIAG conversations and receipts stay in the central history");
 	await service.stop();
 	await prisma.$disconnect();
 	console.log(

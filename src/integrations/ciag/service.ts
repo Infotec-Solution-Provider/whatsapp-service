@@ -5,7 +5,6 @@ import axios from "axios";
 import prisma from "../../services/prisma.service";
 import whatsapp from "../../services/whatsapp.service";
 import contactsService from "../../services/contacts.service";
-import chatsService from "../../services/chats.service";
 import messagesService from "../../services/messages.service";
 import distribution from "../../services/messages-distribution.service";
 import files from "../../services/files.service";
@@ -468,8 +467,11 @@ class CiagService {
 			buffer,
 			contentHash: createHash("sha256").update(buffer).digest("hex")
 		});
-		await prisma.ciagMedia.create({ data: { integrationId: scope.id, fileId: file.id, voice } });
-		return { id: file.id, name: file.name, mime: file.mime_type, size: Number(file.size), voice };
+		const owned = await prisma.ciagMedia.upsert({
+			where: { integrationId_fileId: { integrationId: scope.id, fileId: file.id } },
+			create: { integrationId: scope.id, fileId: file.id, voice }, update: {}
+		});
+		return { id: file.id, name: file.name, mime: file.mime_type, size: Number(file.size), voice: owned.voice };
 	}
 	async download(scope: CiagIntegration, fileId: number) {
 		const file = await this.allowedMedia(scope, fileId);
@@ -497,17 +499,21 @@ class CiagService {
 			});
 		}
 	}
+	private async chat(scope: CiagIntegration, contactId: number) {
+		// Both callers hold the persistent contact lock. CIAG has no mirrored CRM database.
+		const existing = await prisma.wppChat.findFirst({
+			where: { instance: scope.instance, contactId, sectorId: scope.sectorId, isFinished: false }
+		});
+		return existing ?? prisma.wppChat.create({ data: {
+			instance: scope.instance, contactId, sectorId: scope.sectorId,
+			userId: null, agentId: null, type: "ACTIVE", startedAt: new Date()
+		} });
+	}
 	async receiveInbound(scope: CiagIntegration, message: WppMessage) {
 		const p = phone(message.from);
 		return this.withContactLock(scope.id, p, async () => {
 			const contact = await this.contact(scope, p, p);
-			const { chat } = await chatsService.ensureActiveChatForAgent({
-				instance: scope.instance,
-				contactId: contact.id,
-				sectorId: scope.sectorId,
-				userId: null,
-				agentId: null
-			});
+			const chat = await this.chat(scope, contact.id);
 			const normalized = message.body
 				.normalize("NFD")
 				.replace(/[\u0300-\u036f]/g, "")
@@ -616,13 +622,7 @@ class CiagService {
 				contact = await this.guard(scope, input);
 			const client = whatsapp.getClient(scope.clientId);
 			check(client instanceof WABAWhatsappClient, "Conexão WABA indisponível.", 503);
-			const { chat } = await chatsService.ensureActiveChatForAgent({
-				instance: scope.instance,
-				contactId: contact.id,
-				sectorId: scope.sectorId,
-				userId: null,
-				agentId: null
-			});
+			const chat = await this.chat(scope, contact.id);
 			const base = {
 				instance: scope.instance,
 				from: `me:${client._phone}`,
