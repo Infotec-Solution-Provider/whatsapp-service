@@ -1,4 +1,5 @@
 import prismaService from "./prisma.service";
+import { META_MANAGEMENT_PARAMETER } from "../parameters/meta-management";
 
 const DEFAULT_FEATURE_PARAMETERS: Record<string, string> = {
 	"monitor:wait_warning_minutes": "30",
@@ -88,6 +89,15 @@ class ParametersService {
 		return this.getInstanceBooleanParam(instance, INTERNAL_GROUP_WHATSAPP_SYNC_PARAMETER, legacyDefault);
 	}
 
+	public async isMetaManagementEnabled(instance: string) {
+		const parameter = await prismaService.parameter.findFirst({
+			where: { instance, scope: "INSTANCE", key: META_MANAGEMENT_PARAMETER, userId: null, sectorId: null },
+			orderBy: { id: "desc" },
+			select: { value: true }
+		});
+		return parameter?.value === "true";
+	}
+
 	public async getSessionParams({
 		instance,
 		sectorId,
@@ -96,7 +106,7 @@ class ParametersService {
 		instance: string;
 		sectorId?: number | null;
 		userId?: number | null;
-	}) {
+	}): Promise<Record<string, string>> {
 		const [instanceParams, sectorParams, userParams] = await Promise.all([
 			this.getInstanceParams(instance),
 			sectorId ? this.getSectorParams(instance, sectorId) : [],
@@ -108,11 +118,14 @@ class ParametersService {
 			Object.fromEntries(params.map((p) => [p.key, p.value]));
 
 		// prioridade: instancia < setor < usuario
+		const metaSetting = instanceParams.filter((row) => row.key === META_MANAGEMENT_PARAMETER && row.userId === null && row.sectorId === null).at(-1);
 		const mergedParams = {
 			...DEFAULT_FEATURE_PARAMETERS,
 			...toParamMap(instanceParams),
 			...toParamMap(sectorParams),
-			...toParamMap(userParams)
+			...toParamMap(userParams),
+			// Only operations may enable this feature, always at instance scope.
+			[META_MANAGEMENT_PARAMETER]: String(metaSetting?.value === "true")
 		};
 
 		return mergedParams;

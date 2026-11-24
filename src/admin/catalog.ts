@@ -1,4 +1,5 @@
 import { whatsappParameterSettings } from "../parameters/parameter-settings.catalog";
+import { META_MANAGEMENT_PARAMETER } from "../parameters/meta-management";
 import { DEFAULT_HUMAN_BEHAVIOR_CONFIG as human } from "../utils/human-behavior.simulator";
 import type { AdminSetting } from "./admin-protocol";
 
@@ -36,6 +37,7 @@ for (const [key, label] of [
 flag("feature_telephony_monitoring_enabled", "Monitoria de telefonia", "Telefonia");
 flag("feature_contact_requests_enabled", "Solicitações sobre contatos", "Contatos");
 flag("feature_parameter_settings_enabled", "Tela de parâmetros do CRM", "Recursos");
+flag(META_MANAGEMENT_PARAMETER, "Gerenciamento Meta", "WhatsApp", false, ["INSTANCE"]);
 flag("feature_new_frontend_enabled", "Interface nova do CRM", "Interface");
 flag("feature_frontend_switch_enabled", "Troca de interface", "Interface");
 for (const field of parameterCatalog) {
