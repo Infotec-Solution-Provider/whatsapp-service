@@ -12,8 +12,6 @@ import { isFunctionalHealthStatus } from "../utils/functional-health-status";
 import messageReactionsService from "./message-reactions.service";
 import { splitWabaWebhook } from "../utils/waba-reaction";
 import { WabaReactionReceiptsService } from "./waba-reaction-receipts.service";
-import { wabaContactName } from "../utils/incoming-contact-name";
-import { WabaSystemEventsService } from "./waba-system-events.service";
 
 interface ValidateEntryResultStatus {
 	type: "status";
@@ -30,7 +28,6 @@ interface ValidateEntryResultMessage {
 	recipient: string;
 	phoneNumberId: string | undefined;
 	accountId: string | undefined;
-	contactName: string | null;
 }
 
 interface ValidateEntryResultIgnored {
@@ -51,7 +48,6 @@ interface WebhookQueueLogOptions {
 }
 
 class WABAService {
-	private readonly inboundPeers = new Map<string, Promise<HandleWebhookEntryResult>>();
 	private async validateEntry(
 		_instance: string,
 		logger: ProcessingLogger,
@@ -87,8 +83,7 @@ class WABAService {
 			const message = value.messages[0] as Message;
 			logger.log("Identificado como mensagem do tipo " + message.type);
 			return { type: "message", data: message, appId: undefined, recipient,
-				phoneNumberId: value.metadata?.phone_number_id, accountId: entry?.id,
-				contactName: wabaContactName(value.contacts, message.from) };
+				phoneNumberId: value.metadata?.phone_number_id, accountId: entry?.id };
 		}
 
 		return { type: "ignored", reason: "Webhook WABA ignorado: sem mensagem/status processável" };
@@ -104,19 +99,6 @@ class WABAService {
 			}
 			return { ignored: allIgnored };
 		}
-		const sender = (input as ReceiveMessageBody | null)?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.from;
-		if (typeof sender !== "string") return this.handleSingleWebhookEntry(instance, input, logOptions);
-		// Serialize one peer, without dropping distinct messages, while contact/chat creation runs.
-		const key = `${instance}:${sender}`;
-		const previous = this.inboundPeers.get(key);
-		const work = (previous ?? Promise.resolve()).catch(() => undefined)
-			.then(() => this.handleSingleWebhookEntry(instance, input, logOptions));
-		this.inboundPeers.set(key, work);
-		try { return await work; }
-		finally { if (this.inboundPeers.get(key) === work) this.inboundPeers.delete(key); }
-	}
-
-	private async handleSingleWebhookEntry(instance: string, input: unknown, logOptions?: WebhookQueueLogOptions): Promise<HandleWebhookEntryResult> {
 		const logger = new ProcessingLogger(instance, "waba-webhook-entry", logOptions?.queueId ?? Date.now().toString(), input);
 
 		try {
@@ -130,13 +112,6 @@ class WABAService {
 				return { ignored: true, reason: validated.reason };
 			}
 
-			if (validated.type === "message" && validated.data.type === "system") {
-				const result = await new WabaSystemEventsService(prismaService,
-					(data) => messagesService.insertMessage(data)).record(instance, validated.data, validated.phoneNumberId, validated.accountId);
-				logger.log("Notificação técnica WABA registrada sem distribuição", result);
-				logger.success("Evento de sistema WABA processado sem atividade do cliente");
-				return { ignored: true, reason: "Evento técnico WABA registrado sem abrir atendimento" };
-			}
 			if (validated.type === "message" && validated.data.type === "reaction") {
 				if (!validated.phoneNumberId || !validated.accountId) throw new Error("WABA_REACTION_CHANNEL_REQUIRED");
 				const channels = await prismaService.wppClient.findMany({ where: { instance, type: "WABA", isActive: true,
@@ -192,16 +167,21 @@ class WABAService {
 							};
 						}
 					}
+					const parsedMsg = await WABAMessageParser.parse(
+						client.id,
+						validated.recipient,
+						instance,
+						validated.data,
+						logger
+					);
+
 					const existingMessage =
-						validated.data.id &&
+						parsedMsg.wabaId &&
 						(await prismaService.wppMessage.findFirst({
-							where: { wabaId: validated.data.id }
+							where: { wabaId: parsedMsg.wabaId }
 						}));
 
-					if (existingMessage && (existingMessage.instance !== instance || existingMessage.clientId !== client.id || existingMessage.from !== validated.data.from)) {
-						throw new Error("WABA_MESSAGE_IDENTITY_MISMATCH");
-					}
-					if (existingMessage && existingMessage.chatId !== null) {
+					if (!!existingMessage) {
 						logger.log("Mensagem WABA já existe no banco de dados, ignorando processamento", {
 							messageId: existingMessage.id,
 							wabaId: existingMessage.wabaId
@@ -210,17 +190,15 @@ class WABAService {
 						return { ignored: true, reason: "Webhook WABA ignorado: mensagem duplicada" };
 					}
 
-					// Retry a saved but undistributed message; dedup must not orphan a failed assignment.
-					const inserted = existingMessage || await messagesService.insertMessage(await WABAMessageParser.parse(
-						client.id, validated.recipient, instance, validated.data, logger));
-					const processed = await messagesDistributionService.processMessage(instance, client.id, inserted, validated.contactName);
+					const inserted = await messagesService.insertMessage(parsedMsg);
+					const processed = await messagesDistributionService.processMessage(instance, client.id, inserted);
 
 					if (processed.contactId) {
 						logger.log("Verificando necessidade de atualizar expiration da conversa");
 						const isUpdated = await this.checkAndUpdateContactConversationExpiration(
 							logger,
 							processed.contactId,
-							+inserted.timestamp
+							+parsedMsg.timestamp
 						);
 
 						if (isUpdated) {
