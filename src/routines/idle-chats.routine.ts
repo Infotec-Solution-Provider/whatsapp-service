@@ -5,6 +5,7 @@ import { Logger } from "@in.pulse-crm/utils";
 import chatsService from "../services/chats.service";
 import whatsappService from "../services/whatsapp.service";
 import ProcessingLogger from "../utils/processing-logger";
+import { InstanceQueryUnavailableError } from "../sdk-local/instance.client";
 
 interface MessageLike {
 	sentAt: Date;
@@ -20,12 +21,14 @@ const DEFAULT_CHAT_IDLE_TIME = 30 * 60 * 1000; // minutos
 const MIN_MESSAGES_WINDOW = 24 * 60 * 60 * 1000;
 // Finalizações por execução: um backlog drena em poucos minutos, sem rajada de notificações.
 const MAX_ACTIONS_PER_RUN = 50;
-// Falhas seguidas indicam tenant indisponível; a próxima execução tenta de novo.
+// Limita as demais falhas consecutivas na mesma execução.
 const MAX_CONSECUTIVE_FAILURES = 3;
 // Um chat que falhou espera antes de nova tentativa, para não travar os demais.
 const FAILED_CHAT_RETRY_DELAY = 15 * 60 * 1000;
+const CRM_RETRY_DELAY = 5 * 60 * 1000;
 
 const failedChatsRetryAt = new Map<number, number>();
+const crmRetryAt = new Map<string, number>();
 
 export default async function runIdleChatsJob() {
 	const process = new ProcessingLogger("SYSTEM", "idle-chats-routine", "idle-chats", {});
@@ -40,13 +43,17 @@ export default async function runIdleChatsJob() {
 		process.log("Instâncias habilitadas carregadas", { instances: enabledInstances });
 
 		const messagesWindow = getMessagesWindow(parameters);
-		const ongoingChats = await getOngoingChats(enabledInstances, messagesWindow);
-		process.log("Chats em andamento carregados", { total: ongoingChats.length, messagesWindow });
 
 		const now = Date.now();
 		for (const [chatId, retryAt] of failedChatsRetryAt) {
 			if (retryAt <= now) failedChatsRetryAt.delete(chatId);
 		}
+		for (const [instance, retryAt] of crmRetryAt) {
+			if (retryAt <= now) crmRetryAt.delete(instance);
+		}
+		const availableInstances = enabledInstances.filter((instance) => !crmRetryAt.has(instance));
+		const ongoingChats = await getOngoingChats(availableInstances, messagesWindow);
+		process.log("Chats em andamento carregados", { total: ongoingChats.length, messagesWindow });
 
 		let processedChats = 0;
 		let finishedChats = 0;
@@ -64,7 +71,7 @@ export default async function runIdleChatsJob() {
 				stopReason = `${consecutiveFailures} falhas consecutivas`;
 				break;
 			}
-			if (failedChatsRetryAt.has(chat.id)) {
+			if (crmRetryAt.has(chat.instance) || failedChatsRetryAt.has(chat.id)) {
 				continue;
 			}
 
@@ -145,13 +152,15 @@ export default async function runIdleChatsJob() {
 					continue;
 				}
 			} catch (error) {
-				consecutiveFailures++;
 				failedChatIds.push(chat.id);
 				failedChatsRetryAt.set(chat.id, Date.now() + FAILED_CHAT_RETRY_DELAY);
 				process.log(`Chat ${chat.id} - Falha: ${error instanceof Error ? error.message : String(error)}`);
+				if (!pauseForCrmFailure(chat.instance, error)) consecutiveFailures++;
 			}
 		}
 
+		const pausedInstances = enabledInstances.filter((instance) => crmRetryAt.has(instance));
+		if (pausedInstances.length) process.log("Finalização automática em pausa por indisponibilidade do CRM", { instances: pausedInstances });
 		const result = { processedChats, finishedChats, failedChatIds, stopReason };
 		process.log("Rotina concluída", result);
 		process.success(result);
@@ -160,6 +169,12 @@ export default async function runIdleChatsJob() {
 		process.failed(error);
 		throw error;
 	}
+}
+
+function pauseForCrmFailure(instance: string, error: unknown): boolean {
+	if (!(error instanceof InstanceQueryUnavailableError) || error.instance !== instance) return false;
+	crmRetryAt.set(instance, Date.now() + CRM_RETRY_DELAY);
+	return true;
 }
 
 async function getRoutineEnabledInstances(parameters: Parameter[]) {
@@ -271,6 +286,7 @@ async function finishChatAndNotify(chat: WppChat, reason: string, contactName: s
 			select: { isFinished: true }
 		});
 		if (!current?.isFinished) throw error;
+		pauseForCrmFailure(chat.instance, error);
 	}
 
 	await prismaService.notification.create({

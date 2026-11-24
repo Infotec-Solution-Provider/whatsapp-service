@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import type { Parameter } from "@prisma/client";
+import { InstanceQueryUnavailableError } from "../sdk-local/instance.client";
 
 const HOUR = 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
 const IDLE_TIME = 48 * HOUR;
 
 interface FakeMessage {
@@ -34,7 +36,7 @@ Date.now = () => now;
 let chats: FakeChat[] = [];
 let notifications: number[] = [];
 let finishAttempts: number[] = [];
-let failingChats = new Map<number, "before-update" | "after-update">();
+let failingChats = new Map<number, "before-update" | "after-update" | "crm-before-update" | "crm-after-update">();
 let messagesWindowStart: Date | null = null;
 const results: Array<{
 	processedChats: number;
@@ -104,7 +106,9 @@ mockModule("../services/chats.service", {
 			const failure = failingChats.get(chatId);
 			const chat = chats.find((item) => item.id === chatId)!;
 			if (failure === "before-update") throw new Error(`timeout of 60000ms exceeded (chat ${chatId})`);
+			if (failure === "crm-before-update") throw new InstanceQueryUnavailableError(chat.instance, "CRM unreachable");
 			chat.isFinished = true;
+			if (failure === "crm-after-update") throw new InstanceQueryUnavailableError(chat.instance, "CRM unreachable");
 			if (failure === "after-update") throw new Error(`tenant sync failed (chat ${chatId})`);
 		}
 	}
@@ -201,9 +205,53 @@ async function testConsecutiveFailuresStopTheRun(): Promise<void> {
 	for (const chat of chats) failingChats.set(chat.id, "before-update");
 
 	await runIdleChatsJob();
-	assert.deepEqual(finishAttempts, [4000, 4001, 4002], "an unavailable tenant must not be hit for every chat");
+	assert.deepEqual(finishAttempts, [4000, 4001, 4002], "unclassified failures retain the existing limit per run");
 	assert.equal(results[0]?.stopReason, "3 falhas consecutivas");
 	assert.deepEqual(notifications, []);
+}
+
+async function testCrmOutagePausesOnlyAffectedTenant(): Promise<void> {
+	reset([
+		idleChat(7000), idleChat(7001), idleChat(7002),
+		{ ...idleChat(7003), instance: "other-tenant" }
+	]);
+	failingChats.set(7000, "crm-before-update");
+	failingChats.set(7001, "crm-before-update");
+	await runIdleChatsJob();
+	assert.deepEqual(finishAttempts, [7000, 7003]);
+	assert.deepEqual(notifications, [7003]);
+	assert.deepEqual(results[0]?.failedChatIds, [7000]);
+	assert.equal(results[0]?.stopReason, null);
+
+	now += MINUTE;
+	chats.push({ ...idleChat(7004), instance: "other-tenant" });
+	await runIdleChatsJob();
+	assert.deepEqual(finishAttempts, [7000, 7003, 7004]);
+
+	now += 4 * MINUTE;
+	await runIdleChatsJob();
+	assert.deepEqual(finishAttempts, [7000, 7003, 7004, 7001], "a failed recovery attempt pauses that tenant again");
+
+	failingChats.clear();
+	now += 5 * MINUTE;
+	await runIdleChatsJob();
+	assert.deepEqual(notifications, [7003, 7004, 7002], "healthy CRM resumes work while failed chats retain their own retry times");
+
+	now += 10 * MINUTE;
+	await runIdleChatsJob();
+	assert.deepEqual(notifications, [7003, 7004, 7002, 7000, 7001]);
+}
+
+async function testCrmOutageAfterFinishingStillNotifies(): Promise<void> {
+	reset([idleChat(7100), idleChat(7101), { ...idleChat(7102), instance: "other-tenant" }]);
+	failingChats.set(7100, "crm-after-update");
+	await runIdleChatsJob();
+	assert.deepEqual(notifications, [7100, 7102]);
+	assert.deepEqual(finishAttempts, [7100, 7102]);
+	assert.deepEqual(results[0]?.failedChatIds, []);
+	now += 5 * MINUTE;
+	await runIdleChatsJob();
+	assert.deepEqual(notifications, [7100, 7102, 7101], "finalized chat must not be reprocessed");
 }
 
 async function testFailureAfterFinishingStillNotifies(): Promise<void> {
@@ -223,6 +271,10 @@ async function main(): Promise<void> {
 		await testFailedChatDoesNotBlockOthers();
 		await testConsecutiveFailuresStopTheRun();
 		await testFailureAfterFinishingStillNotifies();
+		parameters.push({ ...parameters[0]!, id: 6, instance: "other-tenant" });
+		await testCrmOutagePausesOnlyAffectedTenant();
+		await testCrmOutageAfterFinishingStillNotifies();
+		parameters.pop();
 		parameters.push({
 			id: 3,
 			scope: "USER",
