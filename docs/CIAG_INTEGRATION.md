@@ -29,6 +29,10 @@ O ambiente existente não possui histórico Prisma de migrações. Nesse caso, e
 
 Cadastre um armazenamento `server` padrão exclusivo para a instância `ciag` no serviço de arquivos. O adaptador CIAG faz o upload e o download na Meta pela conexão WABA vinculada, com a versão Graph do número, e mantém os arquivos no armazenamento central existente. Não é necessário um agente Windows para esse número. Outras instâncias conservam seu transporte anterior.
 
+No `uploadFile` do serviço de arquivos legado, a conversão automática para MP3 deve usar `instance !== "ciag" && file.mimetype.startsWith("audio/")`. O CIAG já valida o conteúdo e converte gravações para OGG/Opus antes de armazená-las; converter novamente destruiria o formato de mensagem de voz. Preserve os bytes recebidos da Meta e os arquivos validados do CIAG. A conversão dos demais clientes continua igual. Confira o cabeçalho `OggS` e a reprodução após baixar pelo proxy autenticado.
+
+As conversas CIAG usam o histórico central e não consultam um servidor CRM legado por instância. O worker e o recebimento criam a conversa no escopo da integração sob o lock persistente do contato. A deduplicação de arquivos do serviço existente também é preservada: uploads repetidos podem devolver o mesmo identificador sem criar outro registro de propriedade.
+
 Instale o middleware compilado de `src/integrations/ciag/files-guard.ts` no serviço de arquivos, antes das rotas de arquivos, fornecendo consultas do proprietário real do arquivo e de seu identificador público. A rota multipart deve também chamar `allowCiagFilesAccess` após o parser. Defina `CIAG_FILES_SERVICE_KEY` no ambiente privado do WhatsApp e seu SHA-256 como `CIAG_FILES_SERVICE_KEY_HASH` no serviço de arquivos. Não exponha essa chave no frontend. A proteção abrange download, visualização, metadados, consulta por hash, exclusão, upload e os caminhos públicos legados dos arquivos CIAG; o proxy autenticado sozinho não protege essas URLs antigas. Valide acesso sem chave tanto pelo proxy quanto pelas URLs antigas. Preserve os clientes de armazenamento dos demais tenants ao publicar.
 
 ## Contrato HTTP
