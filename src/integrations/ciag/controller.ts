@@ -1,4 +1,4 @@
-import { Router, json, Request, Response } from "express";
+import { Router, json, Request, Response, NextFunction } from "express";
 import multer from "multer";
 import type { CiagIntegration } from "@prisma/client";
 import service from "./service";
@@ -51,7 +51,7 @@ route("get", "/messages/result", async (req, res) => service.result(scope(res), 
 route("post", "/messages/cancel", async (req, res) => service.cancel(scope(res), req.body.externalId));
 const upload = multer({
 	storage: multer.memoryStorage(),
-	limits: { fileSize: 100 * 1024 * 1024, files: 1, fields: 1, fieldSize: 20, parts: 2 }
+	limits: { fileSize: 100 * 1024 * 1024, files: 1, fields: 1, fieldSize: 20, parts: 3 }
 });
 router.post(prefix + "/media", upload.single("file"), async (req, res) => {
 	try {
@@ -69,6 +69,13 @@ route("get", "/media/:id", async (req, res) => {
 	res.setHeader("Cache-Control", "no-store");
 	res.setHeader("X-Content-Type-Options", "nosniff");
 	res.send(data);
+});
+router.use(prefix, (error: unknown, _req: Request, res: Response, next: NextFunction) => {
+	if (error instanceof multer.MulterError) {
+		res.status(error.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({ error: "Anexo inválido ou acima dos limites permitidos." });
+		return;
+	}
+	next(error);
 });
 router.use(prefix, (_req, res) => {
 	res.status(404).json({ error: "Rota não encontrada." });

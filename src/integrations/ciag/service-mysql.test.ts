@@ -236,6 +236,23 @@ async function main() {
 	assert.equal(privateFile.status, 404);
 	const missing = await fetch(`http://127.0.0.1:${port}/api/integrations/ciag/v1/contacts`);
 	assert.equal(missing.status, 401);
+	const originalUpload = files.uploadFile;
+	try {
+		files.uploadFile = async (upload) => {
+			assert.equal(upload.instance, "ciag"); assert.equal(upload.mimeType, "audio/ogg");
+			assert.equal(upload.buffer.subarray(0, 4).toString(), "OggS");
+			return { id: 9877, name: upload.fileName, mime_type: upload.mimeType, size: upload.buffer.length } as Awaited<ReturnType<typeof files.uploadFile>>;
+		};
+		const audio = execFileSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "libopus", "-f", "webm", "pipe:1"]);
+		const form = new FormData(); form.append("file", new Blob([new Uint8Array(audio)], { type: "audio/webm" }), "gravacao.webm"); form.append("voice", "true");
+		const response = await fetch(`http://127.0.0.1:${port}/api/integrations/ciag/v1/media`, { method: "POST", headers: { Authorization: "Bearer " + key }, body: form });
+		assert.equal(response.status, 200, "Native recording multipart includes a file and the voice flag");
+		assert.equal(((await response.json()) as { voice: boolean }).voice, true);
+		form.append("extra", "not-allowed");
+		const rejected = await fetch(`http://127.0.0.1:${port}/api/integrations/ciag/v1/media`, { method: "POST", headers: { Authorization: "Bearer " + key }, body: form });
+		assert.equal(rejected.status, 400);
+		assert.equal(typeof ((await rejected.json()) as { error: string }).error, "string");
+	} finally { files.uploadFile = originalUpload; }
 	processEnvSecret();
 	const body = {
 		object: "whatsapp_business_account",
