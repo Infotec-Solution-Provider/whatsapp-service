@@ -112,6 +112,26 @@ async function main() {
 	assert.deepEqual(fresh.body, { data: [42] });
 	assert.equal(fresh.listenerCount("close"), 0);
 	assert.equal(old.listenerCount("close"), 0);
+	const writes: string[] = [];
+	const write = process.stderr.write;
+	const monitorError = new Error("dados enviados não devem aparecer no log");
+	process.stderr.write = ((line: string) => { writes.push(line); return true; }) as typeof write;
+	try {
+		const monitor = protectedRead("chats.monitor", async () => { throw monitorError; }, new ReadRequestGate(options));
+		const monitorReq = Object.assign(request(), {
+			method: "GET", route: { path: "/api/whatsapp/session/monitor" }
+		});
+		await assert.rejects(monitor(monitorReq, new Reply() as unknown as Response), error => error === monitorError);
+		assert.equal(writes.length, 1);
+		const observation = JSON.parse(writes[0]!.slice("[monitor-request] ".length));
+		assert.equal(observation.route, "/api/whatsapp/session/monitor");
+		assert.equal(observation.instance, "a");
+		assert.equal(observation.failed, true);
+		assert.equal(typeof observation.elapsedMs, "number");
+		assert.equal(typeof observation.requestId, "string");
+		assert.equal(writes[0]!.includes(monitorError.message), false);
+		assert.equal(writes[0]!.includes("userId"), false);
+	} finally { process.stderr.write = write; }
 	console.log("protected-read: sharing, disconnect, quotas, isolation, failures and HTTP contracts passed");
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; });
