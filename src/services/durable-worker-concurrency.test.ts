@@ -22,7 +22,7 @@ async function testBatchDrainsOnDatabaseFailure(stage: FailureStage): Promise<vo
 	const timeout = Object.assign(new Error(`Injected P2024 during ${stage}`), { code: "P2024" });
 	const rows = Array.from({ length: 12 }, (_, index) => ({
 		id: `item-${index}`, idempotencyKey: `item-${index}`, status: "PENDING", retryCount: 0,
-		maxRetries: 0, payload: {}, lockedBy: null as string | null,
+		maxRetries: 0, payload: {}, createdAt: new Date(), lockedBy: null as string | null,
 	}));
 	let candidateQueries = 0;
 	let active = 0;

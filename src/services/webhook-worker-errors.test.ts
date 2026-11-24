@@ -53,7 +53,7 @@ async function testEscapedItemFailure(kind: WorkerKind, stage: FailureStage): Pr
 	const timeout = Object.assign(new Error(`Injected P2024: ${kind}/${stage}`), { code: "P2024" });
 	const pendingWrite = deferred();
 	const pollDelay = deferred();
-	const item = { id: "webhook-1", instance: "test", payload: {}, retryCount: 0, maxRetries: 3 };
+	const item = { id: "webhook-1", instance: "test", payload: {}, retryCount: 0, maxRetries: 3, ageSeconds: 0 };
 	let deliveries = 0;
 	let polls = 0;
 	const errorsBefore = errors.length;
@@ -68,7 +68,7 @@ async function testEscapedItemFailure(kind: WorkerKind, stage: FailureStage): Pr
 		return [item];
 	};
 	db["$executeRawUnsafe"] = async (query: string) => {
-		await write(query.includes("processing_started_at"));
+		await write(query.includes("processing_started_at = NOW(3)"));
 		return 1;
 	};
 	db["gupshupWebhookQueue"] = {

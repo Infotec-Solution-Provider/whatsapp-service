@@ -5,10 +5,18 @@ import prismaService from "./prisma.service";
 import wabaService from "./waba.service";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
 import { pauseAdmissionFailure } from "./operator-pause-admission";
+import { decideWabaWebhookRetry } from "./waba-webhook-retry";
 
 const QUEUE_POLL_INTERVAL = parseInt(process.env["WABA_WEBHOOK_QUEUE_POLL_INTERVAL"] || "1000", 10);
 const MAX_CONCURRENT_PROCESSING = parseInt(process.env["WABA_WEBHOOK_MAX_CONCURRENT"] || "5", 10);
 const MAX_RETRIES = parseInt(process.env["WABA_WEBHOOK_MAX_RETRIES"] || "30", 10);
+
+// Use the time of the last durable transition. Fresh and manually requeued items are eligible immediately.
+const RETRY_IS_DUE = `updated_at <= TIMESTAMPADD(SECOND, -(CASE
+	WHEN error IN ('OPERATOR_PAUSED', 'OPERATOR_AVAILABILITY_UNAVAILABLE') THEN 30
+	WHEN retry_count = 0 OR error IS NULL THEN 0
+	ELSE LEAST(240, 5 * POW(2, LEAST(retry_count - 1, 6))) + MOD(CRC32(id), 5)
+END), NOW(3))`;
 
 const WABA_QUEUE_STATUS = {
 	PENDING: "PENDING",
@@ -26,6 +34,7 @@ interface WABAWebhookQueueRow {
 	payload: unknown;
 	retryCount: number;
 	maxRetries: number;
+	ageSeconds: number | bigint;
 }
 
 class WABAWebhookQueueService {
@@ -90,16 +99,10 @@ class WABAWebhookQueueService {
 	}
 
 	private async getNextPendingItem() {
-		const rows = await prismaService.$queryRawUnsafe<WABAWebhookQueueRow[]>(
-			`SELECT
-				id,
-				instance,
-				payload,
-				retry_count AS retryCount,
-				max_retries AS maxRetries
+		const rows = await prismaService.$queryRawUnsafe<Array<Pick<WABAWebhookQueueRow, "id" | "instance">>>(
+			`SELECT id, instance
 			 FROM waba_webhook_queue
-             WHERE status = ?
-               AND (error IS NULL OR error NOT IN ('OPERATOR_PAUSED','OPERATOR_AVAILABILITY_UNAVAILABLE') OR updated_at <= DATE_SUB(NOW(3), INTERVAL 30 SECOND))
+			 WHERE status = ? AND ${RETRY_IS_DUE}
 			 ORDER BY created_at ASC
 			 LIMIT 1`,
 			WABA_QUEUE_STATUS.PENDING
@@ -114,8 +117,13 @@ class WABAWebhookQueueService {
 			return;
 		}
 
+		const attempts = item.retryCount + 1;
+		const decideRetry = (error: unknown) => decideWabaWebhookRetry(error, attempts, item.maxRetries, Number(item.ageSeconds));
 		try {
-			const result = await wabaService.handleWebhookEntry(item.instance, this.parsePayload(item.payload));
+			const result = await wabaService.handleWebhookEntry(item.instance, this.parsePayload(item.payload), {
+				queueId: id,
+				shouldLogFailure: error => !pauseAdmissionFailure(error) && !decideRetry(error).retry
+			});
 
 			if (result.ignored) {
 				await prismaService.$executeRawUnsafe(
@@ -136,7 +144,7 @@ class WABAWebhookQueueService {
 				WABA_QUEUE_STATUS.COMPLETED,
 				id
 			);
-		} catch (err: any) {
+		} catch (err: unknown) {
 			const deferred = pauseAdmissionFailure(err);
 			if (deferred) {
 				await prismaService.$executeRawUnsafe(
@@ -144,12 +152,11 @@ class WABAWebhookQueueService {
 					deferred.code, id);
 				return;
 			}
-			const newRetryCount = item.retryCount + 1;
-			const shouldRetry = newRetryCount < item.maxRetries;
+			const { retry, code } = decideRetry(err);
 			const safeError = sanitizeErrorMessage(err);
-			const errorMessage = typeof safeError === "string" && safeError.trim().length > 0
+			const errorMessage = (!retry && code) || (typeof safeError === "string" && safeError.trim().length > 0
 				? safeError
-				: "Unknown error";
+				: "Unknown error");
 
 			await prismaService.$executeRawUnsafe(
 				`UPDATE waba_webhook_queue
@@ -157,14 +164,16 @@ class WABAWebhookQueueService {
 					status = ?,
 					retry_count = ?,
 					error = ?,
-					processed_at = ?,
+					processed_at = IF(?, NULL, NOW(3)),
+					processing_started_at = NULL,
 					updated_at = NOW(3)
-				 WHERE id = ?`,
-				shouldRetry ? WABA_QUEUE_STATUS.PENDING : WABA_QUEUE_STATUS.FAILED,
-				newRetryCount,
+				 WHERE id = ? AND status = ?`,
+				retry ? WABA_QUEUE_STATUS.PENDING : WABA_QUEUE_STATUS.FAILED,
+				attempts,
 				errorMessage,
-				shouldRetry ? null : new Date(),
-				id
+				retry,
+				id,
+				WABA_QUEUE_STATUS.PROCESSING
 			);
 		}
 	}
@@ -197,7 +206,7 @@ class WABAWebhookQueueService {
 		const updated = await prismaService.$executeRawUnsafe(
 			`UPDATE waba_webhook_queue
 			 SET status = ?, processing_started_at = NOW(3), updated_at = NOW(3)
-			 WHERE id = ? AND status = ?`,
+			 WHERE id = ? AND status = ? AND ${RETRY_IS_DUE}`,
 			WABA_QUEUE_STATUS.PROCESSING,
 			id,
 			WABA_QUEUE_STATUS.PENDING
@@ -213,7 +222,8 @@ class WABAWebhookQueueService {
 				instance,
 				payload,
 				retry_count AS retryCount,
-				max_retries AS maxRetries
+				max_retries AS maxRetries,
+				TIMESTAMPDIFF(SECOND, created_at, NOW(3)) AS ageSeconds
 			 FROM waba_webhook_queue
 			 WHERE id = ?
 			 LIMIT 1`,

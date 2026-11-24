@@ -45,6 +45,11 @@ interface HandleWebhookEntryResult {
 	reason?: string;
 }
 
+interface WebhookQueueLogOptions {
+	queueId: string;
+	shouldLogFailure: (error: unknown) => boolean;
+}
+
 class WABAService {
 	private readonly inboundPeers = new Map<string, Promise<HandleWebhookEntryResult>>();
 	private async validateEntry(
@@ -89,30 +94,30 @@ class WABAService {
 		return { type: "ignored", reason: "Webhook WABA ignorado: sem mensagem/status processável" };
 	}
 
-	public async handleWebhookEntry(instance: string, input: unknown): Promise<HandleWebhookEntryResult> {
+	public async handleWebhookEntry(instance: string, input: unknown, logOptions?: WebhookQueueLogOptions): Promise<HandleWebhookEntryResult> {
 		const items = splitWabaWebhook(input);
 		if (items.length > 1) {
 			let allIgnored = true;
 			for (const item of items) {
-				const result = await this.handleWebhookEntry(instance, item);
+				const result = await this.handleWebhookEntry(instance, item, logOptions);
 				allIgnored = allIgnored && result.ignored;
 			}
 			return { ignored: allIgnored };
 		}
 		const sender = (input as ReceiveMessageBody | null)?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.from;
-		if (typeof sender !== "string") return this.handleSingleWebhookEntry(instance, input);
+		if (typeof sender !== "string") return this.handleSingleWebhookEntry(instance, input, logOptions);
 		// Serialize one peer, without dropping distinct messages, while contact/chat creation runs.
 		const key = `${instance}:${sender}`;
 		const previous = this.inboundPeers.get(key);
 		const work = (previous ?? Promise.resolve()).catch(() => undefined)
-			.then(() => this.handleSingleWebhookEntry(instance, input));
+			.then(() => this.handleSingleWebhookEntry(instance, input, logOptions));
 		this.inboundPeers.set(key, work);
 		try { return await work; }
 		finally { if (this.inboundPeers.get(key) === work) this.inboundPeers.delete(key); }
 	}
 
-	private async handleSingleWebhookEntry(instance: string, input: unknown): Promise<HandleWebhookEntryResult> {
-		const logger = new ProcessingLogger(instance, "waba-webhook-entry", Date.now().toString(), input);
+	private async handleSingleWebhookEntry(instance: string, input: unknown, logOptions?: WebhookQueueLogOptions): Promise<HandleWebhookEntryResult> {
+		const logger = new ProcessingLogger(instance, "waba-webhook-entry", logOptions?.queueId ?? Date.now().toString(), input);
 
 		try {
 			logger.log("Iniciando processamento do webhook WABA");
@@ -264,7 +269,7 @@ class WABAService {
 			logger.success("Webhook WABA processado com sucesso");
 			return { ignored: false };
 		} catch (err: any) {
-			logger.failed(err);
+			if (!logOptions || logOptions.shouldLogFailure(err)) logger.failed(err);
 			throw err;
 		}
 	}

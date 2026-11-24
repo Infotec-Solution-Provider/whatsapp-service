@@ -30,6 +30,7 @@ async function run(): Promise<void> {
 	const statusCalls: unknown[][] = [];
 	const writes: unknown[][] = [];
 	let queuedPayload: unknown = payload("delivered", callback);
+	let queueAgeSeconds = 0;
 	let missingMessage = false;
 	const missingError = Object.assign(new Error("Message not found"), { name: "MessageStatusTargetNotFoundError" });
 	try {
@@ -41,7 +42,8 @@ async function run(): Promise<void> {
 		});
 		replaceDefault("./prisma.service", {
 			wppClient: { findFirstOrThrow: async () => ({ id: 6, instance: "tenant" }) },
-			$queryRawUnsafe: async () => [{ id: "queue-id", instance: "tenant", payload: queuedPayload, retryCount: 0, maxRetries: 30 }],
+			$queryRawUnsafe: async () => [{ id: "queue-id", instance: "tenant", payload: queuedPayload,
+				retryCount: 0, maxRetries: 30, ageSeconds: BigInt(queueAgeSeconds) }],
 			$executeRawUnsafe: async (...args: unknown[]) => { writes.push(args); return 1; },
 		});
 		for (const path of ["./chats.service", "./messages.service", "./files.service", "./whatsapp.service"]) {
@@ -109,6 +111,12 @@ async function run(): Promise<void> {
 		await queue.processItem("queue-id");
 		assert.equal(writes.at(-1)?.[1], "PENDING");
 		assert.equal(writes.at(-1)?.[2], 1);
+		assert.equal(failedLogs.length, 1, "A retry must not duplicate the direct-call failure record");
+		queueAgeSeconds = 900;
+		await queue.processItem("queue-id");
+		assert.equal(writes.at(-1)?.[1], "FAILED");
+		assert.equal(writes.at(-1)?.[3], "WABA_RECEIPT_RECONCILIATION_REQUIRED");
+		assert.deepEqual(failedLogs, [missingError, missingError]);
 		console.log("waba-health-status: round trip, early/delayed callbacks, strict marker scope and durable queue transitions passed");
 	} finally {
 		registry.unregister(correlationId);
