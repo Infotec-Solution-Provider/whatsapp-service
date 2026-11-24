@@ -4,7 +4,7 @@ import TemplateAdapter from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
 import filesService from "../services/files.service";
 import prismaService from "../services/prisma.service";
-import { TemplateVariables, WABAMessageTemplate, WABATemplateBodyComponent } from "../types/whatsapp-api.types";
+import { TemplateVariables, WABAMessageTemplate } from "../types/whatsapp-api.types";
 import {
 	EditMessageOptions,
 	SendFileOptions,
@@ -16,7 +16,7 @@ import {
 } from "../types/whatsapp-instance.types";
 import generateUID from "../utils/generate-uid";
 import ProcessingLogger from "../utils/processing-logger";
-import { classifyWabaSendError, sendWabaRequest, wabaPreparationError } from "../utils/waba-send";
+import { classifyWabaSendError, sendWabaRequest, wabaPreparationError, WabaTemplateBodyValuesError } from "../utils/waba-send";
 import WhatsappClient from "./whatsapp-client";
 import { MessageReactionError, reactionEmoji } from "../utils/message-reaction";
 import { isWabaMessageId, wabaPhone } from "../utils/waba-reaction";
@@ -314,10 +314,12 @@ class WABAWhatsappClient implements WhatsappClient {
 		try {
 			process.log("Iniciando envio de mensagem de template...");
 			const requestURL = `https://graph.facebook.com/v16.0/${this.wabaPhoneId}/messages/`;
-			const components = this.getTemplateVariables({
-				template: options.template.raw,
+			const template = options.template.raw as WABAMessageTemplate;
+			const componentVariables = this.getTemplateVariables({
+				template,
 				variables: options.templateVariables
 			});
+			const components = componentVariables.filter((variables) => variables !== undefined);
 			process.log("Componentes do template processados.", components);
 
 			const body = {
@@ -335,21 +337,16 @@ class WABAWhatsappClient implements WhatsappClient {
 			};
 			process.log("Enviando mensagem de template a Graph API...", {
 				url: requestURL,
-				body,
-				options: this.reqOptions
+				body
 			});
 
-			const response = await axios.post(requestURL, body, this.reqOptions);
-			const replacedText = (options.template.raw.components as WABATemplateBodyComponent[])
-				.map((c, i) => {
-					let text = c.text;
-					components[i]?.parameters.forEach((p, pi) => {
-						text = text.replaceAll(`{{${pi + 1}}}`, p.text);
-					});
-
-					return text;
-				})
+			const replacedText = template.components
+				.map((component, index) => "text" in component
+					? component.text?.replace(/\{\{([1-9]\d*)\}\}/g, (placeholder, position: string) =>
+						componentVariables[index]?.parameters[Number(position) - 1]?.text ?? placeholder)
+					: undefined)
 				.join("\n");
+			const response = await axios.post(requestURL, body, this.reqOptions);
 
 			const now = new Date();
 			const message: CreateMessageDto = {
@@ -378,8 +375,17 @@ class WABAWhatsappClient implements WhatsappClient {
 
 	private getTemplateVariables({ template, variables }: GetTemplateVariablesProps) {
 		const templateComponents = template.components;
+		const bodyValues = variables?.bodyValues;
+		if (bodyValues !== undefined) {
+			const body = templateComponents.find((component) => component.type === "BODY");
+			const positions = new Set(Array.from(body?.text?.matchAll(/\{\{([1-9]\d*)\}\}/g) ?? [], (match) => Number(match[1])));
+			if (!Array.isArray(bodyValues) || bodyValues.length !== positions.size || [...positions].some((position) => position > positions.size)
+				|| Array.from(bodyValues).some((value) => typeof value !== "string" || !value.trim())) {
+				throw new WabaTemplateBodyValuesError();
+			}
+		}
 
-		const formatedVars = templateComponents.map((c) => {
+		return templateComponents.map((c) => {
 			if (
 				c.type === "HEADER" &&
 				c.example &&
@@ -393,6 +399,8 @@ class WABAWhatsappClient implements WhatsappClient {
 					type: "header",
 					parameters: [{ type: "text", text: parameter }]
 				};
+			} else if (c.type === "BODY" && bodyValues !== undefined) {
+				return bodyValues.length ? { type: "body", parameters: bodyValues.map((text) => ({ type: "text", text })) } : undefined;
 			} else if (
 				c.type === "BODY" &&
 				c.example &&
@@ -416,9 +424,6 @@ class WABAWhatsappClient implements WhatsappClient {
 			// Explicitly return undefined for code paths that do not match above
 			return undefined;
 		});
-
-		// Filter out undefined values
-		return formatedVars.filter((v) => v !== undefined);
 	}
 
 	public async getTemplates(): Promise<any> {

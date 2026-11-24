@@ -437,6 +437,8 @@ export interface GSWebhookMessage {
 }
 
 export interface TemplateVariables {
+	/** Text for numbered variables in a WABA BODY, in position order. */
+	bodyValues?: string[];
 	saudação_tempo: string;
 	cliente_cnpj: string;
 	cliente_razao: string;

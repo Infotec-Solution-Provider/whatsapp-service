@@ -3,6 +3,7 @@ import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import whatsappService from "../services/whatsapp.service";
 import sectorClientsService from "../services/sector-clients.service";
 import { pauseAdmissionFailure } from "../services/operator-pause-admission";
+import { WabaTemplateBodyValuesError } from "../utils/waba-send";
 
 class WhatsappController {
 	constructor(public readonly router: Router) {
@@ -49,6 +50,10 @@ class WhatsappController {
 			res.status(201).send();
 		} catch (err: any) {
 			if (pauseAdmissionFailure(err)) throw err;
+			if (err instanceof WabaTemplateBodyValuesError) {
+				res.status(400).send({ message: err.message, error: err.message });
+				return;
+			}
 			res.status(500).send({
 				message: "failed to send template",
 				error: err?.message || err

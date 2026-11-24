@@ -28,7 +28,7 @@ import prismaService from "./prisma.service";
 import contactsService from "./contacts.service";
 import { createUploadTraceLogger } from "../utils/file-upload-trace";
 import readyMessagesService from "./ready-messages.service";
-import { WabaDeliveryError } from "../utils/waba-send";
+import { WabaDeliveryError, WabaTemplateBodyValuesError } from "../utils/waba-send";
 import { getTemplateAttribution } from "../utils/template-attribution";
 import humanBehavior from "./human-behavior-config.service";
 import type { HumanBehaviorConfig } from "../utils/human-behavior.simulator";
@@ -888,6 +888,7 @@ class WhatsappService {
 				originalError
 			);
 			process.failed(originalError);
+			if (error instanceof WabaTemplateBodyValuesError) throw error;
 			throw new BadRequestError("Erro ao enviar mensagem de template: " + sanitizeErrorMessage(error), error);
 		}
 	}

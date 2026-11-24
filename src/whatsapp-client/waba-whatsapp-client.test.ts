@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import type { SendFileOptions } from "../types/whatsapp-instance.types";
-import { WabaDeliveryError } from "../utils/waba-send";
+import type { SendFileOptions, SendTemplateOptions } from "../types/whatsapp-instance.types";
+import { WabaDeliveryError, WabaTemplateBodyValuesError } from "../utils/waba-send";
 
 async function main() {
 	const previous = new Map<string, NodeModule | undefined>();
@@ -98,7 +98,58 @@ async function main() {
 		bodies.length = 0;
 		await assert.rejects(client.sendReaction({ to: "group@g.us", messageId: "wamid.target", emoji: "👍", isGroup: true }));
 		assert.equal(bodies.length, 0);
-		console.log("waba-whatsapp-client: real client media renewal, caption/type, upload failure, timeout and credential-free logs passed");
+
+		send = () => ({ messages: [{ id: "wamid.template" }] });
+		const templateOptions: SendTemplateOptions = {
+			to: options.to,
+			components: [],
+			templateVariables: {
+				saudação_tempo: "Boa tarde", cliente_cnpj: "", cliente_razao: "Empresa C",
+				contato_primeiro_nome: "Luiza", contato_nome_completo: "Luiza Martins",
+				atendente_nome: "Bruno", atendente_nome_exibição: "Bruno"
+			},
+			template: {
+				id: "legacy", name: "legacy", language: "pt_BR", category: "UTILITY", source: "waba", status: "APPROVED", text: "{{1}} da {{2}}",
+				raw: { components: [
+					{ type: "HEADER", format: "TEXT", text: "Olá {{1}}", example: { header_text: ["atendente_nome"] } },
+					{ type: "BODY", text: "{{1}} da {{2}}", example: { body_text: [["contato_primeiro_nome", "cliente_razao"]] } }
+				] }
+			}
+		};
+		const legacyTemplate = await client.sendTemplate(templateOptions, 1, 2);
+		assert.equal(legacyTemplate.body, "Olá Bruno\nLuiza da Empresa C");
+		assert.deepEqual(bodies[0].template.components, [
+			{ type: "header", parameters: [{ type: "text", text: "Bruno" }] },
+			{ type: "body", parameters: [{ type: "text", text: "Luiza" }, { type: "text", text: "Empresa C" }] }
+		]);
+
+		const manualOptions: SendTemplateOptions = {
+			...templateOptions,
+			template: {
+				...templateOptions.template,
+				id: "aviso", name: "aviso", text: "Olá {{1}}. Valor {{2}} para {{1}}.",
+				raw: { components: [
+					{ type: "HEADER", format: "TEXT", text: "Comunicado" },
+					{ type: "BODY", text: "Olá {{1}}. Valor {{2}} para {{1}}.", example: { body_text: [["Exemplo", "R$ 1"]] } }
+				] }
+			},
+			templateVariables: { ...templateOptions.templateVariables, bodyValues: [" Luiza {{2}} ", "R$ 12,50 e $&"] }
+		};
+		const manualTemplate = await client.sendTemplate(manualOptions, 1, 2);
+		assert.equal(manualTemplate.body, "Comunicado\nOlá  Luiza {{2}} . Valor R$ 12,50 e $& para  Luiza {{2}} .");
+		assert.deepEqual(bodies[1].template.components, [{ type: "body", parameters: [
+			{ type: "text", text: " Luiza {{2}} " }, { type: "text", text: "R$ 12,50 e $&" }
+		] }]);
+
+		bodies.length = 0;
+		for (const invalid of [null, "texto", [], ["Luiza"], ["Luiza", "  "], ["Luiza", 4], ["Luiza", "12,50", "extra"], Array(2)]) {
+			await assert.rejects(client.sendTemplate({
+				...manualOptions, templateVariables: { ...manualOptions.templateVariables, bodyValues: invalid as string[] }
+			}, 1, 2), WabaTemplateBodyValuesError);
+		}
+		assert.equal(bodies.length, 0, "invalid positional values must fail before dispatch");
+		assert.doesNotMatch(JSON.stringify(logs), /never-log-this-token|Authorization/);
+		console.log("waba-whatsapp-client: media renewal, reactions, positional and legacy templates passed");
 	} finally {
 		for (const [id, cached] of previous) { if (cached) require.cache[id] = cached; else delete require.cache[id]; }
 	}

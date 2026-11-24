@@ -33,6 +33,13 @@ export class WabaDeliveryError extends Error {
 	}
 }
 
+export class WabaTemplateBodyValuesError extends Error {
+	constructor() {
+		super("Preencha os valores de todas as variáveis numeradas do template.");
+		this.name = "WabaTemplateBodyValuesError";
+	}
+}
+
 function metaDetails(error: unknown): { details: WabaErrorDetails; transient: boolean; hasReceipt: boolean } {
 	const source = record(error);
 	const response = record(source?.["response"]);
