@@ -5,6 +5,8 @@ import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import { FlowSimulationError, simulateMessageFlow } from "../message-flow/simulation";
 import studio, { StudioError } from "../services/message-flow-studio.service";
 import parameters from "../services/parameters.service";
+import { TriggerError } from "../triage/triggers";
+import { createBotTriggerSettingsRouter } from "./bot-trigger-settings.controller";
 
 const router = Router();
 
@@ -23,6 +25,8 @@ router.use(isAuthenticated, isAdmin, async (req, res, next) => {
 	next();
 });
 router.use(json({ limit: "1mb" }));
+
+router.use(createBotTriggerSettingsRouter(positiveId));
 
 router.get("/sectors/:sectorId/flows", async (req, res) => {
 	res.json(await studio.list(req.session.instance, positiveId(req.params["sectorId"])));
@@ -61,7 +65,7 @@ router.post("/sectors/:sectorId/simulate", async (req, res) => {
 });
 
 const handleError: ErrorRequestHandler = (error: unknown, _req, res, _next) => {
-	if (error instanceof StudioError || error instanceof FlowSimulationError) {
+	if (error instanceof StudioError || error instanceof FlowSimulationError || error instanceof TriggerError) {
 		res.status(error.status).json({ code: error.code, message: error.message });
 	} else if (error instanceof UnauthorizedError) {
 		res.status(403).json({ code: "ADMIN_REQUIRED", message: "Acesso restrito a administradores." });

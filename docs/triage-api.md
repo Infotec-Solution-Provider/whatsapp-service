@@ -44,3 +44,18 @@ Neste exemplo, substitua 7 por um setor autorizado a receber conversas no canal.
 - `GET /channels/:id/activity` mostra sessões iniciadas, transferências, tempo médio e falhas nas últimas 24 horas, além das conversas que ainda permitem intervenção. O número de pendências contempla atendimentos antigos.
 - `POST /channels/:id/chats/:chatId/takeover` transfere a conversa em triagem ao usuário da sessão. O backend verifica novamente o canal, a atribuição e os efeitos pendentes.
 - A ativação do recurso por ambiente e as migrações do armazenamento estão em [Homologação com SQL por tenant](tenant-sql-homolog.md).
+
+## Acionamentos do setor
+
+No gestor de fluxo, o administrador configura as regras sob `/api/whatsapp/message-flow-studio/sectors/:sectorId`. O editor de fluxos e a triagem precisam estar habilitados para a empresa. Cada setor mantém sua própria revisão.
+
+| Operação | Resultado |
+|---|---|
+| `GET /bots` | Catálogo em `data.bots`, com bot, canal, nome e versão publicada. A lista contempla os canais ativos e associados ao setor. |
+| `GET /bot-triggers` | Retorna `data.revision`, `data.rules` e `data.bots`. Um setor sem regras tem revisão zero. |
+| `PUT /bot-triggers` | Recebe `{revision,rules}` e substitui a lista do setor. HTTP 409 exige recarregar as regras atuais. Para desabilitar um acionamento, remova-o da lista. |
+| `POST /bot-triggers/simulate` | Recebe `{rules,channelId,type,text?}` com a lista em edição. Retorna `data.matched` e `data.bot`. A operação só consulta o catálogo. |
+
+Os tipos são `manual`, `transfer`, `closed` e `keyword`. Cada regra indica seu `botId`. A regra de palavra-chave também recebe `keywords`, uma lista de expressões comparadas à mensagem inteira, ignorando caixa, acentuação e espaços repetidos. Quando uma conversa ainda está sem setor definido, uma palavra só aciona o bot se apontar para um único setor elegível no canal. A transferência considera o setor de destino e o encerramento considera o setor do atendimento finalizado.
+
+Na API de triagem, `GET /channels/:id/chats/:chatId/start` informa ao administrador ou delegado do canal se o chat permite o início manual. Envie `POST` para o mesmo caminho com `{requestId}`, um UUID gerado pelo cliente para aquela ação. Reutilize o identificador ao repetir uma solicitação após uma falha de rede. A resposta tem `data.started` e `data.chatId`. HTTP 409 indica que a conversa ou a publicação já não atende às condições de início.

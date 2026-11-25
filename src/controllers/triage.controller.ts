@@ -1,4 +1,5 @@
 import express, { type RequestHandler } from "express";
+import { BadRequestError, ConflictError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import { triageAuthoring } from "../triage/authoring";
 import { requestBody } from "../triage/access";
@@ -6,12 +7,17 @@ import { TriageNotPrepared, readinessMessage, unavailableDatabase } from "../tri
 import positiveResourceId from "../utils/positive-resource-id";
 import { getTriageActivity } from "../triage/activity";
 import { takeOverTriage } from "../triage/dispatch";
+import { manualTriageAvailability, startTriggeredTriage } from "../triage/trigger-start";
 
 export function createTriageRouter(
 	service = triageAuthoring,
 	authenticate: RequestHandler = isAuthenticated,
 	activity = getTriageActivity,
-	takeover = takeOverTriage
+	takeover = takeOverTriage,
+	checkManual = manualTriageAvailability,
+	startManual: (
+		input: Parameters<typeof startTriggeredTriage>[0]
+	) => Promise<{ chat: { id: number }; started: boolean } | null> = startTriggeredTriage
 ) {
 	const router = express.Router();
 	router.use(authenticate, express.json({ limit: "256kb" }));
@@ -67,6 +73,37 @@ export function createTriageRouter(
 		const id = positiveResourceId(req.params["id"]);
 		await service.requireChannel(req.session, id);
 		res.json({ data: await activity(req.session.instance, id) });
+	});
+	router.get("/channels/:id/chats/:chatId/start", async (req, res) => {
+		const channelId = positiveResourceId(req.params["id"]),
+			chatId = positiveResourceId(req.params["chatId"]);
+		await service.requireChannel(req.session, channelId);
+		const bot = await checkManual(req.session.instance, channelId, chatId, req.session.userId);
+		res.json({ data: { available: Boolean(bot), botId: bot?.botId ?? null, name: bot?.name ?? null } });
+	});
+	router.post("/channels/:id/chats/:chatId/start", async (req, res) => {
+		const channelId = positiveResourceId(req.params["id"]),
+			chatId = positiveResourceId(req.params["chatId"]);
+		await service.requireChannel(req.session, channelId);
+		const requestId = requestBody(req.body, ["requestId"])["requestId"];
+		if (
+			typeof requestId !== "string" ||
+			!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)
+		)
+			throw new BadRequestError("Informe um identificador único de solicitação.");
+		const result = await startManual({
+			instance: req.session.instance,
+			channelId,
+			chatId,
+			type: "manual",
+			actorId: req.session.userId,
+			eventKey: requestId.toLowerCase(),
+			authorizeTx: async (tx) => {
+				await service.requireChannel(req.session, channelId, tx);
+			}
+		});
+		if (!result) throw new ConflictError("Este atendimento não está disponível para iniciar o bot neste canal.");
+		res.json({ data: { started: result.started, chatId: result.chat.id } });
 	});
 	router.post("/channels/:id/chats/:chatId/takeover", async (req, res) => {
 		requestBody(req.body ?? {}, []);

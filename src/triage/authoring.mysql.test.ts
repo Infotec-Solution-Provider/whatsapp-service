@@ -16,6 +16,10 @@ import { createTriageRouter } from "../controllers/triage.controller";
 import { TriageAuthoring } from "./authoring";
 import { type TriageDefinition } from "./engine";
 import { TRIAGE_FLAG } from "../parameters/triage-feature";
+import { createBotTriggerSettingsRouter } from "../controllers/bot-trigger-settings.controller";
+import { TriageTriggers, TriggerError } from "./triggers";
+import { exerciseBotTriggers } from "./triggers.mysql-cases";
+import positiveResourceId from "../utils/positive-resource-id";
 
 const testUrl = process.env["TRIAGE_API_TEST_MYSQL_URL"];
 const tenants = ["alpha", "beta"] as const;
@@ -72,14 +76,38 @@ async function seed(pool: Pool, prefix: string, owners: readonly string[]) {
 		? "prisma/tenant-sql/20261125151000_triage_runtime.sql"
 		: "prisma/migrations/20261125151000_triage_runtime/migration.sql";
 	await ddl(pool, await readFile(resolve(runtime), "utf8"));
+	const triggers = prefix
+		? "prisma/tenant-sql/20261125193000_triage_trigger_sets.sql"
+		: "prisma/migrations/20261125193000_triage_trigger_sets/migration.sql";
+	await ddl(pool, await readFile(resolve(triggers), "utf8"));
 }
 
 async function exercise(
 	service: TriageAuthoring,
+	triggers: TriageTriggers,
 	changeFlag: (on: boolean) => Promise<void>,
-	renameTable: (table: "triage_channels" | "triage_versions") => Promise<void>
+	renameTable: (table: "triage_channels" | "triage_versions" | "triage_trigger_sets") => Promise<void>
 ) {
 	const app = express();
+	const manualRequestId = "6c90513c-8b4a-47cb-b559-6e4b5a63d036";
+	app.use(
+		"/rules",
+		express.json(),
+		(req, res, next) => {
+			const user = sessions[String(req.headers.authorization)];
+			if (!user) {
+				res.sendStatus(401);
+				return;
+			}
+			req.session = user;
+			next();
+		},
+		createBotTriggerSettingsRouter(positiveResourceId, triggers)
+	);
+	app.use(((error, _req, res, next) => {
+		if (error instanceof TriggerError) res.status(error.status).json({ code: error.code, message: error.message });
+		else next(error);
+	}) as express.ErrorRequestHandler);
 	app.use(
 		"/api/whatsapp/triage",
 		createTriageRouter(
@@ -98,6 +126,18 @@ async function exercise(
 			},
 			async () => {
 				throw new Error("Takeover must not be called without channel access.");
+			},
+			async (instance, channelId, chatId, actorId) => {
+				assert.deepEqual([instance, channelId, actorId], ["alpha", 1, 2]);
+				return chatId === 7 ? { botId: 1, name: "Recepção" } : null;
+			},
+			async (input) => {
+				assert.deepEqual(
+					[input.instance, input.channelId, input.actorId, input.eventKey, input.type],
+					["alpha", 1, 2, manualRequestId, "manual"]
+				);
+				assert.ok(input.authorizeTx, "Revalidação da delegação dentro da transação de início");
+				return input.chatId === 7 ? { started: true, chat: { id: 7 } } : null;
 			}
 		)
 	);
@@ -128,6 +168,8 @@ async function exercise(
 		await api("GET", "/channels/1", undefined, "supervisor", 403);
 		await api("GET", "/channels/1/activity", undefined, "supervisor", 403);
 		await api("POST", "/channels/1/chats/7/takeover", {}, "supervisor", 403);
+		await api("POST", "/channels/1/chats/7/start", {}, "supervisor", 403);
+		await api("GET", "/channels/1/chats/7/start", undefined, "supervisor", 403);
 		assert.deepEqual((await api("GET", "/operators?search=Deleg", undefined, "admin")).users, [
 			{ id: 2, name: "Delegado" }
 		]);
@@ -137,6 +179,18 @@ async function exercise(
 		await api("PUT", "/channels/1/grants/2", { enabled: true }, "admin");
 		await api("PUT", "/channels/1/grants/4", { enabled: true }, "supervisor", 403);
 		assert.equal((await api("GET", "/channels/1/grants", undefined, "admin")).users.length, 1);
+		await api("POST", "/channels/1/chats/7/start", { requestId: "invalid" }, "supervisor", 400);
+		assert.deepEqual(await api("GET", "/channels/1/chats/7/start"), {
+			available: true,
+			botId: 1,
+			name: "Recepção"
+		});
+		assert.deepEqual(await api("GET", "/channels/1/chats/8/start"), { available: false, botId: null, name: null });
+		assert.deepEqual(await api("POST", "/channels/1/chats/7/start", { requestId: manualRequestId }), {
+			chatId: 7,
+			started: true
+		});
+		await api("POST", "/channels/1/chats/8/start", { requestId: manualRequestId }, "supervisor", 409);
 		assert.deepEqual(
 			(await api("GET", "/context")).channels.map((v: { id: number }) => v.id),
 			[1]
@@ -204,6 +258,7 @@ async function exercise(
 		assert.equal(v1.versions[0].createdBy, 2);
 		assert.equal(v1.history.filter((e: { action: string }) => e.action === "GRANTED").length, 1);
 		assert.equal((await service.activeForChannel("alpha", 1))?.versionId, v1.activeVersionId);
+		await exerciseBotTriggers(new URL("/rules", base).toString(), triggers, v1.activeVersionId);
 		assert.equal(await service.getRuntimeVersion("beta", v1.activeVersionId), null);
 		const updated = structuredClone(definition);
 		updated.nodes[0]!.text = "Bem-vindo à nova triagem";
@@ -219,9 +274,11 @@ async function exercise(
 		const paused = await api("POST", "/channels/1/pause", { revision: 6 });
 		assert.equal(paused.paused, true);
 		assert.equal(await service.activeForChannel("alpha", 1), null);
+		assert.equal(await triggers.match("alpha", 1, { type: "manual", sectorId: 10 }), null);
 		assert.deepEqual((await service.getRuntimeVersion("alpha", v2.activeVersionId))?.definition, updated);
 		await api("PUT", "/channels/1/grants/2", { enabled: false }, "admin");
 		await api("POST", "/channels/1/rollback", { revision: 7, versionId: v1.activeVersionId }, "supervisor", 403);
+		await api("POST", "/channels/1/chats/7/start", {}, "supervisor", 403);
 		await changeFlag(false);
 		await api("GET", "/context", undefined, "admin", 403);
 		assert.equal(await service.activeForChannel("alpha", 1), null);
@@ -239,6 +296,12 @@ async function exercise(
 			await api("POST", "/channels/1/rollback", { revision: 7, versionId: v1.activeVersionId }, "admin");
 			assert.equal((await service.activeForChannel("alpha", 1))?.versionId, v1.activeVersionId);
 			await api("GET", "/channels/1", undefined, "supervisor", 403);
+			await renameTable("triage_trigger_sets");
+			assert.equal(await triggers.match("alpha", 1, { type: "keyword", text: "vendas" }), null);
+			await assert.rejects(
+				triggers.settings(admin, 10),
+				(err: unknown) => err instanceof TriggerError && err.status === 503
+			);
 			await renameTable("triage_versions");
 			await api("GET", "/context", undefined, "admin", 503);
 			assert.equal(
@@ -321,6 +384,7 @@ test(
 			const native = createTenantSqlRouter(shards);
 			await exercise(
 				new TriageAuthoring(prisma, crm),
+				new TriageTriggers(prisma),
 				async (on) => {
 					await central.pool.query("UPDATE parameters SET value=? WHERE instance='alpha'", [String(on)]);
 				},
@@ -330,6 +394,7 @@ test(
 			);
 			await exercise(
 				new TriageAuthoring(native as unknown as PrismaClient, crm),
+				new TriageTriggers(native as unknown as PrismaClient),
 				async (on) => {
 					await shards
 						.get("alpha")!

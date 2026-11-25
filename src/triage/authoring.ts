@@ -39,6 +39,7 @@ interface ChannelDraft {
 interface StoredVersion {
 	id: number;
 	channel_id: number;
+	number: number;
 	name: string;
 	definition: string;
 }
@@ -129,7 +130,7 @@ async function draftRow(db: TriageReader, instance: string, channelId: number, l
 }
 async function versionRow(db: TriageReader, instance: string, channelId: number, versionId: number) {
 	const [version] = await db.$queryRawUnsafe<StoredVersion[]>(
-		"SELECT id,channel_id,name,definition FROM triage_versions WHERE instance=? AND channel_id=? AND id=?",
+		"SELECT id,channel_id,number,name,definition FROM triage_versions WHERE instance=? AND channel_id=? AND id=?",
 		instance,
 		channelId,
 		versionId
@@ -484,7 +485,7 @@ export class TriageAuthoring {
 			if (versionId === null) return null;
 			if (!tx && !(await findChannel(db, instance, channelId))) return null;
 			const [version] = await db.$queryRawUnsafe<StoredVersion[]>(
-				"SELECT id,channel_id,name,definition FROM triage_versions WHERE instance=? AND channel_id=? AND id=?" +
+				"SELECT id,channel_id,number,name,definition FROM triage_versions WHERE instance=? AND channel_id=? AND id=?" +
 					(tx ? " FOR UPDATE" : ""),
 				instance,
 				channelId,
@@ -497,7 +498,7 @@ export class TriageAuthoring {
 	getRuntimeVersion(instance: string, versionId: number) {
 		return withDatabaseTenant(instance, async () => {
 			const [version] = await this.db.$queryRawUnsafe<StoredVersion[]>(
-				"SELECT id,channel_id,name,definition FROM triage_versions WHERE instance=? AND id=?",
+				"SELECT id,channel_id,number,name,definition FROM triage_versions WHERE instance=? AND id=?",
 				instance,
 				versionId
 			);
@@ -509,6 +510,8 @@ export class TriageAuthoring {
 			botId: row.channel_id,
 			channelId: row.channel_id,
 			versionId: row.id,
+			version: row.number,
+			name: row.name,
 			definition: parseStored(row.definition)
 		};
 	}
