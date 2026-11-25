@@ -7,7 +7,8 @@ import { RemoteAuthBatch, RemoteSessionDirectoryItem, RemoteSessionInfo } from "
 import prismaService from "./prisma.service";
 import socketService from "./socket.service";
 import { calculateSessionStability, calculateTransportStability, transportHistory } from "./remote-session-stability";
-import { pickClientSession } from "../utils/remote-session-directory";
+import { pickClientSession, pickRoutedSession } from "../utils/remote-session-directory";
+import { remoteControlBase } from "../utils/remote-control-host";
 import wwebjsHealthCheckService from "./wwebjs-health-check.service";
 import { ChannelMessageHealthReader } from "./channel-message-health.reader";
 import type { ChannelMessageHealth } from "./channel-message-health";
@@ -172,7 +173,7 @@ class RemoteSessionMonitorService {
 		const [disconnections, recentDisconnections, directory, messageHealth] = await Promise.all([
 			this.countUnexpectedDisconnections(clients.map((client) => client.id)),
 			this.countUnexpectedDisconnections(clients.map((client) => client.id), 60 * 60_000),
-			this.loadRemoteSessionDirectory(clients),
+			this.loadRemoteSessionDirectory(clients, session.instance),
 			this.messageHealthReader.read(session.instance, clients.map((client) => client.id))
 		]);
 		return clients.map((client) => ({
@@ -327,7 +328,10 @@ class RemoteSessionMonitorService {
 	public async getAuthBatchQr(session: SessionData, clientId: number, batchId: string): Promise<unknown> {
 		const { client, batch } = await this.getAuthorizedAuthBatch(session, clientId, batchId);
 		const activeItem = batch.items.find((item) => item.status === "ACTIVATING" || item.status === "QR_PENDING");
-		const activeClient = activeItem ? await this.getScopedRemoteClient(session, activeItem.clientId) : client;
+		if (activeItem && activeItem.instance !== session.instance) throw new RemoteSessionMonitorError(403, "Sessão fora da instância.");
+		// A provisioned shadow has a physical id on the host and need not have a separate CRM channel.
+		const activeClient = activeItem && !remoteControlBase(client.remoteClientUrl)
+			? await this.getScopedRemoteClient(session, activeItem.clientId) : client;
 		return this.remoteRequest(
 			activeClient.remoteClientUrl,
 			"get",
@@ -338,7 +342,7 @@ class RemoteSessionMonitorService {
 	public async refreshClient(clientId: number): Promise<void> {
 		const client = await prismaService.wppClient.findFirst({
 			where: { id: clientId, type: WppClientType.REMOTE, isActive: true },
-			select: { remoteClientUrl: true }
+			select: { remoteClientUrl: true, instance: true }
 		});
 
 		if (!client?.remoteClientUrl) {
@@ -351,7 +355,9 @@ class RemoteSessionMonitorService {
 				"get",
 				"/api/sessions"
 			).catch(() => null);
-			const remoteSessionId = pickClientSession(directory?.sessions, clientId)?.sessionId;
+			const managed = remoteControlBase(client.remoteClientUrl);
+			const remoteSessionId = pickRoutedSession(directory?.sessions, clientId, client.instance, !!managed)?.sessionId;
+			if (managed && !remoteSessionId) throw new RemoteSessionMonitorError(409, "Sessão principal indisponível.");
 			const pathPrefix = remoteSessionId ? `/api/sessions/${encodeURIComponent(remoteSessionId)}` : "/api";
 			const session = await this.remoteRequest<RemoteSessionInfo>(
 				client.remoteClientUrl,
@@ -402,7 +408,7 @@ class RemoteSessionMonitorService {
 	private async getScopedRemoteClient(session: SessionData, clientId: number) {
 		const client = await prismaService.wppClient.findFirst({
 			where: { ...this.visibleClientWhere(session), id: clientId },
-			select: { id: true, remoteClientUrl: true }
+			select: { id: true, instance: true, remoteClientUrl: true }
 		});
 
 		if (!client?.remoteClientUrl) {
@@ -418,7 +424,9 @@ class RemoteSessionMonitorService {
 			"get",
 			"/api/sessions"
 		).catch(() => null);
-		const sessionId = pickClientSession(directory?.sessions, clientId)?.sessionId;
+		const managed = remoteControlBase(client.remoteClientUrl);
+		const sessionId = pickRoutedSession(directory?.sessions, clientId, session.instance, !!managed)?.sessionId;
+		if (managed && !sessionId) throw new RemoteSessionMonitorError(409, "Não foi possível identificar a sessão principal do canal.");
 		return {
 			client,
 			pathPrefix: sessionId ? `/api/sessions/${encodeURIComponent(sessionId)}` : "/api"
@@ -437,7 +445,7 @@ class RemoteSessionMonitorService {
 	}
 
 	private async assertClientMonitorGroup(
-		client: { id: number; remoteClientUrl: string | null },
+		client: { id: number; instance: string; remoteClientUrl: string | null },
 		groupId: string
 	): Promise<void> {
 		const directory = await this.remoteRequest<{ sessions: RemoteSessionDirectoryItem[] }>(
@@ -445,12 +453,15 @@ class RemoteSessionMonitorService {
 			"get",
 			"/api/sessions"
 		);
-		const member = pickClientSession(directory.sessions, client.id);
+		const member = pickClientSession(directory.sessions.filter(item => item.instance === client.instance), client.id);
 		if (!member || member.monitorGroupId !== groupId) {
 			throw new RemoteSessionMonitorError(
 				403,
 				"The selected WhatsApp client does not belong to this monitoring group"
 			);
+		}
+		if (directory.sessions.some(item => item.monitorGroupId === groupId && item.instance !== client.instance)) {
+			throw new RemoteSessionMonitorError(403, "O grupo contém uma sessão de outra instância.");
 		}
 	}
 
@@ -501,7 +512,7 @@ class RemoteSessionMonitorService {
 	}
 
 	private async loadRemoteSessionDirectory(
-		clients: Array<{ id: number; remoteClientUrl: string | null }>
+		clients: Array<{ id: number; remoteClientUrl: string | null }>, instance: string
 	): Promise<Map<number, RemoteSessionDirectoryItem>> {
 		const byClientId = new Map<number, RemoteSessionDirectoryItem>();
 		const urls = [
@@ -515,7 +526,9 @@ class RemoteSessionMonitorService {
 						"get",
 						"/api/sessions"
 					);
+					const visible = new Set(clients.filter(client => client.remoteClientUrl === url).map(client => client.id));
 					for (const item of response.sessions || []) {
+						if (item.instance !== instance || !visible.has(item.clientId)) continue;
 						const current = byClientId.get(item.clientId);
 						byClientId.set(item.clientId, current ? pickClientSession([current, item])! : item);
 					}
@@ -572,7 +585,7 @@ class RemoteSessionMonitorService {
 
 		try {
 			const response = await axios.request<T>({
-				baseURL: baseUrl,
+				baseURL: remoteControlBase(baseUrl) ?? baseUrl,
 				url: path,
 				method,
 				data,

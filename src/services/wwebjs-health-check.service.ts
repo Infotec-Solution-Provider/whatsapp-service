@@ -30,7 +30,7 @@ export interface WhatsappFunctionalHealth {
 	sessionId: string;
 	groupId: string | null;
 	role: "PRIMARY" | "SHADOW";
-	library: "BAILEYS" | "ZAPO";
+	library: "BAILEYS" | "ZAPO" | "WHATSMEOW";
 	correlationId: string;
 	startedAt: string;
 	completedAt: string;

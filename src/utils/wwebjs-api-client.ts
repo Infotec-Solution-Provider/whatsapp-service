@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from "axios";
+import { remoteControlBase } from "./remote-control-host";
 import "dotenv/config";
 
 const DEFAULT_WWEBJS_API_URL = process.env["WWEBJS_API_URL"] || "http://localhost:727";
@@ -17,7 +18,7 @@ export interface WwebjsSessionDirectoryItem {
   sessionId: string;
   clientId: number;
   instance: string;
-  library: "BAILEYS" | "ZAPO";
+  library: "BAILEYS" | "ZAPO" | "WHATSMEOW";
   enabled: boolean;
   isDefault: boolean;
   monitorGroupId: string | null;
@@ -41,7 +42,7 @@ function sessionPath(sessionId: string | undefined, suffix: string): string {
 
 export function createWwebjsApiClient(baseUrl = DEFAULT_WWEBJS_API_URL): WwebjsApiClient {
   const httpClient: AxiosInstance = axios.create({
-    baseURL: `${baseUrl.replace(/\/+$/, "")}/api`,
+    baseURL: `${remoteControlBase(baseUrl) ?? baseUrl.replace(/\/+$/, "")}/api`,
     timeout: 10_000,
   });
 

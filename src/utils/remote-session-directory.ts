@@ -23,3 +23,12 @@ export function pickClientSession<T extends DirectorySession>(sessions: readonly
 	}
 	return best;
 }
+
+/** Managed channels have one principal. An incomplete directory must never route a request to a host default. */
+export function pickRoutedSession<T extends DirectorySession & { instance: string; enabled?: boolean }>(
+	sessions: readonly T[] | null | undefined, clientId: number, instance: string, managed: boolean
+): T | undefined {
+	if (!managed) return pickClientSession(sessions, clientId);
+	const matches = sessions?.filter(item => item.instance === instance && item.clientId === clientId && item.enabled && item.monitorRole === "PRIMARY");
+	return matches?.length === 1 ? matches[0] : undefined;
+}

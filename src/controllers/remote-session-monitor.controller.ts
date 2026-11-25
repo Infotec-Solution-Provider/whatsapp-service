@@ -1,5 +1,6 @@
 import { Request, Response, Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
+import isAdmin from "../middlewares/is-admin.middleware";
 import requireSessionMonitoring from "../middlewares/require-session-monitoring.middleware";
 import remoteSessionMonitorService, { RemoteSessionMonitorError } from "../services/remote-session-monitor.service";
 
@@ -9,49 +10,37 @@ class RemoteSessionMonitorController {
 	constructor(public readonly router: Router) {
 		router.get(ENDPOINT, isAuthenticated, requireSessionMonitoring, this.listClients);
 		router.get(`${ENDPOINT}/:clientId`, isAuthenticated, requireSessionMonitoring, this.getClientDetail);
-		router.post(`${ENDPOINT}/:clientId/restart`, isAuthenticated, requireSessionMonitoring, this.restart);
+		// The following operations expose pairing codes or change the state of a physical account.
+		router.use(`${ENDPOINT}/:clientId`, isAuthenticated, isAdmin, requireSessionMonitoring);
+		router.post(`${ENDPOINT}/:clientId/restart`, this.restart);
 		router.post(
 			`${ENDPOINT}/:clientId/functional-check`,
-			isAuthenticated,
-			requireSessionMonitoring,
 			this.runFunctionalCheck
 		);
-		router.post(`${ENDPOINT}/:clientId/reset-qr`, isAuthenticated, requireSessionMonitoring, this.resetForQr);
-		router.get(`${ENDPOINT}/:clientId/qr`, isAuthenticated, requireSessionMonitoring, this.getQr);
+		router.post(`${ENDPOINT}/:clientId/reset-qr`, this.resetForQr);
+		router.get(`${ENDPOINT}/:clientId/qr`, this.getQr);
 		router.post(
 			`${ENDPOINT}/:clientId/auth-batches`,
-			isAuthenticated,
-			requireSessionMonitoring,
 			this.createAuthBatch
 		);
 		router.get(
 			`${ENDPOINT}/:clientId/auth-batches/:batchId`,
-			isAuthenticated,
-			requireSessionMonitoring,
 			this.getAuthBatch
 		);
 		router.post(
 			`${ENDPOINT}/:clientId/auth-batches/:batchId/next`,
-			isAuthenticated,
-			requireSessionMonitoring,
 			this.activateNextAuthItem
 		);
 		router.post(
 			`${ENDPOINT}/:clientId/auth-batches/:batchId/items/:itemId/retry`,
-			isAuthenticated,
-			requireSessionMonitoring,
 			this.retryAuthItem
 		);
 		router.post(
 			`${ENDPOINT}/:clientId/auth-batches/:batchId/cancel`,
-			isAuthenticated,
-			requireSessionMonitoring,
 			this.cancelAuthBatch
 		);
 		router.get(
 			`${ENDPOINT}/:clientId/auth-batches/:batchId/qr`,
-			isAuthenticated,
-			requireSessionMonitoring,
 			this.getAuthBatchQr
 		);
 	}

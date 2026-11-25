@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { businessChannelUrl } from "../utils/remote-control-host";
 import { File, SocketEventType, SocketServerAdminRoom, SocketServerChatRoom } from "../sdk-local";
 import { TemplateMessage } from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
@@ -104,13 +105,17 @@ class RemoteWhatsappClient implements WhatsappClient {
 		return null;
 	}
 
+	private readonly clientUrl: string;
+
 	constructor(
 		public readonly id: number,
 		public readonly instance: string,
 		public readonly name: string,
 		public _phone: string,
-		private readonly clientUrl: string
-	) {}
+		clientUrl: string
+	) {
+		this.clientUrl = businessChannelUrl(clientUrl, instance, id);
+	}
 
 	public async handleQr(qr: string) {
 		const client = await prismaService.wppClient.findUnique({
