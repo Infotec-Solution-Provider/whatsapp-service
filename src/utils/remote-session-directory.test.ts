@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import axios from "axios";
+import { Logger } from "@in.pulse-crm/utils";
+import { currentDatabaseTenant, withDatabaseTenant } from "./database-tenant-context";
 import { pickClientSession } from "./remote-session-directory";
 
 const shadow = { sessionId: "nunes", clientId: 2, monitorRole: "SHADOW", isDefault: false };
@@ -59,4 +61,70 @@ test("the session poller reads the PRIMARY session, not the shadow listed first"
 	await monitor.refreshClient(2);
 	assert.deepEqual(requested, ["/api/sessions", "/api/sessions/nunes_zapo/session/info"]);
 	assert.deepEqual(recorded, [{ clientId: 2, state: "CONNECTED" }]);
+});
+
+test("polling keeps the session tenant through refresh and updates when a peer database is unavailable", async (t) => {
+	const saved = new Map<string, NodeModule | undefined>();
+	function stub(path: string, exports: unknown) {
+		const id = require.resolve(path);
+		saved.set(id, require.cache[id]);
+		require.cache[id] = { id, filename: id, loaded: true, exports } as NodeModule;
+	}
+	const monitorPath = require.resolve("../services/remote-session-monitor.service");
+	saved.set(monitorPath, require.cache[monitorPath]);
+	delete require.cache[monitorPath];
+	t.after(() => {
+		for (const [id, module] of saved) {
+			if (module) require.cache[id] = module;
+			else delete require.cache[id];
+		}
+	});
+	let native = true;
+	const id = 42;
+	const enumerated: Array<string | undefined> = [];
+	const refreshed: Array<string | null> = [];
+	const observed: Array<string | null> = [];
+	const failures: Array<string | null> = [];
+	stub("../tenant-sql/registry", { tenantSqlEnabled: () => native });
+	stub("../tenant-sql/router", { tenantSqlInstanceNames: () => ["homolog", "infotec", "suprimaxxi"] });
+	stub("../services/prisma.service", { __esModule: true, default: {
+		wppClient: {
+			findMany: async ({ where }: { where: { instance?: string } }) => {
+				enumerated.push(where.instance);
+				if (native && (!where.instance || where.instance === "homolog")) throw new Error("Database unavailable");
+				return [{ id, instance: where.instance ?? "legacy" }];
+			},
+			findFirst: async () => {
+				const tenant = currentDatabaseTenant();
+				refreshed.push(tenant);
+				return { remoteClientUrl: `http://${tenant ?? "legacy"}:728` };
+			}
+		},
+		wppClientSessionSnapshot: { updateMany: async () => { failures.push(currentDatabaseTenant()); return { count: 1 }; } }
+	} });
+	const errors = t.mock.method(Logger, "error", () => {});
+	t.mock.method(axios, "request", async ({ url, baseURL }: { url: string; baseURL: string }) => {
+		if (url === "/api/sessions") return { data: { sessions: [] } };
+		if (baseURL.includes("suprimaxxi")) throw new Error("Remote unavailable");
+		return { data: { state: "CONNECTED", observedAt: new Date().toISOString() } };
+	});
+	const monitor = (require("../services/remote-session-monitor.service") as typeof import("../services/remote-session-monitor.service")).default;
+	t.mock.method(monitor, "recordSnapshot", async () => { observed.push(currentDatabaseTenant()); });
+
+	await monitor.pollAll();
+	assert.deepEqual(enumerated, ["homolog", "infotec", "suprimaxxi"]);
+	assert.deepEqual(refreshed, ["infotec", "suprimaxxi"]);
+	assert.deepEqual(observed, ["infotec"]);
+	assert.deepEqual(failures, ["suprimaxxi"]);
+	assert.match(String(errors.mock.calls[0]?.arguments[0]), /homolog.*Database unavailable/);
+
+	await withDatabaseTenant("infotec", () => monitor.pollAll());
+	assert.deepEqual(enumerated.slice(3), ["infotec"]);
+	assert.equal(observed.at(-1), "infotec");
+	assert.equal(currentDatabaseTenant(), null);
+
+	native = false;
+	await monitor.pollAll();
+	assert.equal(enumerated.at(-1), undefined);
+	assert.equal(observed.at(-1), null);
 });

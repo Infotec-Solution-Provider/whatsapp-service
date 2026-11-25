@@ -11,6 +11,9 @@ import { pickClientSession } from "../utils/remote-session-directory";
 import wwebjsHealthCheckService from "./wwebjs-health-check.service";
 import { ChannelMessageHealthReader } from "./channel-message-health.reader";
 import type { ChannelMessageHealth } from "./channel-message-health";
+import { tenantSqlEnabled } from "../tenant-sql/registry";
+import { tenantSqlInstanceNames } from "../tenant-sql/router";
+import { currentDatabaseTenant, withDatabaseTenant } from "../utils/database-tenant-context";
 
 const REMOTE_TIMEOUT_MS = 5_000;
 const STABILITY_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -372,15 +375,34 @@ class RemoteSessionMonitorService {
 		}
 	}
 
-	public async pollAll(): Promise<void> {
-		const clients = await prismaService.wppClient.findMany({
-			where: { type: WppClientType.REMOTE, isActive: true, remoteClientUrl: { not: null } },
-			select: { id: true }
+	private getPollClients(instance?: string) {
+		return prismaService.wppClient.findMany({
+			where: { type: WppClientType.REMOTE, isActive: true, remoteClientUrl: { not: null }, ...(instance ? { instance } : {}) },
+			select: { id: true, instance: true }
 		});
+	}
+
+	public async pollAll(): Promise<void> {
+		const native = tenantSqlEnabled();
+		const scope = native ? currentDatabaseTenant() : null;
+		const pollAllTenants = native && !scope;
+		const clients = pollAllTenants
+			? (await Promise.all(tenantSqlInstanceNames().map(async (instance) => {
+				try {
+					return await this.getPollClients(instance);
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					Logger.error(`[RemoteSessionMonitor] Poll failed for ${instance}: ${message}`);
+					return [];
+				}
+			}))).flat()
+			: await this.getPollClients(scope ?? undefined);
 
 		for (let index = 0; index < clients.length; index += 5) {
 			const batch = clients.slice(index, index + 5);
-			await Promise.allSettled(batch.map((client) => this.refreshClient(client.id)));
+			await Promise.allSettled(batch.map(({ id, instance }) =>
+				pollAllTenants ? withDatabaseTenant(instance, () => this.refreshClient(id)) : this.refreshClient(id)
+			));
 		}
 	}
 
