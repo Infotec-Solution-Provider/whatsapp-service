@@ -1,32 +1,26 @@
 import { Router } from "express";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
-import {
-	canReadNewContactsReport,
-	NEW_CONTACTS_PILOT_INSTANCE,
-	parseNewContactsQuery
-} from "../services/new-contacts-report.contract";
+import { parseNewContactsQuery } from "../services/new-contacts-report.contract";
 import { queryNewContactsReport } from "../services/new-contacts-report.service";
-import { withDatabaseTenant } from "../utils/database-tenant-context";
+import { currentDatabaseTenant } from "../utils/database-tenant-context";
 
 export function createNewContactsReportRouter() {
 	const router = Router();
 	router.post("/api/whatsapp/reports/new-contacts/query", isAuthenticated, async (req, res) => {
 		res.setHeader("Cache-Control", "no-store");
-		if (!canReadNewContactsReport(req.session)) {
-			res.status(403).json({ message: "Acesso restrito aos administradores da empresa participante." });
+		const instance = currentDatabaseTenant();
+		if (!instance || req.session.role.toUpperCase() !== "ADMIN") {
+			res.status(403).json({ message: "Acesso restrito aos administradores da empresa." });
 			return;
 		}
 		const instanceContext = req.get("X-CRM-Instance");
-		if (instanceContext !== undefined && instanceContext.trim().toLowerCase() !== NEW_CONTACTS_PILOT_INSTANCE) {
+		if (instanceContext !== undefined && instanceContext.trim().toLowerCase() !== instance.toLowerCase()) {
 			res.status(409).json({ code: "CRM_INSTANCE_CHANGED", message: "A sessão pertence a outra empresa. Atualize a tela." });
 			return;
 		}
 
 		const query = parseNewContactsQuery(req.body);
-		const data = await withDatabaseTenant(
-			NEW_CONTACTS_PILOT_INSTANCE,
-			() => queryNewContactsReport(NEW_CONTACTS_PILOT_INSTANCE, query)
-		);
+		const data = await queryNewContactsReport(instance, query);
 		res.json({ data });
 	});
 	return router;

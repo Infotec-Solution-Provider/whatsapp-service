@@ -70,9 +70,9 @@ async function seed(database: Connection, prefix: string) {
 async function verifyQueries(execute: (sql: string, params: unknown[]) => Promise<RowDataPacket[]>) {
 	const period = { from: "2026-11-24", to: "2026-11-24" };
 	const queriedAt = new Date("2026-11-26T00:00:00Z");
-	const fetch = async (request: unknown) => {
+	const fetch = async (request: unknown, instance = "suprimaxxi") => {
 		const query = parseNewContactsQuery(request);
-		const { summary, rows } = buildNewContactsQueries("suprimaxxi", query, queriedAt);
+		const { summary, rows } = buildNewContactsQueries(instance, query, queriedAt);
 		const counts = await execute(summary.sql, summary.params);
 		const contacts = await execute(rows.sql, rows.params);
 		return { counts, contacts };
@@ -107,6 +107,10 @@ async function verifyQueries(execute: (sql: string, params: unknown[]) => Promis
 	assert.deepEqual(groups(nextBatch.counts), groups(initialBatch.counts));
 	const openUnlinked = await fetch({ filters: { ...period, status: "open", linked: false } });
 	assert.deepEqual(openUnlinked.contacts.map(row => row["contactId"]), [5]);
+
+	const other = await fetch({ filters: period }, "other");
+	assert.deepEqual(other.contacts.map(row => [row["contactId"], row["firstChannelName"], row["ownerId"]]), [[6, null, null]]);
+	assert.deepEqual(groups(other.counts), [[null, 1]]);
 }
 
 async function main() {

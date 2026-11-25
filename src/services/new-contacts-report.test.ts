@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { canReadNewContactsReport, parseNewContactsQuery } from "./new-contacts-report.contract";
+import { parseNewContactsQuery } from "./new-contacts-report.contract";
 import { buildNewContactsQueries } from "./new-contacts-report.query";
 
 test("interprets both end dates in São Paulo time and counts civil days", () => {
@@ -16,10 +16,7 @@ test("interprets both end dates in São Paulo time and counts civil days", () =>
 	assert.throws(() => parseNewContactsQuery({ filters: { from: "2026-11-25", to: "2026-11-24" } }));
 });
 
-test("restricts the pilot to tenant administrators and rejects scope changes", () => {
-	assert.equal(canReadNewContactsReport({ instance: "Suprimaxxi", role: "admin" }), true);
-	assert.equal(canReadNewContactsReport({ instance: "suprimaxxi", role: "USER" }), false);
-	assert.equal(canReadNewContactsReport({ instance: "odim", role: "ADMIN" }), false);
+test("rejects tenant overrides and invalid filter values", () => {
 	const filters = { from: "2026-11-24", to: "2026-11-24" };
 	assert.throws(() => parseNewContactsQuery({ filters, instance: "odim" }));
 	assert.throws(() => parseNewContactsQuery({ filters: { ...filters, firstResponderIds: ["1"] } }));

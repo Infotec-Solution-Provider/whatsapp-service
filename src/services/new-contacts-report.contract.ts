@@ -1,6 +1,5 @@
 import { BadRequestError } from "@rgranatodutra/http-errors";
 
-export const NEW_CONTACTS_PILOT_INSTANCE = "suprimaxxi";
 const DAY_MS = 86_400_000;
 const DATABASE_MAX_ID = 2_147_483_647;
 const dateFormatter = new Intl.DateTimeFormat("en-CA", {
@@ -27,10 +26,6 @@ export interface NewContactsQuery {
 	pageSize: number;
 	offset: number;
 	limit: number;
-}
-
-export function canReadNewContactsReport(session: { instance: string; role: string }): boolean {
-	return session.instance.toLowerCase() === NEW_CONTACTS_PILOT_INSTANCE && session.role.toUpperCase() === "ADMIN";
 }
 
 function invalid(message: string): never {
