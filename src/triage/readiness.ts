@@ -7,7 +7,10 @@ const tables = [
 	"triage_audit",
 	"triage_sessions",
 	"triage_events",
-	"triage_effects"
+	"triage_effects",
+	"triage_runs",
+	"triage_trigger_notices",
+	"triage_trigger_sets"
 ];
 export class TriageNotPrepared extends Error {}
 export const readinessMessage =
@@ -16,7 +19,9 @@ export const readinessMessage =
 export async function assertTriageTables(db: TriageReader, native: boolean) {
 	const names = native ? tables.map((t) => "wpp_runtime_" + t) : tables;
 	const [row] = await db.$queryRawUnsafe<{ ready: number | bigint }[]>(
-		"SELECT COUNT(*) AS ready FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type='BASE TABLE' AND table_name IN (?,?,?,?,?,?,?)",
+		"SELECT COUNT(*) AS ready FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type='BASE TABLE' AND table_name IN (" +
+			names.map(() => "?").join(",") +
+			")",
 		...names
 	);
 	if (Number(row?.ready) !== tables.length) throw new TriageNotPrepared(readinessMessage);

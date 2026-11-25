@@ -1,3 +1,5 @@
+import positiveResourceId from "../utils/positive-resource-id";
+import { listChatTransferSectors } from "../services/chat-sector-transfer";
 import { Request, Response, Router } from "express";
 import chatsService, { PublicConversationsFilters } from "../services/chats.service";
 import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
@@ -147,6 +149,13 @@ class ChatsController {
 		this.router.post("/api/whatsapp/chats/:id/finish", isAuthenticated, this.finishChatById);
 		this.router.post("/api/whatsapp/chats", isAuthenticated, this.startChatByContactId);
 		this.router.get("/api/whatsapp/session/monitor", isAuthenticated, protectedRead("chats.monitor", this.getChatsMonitor));
+		this.router.get("/api/whatsapp/chats/:id/transfer-sectors",isAuthenticated,async (req,res) => {
+			res.json({data:await listChatTransferSectors(req.session,positiveResourceId(req.params["id"]))});
+		});
+		this.router.post("/api/whatsapp/chats/:id/transfer-sector",isAuthenticated,async (req,res) => {
+			const data=await chatsService.transferToSectorQueue(req.session,positiveResourceId(req.params["id"]),positiveResourceId(req.body?.sectorId));
+			res.json({data,message:"Atendimento transferido para a fila do setor."});
+		});
 		this.router.post("/api/whatsapp/chats/:id/transfer", isAuthenticated, this.transferAttendance);
 		this.router.patch("/api/whatsapp/chat-preferences/:type/:id", isAuthenticated, this.updateChatPreference);
 	}

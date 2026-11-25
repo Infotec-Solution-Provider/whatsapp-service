@@ -1,3 +1,5 @@
+import { lockReceivingSector } from "../services/sectors.service";
+import { drainTriageNotices } from "./trigger-notices";
 import { Prisma, TriageEffect, WppChat, WppMessage } from "@prisma/client";
 import { ConflictError } from "@rgranatodutra/http-errors";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
@@ -5,6 +7,7 @@ import db from "../services/prisma.service";
 import chatPreferences from "../services/chat-user-preferences.service";
 import {
 	cancelTriageTx,
+	completeTriageRun,
 	definitionOf,
 	expireTriage,
 	lockSession,
@@ -146,7 +149,13 @@ async function fallback(tx: Prisma.TransactionClient, item: TriageEffect, reason
 	});
 	await tx.triageSession.update({ where: { chatId: session.chatId }, data: { status: "handoff", deadline: null } });
 	const event = await tx.triageEvent.create({
-		data: { instance: item.instance, chatId: item.chatId, kind: reason, eventKey: "incident:" + item.id }
+		data: {
+			instance: item.instance,
+			chatId: item.chatId,
+			runId: session.runId,
+			kind: reason,
+			eventKey: "incident:" + item.id
+		}
 	});
 	await tx.triageEffect.create({
 		data: {
@@ -214,7 +223,7 @@ async function deliver({ effect, session, chat }: Claimed) {
 	const source = await db.wppMessage.findFirstOrThrow({
 		where: {
 			instance: session.instance,
-			chatId: session.chatId,
+			contactId: session.contactId,
 			id: session.lastMessageId,
 			clientId: session.channelId
 		}
@@ -294,12 +303,14 @@ async function handoff({ effect, session }: Claimed) {
 	if (!sectorId || !channel.sectors.some((s) => s.id === sectorId && s.instance === instance))
 		throw new Error("TRIAGE_SECTOR_UNAVAILABLE");
 	const contact = await db.wppContact.findFirstOrThrow({ where: { instance, id: session.contactId } });
-	const message = await db.wppMessage.findFirstOrThrow({ where: { instance, id: session.lastMessageId, chatId } });
+	const message = await db.wppMessage.findFirstOrThrow({
+		where: { instance, id: session.lastMessageId, contactId: session.contactId, clientId: channelId }
+	});
 	const flow = await distribution.getFlow(instance, sectorId);
 	const assignment = await flow.getChatPayload(
 		new ProcessingLogger(instance, "triage-handoff", String(chatId), {}),
 		contact,
-		message
+		{ ...message, chatId: null }
 	);
 	if (
 		assignment.sectorId !== sectorId ||
@@ -310,15 +321,8 @@ async function handoff({ effect, session }: Claimed) {
 	let summary: WppMessage[] | undefined;
 	const chat = await chatPreferences.withUnreadAssignment(
 		async (tx) => {
-			const destination = await tx.$queryRawUnsafe<{ id: number }[]>(
-				"SELECT s.id FROM clients c JOIN _sector_clients sc ON sc.A=c.id JOIN sectors s ON s.id=sc.B " +
-					"WHERE c.instance=? AND c.id=? AND s.instance=? AND s.id=? AND s.receive_chats=1 FOR UPDATE",
-				instance,
-				channelId,
-				instance,
-				sectorId
-			);
-			if (!destination.length) throw new Error("TRIAGE_SECTOR_UNAVAILABLE");
+			if (!(await lockReceivingSector(tx, instance, channelId, sectorId)))
+				throw new Error("TRIAGE_SECTOR_UNAVAILABLE");
 			const current = await lockSession(tx, instance, chatId);
 			const before = await tx.wppChat.findFirstOrThrow({ where: { id: chatId, instance } });
 			const row = await tx.triageEffect.findUniqueOrThrow({ where: { id: effect.id } });
@@ -356,9 +360,16 @@ async function handoff({ effect, session }: Claimed) {
 				}
 			});
 			await tx.triageSession.update({ where: { chatId }, data: { status: "handed_off", deadline: null } });
+			await completeTriageRun(tx, current, "handed_off");
 			await tx.triageEffect.update({ where: { id: row.id }, data: { status: "done", error: null } });
 			await tx.triageEvent.create({
-				data: { instance, chatId, eventKey: "handoff:" + chatId, kind: "handed_off" }
+				data: {
+					instance,
+					chatId,
+					runId: current.runId,
+					eventKey: "handoff:" + effect.id + ":done",
+					kind: "handed_off"
+				}
 			});
 			return updated;
 		},
@@ -382,6 +393,9 @@ export async function serviceTriageEffect(candidate: TriageEffect) {
 }
 
 export async function drainTriage() {
+	await drainTriageNotices().catch((error) => {
+		if (!noTriageTables(error)) throw error;
+	});
 	const now = new Date();
 	const expired = await db.triageEffect.findMany({
 		where: { status: { in: ["working", "sending"] }, retryAt: { lte: now } },

@@ -1,3 +1,4 @@
+import { lockReceivingSector } from "./sectors.service";
 import {
 	SocketEventType,
 	SocketServerAdminRoom,
@@ -43,7 +44,11 @@ import socketService from "./socket.service";
 import transferHistoryService from "./transfer-history.service";
 import whatsappService from "./whatsapp.service";
 import botsRegistry from "../bots/bots-registry";
-import { acceptsTriageMessage, consumeTriage, hasTriageIngress } from "../triage/runtime";
+import { acceptsTriageMessage, consumeTriage, hasTriageIngress, TRIAGE_CHAT_MARKER } from "../triage/runtime";
+import { startTriggeredTriage } from "../triage/trigger-start";
+import { triageTriggers } from "../triage/triggers";
+import type { ChatPayload } from "../message-flow/base/base.step";
+import { enqueueTriageNotice } from "../triage/trigger-notices";
 
 type MessageStatusProvider = "wwebjs" | "waba";
 
@@ -397,7 +402,8 @@ class MessagesDistributionService {
 		contact: WppContact,
 		message: WppMessage,
 		logger: ProcessingLogger,
-		skipBotCheck: boolean = false
+		skipBotCheck: boolean = false,
+		flowDecision?: ChatPayload
 	): Promise<{ chat: WppChat; systemMessage: string | null }> {
 		// Múltiplos setores: ativa bot de escolha de setor
 		if (sectors.length > 1) {
@@ -429,7 +435,7 @@ class MessagesDistributionService {
 		} as WppChat;
 
 		// Verifica se algum bot deve ser ativado
-		if (!skipBotCheck) {
+		if (!skipBotCheck && !flowDecision) {
 			const botId = await this.determineBotForNewChat(tempChat, contact, logger);
 
 			if (botId) {
@@ -461,7 +467,7 @@ class MessagesDistributionService {
 		// Sem bot: usa MessageFlow normal (atribui atendente)
 		logger.log("Nenhum bot ativo. Usando MessageFlow para atribuir atendente.");
 		const flow = await this.getFlow(instance, sectors[0]!.id);
-		const result = await flow.getChatPayload(logger, contact, message);
+		const result = flowDecision ?? await flow.getChatPayload(logger, contact, message);
 		const { systemMessage, ...chatData } = result;
 
 		if (typeof chatData.agentId === "number") {
@@ -480,16 +486,175 @@ class MessagesDistributionService {
 		return { chat, systemMessage: systemMessage || null };
 	}
 
-	/** Retry only the conversational bot after WABA persisted an inbound but interrupted distribution. */
+	/** The flow may activate a bot only while choosing a new inbound destination. */
+	private async evaluateBotFlow(
+		instance: string,
+		sectorId: number,
+		contact: WppContact,
+		message: WppMessage,
+		logger: ProcessingLogger,
+		menuChat?: WppChat
+	) {
+		let flow: MessageFlow;
+		try {
+			flow = await this.getFlow(instance, sectorId);
+		} catch (error) {
+			logger.log("Fluxo indisponível ao verificar bots; mantendo a distribuição.", {
+				error: sanitizeErrorMessage(error)
+			});
+			return null;
+		}
+		if (!flow.hasStartBot() || !message.clientId || !acceptsTriageMessage(message)) return null;
+		const channelId = message.clientId;
+		const chosen: { activation: Awaited<ReturnType<typeof startTriggeredTriage>> } = { activation: null };
+		const decision = await flow.getChatPayload(
+			logger,
+			contact,
+			{ ...message, chatId: null },
+			{
+				startBot: async (botId) => {
+					chosen.activation = await startTriggeredTriage({
+						instance,
+						channelId,
+						sectorId,
+						botId,
+						contact,
+						message,
+						type: "flow",
+						eventKey: String(message.id),
+						...(menuChat && { chatId: menuChat.id, fromSectorMenu: true })
+					});
+					return chosen.activation?.ref ?? null;
+				}
+			}
+		);
+		return { decision, ...chosen };
+	}
+
+	/** For legacy multidepartment numbers there is no routing sector until the customer selects one. */
+	public async startSectorMenuBot(sector: WppSector, contact: WppContact, message: WppMessage, chat: WppChat) {
+		const logger = new ProcessingLogger(chat.instance, "sector-menu-flow", String(chat.id), {});
+		const result = await this.evaluateBotFlow(chat.instance, sector.id, contact, message, logger, chat);
+		if (!result) return false;
+		if (result.activation) {
+			await chatsService.syncChatToLocal(result.activation.chat);
+			return true;
+		}
+		const { userId, walletId, priority, systemMessage } = result.decision;
+		const assigned = await chatUserPreferencesService.withUnreadAssignment(
+			async (tx) => {
+				if (!message.clientId || !(await lockReceivingSector(tx, chat.instance, message.clientId, sector.id)))
+					throw new Error("O setor selecionado não recebe mais neste número.");
+				return tx.wppChat.update({
+					where: { id: chat.id, instance: chat.instance, botId: 1, isFinished: false },
+					data: {
+						sectorId: sector.id,
+						userId: userId ?? null,
+						walletId: walletId ?? null,
+						botId: null,
+						...(priority && { priority })
+					}
+				});
+			},
+			{ instance: chat.instance, chatId: chat.id, recipientId: userId }
+		);
+		await chatsService.syncChatToLocal(assigned);
+		if (systemMessage) await this.addSystemMessage(assigned, systemMessage);
+		await this.notifyChatStarted(logger, assigned);
+		return true;
+	}
+
+	private async routeBotInbound(
+		instance: string,
+		channelId: number,
+		contact: WppContact,
+		message: WppMessage,
+		current: WppChat | null,
+		logger: ProcessingLogger
+	) {
+		const existing = await consumeTriage(instance, channelId, contact, message, current);
+		if (existing) current = existing.chat;
+		if (
+			existing?.handled ||
+			!acceptsTriageMessage(message) ||
+			(current && (current.botId != null || current.agentId != null || (current.userId ?? 0) > 0))
+		)
+			return { current, handled: existing?.handled ?? false, opened: false };
+		if (["chat", "text"].includes(message.type)) {
+			try {
+				const match = await triageTriggers.match(instance, channelId, {
+					type: "keyword",
+					sectorId: current?.sectorId ?? null,
+					text: message.body
+				});
+				if (match) {
+					const hit = await startTriggeredTriage({
+						instance,
+						channelId,
+						type: "keyword",
+						contact,
+						message,
+						eventKey: String(message.id),
+						...(current && { chatId: current.id }),
+						expectedVersion: match.versionId
+					});
+					if (hit) return { current: hit.chat, handled: true, opened: hit.opened };
+					if (!current) {
+						const concurrent = await chatsService.getChatForContact(channelId, contact);
+						const resumed = await consumeTriage(instance, channelId, contact, message, concurrent);
+						if (resumed?.handled) return { current: resumed.chat, handled: true, opened: false };
+						current = resumed ? resumed.chat : concurrent;
+					}
+				}
+			} catch (error) {
+				logger.log("Falha no gatilho por palavra-chave; mantendo a distribuição.", {
+					error: sanitizeErrorMessage(error)
+				});
+			}
+		}
+		if (!current) {
+			const sectors = await this.getSectors(channelId);
+			if (sectors.length === 1) {
+				const result = await this.evaluateBotFlow(instance, sectors[0]!.id, contact, message, logger);
+				if (result?.activation)
+					return { current: result.activation.chat, handled: true, opened: result.activation.opened };
+				if (result) {
+					const concurrent = await chatsService.getChatForContact(channelId, contact);
+					if (concurrent) {
+						const resumed = await consumeTriage(instance, channelId, contact, message, concurrent);
+						if (resumed?.chat) return { current: resumed.chat, handled: resumed.handled, opened: false };
+						if (!resumed) return { current: concurrent, handled: false, opened: false };
+					}
+					return { current: null, handled: false, opened: false, decision: result.decision };
+				}
+			}
+		}
+		return { current, handled: false, opened: false };
+	}
+
+	/** Replays an unattached official webhook only when an explicit bot or an active session accepts it. */
 	public async recoverTriageInbound(instance: string, clientId: number, msg: WppMessage) {
-		if (msg.chatId != null || msg.instance !== instance || msg.clientId !== clientId || !acceptsTriageMessage(msg) ||
-			!await hasTriageIngress(instance,clientId)) return false;
-		const contact = await this.resolveMessageContact(instance,msg);
-		const current = await chatsService.getChatForContact(clientId,contact);
-		const result = await consumeTriage(instance,clientId,contact,msg,current);
-		if (!result?.handled || !result.chat) return false;
-		if (result.opened) await chatsService.syncChatToLocal(result.chat);
-		return this.insertAndNotify(new ProcessingLogger(instance,"triage-recovery",String(msg.id),{}),result.chat,msg,result.opened,true);
+		if (
+			msg.chatId != null ||
+			msg.instance !== instance ||
+			msg.clientId !== clientId ||
+			!acceptsTriageMessage(msg) ||
+			!(await hasTriageIngress(instance, clientId))
+		)
+			return false;
+		const logger = new ProcessingLogger(instance, "triage-recovery", String(msg.id), {});
+		const contact = await this.resolveMessageContact(instance, msg);
+		const route = await this.routeBotInbound(
+			instance,
+			clientId,
+			contact,
+			msg,
+			await chatsService.getChatForContact(clientId, contact),
+			logger
+		);
+		if (!route.handled || !route.current) return false;
+		if (route.opened) await chatsService.syncChatToLocal(route.current);
+		return this.insertAndNotify(logger, route.current, msg, route.opened, true);
 	}
 
 	public async processMessage(
@@ -513,14 +678,11 @@ class MessagesDistributionService {
 
 			// 2. Busca chat existente
 			logger.log("Buscando chat para o contato.");
-			let currChat = await chatsService.getChatForContact(clientId, contact);
-			const triage = await consumeTriage(instance, clientId, contact, msg, currChat);
-			if (triage) {
-				currChat = triage.chat;
-				if (triage.handled && triage.chat) {
-					if (triage.opened) await chatsService.syncChatToLocal(triage.chat);
-					return this.insertAndNotify(logger, triage.chat, msg, triage.opened, strictLocalSync);
-				}
+			const route = await this.routeBotInbound(instance,clientId,contact,msg,await chatsService.getChatForContact(clientId,contact),logger);
+			const currChat = route.current;
+			if (route.handled && currChat) {
+				if (route.opened) await chatsService.syncChatToLocal(currChat);
+				return this.insertAndNotify(logger,currChat,msg,route.opened,strictLocalSync);
 			}
 			// A resposta automática do setor tem precedência sobre o agente de IA na mesma mensagem.
 			const autoReplySent = await this.checkAndSendAutoResponseMessage(instance, contact, currChat, logger);
@@ -541,7 +703,7 @@ class MessagesDistributionService {
 			// 4. Cria novo chat
 			logger.log("Nenhum chat encontrado para o contato.");
 			const sectors = await this.getSectors(clientId);
-			const { chat: newChat, systemMessage } = await this.createNewChat(instance, sectors, contact, msg, logger);
+			const { chat: newChat, systemMessage } = await this.createNewChat(instance, sectors, contact, msg, logger, false, route.decision);
 
 			if (!newChat) {
 				throw new Error("Nenhum chat foi criado.");
@@ -621,10 +783,11 @@ class MessagesDistributionService {
 			const flow = await this.getFlow(sector.instance, sector.id);
 			// O agente do step AI_AGENT só é gravado na criação do chat; a transferência mantém o agent_id atual.
 			const { agentId: _flowAgentId, ...data } = await flow.getChatPayload(logger, contact, message);
-			const updatedChat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.update({
-				where: { id: chat.id },
-				data: { ...data, botId: null }
-			}), { instance: sector.instance, recipientId: data.userId, chatId: chat.id });
+			const updatedChat = await chatUserPreferencesService.withUnreadAssignment(async tx => {
+				const updated = await tx.wppChat.update({where:{id:chat.id},data:{...data,botId:null}});
+				if (updated.sectorId !== chat.sectorId && chat.botId !== TRIAGE_CHAT_MARKER) await enqueueTriageNotice(tx,updated,"transfer");
+				return updated;
+			}, { instance: sector.instance, recipientId: data.userId, chatId: chat.id });
 			await chatsService.syncChatToLocal(updatedChat);
 			await transferHistoryService.recordTransfer({
 				previousChat: {

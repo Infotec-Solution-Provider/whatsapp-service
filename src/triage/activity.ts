@@ -38,25 +38,25 @@ export function getTriageActivity(instance: string, channelId: number, db: Activ
 	const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 	return withDatabaseTenant(instance, () => db.$transaction(async tx => {
 		const [started] = await tx.$queryRawUnsafe<{total:SqlCount}[]>(
-			"SELECT COUNT(*) AS total FROM triage_sessions WHERE instance=? AND channel_id=? AND created_at BETWEEN ? AND ?", instance, channelId, since, now);
+			"SELECT COUNT(*) AS total FROM triage_runs WHERE instance=? AND channel_id=? AND created_at BETWEEN ? AND ?", instance, channelId, since, now);
 		const completed = await tx.$queryRawUnsafe<CompletedGroup[]>(`
 			SELECT JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.reason')) AS reason,
 			       COALESCE(sec.name, CONCAT('Setor #',JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.sectorId')))) AS sector,
 			       COUNT(*) AS total, SUM(TIMESTAMPDIFF(MICROSECOND, s.created_at, e.updated_at)) AS durationUs
-			FROM triage_sessions s JOIN triage_effects e ON e.chat_id=s.chat_id AND e.instance=s.instance
+			FROM triage_runs s JOIN triage_events a ON a.run_id=s.id AND a.instance=s.instance JOIN triage_effects e ON e.event_id=a.id AND e.instance=a.instance
 			LEFT JOIN sectors sec ON sec.instance=? AND sec.id=CAST(JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.sectorId')) AS UNSIGNED)
-			WHERE s.instance=? AND s.channel_id=? AND s.status='handed_off'
+			WHERE s.instance=? AND s.channel_id=? AND s.final_status='handed_off'
 			  AND e.kind='handoff' AND e.status='done' AND e.updated_at BETWEEN ? AND ?
 			GROUP BY reason, sector`, instance, instance, channelId, since, now);
 		const [failed] = await tx.$queryRawUnsafe<{total:SqlCount}[]>(`
-			SELECT COUNT(DISTINCT s.chat_id) AS total FROM triage_sessions s JOIN triage_effects e ON e.chat_id=s.chat_id AND e.instance=s.instance
+			SELECT COUNT(DISTINCT s.id) AS total FROM triage_runs s JOIN triage_events a ON a.run_id=s.id AND a.instance=s.instance JOIN triage_effects e ON e.event_id=a.id AND e.instance=a.instance
 			WHERE s.instance=? AND s.channel_id=? AND e.status IN ('failed','unknown') AND e.updated_at BETWEEN ? AND ?`,
 			instance, channelId, since, now);
 		const active = await tx.$queryRawUnsafe<ActiveChat[]>(`
 			SELECT q.chatId, IF(q.needsHelp, 'intervention', q.status) AS status, SUM(q.needsHelp) OVER () AS pendingIntervention
 			FROM (
 				SELECT s.chat_id AS chatId, s.status, s.updated_at, (s.status='handoff' AND EXISTS (
-					SELECT 1 FROM triage_effects e WHERE e.instance=s.instance AND e.chat_id=s.chat_id
+					SELECT 1 FROM triage_events a JOIN triage_effects e ON e.event_id=a.id AND e.instance=a.instance WHERE a.run_id=s.run_id AND a.instance=s.instance
 					  AND e.kind='handoff' AND e.status='failed'
 					  AND JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.reason')) IN ('delivery','unavailable')
 				)) AS needsHelp

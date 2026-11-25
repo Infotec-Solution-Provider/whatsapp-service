@@ -47,9 +47,9 @@ model TriageRun {
   createdAt    DateTime @default(now()) @map("created_at") @db.DateTime(3)
   endedAt      DateTime? @map("ended_at") @db.DateTime(3)
 
-  @@unique([instance, eventKey])
-  @@index([instance, channelId, createdAt])
-  @@index([instance, chatId, id])
+  @@unique([instance, eventKey], map: "triage_runs_origin_key")
+  @@index([instance, channelId, createdAt], map: "triage_runs_channel_idx")
+  @@index([instance, chatId, id], map: "triage_runs_chat_idx")
   @@map("triage_runs")
 }
 
@@ -68,12 +68,13 @@ model TriageTriggerNotice {
   attempts    Int      @default(0)
   status      String   @default("pending") @db.VarChar(20)
 
-  @@index([instance, chatId, id])
-  @@index([status, retryAt, id])
+  @@index([instance, chatId, id], map: "triage_notice_chat_idx")
+  @@index([status, retryAt, id], map: "triage_notice_retry_idx")
   @@map("triage_trigger_notices")
 }
 
 model TriageEvent {
+  runId     Int?     @map("run_id")
   id        Int      @id @default(autoincrement())
   instance  String   @db.VarChar(191)
   chatId    Int      @map("chat_id")
@@ -83,6 +84,7 @@ model TriageEvent {
   createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
 
   @@unique([instance, eventKey])
+  @@index([runId, id], map: "triage_events_run_idx")
   @@index([instance, chatId, id])
   @@map("triage_events")
 }

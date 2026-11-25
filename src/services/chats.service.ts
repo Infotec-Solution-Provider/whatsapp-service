@@ -1,3 +1,5 @@
+import { transferChatToSectorQueue } from "./chat-sector-transfer";
+import { enqueueTriageNotice } from "../triage/trigger-notices";
 import { tenantSqlEnabled } from "../tenant-sql/registry";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
 import { cancelTriageTx, TRIAGE_CHAT_MARKER } from "../triage/runtime";
@@ -792,6 +794,36 @@ class ChatsService {
 		return clientId;
 	}
 
+	public async transferToSectorQueue(session: SessionData, chatId: number, sectorId: number) {
+		const { chat, previousSectorId, previousUserId, name } = await transferChatToSectorQueue(
+			session,
+			chatId,
+			sectorId
+		);
+		const logger = new ProcessingLogger(session.instance, "sector-transfer", String(chatId), {});
+		await this.runAfterAgentAction(logger, "sincronizar o chat", () => this.syncChatToLocal(chat));
+		await this.runAfterAgentAction(logger, "registrar a transferência", () =>
+			messagesDistributionService.addSystemMessage(chat, "Transferido para a fila do setor " + name + ".")
+		);
+		await this.runAfterAgentAction(logger, "avisar as telas", async () => {
+			const data = { chatId };
+			await socketService.emit(SocketEventType.WppChatTransfer, `${session.instance}:chat:${chatId}`, data);
+			await socketService.emit(
+				SocketEventType.WppChatTransfer,
+				`${session.instance}:${previousSectorId}:monitor`,
+				data
+			);
+			if (previousUserId && previousUserId > 0)
+				await socketService.emit(
+					SocketEventType.WppChatTransfer,
+					`${session.instance}:user:${previousUserId}`,
+					data
+				);
+			await messagesDistributionService.notifyChatStarted(logger, chat);
+		});
+		return { chatId, sectorId };
+	}
+
 	public async transferAttendance(token: string, session: SessionData, id: number, userId: number) {
 		const { instance } = session;
 
@@ -976,13 +1008,14 @@ class ChatsService {
 					resultId
 				}
 			});
-			const updateResult = scopedChat.botId === TRIAGE_CHAT_MARKER
-				? await withDatabaseTenant(instance, () => prismaService.$transaction(async tx => {
-					const result = await finish(tx);
-					if (result.count) await cancelTriageTx(tx, scopedChat);
-					return result;
-				}))
-				: await finish(prismaService);
+			const updateResult = await withDatabaseTenant(instance, () => prismaService.$transaction(async tx => {
+				const result = await finish(tx);
+				if (!result.count) return result;
+				await cancelTriageTx(tx, scopedChat);
+				await enqueueTriageNotice(tx,await tx.wppChat.findUniqueOrThrow({where:{id}}), "closed");
+				return result;
+			}));
+
 
 			if (updateResult.count === 0) {
 				if (options.expectedChat) throw new ConflictError("O atendimento mudou durante o agendamento.");

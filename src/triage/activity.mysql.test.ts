@@ -26,6 +26,8 @@ for (const mode of ["central", "tenant"] as const) {
 			const migration = mode === "central" ? "prisma/migrations/20261125151000_triage_runtime/migration.sql" :
 				"prisma/tenant-sql/20261125151000_triage_runtime.sql";
 			await connection.query(await readFile(migration, "utf8"));
+			const activation=mode==="central"?"prisma/migrations/20261125194000_triage_activation_runtime/migration.sql":"prisma/tenant-sql/20261125194000_triage_activation_runtime.sql";
+			await connection.query(await readFile(activation,"utf8"));
 			await connection.query(`CREATE TABLE ${prefix}sectors (id INT PRIMARY KEY, instance VARCHAR(191), name VARCHAR(255));
 				CREATE TABLE ${prefix}chats (id INT PRIMARY KEY, instance VARCHAR(191), is_finished INT, bot_id INT);
 				INSERT INTO ${prefix}sectors VALUES (11,'empresa','Vendas'),(12,'empresa','Suporte'),(13,'outra','Setor privativo')`);
@@ -37,15 +39,19 @@ for (const mode of ["central", "tenant"] as const) {
 
 			async function session(id: number, status: string, age: number, channel = 1, instance = "empresa", closed = 0) {
 				await connection.execute(`INSERT INTO ${prefix}chats VALUES(?,?,?,?)`, [id, instance, closed, TRIAGE_CHAT_MARKER]);
+				await connection.execute(`INSERT INTO ${prefix}triage_runs(id,instance,chat_id,channel_id,bot_id,version_id,event_key,kind,created_at,final_status)
+					VALUES(?,?,?,?,1,1,?,'flow',?,?)`,[id,instance,id,channel,String(id),earlier(age),status]);
 				await connection.execute(`INSERT INTO ${prefix}triage_sessions
-					(chat_id,instance,channel_id,contact_id,bot_id,version_id,definition,state,status,last_message_id,created_at,updated_at)
-					VALUES(?,?,?,1,1,1,'{}','{}',?,1,?,?)`, [id, instance, channel, status, earlier(age), earlier(age)]);
+					(chat_id,run_id,instance,channel_id,contact_id,bot_id,version_id,definition,state,status,last_message_id,created_at,updated_at)
+					VALUES(?,?,?,?,1,1,1,'{}','{}',?,1,?,?)`, [id,id, instance, channel, status, earlier(age), earlier(age)]);
 			}
 			let event = 0;
 			async function effect(chat: number, status: string, reason: string, sectorId: number, age: number, kind = "handoff", instance = "empresa") {
+				event++;
+				await connection.execute(`INSERT INTO ${prefix}triage_events(id,run_id,instance,chat_id,event_key,kind) VALUES (?,?,?,?,?,'reply')`,[event,chat,instance,chat,String(event)]);
 				await connection.execute(`INSERT INTO ${prefix}triage_effects
 					(instance,chat_id,event_id,position,kind,payload,status,updated_at) VALUES(?,?,?,0,?,?,?,?)`,
-					[instance, chat, ++event, kind, JSON.stringify({sectorId, reason}), status, earlier(age)]);
+					[instance, chat, event, kind, JSON.stringify({sectorId, reason}), status, earlier(age)]);
 			}
 			await session(1, "waiting", 10);
 			await session(2, "handed_off", 60);

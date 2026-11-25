@@ -76,6 +76,10 @@ async function seed(pool: Pool, prefix: string, owners: readonly string[]) {
 		? "prisma/tenant-sql/20261125151000_triage_runtime.sql"
 		: "prisma/migrations/20261125151000_triage_runtime/migration.sql";
 	await ddl(pool, await readFile(resolve(runtime), "utf8"));
+	const activation = prefix
+		? "prisma/tenant-sql/20261125194000_triage_activation_runtime.sql"
+		: "prisma/migrations/20261125194000_triage_activation_runtime/migration.sql";
+	await ddl(pool,await readFile(resolve(activation),"utf8"));
 	const triggers = prefix
 		? "prisma/tenant-sql/20261125193000_triage_trigger_sets.sql"
 		: "prisma/migrations/20261125193000_triage_trigger_sets/migration.sql";

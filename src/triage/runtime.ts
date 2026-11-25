@@ -19,20 +19,13 @@ export const triageJson = (value: unknown): Prisma.InputJsonValue => JSON.parse(
 export const definitionOf = (session: TriageSession) => session.definition as unknown as TriageDefinition;
 export const stateOf = (session: TriageSession) => session.state as unknown as TriageState;
 type Tx = Prisma.TransactionClient;
-// A chat can acquire a triage session only in its creation transaction. Cache this
-// immutable association so established human conversations need no per-turn join.
-const knownChannels = new Map<string, number | null>();
 async function channelOf(instance: string, chatId: number) {
-	const key = instance + ":" + chatId;
-	if (knownChannels.has(key)) return knownChannels.get(key);
 	const session = await db.triageSession
 		.findFirst({ where: { instance, chatId }, select: { channelId: true } })
 		.catch((error) => {
 			if (noTriageTables(error)) return null;
 			throw error;
 		});
-	if (knownChannels.size >= 8192) knownChannels.delete(knownChannels.keys().next().value!);
-	knownChannels.set(key, session?.channelId ?? null);
 	return session?.channelId;
 }
 
@@ -41,7 +34,7 @@ export function noTriageTables(error: unknown) {
 	return code === "P2021" || code === "ER_NO_SUCH_TABLE";
 }
 
-async function openChatForChannel(
+export async function openChatForChannel(
 	tx: Pick<Tx, "wppChat" | "triageSession">,
 	instance: string,
 	contactId: number,
@@ -92,7 +85,7 @@ export async function lockSession(tx: Tx, instance: string, chatId: number) {
 	return tx.triageSession.findFirst({ where: { instance, chatId } });
 }
 
-async function recordTurn(
+export async function recordTurn(
 	tx: Tx,
 	session: TriageSession,
 	key: string,
@@ -102,7 +95,7 @@ async function recordTurn(
 ) {
 	const { instance, chatId } = session;
 	const entry = await tx.triageEvent.create({
-		data: { instance, chatId, eventKey: key, kind: event.type, nodeId: turn.state.nodeId }
+		data: { instance, chatId, runId: session.runId, eventKey: key, kind: event.type, nodeId: turn.state.nodeId }
 	});
 	const effects: { kind: string; payload: Prisma.InputJsonValue }[] = turn.messages.map((text) => ({
 		kind: "message",
@@ -186,9 +179,24 @@ export async function cancelTriageTx(tx: Tx, chat: Pick<WppChat, "id" | "instanc
 		data: { status: "cancelled" }
 	});
 	await tx.triageEvent.create({
-		data: { instance: chat.instance, chatId: chat.id, kind: "takeover", eventKey: "takeover:" + chat.id }
+		data: {
+			instance: chat.instance,
+			chatId: chat.id,
+			runId: session.runId,
+			kind: "takeover",
+			eventKey: "takeover:" + chat.id + ":" + (session.runId ?? 0)
+		}
 	});
+	await completeTriageRun(tx, session, "taken");
 	return recordSummary(tx, session, "manual");
+}
+
+export async function completeTriageRun(tx: Tx, session: TriageSession, status: string) {
+	if (session.runId)
+		await tx.triageRun.update({
+			where: { id: session.runId },
+			data: { finalState: triageJson(session.state), finalStatus: status, endedAt: new Date() }
+		});
 }
 
 export async function consumeTriage(
@@ -235,72 +243,11 @@ export async function consumeTriage(
 		}
 	}
 	const ignored = excludedOtherChannel ? { chat: current, handled: false, opened: false } : null;
-	if (current && current.botId !== TRIAGE_CHAT_MARKER) return ignored;
-	if (!current && !(await triageAuthoring.activeForChannel(instance, channelId))) return ignored;
+	if (!current || current.botId !== TRIAGE_CHAT_MARKER) return ignored;
+	const chat = current;
 	return withDatabaseTenant(instance, () =>
 		db.$transaction(
 			async (tx) => {
-				let chat = current;
-				if (!chat) {
-					const binding = await triageAuthoring.activeForChannel(instance, channelId, tx);
-					if (!binding) return ignored;
-					// Two webhook workers may both have observed no chat for this person.
-					await tx.$queryRawUnsafe(
-						"SELECT id FROM contacts WHERE instance=? AND id=? FOR UPDATE",
-						instance,
-						contact.id
-					);
-					const channel = await tx.wppClient.findFirstOrThrow({
-						where: { instance, id: channelId },
-						include: { sectors: true }
-					});
-					const sectorIds = channel.sectors.map((s) => s.id);
-					const replay = await tx.triageEvent.findFirst({ where: { instance, eventKey: key } });
-					if (replay)
-						return {
-							chat: await tx.wppChat.findFirstOrThrow({ where: { instance, id: replay.chatId } }),
-							handled: true,
-							opened: false
-						};
-					chat = await openChatForChannel(tx, instance, contact.id, channelId, sectorIds);
-					if (!chat) {
-						const sectorId = binding.definition.fallbackSectorId;
-						if (!sectorId || !sectorIds.includes(sectorId)) return ignored;
-						chat = await tx.wppChat.create({
-							data: {
-								instance,
-								contactId: contact.id,
-								type: "RECEPTIVE",
-								botId: TRIAGE_CHAT_MARKER,
-								sectorId,
-								startedAt: new Date()
-							}
-						});
-						const event = { type: "start", text: msg.body } as const;
-						const turn = advanceTriage(binding.definition, null, event, new Date());
-						const session = await tx.triageSession.create({
-							data: {
-								chatId: chat.id,
-								instance,
-								channelId,
-								contactId: contact.id,
-								botId: binding.botId,
-								versionId: binding.versionId,
-								definition: triageJson(binding.definition),
-								state: triageJson(turn.state),
-								status: "waiting",
-								lastMessageId: msg.id
-							}
-						});
-						await recordTurn(tx, session, key, event, turn, msg.id);
-						await tx.wppMessage.update({
-							where: { id: msg.id },
-							data: { chatId: chat.id, contactId: contact.id }
-						});
-						return { chat, handled: true, opened: true };
-					}
-				}
-				if (chat.botId !== TRIAGE_CHAT_MARKER) return { chat, handled: false, opened: false };
 				const session = await lockSession(tx, instance, chat.id);
 				if (!session) throw new Error("TRIAGE_SESSION_MISSING");
 				if (session.channelId !== channelId || session.contactId !== contact.id)
@@ -310,7 +257,13 @@ export async function consumeTriage(
 				if (session.status !== "waiting") {
 					if (session.status === "handoff") {
 						await tx.triageEvent.create({
-							data: { instance, chatId: chat.id, eventKey: key, kind: "awaiting_handoff" }
+							data: {
+								instance,
+								chatId: chat.id,
+								runId: session.runId,
+								eventKey: key,
+								kind: "awaiting_handoff"
+							}
 						});
 						await tx.wppMessage.update({
 							where: { id: msg.id },
@@ -344,7 +297,7 @@ export async function expireTriage(instance: string, chatId: number, now: Date) 
 				await recordTurn(
 					tx,
 					session,
-					"timeout:" + chatId + ":" + session.deadline.getTime(),
+					"timeout:" + chatId + ":" + (session.runId ?? 0) + ":" + session.deadline.getTime(),
 					event,
 					turn,
 					session.lastMessageId

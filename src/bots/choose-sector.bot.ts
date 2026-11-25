@@ -69,10 +69,11 @@ class ChooseSectorBot {
 	public async processMessage(chat: WppChat, contact: WppContact, message: WppMessage) {
 		const currentStep = this.getRunningStep(chat.id);
 
+		if (!message.clientId || message.instance !== chat.instance) throw new Error("Canal da mensagem indisponível.");
 		const sectors = await sectorsService.getSectors(chat.instance, {
-			receiveChats: true
+			receiveChats: true, clients: {some:{id:message.clientId,instance:chat.instance,isActive:true}}
 		});
-		if (!sectors) {
+		if (!sectors.length) {
 			throw new Error(`No sectors found for instance ${chat.instance}`);
 		}
 
@@ -99,6 +100,10 @@ class ChooseSectorBot {
 
 				const chooseSector = isValid ? sectors[chooseOption - 1] : null;
 				if (chooseSector) {
+					if (await messagesDistributionService.startSectorMenuBot(chooseSector,contact,message,chat)) {
+						this.removeRunningStep(chat.id);
+						return;
+					}
 					let query = `SELECT * FROM operadores WHERE SETOR = ${chooseSector.id} ORDER BY NOME`;
 					let operadores = await instancesService.executeQuery<Array<User>>(chat.instance, query, []);
 					const eligible = await pauseEligibleOperatorIds(chat.instance, operadores.map(operator => operator.CODIGO));
@@ -153,6 +158,12 @@ class ChooseSectorBot {
 				const isValids = chooseOptionOp > 0 && chooseOptionOp <= operadores.length;
 				const chooseOp = isValids ? operadores[chooseOptionOp - 1] : null;
 
+				if (chooseOp && !sectors.some(s => s.id === sector?.id)) {
+					this.chatState.delete(String(chat.id));
+					this.setRunningStep(chat.id,2);
+					await whatsappService.sendBotMessage(message.from,message.clientId,{chat,text:chooseSectorMessage});
+					return;
+				}
 				if (chooseOp) {
 					const answer = `Estamos te redirecionado para o atendente ${chooseOp.NOME}.\nVocê será atendido em breve!`;
 					const operatoranswer = `*${chooseOp.NOME}*: Olá, em que posso ajudar?`;
