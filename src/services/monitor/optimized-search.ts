@@ -37,7 +37,7 @@ function whatsappBase(context: MonitorQueryContext, finished: boolean, latest: b
     if (input.from) add(column + ">=?", new Date(input.from));
     if (input.to) add(column + "<=?", new Date(input.to));
   };
-  if (!f.showBots) add("(c.bot_id IS NULL OR c.bot_id=0)");
+  if (!f.showBots) add("(c.bot_id IS NULL OR c.bot_id IN (0,-10))");
   if (f.user !== "all") add("c.user_id=?", f.user);
   if (f.showOnlyScheduled) add("c.is_schedule=1");
   range("c.started_at", f.startedAt); range("c.finished_at", f.finishedAt);

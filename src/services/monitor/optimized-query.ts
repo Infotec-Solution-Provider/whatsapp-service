@@ -206,7 +206,7 @@ export function buildMonitorQuery(category: MonitorCategory, context: MonitorQue
 			});
 		} else {
 			if (!f.categories.showCustomerChats) add("1 = 0");
-			if (!f.showBots) add("(c.bot_id IS NULL OR c.bot_id = 0)");
+			if (!f.showBots) add("(c.bot_id IS NULL OR c.bot_id IN (0,-10))");
 			if (f.user !== "all") add("c.user_id = ?", f.user);
 			if (f.showOnlyScheduled) add("c.is_schedule = 1");
 			if (needSchedule) joins.push(`LEFT JOIN ${prefix}schedules sch ON sch.chat_id = ${id} AND sch.instance = c.instance`);

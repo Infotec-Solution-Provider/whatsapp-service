@@ -3,6 +3,7 @@ import type { Parameter, ParameterScope } from "@prisma/client";
 import parametersService, { INTERNAL_GROUP_WHATSAPP_SYNC_PARAMETER } from "./parameters.service";
 import { MESSAGE_FLOW_EDITOR_PARAMETER } from "../parameters/message-flow-editor";
 import prismaService from "./prisma.service";
+import { TRIAGE_FLAG } from "../parameters/triage-feature";
 
 type FindManyArgs = { where?: { scope?: ParameterScope; instance?: string } };
 type ParameterDelegate = {
@@ -94,6 +95,15 @@ async function run() {
 			"false"
 		);
 
+		const previous = ["INPULSE_ENVIRONMENT","TRIAGE_HOMOLOG_ENABLED","name"].map(key => [key, process.env[key]] as const);
+		try {
+			Object.assign(process.env,{INPULSE_ENVIRONMENT:"homolog",TRIAGE_HOMOLOG_ENABLED:"true",name:"homolog-whatsapp"});
+			assert.equal((await parametersService.getSessionParams({instance:"tenant-default"}))[TRIAGE_FLAG],"true");
+			process.env["name"]="whatsapp";
+			assert.equal((await parametersService.getSessionParams({instance:"tenant-default"}))[TRIAGE_FLAG],"false");
+		} finally {
+			for (const [key,value] of previous) { if (value === undefined) delete process.env[key]; else process.env[key]=value; }
+		}
 		console.log("Tenant parameter tests passed");
 	} finally {
 		parameterDelegate.findMany = originalFindMany;

@@ -1,4 +1,6 @@
 import { tenantSqlEnabled } from "../tenant-sql/registry";
+import { withDatabaseTenant } from "../utils/database-tenant-context";
+import { cancelTriageTx, TRIAGE_CHAT_MARKER } from "../triage/runtime";
 import { Customer, SessionData, SocketEventType, SocketServerMonitorRoom, SocketServerUserRoom } from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { Prisma, WppChat, WppContact, WppMessage, WppSector } from "@prisma/client";
@@ -807,12 +809,10 @@ class ChatsService {
 		}
 		const user = await usersService.getUserById(chats.userId);
 
-		const chat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.update({
-			where: { id },
-			data: {
-				userId
-			}
-		}), { instance, recipientId: userId, chatId: id });
+		const chat = await chatUserPreferencesService.withUnreadAssignment(async (tx) => {
+			await cancelTriageTx(tx, chats);
+			return tx.wppChat.update({ where: { id }, data: { userId, ...(chats.botId === TRIAGE_CHAT_MARKER ? { botId: null } : {}) } });
+		}, { instance, recipientId: userId, chatId: id });
 
 		await this.syncChatToLocal(chat);
 		await transferHistoryService.recordTransfer({
@@ -876,7 +876,7 @@ class ChatsService {
 
 			const scopedChat = await prismaService.wppChat.findFirst({
 				where: { id, instance: session.instance, ...options.expectedChat },
-				select: { id: true }
+				select: { id: true, instance: true, botId: true }
 			});
 
 			if (!scopedChat) {
@@ -929,15 +929,19 @@ class ChatsService {
 					throw new Error(`Chat ${id} sem contato para disparo da pesquisa`);
 				}
 
-				const surveyChat = await prismaService.wppChat.update({
+				const surveyUpdate = (tx: Pick<Prisma.TransactionClient,"wppChat">) => tx.wppChat.update({
 					where: { id: chat.id },
 					data: {
+						...(scopedChat.botId === TRIAGE_CHAT_MARKER ? { botId: null } : {}),
 						isFinished: false,
 						finishedAt: null,
 						finishedBy: null,
 						resultId
 					}
 				});
+				const surveyChat = scopedChat.botId === TRIAGE_CHAT_MARKER
+					? await withDatabaseTenant(instance, () => prismaService.$transaction(async tx => { await cancelTriageTx(tx, scopedChat); return surveyUpdate(tx); }))
+					: await surveyUpdate(prismaService);
 
 				await this.syncChatToLocal(surveyChat);
 				await messagesDistributionService.addSystemMessage(
@@ -957,7 +961,7 @@ class ChatsService {
 
 			logger.log(`Atualizando chat no banco de dados. Marcando como finalizado`);
 			const finishedAt = new Date();
-			const updateResult = await prismaService.wppChat.updateMany({
+			const finish = (tx: Pick<Prisma.TransactionClient,"wppChat">) => tx.wppChat.updateMany({
 				where: {
 					id,
 					instance,
@@ -966,11 +970,19 @@ class ChatsService {
 				},
 				data: {
 					isFinished: true,
+					...(scopedChat.botId === TRIAGE_CHAT_MARKER ? { botId: null } : {}),
 					finishedAt,
 					finishedBy: userId,
 					resultId
 				}
 			});
+			const updateResult = scopedChat.botId === TRIAGE_CHAT_MARKER
+				? await withDatabaseTenant(instance, () => prismaService.$transaction(async tx => {
+					const result = await finish(tx);
+					if (result.count) await cancelTriageTx(tx, scopedChat);
+					return result;
+				}))
+				: await finish(prismaService);
 
 			if (updateResult.count === 0) {
 				if (options.expectedChat) throw new ConflictError("O atendimento mudou durante o agendamento.");
@@ -1617,6 +1629,7 @@ class ChatsService {
 			const userName = await this.findOperatorName(instance, userId, logger);
 
 			const chat = await chatUserPreferencesService.withUnreadAssignment(async (tx) => {
+				await cancelTriageTx(tx, previousChat);
 				const updated = await tx.wppChat.updateMany({
 					where: { id: chatId, instance, isFinished: false },
 					data: { userId, agentId: null, botId: null }

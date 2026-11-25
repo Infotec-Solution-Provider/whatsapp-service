@@ -1,6 +1,7 @@
 import prismaService from "./prisma.service";
 import { META_MANAGEMENT_PARAMETER } from "../parameters/meta-management";
 import { MESSAGE_FLOW_EDITOR_PARAMETER } from "../parameters/message-flow-editor";
+import { resolveTriageFlag, TRIAGE_FLAG } from "../parameters/triage-feature";
 
 const DEFAULT_FEATURE_PARAMETERS: Record<string, string> = {
 	"monitor:wait_warning_minutes": "30",
@@ -134,7 +135,8 @@ class ParametersService {
 			...toParamMap(sectorParams),
 			...toParamMap(userParams),
 			[META_MANAGEMENT_PARAMETER]: String(instanceFlags[META_MANAGEMENT_PARAMETER] === "true"),
-			[MESSAGE_FLOW_EDITOR_PARAMETER]: String(instanceFlags[MESSAGE_FLOW_EDITOR_PARAMETER] === "true")
+			[MESSAGE_FLOW_EDITOR_PARAMETER]: String(instanceFlags[MESSAGE_FLOW_EDITOR_PARAMETER] === "true"),
+			[TRIAGE_FLAG]: String(resolveTriageFlag(instanceFlags[TRIAGE_FLAG]))
 		};
 
 		return mergedParams;

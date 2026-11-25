@@ -7,6 +7,8 @@ import express, { NextFunction, Request, Response } from "express";
 import "express-async-errors";
 import cron from "node-cron";
 import autoResponseController from "./controllers/auto-response.controller";
+import { createTriageRouter } from "./controllers/triage.controller";
+import { homologTriageEnabled } from "./parameters/triage-feature";
 import chatsController from "./controllers/chats.controller";
 import sessionChangesController from "./controllers/session-changes.controller";
 import retainSessionChanges from "./routines/session-change-retention.routine";
@@ -53,6 +55,7 @@ import remoteInboundEventInboxService from "./services/remote-inbound-event-inbo
 import remoteClientService from "./services/remote-client.service";
 import operatorOutboundService from "./services/operator-outbound.service";
 import operatorSendService from "./services/operator-send.service";
+import { startTriageWorker, stopTriageWorker } from "./triage/dispatch";
 import { flushDatabaseIncidentLog, recordDatabaseIncident } from "./utils/database-incident-log";
 import processLogs from "./logs/service";
 import { startOpsAlerts, stopOpsAlerts } from "./services/ops-alerts";
@@ -86,6 +89,7 @@ app.use(publicBiServiceTokenGuard);
 app.get("/health", (_req, res) => {
 	const native = tenantSqlEnabled();
 	res.json({ service: "whatsapp", storage: native ? "tenant-sql" : "central", storageVersion: 1,
+		triage: { homologDefault: homologTriageEnabled() },
 		operatorPauseAdmission: { version: native ? 1 : 0, storage: native ? "tenant-sql" : "central", sharedCrmTransaction: native, instances: native ? tenantSqlInstanceNames() : [] } });
 });
 
@@ -100,6 +104,7 @@ app.use("/api", (_req, res, next) => {
 app.use("/api/internal/admin", express.json({ limit: "1mb" }));
 app.use("/api/whatsapp/meta", metaManagementController);
 app.use("/api/whatsapp/message-flow-studio", messageFlowStudioController);
+app.use("/api/whatsapp/triage", createTriageRouter());
 app.use(express.json({ limit: "2gb" }));
 app.use(express.urlencoded({ extended: true, limit: "2gb" }));
 app.use(createAdminRouter());
@@ -182,6 +187,7 @@ const server = app.listen(serverPort, () => {
 	messageQueueService.startWorker();
 	internalWhatsappMessageQueueService.startWorker();
 	operatorOutboundService.startWorker();
+	startTriageWorker();
 	remoteInboundEventInboxService.startWorker();
 	remoteSessionMonitorRoutine.start();
 	processLogs.start();
@@ -220,6 +226,7 @@ const shutdown = async (signal: string): Promise<void> => {
 	const graceful = Promise.all([
 		serverClosed,
 		operatorOutboundService.stopAndDrain(30_000),
+		stopTriageWorker(),
 		remoteInboundEventInboxService.stopAndDrain(30_000),
 		messageQueueService.stopAndDrain(30_000)
 	]);

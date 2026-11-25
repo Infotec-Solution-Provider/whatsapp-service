@@ -20,7 +20,8 @@ class ChatUserPreferencesService {
 	 */
 	public async withUnreadAssignment<T extends { id: number; instance: string; userId: number | null }>(
 		write: (tx: Prisma.TransactionClient) => Promise<T>,
-		admission?: ChatAssignmentAdmission
+		admission?: ChatAssignmentAdmission,
+		isolationLevel?: Prisma.TransactionIsolationLevel
 	): Promise<T> {
 		if (tenantSqlEnabled() && !admission) throw new OperatorPauseAdmissionError("OPERATOR_AVAILABILITY_UNAVAILABLE");
 		const run = () => prismaService.$transaction(async (tx) => {
@@ -35,7 +36,7 @@ class ChatUserPreferencesService {
 				});
 			}
 			return chat;
-		});
+		}, isolationLevel ? { isolationLevel } : undefined);
 		return admission ? withDatabaseTenant(admission.instance, run) : run();
 	}
 

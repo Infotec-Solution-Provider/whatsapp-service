@@ -24,7 +24,7 @@ export function buildOptimizedWhatsappSummary(context: MonitorQueryContext, over
   add(closedUnreadOnly ? "c.is_finished=1" : "c.is_finished=0");
   // Only ongoing, non-bot chats can breach response SLA. Closed unread chats remain in the main counters.
   if (overdueOnly) add("c.is_finished=0 AND (c.bot_id IS NULL OR c.bot_id=0)");
-  if (!f.showBots) add("(c.bot_id IS NULL OR c.bot_id=0)");
+  if (!f.showBots) add("(c.bot_id IS NULL OR c.bot_id IN (0,-10))");
   if (f.user !== "all") add("c.user_id=?", f.user);
   if (f.showOnlyScheduled) add("c.is_schedule=1");
   range("c.started_at", f.startedAt); range("c.finished_at", f.finishedAt);
