@@ -14,7 +14,9 @@ async function seed(database: Connection, prefix: string) {
 		id INT PRIMARY KEY, instance VARCHAR(50), contact_id INT, chat_id INT, client_id INT,
 		sent_at DATETIME(3), \`from\` VARCHAR(60), \`to\` VARCHAR(60), user_id INT,
 		type VARCHAR(40), status VARCHAR(20), agent_id INT, billing_category VARCHAR(80),
-		INDEX(instance, sent_at, chat_id), INDEX(instance, chat_id, sent_at, id), INDEX(contact_id)
+		INDEX messages_instance_sent_at_chat_id_idx(instance, sent_at, chat_id),
+		INDEX messages_instance_chat_id_sent_at_id_idx(instance, chat_id, sent_at, id),
+		INDEX messages_contact_id_fkey(contact_id)
 	)`);
 	await database.query(`CREATE TABLE ${prefix}contacts (
 		id INT PRIMARY KEY, instance VARCHAR(50), customer_id INT, name VARCHAR(50), is_deleted BOOLEAN, whatsapp_id VARCHAR(50)

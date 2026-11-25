@@ -16,6 +16,11 @@ export function createNewContactsReportRouter() {
 			res.status(403).json({ message: "Acesso restrito aos administradores da empresa participante." });
 			return;
 		}
+		const instanceContext = req.get("X-CRM-Instance");
+		if (instanceContext !== undefined && instanceContext.trim().toLowerCase() !== NEW_CONTACTS_PILOT_INSTANCE) {
+			res.status(409).json({ code: "CRM_INSTANCE_CHANGED", message: "A sessão pertence a outra empresa. Atualize a tela." });
+			return;
+		}
 
 		const query = parseNewContactsQuery(req.body);
 		const data = await withDatabaseTenant(

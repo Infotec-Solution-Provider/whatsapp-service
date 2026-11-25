@@ -43,17 +43,22 @@ test("authenticates the endpoint and derives the database tenant from the sessio
 		await once(server, "listening");
 		const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/whatsapp/reports/new-contacts/query`;
 		const filters = { from: "2026-11-24", to: "2026-11-24" };
-		const post = (authorization?: string, body: unknown = { filters }) => fetch(url, {
+		const post = (authorization?: string, body: unknown = { filters }, instance?: string) => fetch(url, {
 			method: "POST",
-			headers: { "Content-Type": "application/json", ...(authorization && { Authorization: authorization }) },
+			headers: {
+				"Content-Type": "application/json",
+				...(authorization && { Authorization: authorization }),
+				...(instance !== undefined && { "X-CRM-Instance": instance })
+			},
 			body: JSON.stringify(body)
 		});
 		assert.equal((await post()).status, 401);
 		assert.equal((await post("Bearer operator")).status, 403);
 		assert.equal((await post("Bearer another-tenant")).status, 403);
 		assert.equal((await post("Bearer permitted", { filters, instance: "odim" })).status, 400);
+		assert.equal((await post("Bearer permitted", { filters }, "ODIM")).status, 409);
 		assert.equal(calls, 0);
-		const response = await post("Bearer permitted");
+		const response = await post("Bearer permitted", { filters }, "Suprimaxxi");
 		assert.equal(response.status, 200);
 		assert.equal(response.headers.get("cache-control"), "no-store");
 		assert.equal((await response.json()).data.total, 0);

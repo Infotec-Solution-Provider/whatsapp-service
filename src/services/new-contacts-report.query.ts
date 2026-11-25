@@ -54,11 +54,12 @@ export function buildNewContactsQueries(instance: string, query: NewContactsQuer
 	}
 	const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
 	const replyProjection = `${replyAuthor} AS firstResponderId, reply.sent_at AS firstReplyAt,`;
+	// Keep the lookups scoped when MySQL has just populated a tenant's table and its statistics are stale.
 	const replyJoin = `LEFT JOIN chats entry
 			ON entry.id = a.chat_id AND entry.instance = a.instance AND entry.contact_id = a.contact_id
 		LEFT JOIN messages reply ON reply.instance = a.instance AND reply.id = (
 			SELECT sent.id
-			FROM messages sent
+			FROM messages sent FORCE INDEX (messages_instance_chat_id_sent_at_id_idx)
 			WHERE sent.instance = a.instance AND sent.chat_id = entry.id
 				AND (sent.contact_id IS NULL OR sent.contact_id = a.contact_id)
 				AND sent.sent_at <= ?
@@ -73,7 +74,7 @@ export function buildNewContactsQueries(instance: string, query: NewContactsQuer
 	const cohort = (includeReply: boolean) => `WITH arrivals_in_period AS (
 		SELECT m.id, m.instance, m.contact_id, m.chat_id, m.client_id, m.sent_at,
 			ROW_NUMBER() OVER (PARTITION BY m.contact_id ORDER BY m.sent_at, m.id) AS occurrence
-		FROM messages m
+		FROM messages m FORCE INDEX (messages_instance_sent_at_chat_id_idx)
 		WHERE m.instance = ? AND m.sent_at >= ? AND m.sent_at < ? AND m.sent_at <= ?
 			AND m.contact_id IS NOT NULL AND ${incoming("m")}
 	), report_rows AS (
@@ -103,7 +104,7 @@ export function buildNewContactsQueries(instance: string, query: NewContactsQuer
 		WHERE a.occurrence = 1
 			AND COALESCE(contact.whatsapp_id, '') NOT LIKE '%@g.us'
 			AND NOT EXISTS (
-				SELECT 1 FROM messages earlier
+				SELECT 1 FROM messages earlier FORCE INDEX (messages_contact_id_fkey)
 				WHERE earlier.instance = a.instance AND earlier.contact_id = a.contact_id
 					AND earlier.sent_at < ? AND ${incoming("earlier")}
 			)
