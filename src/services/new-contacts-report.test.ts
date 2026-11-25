@@ -44,3 +44,17 @@ test("binds filters and keeps the requested export ordering without pagination",
 	assert.deepEqual(rows.params.slice(-6), [11, 12, 13, "finished", 501, 0]);
 	assert.match(rows.sql, /ORDER BY r\.firstInboundAt ASC, r\.contactId ASC/);
 });
+
+test("reads explicit export batches without the legacy overflow row", () => {
+	const filters = { from: "2026-11-24", to: "2026-11-24" };
+	for (const exportOffset of [0, 1_000]) {
+		const query = parseNewContactsQuery({ filters, exportLimit: 1_000, exportOffset });
+		const { rows } = buildNewContactsQueries("suprimaxxi", query, new Date("2026-11-25T00:00:00Z"));
+		assert.deepEqual(rows.params.slice(-2), [1_000, exportOffset]);
+	}
+
+	assert.throws(() => parseNewContactsQuery({ filters, exportOffset: 0 }));
+	for (const exportOffset of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, "0", null]) {
+		assert.throws(() => parseNewContactsQuery({ filters, exportLimit: 1_000, exportOffset }));
+	}
+});

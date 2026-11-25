@@ -80,7 +80,7 @@ function idList(value: unknown): number[] {
 }
 
 export function parseNewContactsQuery(body: unknown): NewContactsQuery {
-	const request = record(body, ["filters", "page", "pageSize", "sort", "exportLimit"]);
+	const request = record(body, ["filters", "page", "pageSize", "sort", "exportLimit", "exportOffset"]);
 	const filters = record(request["filters"], ["from", "to", "linked", "status", "ownership", ...idFilters]);
 	const from = day(filters["from"]);
 	const to = day(filters["to"]) + DAY_MS;
@@ -98,8 +98,11 @@ export function parseNewContactsQuery(body: unknown): NewContactsQuery {
 	const page = request["page"] ?? 1;
 	const pageSize = request["pageSize"] ?? 25;
 	const exportLimit = request["exportLimit"];
+	const exportOffset = request["exportOffset"];
 	if (!positiveInteger(page, 100_000) || !positiveInteger(pageSize, 100) ||
-		(exportLimit !== undefined && !positiveInteger(exportLimit, 10_000)))
+		(exportLimit !== undefined && !positiveInteger(exportLimit, 10_000)) ||
+		(exportOffset !== undefined && (exportLimit === undefined ||
+			typeof exportOffset !== "number" || !Number.isSafeInteger(exportOffset) || exportOffset < 0)))
 		return invalid("Paginação ou limite de exportação inválido.");
 	const sort = request["sort"] === undefined ? { field: "firstInboundAt", direction: "desc" } :
 		record(request["sort"], ["field", "direction"]);
@@ -122,7 +125,7 @@ export function parseNewContactsQuery(body: unknown): NewContactsQuery {
 		...(linked !== undefined && { linked }),
 		page: exportLimit === undefined ? page : 1,
 		pageSize: exportLimit ?? pageSize,
-		offset: exportLimit === undefined ? (page - 1) * pageSize : 0,
-		limit: exportLimit === undefined ? pageSize : exportLimit + 1
+		offset: exportOffset ?? (exportLimit === undefined ? (page - 1) * pageSize : 0),
+		limit: exportLimit === undefined ? pageSize : exportLimit + (exportOffset === undefined ? 1 : 0)
 	};
 }

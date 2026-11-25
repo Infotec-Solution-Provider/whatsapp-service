@@ -99,6 +99,12 @@ async function verifyQueries(execute: (sql: string, params: unknown[]) => Promis
 		sort: { field: "firstInboundAt", direction: "asc" }, exportLimit: 1 });
 	assert.deepEqual(filtered.contacts.map(row => row["contactId"]), [1, 7]);
 	assert.deepEqual(groups(filtered.counts), [[null, 1], [11, 1]]);
+	const exportRequest = { filters: period, sort: { field: "firstInboundAt", direction: "asc" }, exportLimit: 2 };
+	const initialBatch = await fetch({ ...exportRequest, exportOffset: 0 });
+	const nextBatch = await fetch({ ...exportRequest, exportOffset: 2 });
+	assert.deepEqual(initialBatch.contacts.map(row => row["contactId"]), [1, 4]);
+	assert.deepEqual(nextBatch.contacts.map(row => row["contactId"]), [5, 7]);
+	assert.deepEqual(groups(nextBatch.counts), groups(initialBatch.counts));
 	const openUnlinked = await fetch({ filters: { ...period, status: "open", linked: false } });
 	assert.deepEqual(openUnlinked.contacts.map(row => row["contactId"]), [5]);
 }
