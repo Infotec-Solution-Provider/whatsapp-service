@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Logger } from "@in.pulse-crm/utils";
+import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { SessionData, SocketEventType, SocketServerAdminRoom } from "../sdk-local";
 import { WppClientType } from "@prisma/client";
 import axios, { AxiosError } from "axios";
@@ -391,7 +391,7 @@ class RemoteSessionMonitorService {
 				try {
 					return await this.getPollClients(instance);
 				} catch (error) {
-					const message = error instanceof Error ? error.message : String(error);
+					const message = sanitizeErrorMessage(error) ?? "erro desconhecido";
 					Logger.error(`[RemoteSessionMonitor] Poll failed for ${instance}: ${message}`);
 					return [];
 				}
