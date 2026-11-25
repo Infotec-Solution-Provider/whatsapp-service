@@ -20,6 +20,7 @@ export interface TriageTriggerInput {
 	type: TriageTriggerType;
 	sectorId?: number | null;
 	text?: string;
+	botId?: number;
 }
 export class TriggerError extends Error {
 	constructor(
@@ -86,11 +87,30 @@ function decodeRules(value: unknown): TriageTriggerRule[] {
 		return { type, botId, keywords };
 	});
 }
-function matches(rule: TriageTriggerRule, channelId: number, event: TriageTriggerInput): boolean {
-	if (rule.botId !== channelId || rule.type !== event.type) return false;
+function matches(rule: TriageTriggerRule, event: TriageTriggerInput): boolean {
+	if (rule.type !== event.type || (event.botId != null && event.botId !== rule.botId)) return false;
 	if (rule.type !== "keyword") return true;
 	const incoming = keyword(event.text ?? "");
 	return rule.keywords.some((word) => keyword(word) === incoming);
+}
+function validateConflicts(rules: TriageTriggerRule[], bots: TriageCatalogBot[]) {
+	const channels = new Map(bots.map((bot) => [bot.botId, bot.channelId]));
+	const owners = new Set<string>();
+	for (const rule of rules) {
+		const channelId = channels.get(rule.botId);
+		if (channelId == null || rule.type === "manual") continue;
+		const terms = rule.type === "keyword" ? rule.keywords.map(keyword) : [rule.type];
+		for (const term of terms) {
+			const key = JSON.stringify([channelId, rule.type, term]);
+			if (owners.has(key)) {
+				if (rule.type === "keyword") invalid(`A expressão “${term}” aciona dois bots no mesmo canal e setor.`);
+				invalid(
+					`Escolha apenas um bot para ${rule.type === "transfer" ? "a transferência" : "o encerramento"} no mesmo canal e setor.`
+				);
+			}
+			owners.add(key);
+		}
+	}
 }
 function missingTable(error: unknown, table: string) {
 	const e = error as { errno?: number; code?: string; message?: string; meta?: { code?: string; message?: string } };
@@ -121,25 +141,41 @@ export class TriageTriggers {
 			throw new TriggerError(403, "TRIAGE_DISABLED", "A triagem está desabilitada nesta empresa.");
 		await this.sector(db, session.instance, sectorId, lock);
 	}
-	private bots(db: TriageReader, instance: string, sectorId: number) {
+	private bots(
+		db: TriageReader,
+		instance: string,
+		scope: { sectorId: number } | { channelId: number },
+		includePaused = false
+	) {
+		const sectorScope = "sectorId" in scope;
+		const prefix = isTenantSqlTargetPrepared(this.db, instance) ? "wpp_runtime_" : "";
 		return db.$queryRawUnsafe<TriageCatalogBot[]>(
-			"SELECT c.id AS botId,c.id AS channelId,c.name AS channelName,v.name,v.number AS version,v.id AS versionId " +
-				"FROM sectors s JOIN _sector_clients sc ON sc.B=s.id JOIN clients c ON c.id=sc.A AND c.instance=? AND c.is_active=1 " +
-				"JOIN triage_channels d ON d.channel_id=c.id AND d.instance=? AND d.paused=0 " +
-				"JOIN triage_versions v ON v.id=d.active_version_id AND v.channel_id=c.id AND v.instance=? " +
-				"WHERE s.instance=? AND s.id=? AND s.receive_chats=1 ORDER BY c.name,c.id",
+			"SELECT d.id AS botId,c.id AS channelId,c.name AS channelName,v.name,v.number AS version,v.id AS versionId " +
+				"FROM clients c JOIN " +
+				prefix +
+				"triage_bots d ON d.channel_id=c.id AND d.instance=? " +
+				"JOIN " +
+				prefix +
+				"triage_bot_versions v ON v.id=d.active_version_id AND v.bot_id=d.id AND v.channel_id=c.id AND v.instance=? " +
+				(sectorScope
+					? "JOIN _sector_clients sc ON sc.A=c.id JOIN sectors s ON s.id=sc.B AND s.instance=? AND s.receive_chats=1 "
+					: "") +
+				"WHERE c.instance=? AND c.is_active=1 " +
+				(includePaused ? "" : "AND d.paused=0 ") +
+				(sectorScope ? "AND s.id=? " : "AND c.id=? ") +
+				"ORDER BY c.name,c.id,v.name,d.id",
 			instance,
 			instance,
+			...(sectorScope ? [instance] : []),
 			instance,
-			instance,
-			sectorId
+			sectorScope ? scope.sectorId : scope.channelId
 		);
 	}
 	catalog(instance: string, sectorId: number, tx?: TriageReader): Promise<TriageCatalogBot[]> {
 		return withDatabaseTenant(instance, async () => {
 			const db = tx ?? this.db;
 			if (!(await triageEnabled(db, instance))) return [];
-			return this.bots(db, instance, sectorId);
+			return this.bots(db, instance, { sectorId });
 		});
 	}
 
@@ -166,7 +202,7 @@ export class TriageTriggers {
 	adminCatalog(session: SessionData, sectorId: number) {
 		return withDatabaseTenant(session.instance, async () => {
 			await this.forAdmin(this.db, session, sectorId);
-			return { bots: await this.bots(this.db, session.instance, sectorId) };
+			return { bots: await this.bots(this.db, session.instance, { sectorId }) };
 		});
 	}
 	settings(session: SessionData, sectorId: number) {
@@ -175,7 +211,7 @@ export class TriageTriggers {
 				async (tx) => {
 					await this.forAdmin(tx, session, sectorId);
 					const state = await this.state(tx, session.instance, sectorId);
-					return { ...state, bots: await this.bots(tx, session.instance, sectorId) };
+					return { ...state, bots: await this.bots(tx, session.instance, { sectorId }) };
 				},
 				{ isolationLevel: "RepeatableRead" }
 			)
@@ -202,13 +238,19 @@ export class TriageTriggers {
 							"TRIGGER_CONFLICT",
 							"As regras mudaram. Recarregue antes de salvar."
 						);
-					const bots = await this.bots(tx, session.instance, sectorId);
+					const bots = await this.bots(tx, session.instance, { sectorId });
+					let hasPausedRules = false;
 					for (const rule of rules) {
 						if (bots.some((bot) => bot.botId === rule.botId)) continue;
 						// An unchanged paused binding may remain while another rule is edited.
 						if (!current.rules.some((previous) => JSON.stringify(previous) === JSON.stringify(rule)))
 							invalid("O bot precisa estar publicado e ativo em um canal deste setor.");
+						hasPausedRules = true;
 					}
+					validateConflicts(
+						rules,
+						hasPausedRules ? await this.bots(tx, session.instance, { sectorId }, true) : bots
+					);
 					if (JSON.stringify(current.rules) === JSON.stringify(rules)) return { ...current, bots };
 					await tx.$executeRawUnsafe(
 						"INSERT INTO " +
@@ -230,25 +272,33 @@ export class TriageTriggers {
 		return withDatabaseTenant(session.instance, async () => {
 			await this.forAdmin(this.db, session, sectorId);
 			const body = object(input);
-			exactFields(body, ["rules", "channelId", "type", "text"]);
+			exactFields(body, ["rules", "channelId", "type", "text", "botId"]);
 			const rules = decodeRules(body["rules"]),
 				channelId = body["channelId"];
 			if (!validId(channelId)) invalid("Selecione um canal válido.");
 			const type = triggerType(body["type"]),
 				text = body["text"] ?? "";
 			if (typeof text !== "string" || text.length > 4096) invalid("Mensagem inválida para a simulação.");
-			const bots = await this.bots(this.db, session.instance, sectorId);
-			const bot = rules.some((rule) => matches(rule, channelId, { type, text }))
-				? (bots.find((b) => b.channelId === channelId) ?? null)
-				: null;
+			const selected = body["botId"];
+			if (type === "manual" ? !validId(selected) : selected !== undefined)
+				invalid("Informe o bot escolhido ao simular um início manual.");
+			const bots = await this.bots(this.db, session.instance, { sectorId });
+			validateConflicts(rules, bots);
+			const eligible = new Set(
+				rules
+					.filter((rule) => matches(rule, { type, text, ...(validId(selected) ? { botId: selected } : {}) }))
+					.map((rule) => rule.botId)
+			);
+			const matchesInChannel = bots.filter((bot) => bot.channelId === channelId && eligible.has(bot.botId));
+			const bot = matchesInChannel.length === 1 ? matchesInChannel[0]! : null;
 			return { matched: bot !== null, bot };
 		});
 	}
-	match(instance: string, channelId: number, event: TriageTriggerInput, tx?: TriageReader) {
+	private options(instance: string, channelId: number, event: TriageTriggerInput, tx?: TriageReader) {
 		return withDatabaseTenant(instance, async () => {
 			const db = tx ?? this.db;
-			if (event.sectorId == null && event.type !== "keyword") return null;
-			if (!(await triageEnabled(db, instance))) return null;
+			if (event.sectorId == null && event.type !== "keyword") return [];
+			if (!(await triageEnabled(db, instance))) return [];
 			let candidates: { sectorId: number; rules: string }[];
 			try {
 				candidates = await db.$queryRawUnsafe<{ sectorId: number; rules: string }[]>(
@@ -264,17 +314,32 @@ export class TriageTriggers {
 					...(event.sectorId == null ? [] : [event.sectorId])
 				);
 			} catch (error) {
-				if (missingTable(error, "triage_trigger_sets")) return null;
+				if (missingTable(error, "triage_trigger_sets")) return [];
 				throw error;
 			}
-			const matched = candidates.filter((row) =>
-				decodeRules(JSON.parse(row.rules)).some((rule) => matches(rule, channelId, event))
+			const rules = candidates.flatMap((row) =>
+				decodeRules(JSON.parse(row.rules))
+					.filter((rule) => matches(rule, event))
+					.map((rule) => ({ sectorId: row.sectorId, botId: rule.botId }))
 			);
-			if (matched.length !== 1) return null;
-			const sectorId = matched[0]!.sectorId;
-			const bot = (await this.bots(db, instance, sectorId)).find((b) => b.channelId === channelId);
-			return bot ? { botId: bot.botId, versionId: bot.versionId, sectorId } : null;
+			if (!rules.length) return [];
+			const bots = await this.bots(db, instance, { channelId });
+			const allowed = new Map(bots.map((bot) => [bot.botId, bot]));
+			return rules.flatMap((rule) => {
+				const bot = allowed.get(rule.botId);
+				return bot ? [{ ...bot, sectorId: rule.sectorId }] : [];
+			});
 		});
+	}
+	manualOptions(instance: string, channelId: number, sectorId: number, tx?: TriageReader) {
+		return this.options(instance, channelId, { type: "manual", sectorId }, tx);
+	}
+	async match(instance: string, channelId: number, event: TriageTriggerInput, tx?: TriageReader) {
+		if (event.type === "manual" && !validId(event.botId)) return null;
+		const candidates = await this.options(instance, channelId, event, tx);
+		if (candidates.length !== 1) return null;
+		const { botId, versionId, sectorId } = candidates[0]!;
+		return { botId, versionId, sectorId };
 	}
 }
 export const triageTriggers = new TriageTriggers();
