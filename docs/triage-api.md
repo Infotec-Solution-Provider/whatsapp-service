@@ -4,11 +4,13 @@ O CRM usa `/api/whatsapp/triage` com `Authorization: Bearer <token da sessão>`.
 
 ## Criar e publicar
 
-1. `GET /context` lista canais autorizados, situação da publicação e setores. `GET /channels/:id` retorna o nome, o rascunho, a revisão, o modelo Vendas/Suporte, os setores do canal e as versões. Um canal novo retorna uma definição inicial e revisão zero.
-2. `PUT /channels/:id/draft` recebe `{revision,name,definition}`. Salve o rascunho antes da primeira publicação. Ele pode conter etapas sem destino. Use a revisão da resposta para a próxima escrita. HTTP 409 significa que outra edição foi gravada. Recarregue o canal para comparar o trabalho.
+1. `GET /context` lista os canais autorizados. `GET /channels/:id/bots` lista os bots do canal e o identificador do principal em `defaultBotId`. `POST /channels/:id/bots` com `{"name":"Pós-atendimento"}` cria um rascunho e retorna HTTP 201 com `data.botId`, definição e revisão.
+2. Use `GET /channels/:id/bots/:botId` para abrir esse bot e `PUT /channels/:id/bots/:botId/draft` com `{revision,name,definition}` para salvar uma edição. Um rascunho pode conter etapas sem destino. Use a revisão da resposta na próxima escrita. HTTP 409 indica uma edição concorrente. Os nomes devem ser distintos no canal.
 3. `POST /channels/:id/validate` recebe `{definition}` e retorna `{issues}`. Cada problema identifica a etapa ou configuração, o campo e uma mensagem em português.
 4. `POST /channels/:id/simulate` recebe `{definition,startTime,events}`. Use um instante ISO com fuso e eventos `{"type":"reply","text":"Vendas"}` ou `{"type":"timeout"}`. O simulador devolve o turno inicial e os turnos seguintes em `turns`, com mensagens, respostas, etapas visitadas e destino. Um evento de inatividade sem data avança o relógio até o prazo. A simulação usa valores fictícios e não envia mensagens.
-5. `POST /channels/:id/publish` com `{revision}` grava uma versão imutável, vinculada às próximas entradas do canal. `POST /channels/:id/pause` recebe a mesma estrutura. `POST /channels/:id/rollback` recebe `{revision,versionId}` e reativa uma versão daquele canal. As três operações retornam o detalhe atualizado com a revisão e o histórico. Uma sessão aberta continua executando sua versão original.
+5. `POST /channels/:id/bots/:botId/publish` com `{revision}` disponibiliza uma versão imutável para as regras do gestor. No mesmo endereço do bot, `POST /pause` recebe `{revision}` e `POST /rollback` recebe `{revision,versionId}` de uma versão daquele bot. As três operações devolvem o detalhe atualizado. Sessões em andamento continuam na sua versão original.
+
+Os endereços anteriores de edição, publicação, pausa e reversão diretamente em `/channels/:id` continuam operando sobre o bot principal do canal.
 
 ## Definição do fluxo
 
@@ -55,6 +57,8 @@ No gestor de fluxo, o administrador configura as regras sob `/api/whatsapp/messa
 | `GET /bot-triggers` | Retorna `data.revision`, `data.rules` e `data.bots`. Um setor sem regras tem revisão zero. |
 | `PUT /bot-triggers` | Recebe `{revision,rules}` e substitui a lista do setor. HTTP 409 exige recarregar as regras atuais. Para desabilitar um acionamento, remova-o da lista. |
 | `POST /bot-triggers/simulate` | Recebe `{rules,channelId,type,text?,botId?}` com a lista em edição. A prévia manual exige o `botId` escolhido. Retorna `data.matched` e `data.bot`. A operação só consulta o catálogo. |
+
+Para acionar um bot dentro de um caminho de entrada, adicione uma etapa `START_BOT` com `config.botId` e `fallbackStepId`. A contingência aponta para o caminho de atendimento humano caso o bot esteja indisponível naquele número. O simulador do fluxo aceita `channelId` e apresenta o nome e a versão previstos. Ao terminar, o bot entrega a conversa ao setor escolhido e encerra aquele caminho.
 
 Os tipos são `manual`, `transfer`, `closed` e `keyword`. Cada regra indica seu `botId`. A regra de palavra-chave também recebe `keywords`, uma lista de expressões comparadas à mensagem inteira, ignorando caixa, acentuação e espaços repetidos. Quando uma conversa ainda está sem setor definido, uma palavra só aciona o bot se apontar para um único setor elegível no canal. A transferência considera o setor de destino e o encerramento considera o setor do atendimento finalizado.
 
