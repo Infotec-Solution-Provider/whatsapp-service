@@ -28,13 +28,29 @@ test("simulador e atendimento percorrem os mesmos caminhos, por número ou rótu
 	assert.deepEqual(start.state.answers, {});
 	for (const [input, sector, choice] of [["2", 12, "Suporte"], ["  vÉnDas  ", 11, "Vendas"]] as const) {
 		const reply = { type: "reply", text: input } as const;
-		const turn = advanceTriage(definition, start.state, reply, now);
-		assert.deepEqual(simulateTriage(definition, [reply], now), [start, turn]);
+		const questionTurn = advanceTriage(definition, start.state, reply, now);
+		const detail = {type: "reply", text: "Orçamento do produto"} as const;
+		const turn = advanceTriage(definition, questionTurn.state, detail, now);
+		assert.deepEqual(simulateTriage(definition, [reply, detail], now), [start, questionTurn, turn]);
 		assert.deepEqual(turn.handoff, { sectorId: sector, reason: "configured" });
-		assert.deepEqual(summarizeTriageAnswers(definition, turn.state), [{ label: "Área escolhida", value: choice }]);
+		assert.deepEqual(summarizeTriageAnswers(definition, turn.state), [{ label: "Área escolhida", value: choice },
+			{label: choice === "Suporte" ? "Descrição do problema" : "Produto de interesse", value: detail.text}]);
 		assert.deepEqual(start.state.answers, {});
 		assert.deepEqual(advanceTriage(definition, turn.state, reply, now).messages, []);
 		assert.equal(advanceTriage(definition, turn.state, reply, now).handoff, null);
+	}
+});
+
+test("o exemplo informa o expediente atual e mantém a área escolhida pelo cliente fora de horário", () => {
+	const definition = template();
+	definition.schedule.days = [{day:2,start:"10:00",end:"14:00"}];
+	for (const [choice, sectorId] of [["Vendas",11],["Suporte",12]] as const) {
+		const turns = simulateTriage(definition, [{type:"reply",text:choice},{type:"reply",text:"Quero ajuda"}], now);
+		assert.match(turns[0]!.messages[0]!, /digite atendente a qualquer momento/i);
+		assert.match(turns[1]!.messages[0]!, choice === "Vendas" ? /produto/i : /problema/i);
+		assert.deepEqual(turns[2]!.handoff, {sectorId, reason:"configured"});
+		assert.match(turns[2]!.messages[0]!, /terça, das 10:00 às 14:00/);
+		assert.ok(turns[2]!.messages[0]!.includes(choice));
 	}
 });
 
@@ -98,7 +114,7 @@ test("validação localiza ligação quebrada, ramos sem saída, ciclos imediato
 	assert.ok(validateTriageDefinition(firstIsCondition, sectors).some((issue) => issue.nodeId === "cond" && issue.field === "answerKey"));
 	const menuCycle = template();
 	menuCycle.nodes[1]!.options![0]!.next = "area";
-	menuCycle.nodes = menuCycle.nodes.filter((node) => node.id !== "vendas");
+	menuCycle.nodes = menuCycle.nodes.filter((node) => !node.id.includes("vendas"));
 	assert.deepEqual(validateTriageDefinition(menuCycle, sectors), []);
 });
 

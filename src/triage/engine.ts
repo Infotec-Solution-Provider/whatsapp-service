@@ -1,4 +1,4 @@
-import { inTriageHours, normalizeAnswer, requestsHuman, type TriageDefinition, type TriageNode } from "./definition";
+import { describeTriageHours, inTriageHours, normalizeAnswer, requestsHuman, type TriageDefinition, type TriageNode, type TriageSchedule } from "./definition";
 
 export * from "./definition";
 
@@ -20,10 +20,11 @@ export interface TriageTurn {
 	visited: string[];
 }
 
-function prompt(node: TriageNode): string {
-	if (node.type !== "menu") return node.text!;
+function prompt(node: TriageNode, schedule: TriageSchedule, now: Date): string {
+	const text = node.text!.replaceAll("{{horario}}", () => describeTriageHours(schedule, now));
+	if (node.type !== "menu") return text;
 	const choices = node.options!.map((option, index) => `${index + 1}. ${option.label}`);
-	return [node.text, "", ...choices].join("\n");
+	return [text, "", ...choices].join("\n");
 }
 
 function selectOption(node: TriageNode, reply: string) {
@@ -66,7 +67,7 @@ export function advanceTriage(definition: TriageDefinition, previous: TriageStat
 			if (++state.invalidAttempts >= definition.maxInvalid) return finish("invalid", definition.fallbackSectorId);
 			const retry = waiting.type === "menu" ? "Responda com o número ou o nome de uma das opções." :
 				"Responda com um texto de até 1.000 caracteres.";
-			turn.messages.push(`${retry}\n\n${prompt(waiting)}`);
+			turn.messages.push(`${retry}\n\n${prompt(waiting, definition.schedule, now)}`);
 			state.deadline = expires();
 			return turn;
 		}
@@ -82,12 +83,12 @@ export function advanceTriage(definition: TriageDefinition, previous: TriageStat
 		turn.visited.push(node.id);
 		switch (node.type) {
 			case "message":
-				turn.messages.push(prompt(node));
+				turn.messages.push(prompt(node, definition.schedule, now));
 				state.nodeId = node.next!;
 				break;
 			case "menu":
 			case "question":
-				turn.messages.push(prompt(node));
+				turn.messages.push(prompt(node, definition.schedule, now));
 				state.deadline = expires();
 				return turn;
 			case "condition": {
@@ -99,7 +100,7 @@ export function advanceTriage(definition: TriageDefinition, previous: TriageStat
 				state.nodeId = inTriageHours(definition.schedule, now) ? node.yes! : node.no!;
 				break;
 			case "handoff":
-				if (node.text?.trim()) turn.messages.push(node.text.trim());
+				if (node.text?.trim()) turn.messages.push(prompt(node, definition.schedule, now));
 				return finish("configured", node.sectorId);
 		}
 	}

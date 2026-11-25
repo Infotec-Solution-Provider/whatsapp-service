@@ -80,6 +80,23 @@ export function inTriageHours(schedule: TriageSchedule, now: Date): boolean {
 	});
 }
 
+export function describeTriageHours(schedule: TriageSchedule, now: Date): string {
+	const weekdays = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
+	const runs: {first: number; last: number; times: string}[] = [];
+	for (const day of [1, 2, 3, 4, 5, 6, 0]) {
+		const intervals = schedule.days.filter((range) => range.day === day).sort((a,b) => a.start.localeCompare(b.start));
+		const times = [...new Set(intervals.map((range) => `das ${range.start} às ${range.end}${range.end < range.start ? " do dia seguinte" : ""}`))].join(" e ");
+		const last = runs.at(-1);
+		if (last && last.times === times) last.last = day;
+		else runs.push({first:day,last:day,times});
+	}
+	const parts = runs.filter((run) => run.times).map(({first,last,times}) =>
+		(first === last ? weekdays[first] : `de ${weekdays[first]} a ${weekdays[last]}`) + ", " + times);
+	const zone = new Intl.DateTimeFormat("pt-BR", {timeZone:schedule.timezone, timeZoneName:"longGeneric"})
+		.formatToParts(now).find((part) => part.type === "timeZoneName")?.value ?? schedule.timezone;
+	return parts.join("; ") + " (" + zone + ")";
+}
+
 function targets(node: TriageNode): string[] {
 	switch (node.type) {
 		case "message":
@@ -173,7 +190,7 @@ export function validateTriageDefinition(value: unknown, sectorIds: readonly num
 			localClock(schedule["timezone"]);
 		} catch { issue(null, "schedule.timezone", "Escolha um fuso horário válido."); }
 		const days = schedule["days"];
-		if (!Array.isArray(days) || days.length > 100 || (!days.length && raw.some((n) => n?.type === "hours"))) {
+		if (!Array.isArray(days) || days.length > 100 || (!days.length && raw.some((n) => n?.type === "hours" || (typeof n?.text === "string" && n.text.includes("{{horario}}"))))) {
 			issue(null, "schedule.days", "Informe os intervalos de atendimento usados pela etapa de horário.");
 		} else {
 			days.forEach((range, index) => {
@@ -244,16 +261,21 @@ export function validateTriageDefinition(value: unknown, sectorIds: readonly num
 }
 
 export function createTriageTemplate(sectors: { sales?: number; support?: number; fallback?: number } = {}): TriageDefinition {
-	const handoff = (id: string, title: string, sectorId?: number): TriageNode =>
-		({ id, type: "handoff", title, ...(sectorId ? { sectorId } : {}) });
+	const branch = (id: string, area: string, title: string, question: string, sectorId?: number): TriageNode[] => [
+		{ id: "pergunta-" + id, type: "question", title, text: question, next: "horario-" + id },
+		{ id: "horario-" + id, type: "hours", title: "Expediente de " + area, yes: id, no: "fechado-" + id },
+		{ id: "fechado-" + id, type: "message", title: area + " fora do expediente",
+			text: "Estamos fora do expediente. Atendemos {{horario}}. A equipe de " + area + " receberá sua solicitação para o próximo período de atendimento.", next: id },
+		{ id, type: "handoff", title: "Encaminhar para " + area, ...(sectorId ? { sectorId } : {}) }
+	];
 	return {
 		entry: "inicio",
 		nodes: [
-			{ id: "inicio", type: "message", title: "Boas-vindas", text: "Olá! Vamos encaminhar o seu atendimento.", next: "area" },
+			{ id: "inicio", type: "message", title: "Boas-vindas", text: "Olá! Vamos encaminhar o seu atendimento. Para falar com uma pessoa, digite atendente a qualquer momento.", next: "area" },
 			{ id: "area", type: "menu", title: "Área escolhida", text: "Com qual área você deseja falar?",
-				options: [{ label: "Vendas", next: "vendas" }, { label: "Suporte", next: "suporte" }] },
-			handoff("vendas", "Encaminhar para Vendas", sectors.sales),
-			handoff("suporte", "Encaminhar para Suporte", sectors.support)
+				options: [{ label: "Vendas", next: "pergunta-vendas" }, { label: "Suporte", next: "pergunta-suporte" }] },
+			...branch("vendas", "Vendas", "Produto de interesse", "Em qual produto ou serviço você tem interesse?", sectors.sales),
+			...branch("suporte", "Suporte", "Descrição do problema", "Qual problema você está enfrentando?", sectors.support)
 		],
 		fallbackSectorId: sectors.fallback ?? null,
 		timeoutMinutes: 30,
