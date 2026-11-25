@@ -31,7 +31,7 @@ export class ConditionStep extends BaseStep {
 
 		context.logger.log(`  Resultado: ${result ? '✓ TRUE' : '✗ FALSE'} → Step #${nextStepId}`);
 
-		return this.continue(context, nextStepId);
+		return this.continue(context, nextStepId, result ? "Condição verdadeira." : "Condição falsa.");
 	}
 
 	private evaluate(fieldValue: any, operator: string, value: any): boolean {

@@ -1,5 +1,4 @@
-import authService from "../../services/auth.service";
-import { pauseEligibleOperatorIds } from "../../services/operator-pause-admission.runtime";
+import { distributionReads, FlowDistributionReads } from "../distribution-reads";
 import { BaseStep, StepConfig, StepContext, StepResult } from "../base/base.step";
 
 interface CheckUserOnlineConnections {
@@ -23,7 +22,7 @@ interface CheckUserOnlineConnections {
  * está disponível antes de atribuir um chat para ele.
  */
 export default class CheckUserOnlineStep extends BaseStep {
-	constructor(config: StepConfig) {
+	constructor(config: StepConfig, private readonly reads: FlowDistributionReads = distributionReads) {
 		super(config);
 	}
 
@@ -31,9 +30,9 @@ export default class CheckUserOnlineStep extends BaseStep {
 	 * Verifica se um usuário específico está online.
 	 */
 	private async isUserOnline(userId: number): Promise<boolean> {
-		const sessions = await authService.getOnlineSessions(this.instance);
+		const sessions = await this.reads.sessions(this.instance);
 		if (!sessions.some((session) => session.data.userId === userId && session.onlineTokens.length > 0)) return false;
-		return (await pauseEligibleOperatorIds(this.instance, [userId])).has(userId);
+		return (await this.reads.eligible(this.instance, [userId])).has(userId);
 	}
 
 	/**
@@ -62,7 +61,7 @@ export default class CheckUserOnlineStep extends BaseStep {
 				hasUserId: !!userId,
 				type: typeof userId
 			});
-			return this.continue(ctx, connections.onFalse);
+			return this.continue(ctx, connections.onFalse, "Usuário ausente ou inválido no contexto.");
 		}
 
 		ctx.logger.log(`Verificando se usuário #${userId} está online...`, {
@@ -75,10 +74,10 @@ export default class CheckUserOnlineStep extends BaseStep {
 
 		if (isOnline) {
 			ctx.logger.log(`✓ Usuário #${userId} está ONLINE → Step #${connections.onTrue}`, { userId });
-			return this.continue(ctx, connections.onTrue);
+			return this.continue(ctx, connections.onTrue, "Usuário online e elegível.");
 		}
 
 		ctx.logger.log(`✗ Usuário #${userId} está OFFLINE → Step #${connections.onFalse}`, { userId });
-		return this.continue(ctx, connections.onFalse);
+		return this.continue(ctx, connections.onFalse, "Usuário offline ou indisponível.");
 	}
 }

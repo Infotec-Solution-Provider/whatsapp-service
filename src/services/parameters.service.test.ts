@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type { Parameter, ParameterScope } from "@prisma/client";
 import parametersService, { INTERNAL_GROUP_WHATSAPP_SYNC_PARAMETER } from "./parameters.service";
+import { MESSAGE_FLOW_EDITOR_PARAMETER } from "../parameters/message-flow-editor";
 import prismaService from "./prisma.service";
 
 type FindManyArgs = { where?: { scope?: ParameterScope; instance?: string } };
@@ -12,6 +13,12 @@ const parameterDelegate = prismaService.parameter as unknown as ParameterDelegat
 const originalFindMany = parameterDelegate.findMany.bind(parameterDelegate);
 
 parameterDelegate.findMany = async ({ where }: FindManyArgs = {}) => {
+	if (where?.instance === "tenant-flow") {
+		const row: Parameter = { id: 1, instance: "tenant-flow", scope: "INSTANCE", userId: null, sectorId: null, key: MESSAGE_FLOW_EDITOR_PARAMETER, value: "false" };
+		if (where.scope === "USER") return [{ ...row, scope: "USER", userId: 9, value: "true" }];
+		if (where.scope === "INSTANCE") return [row, { ...row, id: 2, userId: 9, value: "true" }];
+		return [];
+	}
 	if (where?.scope !== "INSTANCE") {
 		return [];
 	}
@@ -61,6 +68,7 @@ parameterDelegate.findMany = async ({ where }: FindManyArgs = {}) => {
 
 async function run() {
 	try {
+		assert.equal((await parametersService.getSessionParams({ instance: "tenant-flow", userId: 9 }))[MESSAGE_FLOW_EDITOR_PARAMETER], "false");
 		assert.equal(await parametersService.isInternalGroupWhatsappSyncEnabled("tenant-default", false), false);
 		assert.equal(await parametersService.isInternalGroupWhatsappSyncEnabled("tenant-default", true), true);
 		assert.equal(await parametersService.isInternalGroupWhatsappSyncEnabled("tenant-enabled", false), true);

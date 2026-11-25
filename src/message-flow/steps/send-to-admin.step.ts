@@ -17,6 +17,6 @@ export default class SendToAdminStep extends BaseStep {
 		};
 
 		ctx.logger.log("Chat criado.", chatData);
-		return this.finalize(chatData);
+		return this.finalize(chatData, "Encaminhado à administração do setor.");
 	}
 }

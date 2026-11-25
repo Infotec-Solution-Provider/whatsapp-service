@@ -26,7 +26,8 @@ export class RouterStep extends BaseStep {
 		});
 
 		// Procura rota exata
-		let nextStepNumber = connections.routes?.[String(value)];
+		let nextStepNumber = Object.hasOwn(connections.routes ?? {}, String(value)) ? connections.routes?.[String(value)] : undefined;
+		const exact = nextStepNumber !== undefined;
 
 		// Se não encontrou, usa rota padrão
 		if (nextStepNumber === undefined) {
@@ -42,6 +43,6 @@ export class RouterStep extends BaseStep {
 			);
 		}
 
-		return this.continue(context, nextStepNumber);
+		return this.continue(context, nextStepNumber, exact ? "Seguiu a rota do valor encontrado." : "Seguiu a rota padrão.");
 	}
 }

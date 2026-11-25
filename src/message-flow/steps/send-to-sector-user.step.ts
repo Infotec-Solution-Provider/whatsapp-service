@@ -1,22 +1,16 @@
-import { User } from "../../sdk-local";
-import instancesService from "../../services/instances.service";
-import { pauseEligibleOperatorIds } from "../../services/operator-pause-admission.runtime";
+import { distributionReads, FlowDistributionReads } from "../distribution-reads";
 import { BaseStep, StepConfig, StepContext, StepResult } from "../base/base.step";
 
 export default class SendToSectorUserStep extends BaseStep {
-	constructor(config: StepConfig) {
+	constructor(config: StepConfig, private readonly reads: FlowDistributionReads = distributionReads) {
 		super(config);
 	}
 
 	public async execute(ctx: StepContext): Promise<StepResult> {
 		ctx.logger.log("Enviando mensagem para um usuário do setor...");
 
-		const candidates = await instancesService.executeQuery<User[]>(
-			this.instance,
-			"SELECT * FROM operadores WHERE SETOR = ?",
-			[this.sectorId]
-		);
-		const eligible = await pauseEligibleOperatorIds(this.instance, candidates.map(user => user.CODIGO));
+		const candidates = await this.reads.sectorOperators(this.instance, this.sectorId);
+		const eligible = await this.reads.eligible(this.instance, candidates.map(user => user.CODIGO));
 		const users = candidates.filter(user => eligible.has(user.CODIGO));
 
 		// Configuração: preferir admin se configurado
@@ -37,6 +31,6 @@ export default class SendToSectorUserStep extends BaseStep {
 		};
 
 		ctx.logger.log("Chat criado.", chatData);
-		return this.finalize(chatData);
+		return this.finalize(chatData, userId === -1 ? "Sem operador elegível. Encaminhado à administração." : "Primeiro operador elegível na ordem de consulta do setor, conforme a preferência de administrador.");
 	}
 }

@@ -40,7 +40,7 @@ export interface StepConfig {
 export interface StepContext {
 	message: WppMessage;
 	contact: WppContact;
-	logger: ProcessingLogger;
+	logger: Pick<ProcessingLogger, "log" | "failed">;
 	instance?: string;
 	sectorId?: number;
 	customer?: Customer | null;
@@ -51,6 +51,7 @@ export interface StepContext {
 
 export interface StepResult {
 	isFinal: boolean;
+	reason?: string;
 	nextStepNumber?: number; // Próxima posição no fluxo (renomeado de stepId)
 	chatData?: ChatPayload;
 	context: StepContext;
@@ -143,6 +144,7 @@ export abstract class BaseStep {
 				return {
 					isFinal: false,
 					nextStepNumber: this.fallbackStepNumber,
+					reason: "Falha na etapa. Usou a saída de contingência.",
 					context
 				};
 			}
@@ -207,9 +209,10 @@ export abstract class BaseStep {
 	 * @param nextStepNumber Número do próximo step (opcional, usa nextStepNumber por padrão)
 	 * @returns StepResult para continuar o fluxo
 	 */
-	protected continue(context: StepContext, nextStepNumber?: number): StepResult {
+	protected continue(context: StepContext, nextStepNumber?: number, reason?: string): StepResult {
 		return {
 			isFinal: false,
+			...(reason ? { reason } : {}),
 			nextStepNumber: nextStepNumber !== undefined ? nextStepNumber : this.nextStepNumber!,
 			context
 		};
@@ -220,9 +223,10 @@ export abstract class BaseStep {
 	 * @param chatData Dados do chat a ser criado
 	 * @returns StepResult final
 	 */
-	protected finalize(chatData: ChatPayload): StepResult {
+	protected finalize(chatData: ChatPayload, reason?: string): StepResult {
 		return {
 			isFinal: true,
+			...(reason ? { reason } : {}),
 			chatData,
 			context: {} as any // Será ignorado quando isFinal = true
 		};

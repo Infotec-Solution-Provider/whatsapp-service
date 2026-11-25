@@ -4,11 +4,20 @@ import { WppContact, WppMessage } from "@prisma/client";
 import { applyFlowAiAgentId, FLOW_AI_AGENT_CONTEXT_KEY } from "../utils/ai-agent-request";
 import { BaseStep, ChatPayload, StepContext, StepResult } from "./base/base.step";
 
+type FlowLogger = Pick<ProcessingLogger, "log" | "failed">;
+
+export interface FlowObserver {
+	beforeStep(stepNumber: number): void;
+	afterStep(stepNumber: number, result: StepResult): void;
+}
+
 export default class MessageFlow {
+	constructor(private readonly observer?: FlowObserver) {}
+
 	private steps: Map<number, BaseStep> = new Map(); // Map<stepNumber, BaseStep>
 	private activeFlows: Map<number, Promise<ChatPayload>> = new Map();
 
-	public async getChatPayload(logger: ProcessingLogger, contact: WppContact, message: WppMessage): Promise<ChatPayload> {
+	public async getChatPayload(logger: FlowLogger, contact: WppContact, message: WppMessage): Promise<ChatPayload> {
 		logger.log("╔═══════════════════════════════════════════════════════════");
 		logger.log("║ INICIANDO PROCESSAMENTO DE FLUXO");
 		logger.log(`║ Contato: ${contact.name || contact.phone} (ID: ${contact.id})`);
@@ -40,7 +49,7 @@ export default class MessageFlow {
 		return null;
 	}
 
-	private async processFlow(logger: ProcessingLogger, contact: WppContact, message: WppMessage): Promise<ChatPayload> {
+	private async processFlow(logger: FlowLogger, contact: WppContact, message: WppMessage): Promise<ChatPayload> {
 		try {
 			let currentStepNumber = 1; // Começa sempre na etapa #1
 			let context: StepContext = { logger, contact, message };
@@ -55,7 +64,9 @@ export default class MessageFlow {
 				}
 
 				const step = this.getStep(currentStepNumber, logger);
+				this.observer?.beforeStep(currentStepNumber);
 				const result = await this.executeStep(step, context);
+				this.observer?.afterStep(currentStepNumber, result);
 
 				if (result.isFinal) {
 					logger.log("╔═══════════════════════════════════════════════════════════");
@@ -79,7 +90,7 @@ export default class MessageFlow {
 		}
 	}
 
-	private getStep(stepNumber: number, logger: ProcessingLogger): BaseStep {
+	private getStep(stepNumber: number, logger: FlowLogger): BaseStep {
 		logger.log(`[MessageFlow] Buscando etapa #${stepNumber} no mapa de etapas`);
 		const step = this.steps.get(stepNumber);
 		if (!step) {
@@ -99,7 +110,7 @@ export default class MessageFlow {
 		return step.run(context);
 	}
 
-	private validateChat(chatPayload: ChatPayload | null, logger: ProcessingLogger): ChatPayload {
+	private validateChat(chatPayload: ChatPayload | null, logger: FlowLogger): ChatPayload {
 		if (!chatPayload) {
 			throw new Error("Nenhum chat foi retornado pelo fluxo de etapas.");
 		}

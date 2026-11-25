@@ -2,7 +2,7 @@ import prismaService from "../services/prisma.service";
 import { BaseStep } from "./base/base.step";
 import MessageFlow from "./message-flow";
 import { StepRegistry } from "./step-registry";
-import { assertFlowDefinition } from "./flow-definition";
+import { assertFlowDefinition, DEFAULT_MESSAGE_FLOW_STEPS } from "./flow-definition";
 
 export default class MessageFlowFactory {
 	/**
@@ -44,20 +44,13 @@ export default class MessageFlowFactory {
 	public static createDefaultMessageFlow(instance: string, sectorId: number): MessageFlow {
 		const messageFlow = new MessageFlow();
 
-		const steps = [
-			{ type: "CHECK_ONLY_ADMIN", stepNumber: 1, nextStepNumber: 2 },
-			{ type: "CHECK_LOALTY", stepNumber: 2, nextStepNumber: 3 },
-			{ type: "CHECK_AVAILABLE_USERS", stepNumber: 3, nextStepNumber: 4 },
-			{ type: "SEND_TO_ADMIN", stepNumber: 4 }
-		];
-
-		for (const stepConfig of steps) {
+		for (const stepConfig of DEFAULT_MESSAGE_FLOW_STEPS) {
 			const step = this.createStep(
 				stepConfig.type,
 				instance,
 				sectorId,
 				stepConfig.stepNumber,
-				stepConfig.nextStepNumber
+				stepConfig.nextStepId ?? undefined
 			);
 			messageFlow.addStep(step);
 		}

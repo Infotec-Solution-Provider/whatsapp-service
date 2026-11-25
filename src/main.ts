@@ -23,6 +23,7 @@ import messageFlowsController from "./controllers/message-flows.controller";
 import messageQueueController from "./controllers/message-queue.controller";
 import messagesController from "./controllers/messages.controller";
 import metaManagementController from "./controllers/meta-management.controller";
+import messageFlowStudioController from "./controllers/message-flow-studio.controller";
 import monitorController from "./controllers/monitor.controller";
 import { createNewContactsReportRouter } from "./controllers/new-contacts-report.controller";
 import notificationsController from "./controllers/notifications.controller";
@@ -98,6 +99,7 @@ app.use("/api", (_req, res, next) => {
 
 app.use("/api/internal/admin", express.json({ limit: "1mb" }));
 app.use("/api/whatsapp/meta", metaManagementController);
+app.use("/api/whatsapp/message-flow-studio", messageFlowStudioController);
 app.use(express.json({ limit: "2gb" }));
 app.use(express.urlencoded({ extended: true, limit: "2gb" }));
 app.use(createAdminRouter());
@@ -140,6 +142,7 @@ app.use(logRoute(messageQueueController.router));
 
 logRoutes("", routesToLog);
 logRoutes("/api/whatsapp/meta", [metaManagementController]);
+logRoutes("/api/whatsapp/message-flow-studio", [messageFlowStudioController]);
 
 // Serve frontend for any unmatched routes (SPA fallback)
 app.get("/flows", (_req, res) => {

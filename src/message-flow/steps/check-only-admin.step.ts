@@ -21,10 +21,10 @@ export default class CheckOnlyAdminStep extends BaseStep {
 
 			ctx.logger.log("Chat criado.", chatData);
 
-			return this.finalize(chatData);
+			return this.finalize(chatData, "Contato restrito à administração.");
 		}
 
 		ctx.logger.log("O contato não é apenas administrador.");
-		return this.continue(ctx);
+		return this.continue(ctx, undefined, "Contato sem restrição à administração.");
 	}
 }

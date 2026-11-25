@@ -8,6 +8,13 @@ export interface FlowStepDefinition {
 	connections?: unknown;
 }
 
+export const DEFAULT_MESSAGE_FLOW_STEPS = [
+	{ type: "CHECK_ONLY_ADMIN", stepNumber: 1, nextStepId: 2 },
+	{ type: "CHECK_LOALTY", stepNumber: 2, nextStepId: 3 },
+	{ type: "CHECK_AVAILABLE_USERS", stepNumber: 3, nextStepId: 4 },
+	{ type: "SEND_TO_ADMIN", stepNumber: 4, nextStepId: null }
+] as const;
+
 const record = (value: unknown): Record<string, unknown> | null =>
 	value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const positive = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) > 0;

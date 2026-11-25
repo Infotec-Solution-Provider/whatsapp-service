@@ -17,7 +17,11 @@ interface QueryConfig {
  * Suporta interpolação de variáveis nos parâmetros.
  */
 export class QueryStep extends BaseStep {
-	constructor(config: StepConfig, private readonly resolveCustomer: (scope: CustomerResolutionScope, contact: WppContact) => Promise<ContactCustomerResolutionResult> = resolveContactCustomerForFlow) {
+	constructor(
+		config: StepConfig,
+		private readonly resolveCustomer: (scope: CustomerResolutionScope, contact: WppContact) => Promise<ContactCustomerResolutionResult> = resolveContactCustomerForFlow,
+		private readonly readQuery: (instance: string, sql: string, params: any[]) => Promise<any[]> = (instance, sql, params) => instancesService.executeQuery(instance, sql, params)
+	) {
 		super(config);
 	}
 
@@ -35,7 +39,7 @@ export class QueryStep extends BaseStep {
 			Object.assign(context.contact, result.contact);
 			context[storeAs] = result.resolution;
 			context.logger.log("[customer-resolution]", { instance: this.instance, sectorId: this.sectorId, contactId: context.contact.id, status: result.resolution.status, reason: result.resolution.reason, durationMs: Date.now() - started });
-			return this.continue(context);
+			return this.continue(context, undefined, ({ found: "Cliente identificado.", not_found: "Cliente não encontrado.", ambiguous: "Mais de um cliente encontrado.", unavailable: "Identificação de cliente indisponível." })[result.resolution.status]);
 		}
 		const config = this.config as QueryConfig;
 
@@ -56,11 +60,7 @@ export class QueryStep extends BaseStep {
 			context.logger.log(`  Params: ${JSON.stringify(params)}`);
 		}
 
-		const results = (await instancesService.executeQuery(
-			this.instance,
-			config.query,
-			params
-		)) as any[];
+		const results = await this.readQuery(this.instance, config.query, params);
 
 		context.logger.log(`  Resultados: ${results.length} linha(s) retornada(s)`);
 
@@ -68,7 +68,7 @@ export class QueryStep extends BaseStep {
 			context.logger.log(`  ⚠ Query obrigatória não retornou dados → fallback`);
 
 			if (this.fallbackStepNumber) {
-				return this.continue(context, this.fallbackStepNumber);
+				return this.continue(context, this.fallbackStepNumber, "Consulta obrigatória sem registros. Usou a contingência.");
 			}
 
 			throw new Error(`Query required but returned no results: ${config.query}`);
@@ -80,6 +80,6 @@ export class QueryStep extends BaseStep {
 
 		context.logger.log(`  ✓ Armazenado: context.${config.storeAs} ${config.single ? '(single)' : `(array[${results.length}])`}`);
 
-		return this.continue(context);
+		return this.continue(context, undefined, "Resultado da consulta disponível para as próximas etapas.");
 	}
 }

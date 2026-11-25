@@ -1,8 +1,7 @@
 import { WppChatPriority } from "@prisma/client";
-import { BaseStep, ChatPayload, StepContext, StepResult } from "./base.step";
-import instancesService from "../../services/instances.service";
-import { resolveAssignmentTarget, AssignmentOperator } from "../assignment-target";
-import { pauseEligibleOperatorIds } from "../../services/operator-pause-admission.runtime";
+import { BaseStep, ChatPayload, StepConfig, StepContext, StepResult } from "./base.step";
+import { distributionReads, FlowDistributionReads } from "../distribution-reads";
+import { resolveAssignmentTarget } from "../assignment-target";
 import { OperatorPauseAdmissionError } from "../../services/operator-pause-admission";
 
 interface AssignConfig {
@@ -22,6 +21,8 @@ interface AssignConfig {
  * Suporta interpolação de variáveis (ex: userId: "${context.assignedUserId}")
  */
 export class AssignStep extends BaseStep {
+	constructor(config: StepConfig, private readonly reads: FlowDistributionReads = distributionReads) { super(config); }
+
 	async execute(context: StepContext): Promise<StepResult> {
 		const config = this.config as AssignConfig;
 
@@ -30,18 +31,19 @@ export class AssignStep extends BaseStep {
 			typeof config.userId === "string" && config.userId.startsWith("${")
 				? this.resolveField(context, config.userId.slice(2, -1))
 				: config.userId;
+		let reason = "Destino definido na configuração da etapa.";
 		if (config.validateUser === true) {
 			const result = await resolveAssignmentTarget({
 				userId: userId as number, fallbackUserId: config.fallbackUserId!,
 				...(config.fallbackRequireAdmin !== undefined ? { fallbackRequireAdmin: config.fallbackRequireAdmin } : {})
 			}, this.sectorId, async (ids) => {
-				const rows = await instancesService.executeQuery<AssignmentOperator[]>(this.instance,
-					"SELECT CODIGO,SETOR,ATIVO,NIVEL FROM operadores WHERE CODIGO IN (?,?) LIMIT 2", ids, { timeoutMs: 3000 });
-				const eligible = await pauseEligibleOperatorIds(this.instance, ids);
+				const rows = await this.reads.operators(this.instance, ids);
+				const eligible = await this.reads.eligible(this.instance, ids);
 				if (!eligible.size) throw new OperatorPauseAdmissionError("OPERATOR_PAUSED");
 				return rows.filter(row => eligible.has(row.CODIGO));
 			});
 			userId = result.userId;
+			reason = { target_valid: "Operador principal validado.", target_invalid_fallback: "Operador principal indisponível. Usou o substituto.", validation_unavailable: "Validação temporariamente indisponível. O fluxo conserva o destino principal." }[result.reason];
 			context.logger.log("Assignment target validation", { reason: result.reason, userId, sectorId: this.sectorId });
 		}
 
@@ -83,6 +85,6 @@ export class AssignStep extends BaseStep {
 			chatData.priority = config.priority;
 		}
 
-		return this.finalize(chatData);
+		return this.finalize(chatData, reason);
 	}
 }

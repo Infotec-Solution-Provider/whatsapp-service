@@ -1,15 +1,8 @@
-import instances from "../../services/instances.service";
-import instancesService from "../../services/instances.service";
-import { User } from "../../sdk-local";
-import { pauseEligibleOperatorIds } from "../../services/operator-pause-admission.runtime";
-import { BaseStep, StepConfig, StepContext, StepResult, CustomerSchedule } from "../base/base.step";
-
-const CHECK_LOALTY_QUERY = `SELECT * FROM campanhas_clientes cc
-            WHERE cc.CLIENTE = ?
-            ORDER BY CODIGO DESC LIMIT 1;`;
+import { distributionReads, FlowDistributionReads } from "../distribution-reads";
+import { BaseStep, StepConfig, StepContext, StepResult } from "../base/base.step";
 
 export default class CheckLoaltyStep extends BaseStep {
-	constructor(config: StepConfig) {
+	constructor(config: StepConfig, private readonly reads: FlowDistributionReads = distributionReads) {
 		super(config);
 	}
 
@@ -18,64 +11,37 @@ export default class CheckLoaltyStep extends BaseStep {
 
 		if (!ctx.contact.customerId) {
 			ctx.logger.log("O contato não possui um ID de cliente.");
-			return this.continue(ctx);
+			return this.continue(ctx, undefined, "Contato sem cliente vinculado.");
 		}
 
-		const customerSchedule = await this.fetchCustomerSchedule(ctx);
-		if (!customerSchedule) {
+		const operatorId = await this.reads.loyalty(this.instance, ctx.contact.customerId);
+		if (operatorId === null) {
 			ctx.logger.log("Agendamento do cliente não encontrado.");
-			return this.continue(ctx);
+			return this.continue(ctx, undefined, "Cliente sem registro de fidelização.");
 		}
-		if (customerSchedule.OPERADOR === 0) {
+		if (operatorId === 0) {
 			ctx.logger.log("O agendamento do cliente não possui um operador.");
-			return this.continue(ctx);
+			return this.continue(ctx, undefined, "Fidelização sem operador.");
 		}
 
-		const isSameSector = await this.isUserInSameSector(
-			this.instance,
-			customerSchedule.OPERADOR
-		);
-		if (!isSameSector) {
+		const [operator] = await this.reads.operators(this.instance, [operatorId]);
+		if (!operator || operator.SETOR !== this.sectorId) {
 			ctx.logger.log("O usuário não está no mesmo setor.");
-			return this.continue(ctx);
+			return this.continue(ctx, undefined, "Operador de fidelização de outro setor ou inexistente.");
 		}
-		if (!(await pauseEligibleOperatorIds(this.instance, [customerSchedule.OPERADOR])).has(customerSchedule.OPERADOR)) return this.continue(ctx);
+		if (!(await this.reads.eligible(this.instance, [operatorId])).has(operatorId)) return this.continue(ctx, undefined, "Operador de fidelização indisponível.");
 
 		const chatData = {
 			instance: this.instance,
 			type: "RECEPTIVE" as const,
-			userId: customerSchedule.OPERADOR,
+			userId: operatorId,
 			contactId: ctx.contact.id,
 			sectorId: this.sectorId
 		};
 
 		ctx.logger.log("Chat criado com sucesso.", chatData);
 
-		return this.finalize(chatData);
+		return this.finalize(chatData, "Encaminhado ao operador de fidelização do setor.");
 	}
 
-	private async fetchCustomerSchedule(
-		ctx: StepContext
-	): Promise<CustomerSchedule | null> {
-		ctx.logger.log("Buscando agendamento do cliente...");
-		const result = await instances.executeQuery<Array<CustomerSchedule>>(
-			this.instance,
-			CHECK_LOALTY_QUERY,
-			[ctx.contact.customerId]
-		);
-		return result[0] || null;
-	}
-
-	private async isUserInSameSector(
-		instance: string,
-		userId: number
-	): Promise<boolean> {
-		const users = await instancesService.executeQuery<User[]>(
-			instance,
-			"SELECT * FROM operadores WHERE CODIGO = ?",
-			[userId]
-		);
-
-		return users.length > 0 && users[0]!.SETOR === this.sectorId;
-	}
 }

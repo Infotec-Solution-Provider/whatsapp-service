@@ -1,7 +1,5 @@
-import { UserOnlineSession } from "../../sdk-local";
-import authService from "../../services/auth.service";
-import prismaService from "../../services/prisma.service";
-import { pauseEligibleOperatorIds } from "../../services/operator-pause-admission.runtime";
+import { distributionReads, FlowDistributionReads } from "../distribution-reads";
+import type { UserOnlineSession } from "../../sdk-local";
 import { BaseStep, StepConfig, StepContext, StepResult } from "../base/base.step";
 
 interface UserChatCount {
@@ -10,7 +8,7 @@ interface UserChatCount {
 }
 
 export default class CheckAvailableUsersStep extends BaseStep {
-	constructor(config: StepConfig) {
+	constructor(config: StepConfig, private readonly reads: FlowDistributionReads = distributionReads) {
 		super(config);
 	}
 
@@ -22,23 +20,12 @@ export default class CheckAvailableUsersStep extends BaseStep {
 	): Promise<UserChatCount[]> {
 		const userIds = sessions.map((session) => session.data.userId);
 
-		const usersChats = await prismaService.wppChat.groupBy({
-			by: ["userId"],
-			where: {
-				userId: { in: userIds },
-				isFinished: false,
-				instance: this.instance
-			},
-			_count: { id: true },
-			orderBy: { _count: { id: "asc" } }
-		});
+		const counts = await this.reads.chatCounts(this.instance, userIds);
 
 		return sessions
 			.map((session) => {
 				const userId = session.data.userId;
-				const chats =
-					usersChats.find((uc) => uc.userId === userId)?._count.id ||
-					0;
+				const chats = counts.get(userId) ?? 0;
 				return { userId, chats };
 			})
 			.sort((a, b) => a.chats - b.chats);
@@ -48,9 +35,9 @@ export default class CheckAvailableUsersStep extends BaseStep {
 	 * Obtém as sessões online filtradas pelo setor.
 	 */
 	private async getSectorOnlineSessions(): Promise<UserOnlineSession[]> {
-		const sessions = await authService.getOnlineSessions(this.instance);
+		const sessions = await this.reads.sessions(this.instance);
 		const sectorSessions = sessions.filter((s) => s.data.sectorId === this.sectorId);
-		const eligible = await pauseEligibleOperatorIds(this.instance, sectorSessions.map(session => session.data.userId));
+		const eligible = await this.reads.eligible(this.instance, sectorSessions.map(session => session.data.userId));
 		return sectorSessions.filter(session => eligible.has(session.data.userId));
 	}
 
@@ -65,7 +52,7 @@ export default class CheckAvailableUsersStep extends BaseStep {
 
 		if (sessions.length === 0) {
 			ctx.logger.log("Nenhum usuário disponível encontrado.");
-			return this.continue(ctx);
+			return this.continue(ctx, undefined, "Nenhum operador disponível no setor.");
 		}
 
 		const usersChats = await this.getUserChatsCount(sessions);
@@ -75,7 +62,8 @@ export default class CheckAvailableUsersStep extends BaseStep {
 			return this.continue(ctx);
 		}
 
-		const { userId } = usersChats[0]!;
+		const { userId, chats } = usersChats[0]!;
+		const tied = usersChats.some(other => other.userId !== userId && other.chats === chats);
 
 		const chatData = {
 			instance: this.instance,
@@ -87,6 +75,6 @@ export default class CheckAvailableUsersStep extends BaseStep {
 
 		ctx.logger.log(`Usuário ${userId} será atribuído ao chat.`, chatData);
 
-		return this.finalize(chatData);
+		return this.finalize(chatData, tied ? "Menor carga empatada. Escolhido pela ordem das sessões consultadas." : "Operador elegível com o menor número de atendimentos abertos.");
 	}
 }

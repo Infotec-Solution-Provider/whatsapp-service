@@ -397,6 +397,33 @@ model WppMessageFlow {
   @@map("message_flows")
 }
 
+// Editable definitions. The distributor reads only the published message_flows projection.
+model MessageFlowLibrary {
+  id         Int      @id @default(autoincrement())
+  instance   String
+  sectorId   Int      @map("sector_id")
+  name       String
+  revision   Int      @default(1)
+  steps      Json
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([instance, sectorId])
+  @@map("message_flow_library")
+}
+
+model MessageFlowPublication {
+  instance    String
+  sectorId    Int    @map("sector_id")
+  libraryId   Int    @map("library_id")
+  revision    Int
+  fingerprint String @db.Char(64)
+  generation  Int    @default(1)
+
+  @@id([instance, sectorId])
+  @@map("message_flow_publications")
+}
+
 model WppMessageFlowStep {
   id            Int                    @id @default(autoincrement())
   type          WppMessageFlowStepType
