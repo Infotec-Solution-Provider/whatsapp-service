@@ -33,6 +33,8 @@ import { getTemplateAttribution } from "../utils/template-attribution";
 import humanBehavior from "./human-behavior-config.service";
 import type { HumanBehaviorConfig } from "../utils/human-behavior.simulator";
 import { admitHumanSend } from "./operator-pause-admission.runtime";
+import { tenantSqlEnabled } from "../tenant-sql/registry";
+import { tenantSqlInstanceNames } from "../tenant-sql/router";
 
 export interface SendTemplateData {
 	template: TemplateMessage;
@@ -139,14 +141,30 @@ class WhatsappService {
 		for (const client of this.clients.values()) if (client.instance === instance && client instanceof WWEBJSWhatsappClient) client.setHumanBehaviorConfig(config);
 	}
 
-	public async buildClients() {
-		const clients = await prismaService.wppClient.findMany({
-			where: {
-				isActive: true
+	private async getActiveClients(): Promise<WppClient[]> {
+		if (!tenantSqlEnabled()) return prismaService.wppClient.findMany({ where: { isActive: true } });
+
+		const clients = await Promise.all(tenantSqlInstanceNames().map(async (instance) => {
+			try {
+				return await prismaService.wppClient.findMany({ where: { instance, isActive: true } });
+			} catch (error) {
+				const message = sanitizeErrorMessage(error) ?? "erro desconhecido";
+				Logger.error(`Falha ao carregar canais da empresa ${instance}: ${message}`);
+				return [];
 			}
-		});
+		}));
+		return clients.flat();
+	}
+
+	public async buildClients() {
+		const clients = await this.getActiveClients();
 
 		for (const client of clients) {
+			const loaded = this.clients.get(client.id);
+			if (loaded && loaded.instance !== client.instance) {
+				Logger.error(`Canal ${client.id} não carregado para ${client.instance}: já associado a ${loaded.instance}.`);
+				continue;
+			}
 			switch (client.type) {
 				case WppClientType.WWEBJS:
 					const WWEBJSClient = new WWEBJSWhatsappClient(client.id, client.instance, client.name);

@@ -13,24 +13,32 @@ import { RemoteInboundEventInbox } from "@prisma/client";
 import prismaService from "./prisma.service";
 import messageReactionsService from "./message-reactions.service";
 import { tenantSqlEnabled } from "../tenant-sql/registry";
-import { withDatabaseTenant } from "../utils/database-tenant-context";
+import { isTenantSqlTargetPrepared } from "../tenant-sql/router";
+import { currentDatabaseTenant, withDatabaseTenant } from "../utils/database-tenant-context";
 import { AsyncConcurrencyLimiter, AsyncKeyedSequencer } from "../utils/async-concurrency-limiter";
+
+const INFOTEC_ID_FLOOR = 2_000_000_000;
 
 class RemoteClientService {
 	private readonly receiptSequencer = new AsyncKeyedSequencer();
 	private readonly receiptProcessing = new AsyncConcurrencyLimiter(4);
 	private async withClientTenant<T>(clientId: number, execute: () => Promise<T>): Promise<T> {
 		if (!tenantSqlEnabled()) return execute();
+		// Infotec was provisioned above every historical ID and owns offset 3 of increment 4.
+		const infotec = Number.isSafeInteger(clientId) && clientId >= INFOTEC_ID_FLOOR && clientId % 4 === 3 &&
+			isTenantSqlTargetPrepared(prismaService, "infotec");
 		const registered = await prismaService.wppClient.findFirst({
-			where: { id: clientId, type: "REMOTE" }, select: { instance: true }
+			where: { id: clientId, type: "REMOTE", ...(infotec ? { instance: "infotec" } : {}) },
+			select: { instance: true }
 		});
 		if (!registered) throw new NotFoundError("Remote client not found");
 		return withDatabaseTenant(registered.instance, execute);
 	}
 	private getRemoteClient(clientId: number): RemoteWhatsappClient {
 		const client = whatsappService.getClient(clientId);
+		const tenant = currentDatabaseTenant();
 
-		if (!client) {
+		if (!client || (tenant && tenant !== client.instance)) {
 			throw new NotFoundError(`Client with id ${clientId} not found`);
 		}
 		if (!(client instanceof RemoteWhatsappClient)) {
