@@ -40,6 +40,7 @@ export async function enqueueTriageNotice(tx: Prisma.TransactionClient, chat: Wp
 			userId: chat.userId,
 			resultId: chat.resultId,
 			messageId: message.id,
+			botId: match.botId,
 			versionId: match.versionId
 		}
 	});
@@ -57,6 +58,7 @@ export async function processTriageNotice(row: TriageTriggerNotice) {
 				type: kind,
 				eventKey: String(row.id),
 				sectorId: row.sectorId,
+				botId: row.botId ?? row.channelId,
 				expectedVersion: row.versionId,
 				expectedMessage: row.messageId,
 				expectedUserId: row.userId,

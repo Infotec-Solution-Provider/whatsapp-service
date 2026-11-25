@@ -54,6 +54,7 @@ model TriageRun {
 }
 
 model TriageTriggerNotice {
+  botId       Int?     @map("bot_id")
   id          Int      @id @default(autoincrement())
   instance    String   @db.VarChar(191)
   chatId      Int      @map("chat_id")

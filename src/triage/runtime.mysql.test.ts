@@ -127,21 +127,23 @@ test("ingresso, persistência, efeitos e intervenção da triagem nos dois modos
 					if (/^CREATE TABLE (?!`triage_)/.test(ddl))
 						await pool.query(ddl.replace(/^CREATE TABLE `/, "CREATE TABLE `" + prefix));
 				}
+				const migrate = async (name: string) => {
+					const file = native
+						? "prisma/tenant-sql/" + name + ".sql"
+						: "prisma/migrations/" + name + "/migration.sql";
+					for (const query of readFileSync(file, "utf8")
+						.split(";")
+						.map((q) => q.trim())
+						.filter(Boolean))
+						await pool.query(query);
+				};
 				for (const migration of [
 					"20261125150000_triage_authoring",
 					"20261125151000_triage_runtime",
 					"20261125193000_triage_trigger_sets",
 					"20261125194000_triage_activation_runtime"
-				]) {
-					const file = native
-						? "prisma/tenant-sql/" + migration + ".sql"
-						: "prisma/migrations/" + migration + "/migration.sql";
-					for (const query of readFileSync(file, "utf8")
-						.split(";")
-						.map((s) => s.trim())
-						.filter(Boolean))
-						await pool.query(query);
-				}
+				])
+					await migrate(migration);
 				await withDatabaseTenant("alpha", async () => {
 					await database.parameter.create({
 						data: { scope: "INSTANCE", key: "enable_whatsapp_triage", value: "true", instance: "alpha" }
@@ -175,6 +177,23 @@ test("ingresso, persistência, efeitos e intervenção da triagem nos dois modos
 							[id, id, JSON.stringify(definition)]
 						);
 					}
+					// The channels/versions above predate the multi-bot migration and must retain their references.
+					await migrate("20261125220000_triage_multi_bot");
+					await migrate("20261125221000_triage_notice_bot");
+					const extraBotId = 21,
+						extraVersionId = 31;
+					await pool.query(
+						"INSERT INTO " +
+							prefix +
+							"triage_bots(id,instance,channel_id,revision,name,definition,edited_by,active_version_id,paused) VALUES (?,'alpha',2,1,'Pedidos',?,1,?,0)",
+						[extraBotId, JSON.stringify(definition), extraVersionId]
+					);
+					await pool.query(
+						"INSERT INTO " +
+							prefix +
+							"triage_bot_versions(id,instance,channel_id,bot_id,number,name,definition,created_by) VALUES (?,'alpha',2,?,1,'Pedidos',?,1)",
+						[extraVersionId, extraBotId, JSON.stringify(definition)]
+					);
 					const contact = await database.wppContact.create({
 						data: { instance: "alpha", phone: "5511001", name: "Contato" }
 					});
@@ -231,7 +250,7 @@ test("ingresso, persistência, efeitos e intervenção da triagem nos dois modos
 					assert.equal(await database.triageEffect.count({ where: { chatId: chat.id } }), 1);
 					const secondChannel = await consume(await incoming("outro canal", 2), chat);
 					assert(secondChannel?.opened && secondChannel.chat && secondChannel.chat.id !== chat.id);
-					await pool.query("UPDATE " + prefix + "triage_channels SET paused=1 WHERE channel_id=1");
+					await pool.query("UPDATE " + prefix + "triage_bots SET paused=1 WHERE id=1");
 					const repeat = await startTriggeredTriage({
 						instance: "alpha",
 						channelId: 1,
@@ -246,6 +265,24 @@ test("ingresso, persistência, efeitos e intervenção da triagem nos dois modos
 						repeat && !repeat.started && repeat.ref.version === 1,
 						"replay usa versão original mesmo pausada"
 					);
+					await pool.query(
+						"INSERT INTO " +
+							prefix +
+							"triage_bot_versions(id,instance,channel_id,bot_id,number,name,definition,created_by) VALUES(32,'alpha',1,1,2,'Nova versão',?,1)",
+						[JSON.stringify(definition)]
+					);
+					await pool.query("UPDATE " + prefix + "triage_bots SET active_version_id=32,paused=0 WHERE id=1");
+					const afterPublish = await startTriggeredTriage({
+						instance: "alpha",
+						channelId: 1,
+						type: "flow",
+						sectorId: 5,
+						contact,
+						message: first,
+						botId: 1,
+						eventKey: String(first.id)
+					});
+					assert.deepEqual(afterPublish?.ref, { id: 1, name: "Teste", version: 1 });
 					const before = sends;
 					const prompt = await database.triageEffect.findFirstOrThrow({ where: { chatId: chat.id } });
 					await Promise.all([serviceTriageEffect(prompt), serviceTriageEffect(prompt)]);
@@ -334,16 +371,60 @@ test("ingresso, persistência, efeitos e intervenção da triagem nos dois modos
 					);
 					await database.wppChat.updateMany({ where: { instance: "alpha" }, data: { isFinished: true } });
 					const rules = [
-						{ type: "keyword", botId: 2, keywords: ["ajuda"] },
+						{ type: "keyword", botId: 2, keywords: ["ajuda", "comum"] },
+						{ type: "keyword", botId: extraBotId, keywords: ["pedidos", "comum"] },
+						{ type: "manual", botId: extraBotId },
 						{ type: "manual", botId: 2 },
 						{ type: "transfer", botId: 2 },
-						{ type: "closed", botId: 2 }
+						{ type: "closed", botId: extraBotId }
 					];
 					await pool.query(
 						"INSERT INTO " +
 							prefix +
 							"triage_trigger_sets(instance,sector_id,revision,rules,edited_by) VALUES ('alpha',5,1,?,1)",
 						[JSON.stringify(rules)]
+					);
+					const duplicateKeyword = await incoming("comum", 2);
+					assert.equal(
+						await startTriggeredTriage({
+							instance: "alpha",
+							channelId: 2,
+							type: "keyword",
+							message: duplicateKeyword,
+							contact,
+							eventKey: String(duplicateKeyword.id)
+						}),
+						null
+					);
+					const secondBotContact = await database.wppContact.create({
+						data: { instance: "alpha", phone: "551188", name: "Outro contato" }
+					});
+					const order = await database.wppMessage.create({
+						data: {
+							instance: "alpha",
+							from: secondBotContact.phone!,
+							to: "me:100",
+							clientId: 2,
+							body: "pedidos",
+							type: "chat",
+							sentAt: new Date(),
+							status: "RECEIVED",
+							timestamp: String(Date.now())
+						}
+					});
+					const orderHit = await startTriggeredTriage({
+						instance: "alpha",
+						channelId: 2,
+						type: "keyword",
+						contact: secondBotContact,
+						message: order,
+						eventKey: String(order.id)
+					});
+					assert.equal(orderHit?.ref.id, extraBotId);
+					assert.equal(
+						(await database.triageSession.findUniqueOrThrow({ where: { chatId: orderHit!.chat.id } }))
+							.versionId,
+						extraVersionId
 					);
 					const keyMsg = await incoming("AJUDA", 2);
 					const kw = {
@@ -356,18 +437,36 @@ test("ingresso, persistência, efeitos e intervenção da triagem nos dois modos
 					};
 					const opened = await startTriggeredTriage(kw);
 					assert(opened?.started);
+					assert.equal(opened.ref.id, 2);
 					await takeOverTriage("alpha", opened.chat.id, 17, undefined, 2);
-					assert.equal(await manualTriageAvailability("alpha", 2, opened.chat.id, 99), null);
-					assert(await manualTriageAvailability("alpha", 2, opened.chat.id, 17));
+					assert.deepEqual(await manualTriageAvailability("alpha", 2, opened.chat.id, 99), []);
+					assert.deepEqual(
+						(await manualTriageAvailability("alpha", 2, opened.chat.id, 17))
+							.map((x) => x.botId)
+							.sort((a, b) => a - b),
+						[2, extraBotId]
+					);
 					const manual = {
 						instance: "alpha",
 						channelId: 2,
 						chatId: opened.chat.id,
 						type: "manual" as const,
+						botId: extraBotId,
 						eventKey: "button-1",
 						actorId: 17
 					};
 					const twice = await Promise.all([startTriggeredTriage(manual), startTriggeredTriage(manual)]);
+					assert.equal(twice[0]?.ref.id, extraBotId);
+					assert.equal(
+						await startTriggeredTriage({ ...manual, botId: 2 }),
+						null,
+						"não redireciona comando idempotente a outro bot"
+					);
+					assert.equal(
+						(await database.triageSession.findUniqueOrThrow({ where: { chatId: opened.chat.id } }))
+							.versionId,
+						extraVersionId
+					);
 					assert.equal(twice.filter((x) => x?.started).length, 1);
 					assert.equal(await database.triageRun.count({ where: { chatId: opened.chat.id } }), 2);
 					await takeOverTriage("alpha", opened.chat.id, 17, undefined, 2);
@@ -387,6 +486,8 @@ test("ingresso, persistência, efeitos e intervenção da triagem nos dois modos
 						where: { originChatId: closed.id, kind: "closed" }
 					});
 					assert.notEqual(follow.chatId, closed.id);
+					assert.equal(follow.botId, extraBotId);
+					assert.equal(notice.botId, extraBotId);
 					assert((await database.wppChat.findUniqueOrThrow({ where: { id: closed.id } })).isFinished);
 					const firstOutbound = await database.triageEffect.findFirstOrThrow({
 						where: { chatId: follow.chatId }

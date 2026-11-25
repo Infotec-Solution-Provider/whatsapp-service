@@ -67,7 +67,7 @@ export function acceptsTriageMessage(message: WppMessage) {
 
 /** Is an interrupted WABA insertion eligible for a triage-only replay, including after a pause? */
 export async function hasTriageIngress(instance: string, channelId: number) {
-	if (await triageAuthoring.activeForChannel(instance, channelId)) return true;
+	if (await triageAuthoring.hasActiveBot(instance, channelId)) return true;
 	return !!(await db.triageSession
 		.findFirst({ where: { instance, channelId, status: { in: ["waiting", "handoff"] } }, select: { chatId: true } })
 		.catch((error) => {

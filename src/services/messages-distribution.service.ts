@@ -596,6 +596,7 @@ class MessagesDistributionService {
 						message,
 						eventKey: String(message.id),
 						...(current && { chatId: current.id }),
+						botId: match.botId,
 						expectedVersion: match.versionId
 					});
 					if (hit) return { current: hit.chat, handled: true, opened: hit.opened };

@@ -69,13 +69,13 @@ function withinWindow(channelType: string, source: WppMessage) {
 	return !["WABA", "GUPSHUP"].includes(channelType) || Date.now() - source.sentAt.getTime() < 24 * 60 * 60 * 1000;
 }
 async function manualTarget(tx: Tx, instance: string, channelId: number, chat: WppChat, actorId: number) {
-	if (!chat.sectorId || !available(chat, { type: "manual", actorId })) return null;
+	if (!chat.sectorId || !available(chat, { type: "manual", actorId })) return [];
 	const source = await latestTriageInbound(tx, instance, chat.id);
 	const channel = await tx.wppClient.findFirst({
 		where: { instance, id: channelId, isActive: true },
 		select: { type: true }
 	});
-	if (!channel || !source || !withinWindow(channel.type, source)) return null;
+	if (!channel || !source || !withinWindow(channel.type, source)) return [];
 	const session = await tx.triageSession.findFirst({ where: { instance, chatId: chat.id } });
 	if (
 		session &&
@@ -86,19 +86,18 @@ async function manualTarget(tx: Tx, instance: string, channelId: number, chat: W
 				select: { id: true }
 			})))
 	)
-		return null;
-	if (!source || source.clientId !== channelId) return null;
-	const rule = await triageTriggers.match(instance, channelId, { type: "manual", sectorId: chat.sectorId }, tx);
-	if (!rule) return null;
-	const binding = await triageAuthoring.activeForChannel(instance, channelId, tx);
-	return binding?.versionId === rule.versionId ? { botId: binding.botId, name: binding.name } : null;
+		return [];
+	if (!source || source.clientId !== channelId) return [];
+	return (await triageTriggers.manualOptions(instance, channelId, chat.sectorId, tx)).map(
+		({ botId, channelId, name, version }) => ({ botId, channelId, name, version })
+	);
 }
 export async function manualTriageAvailability(instance: string, channelId: number, chatId: number, actorId: number) {
 	return withDatabaseTenant(instance, () =>
 		db.$transaction(
 			async (tx) => {
 				const chat = await tx.wppChat.findFirst({ where: { instance, id: chatId } });
-				return chat ? manualTarget(tx, instance, channelId, chat, actorId) : null;
+				return chat ? manualTarget(tx, instance, channelId, chat, actorId) : [];
 			},
 			{ isolationLevel: "ReadCommitted" }
 		)
@@ -128,26 +127,22 @@ export async function startTriggeredTriage(input: StartInput) {
 				);
 				const prior = await tx.triageRun.findFirst({ where: { instance, eventKey: key } });
 				if (prior) {
-					if (prior.channelId !== channelId || (input.botId != null && prior.botId !== input.botId))
+					if (
+						prior.channelId !== channelId ||
+						(input.botId != null && prior.botId !== input.botId) ||
+						(input.type === "manual" && prior.actorId !== input.actorId)
+					)
 						return null;
-					const [v] = await tx.$queryRawUnsafe<{ name: string; number: number }[]>(
-						"SELECT name,number FROM triage_versions WHERE instance=? AND channel_id=? AND id=?",
-						instance,
-						channelId,
-						prior.versionId
-					);
-					if (!v) throw new Error("TRIAGE_ORIGINAL_VERSION_MISSING");
+					const v = await triageAuthoring.getBotRuntimeVersion(instance, prior.botId, prior.versionId, tx);
+					if (!v || v.channelId !== channelId) throw new Error("TRIAGE_ORIGINAL_VERSION_MISSING");
 					const chat = await tx.wppChat.findFirstOrThrow({ where: { instance, id: prior.chatId } });
 					return {
 						chat,
 						started: false,
 						opened: false,
-						ref: { id: prior.botId, name: v.name, version: v.number }
+						ref: { id: prior.botId, name: v.name, version: v.version }
 					};
 				}
-				const binding = await triageAuthoring.activeForChannel(instance, channelId, tx);
-				if (!binding || (input.botId != null && binding.botId !== input.botId)) return null;
-				const ref = { id: binding.botId, name: binding.name, version: binding.version };
 				// Contact serializes two simultaneous first messages and starts racing a post-close follow-up.
 				const original = input.chatId
 					? await tx.wppChat.findFirst({ where: { instance, id: input.chatId } })
@@ -196,17 +191,27 @@ export async function startTriggeredTriage(input: StartInput) {
 								channelId,
 								{
 									type: input.type,
+									...(input.type === "manual" && input.botId != null && { botId: input.botId }),
 									...(sector ? { sectorId: sector } : {}),
 									...(input.type === "keyword" ? { text: source.body } : {})
 								},
 								tx
 							);
+				const botId = input.type === "flow" ? input.botId : rule?.botId;
 				if (
-					input.type !== "flow" &&
-					(!rule || rule.botId !== binding.botId || rule.versionId !== binding.versionId)
+					!botId ||
+					(input.botId != null && input.botId !== botId) ||
+					(input.type === "manual" && input.botId == null)
 				)
 					return null;
-				if (input.expectedVersion && input.expectedVersion !== binding.versionId) return null;
+				const binding = await triageAuthoring.activeForBot(instance, channelId, botId, tx);
+				if (
+					!binding ||
+					(rule && rule.versionId !== binding.versionId) ||
+					(input.expectedVersion && input.expectedVersion !== binding.versionId)
+				)
+					return null;
+				const ref = { id: binding.botId, name: binding.name, version: binding.version };
 				const sectorId = rule?.sectorId ?? sector;
 				const channel = await tx.wppClient.findFirst({
 					where: { id: channelId, instance, isActive: true },
