@@ -27,6 +27,13 @@ async function main() {
 		return true;
 	};
 	const db: any = {
+		// This fixture exercises the existing Odim routing with conversational triage disabled.
+		$queryRawUnsafe: async (sql: string) => {
+			if (sql.includes("FROM parameters WHERE instance=? AND scope='INSTANCE'")) return [];
+			throw new Error("Unexpected runtime query");
+		},
+		triageSession: { findFirst: async () => null },
+		triageEvent: { findFirst: async () => null },
 		$transaction: async (run: (tx: any) => Promise<unknown>) => run(db),
 		chatUserPreference: { upsert: async ({ create }: any) => {
 			assert.equal(create.instance, "odim"); assert.equal(create.isMarkedUnread, true); assert(create.userId > 0);

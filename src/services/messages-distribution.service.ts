@@ -43,6 +43,7 @@ import socketService from "./socket.service";
 import transferHistoryService from "./transfer-history.service";
 import whatsappService from "./whatsapp.service";
 import botsRegistry from "../bots/bots-registry";
+import { acceptsTriageMessage, consumeTriage, hasTriageIngress } from "../triage/runtime";
 
 type MessageStatusProvider = "wwebjs" | "waba";
 
@@ -479,6 +480,18 @@ class MessagesDistributionService {
 		return { chat, systemMessage: systemMessage || null };
 	}
 
+	/** Retry only the conversational bot after WABA persisted an inbound but interrupted distribution. */
+	public async recoverTriageInbound(instance: string, clientId: number, msg: WppMessage) {
+		if (msg.chatId != null || msg.instance !== instance || msg.clientId !== clientId || !acceptsTriageMessage(msg) ||
+			!await hasTriageIngress(instance,clientId)) return false;
+		const contact = await this.resolveMessageContact(instance,msg);
+		const current = await chatsService.getChatForContact(clientId,contact);
+		const result = await consumeTriage(instance,clientId,contact,msg,current);
+		if (!result?.handled || !result.chat) return false;
+		if (result.opened) await chatsService.syncChatToLocal(result.chat);
+		return this.insertAndNotify(new ProcessingLogger(instance,"triage-recovery",String(msg.id),{}),result.chat,msg,result.opened,true);
+	}
+
 	public async processMessage(
 		instance: string,
 		clientId: number,
@@ -500,7 +513,15 @@ class MessagesDistributionService {
 
 			// 2. Busca chat existente
 			logger.log("Buscando chat para o contato.");
-			const currChat = await chatsService.getChatForContact(clientId, contact);
+			let currChat = await chatsService.getChatForContact(clientId, contact);
+			const triage = await consumeTriage(instance, clientId, contact, msg, currChat);
+			if (triage) {
+				currChat = triage.chat;
+				if (triage.handled && triage.chat) {
+					if (triage.opened) await chatsService.syncChatToLocal(triage.chat);
+					return this.insertAndNotify(logger, triage.chat, msg, triage.opened, strictLocalSync);
+				}
+			}
 			// A resposta automática do setor tem precedência sobre o agente de IA na mesma mensagem.
 			const autoReplySent = await this.checkAndSendAutoResponseMessage(instance, contact, currChat, logger);
 

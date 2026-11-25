@@ -53,6 +53,7 @@ import remoteInboundEventInboxService from "./services/remote-inbound-event-inbo
 import remoteClientService from "./services/remote-client.service";
 import operatorOutboundService from "./services/operator-outbound.service";
 import operatorSendService from "./services/operator-send.service";
+import { startTriageWorker, stopTriageWorker } from "./triage/dispatch";
 import { flushDatabaseIncidentLog, recordDatabaseIncident } from "./utils/database-incident-log";
 import processLogs from "./logs/service";
 import { startOpsAlerts, stopOpsAlerts } from "./services/ops-alerts";
@@ -181,6 +182,7 @@ const server = app.listen(serverPort, () => {
 	messageQueueService.startWorker();
 	internalWhatsappMessageQueueService.startWorker();
 	operatorOutboundService.startWorker();
+	startTriageWorker();
 	remoteInboundEventInboxService.startWorker();
 	remoteSessionMonitorRoutine.start();
 	processLogs.start();
@@ -219,6 +221,7 @@ const shutdown = async (signal: string): Promise<void> => {
 	const graceful = Promise.all([
 		serverClosed,
 		operatorOutboundService.stopAndDrain(30_000),
+		stopTriageWorker(),
 		remoteInboundEventInboxService.stopAndDrain(30_000),
 		messageQueueService.stopAndDrain(30_000)
 	]);

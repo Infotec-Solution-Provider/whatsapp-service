@@ -12,6 +12,7 @@ import { isFunctionalHealthStatus } from "../utils/functional-health-status";
 import messageReactionsService from "./message-reactions.service";
 import { splitWabaWebhook } from "../utils/waba-reaction";
 import { WabaReactionReceiptsService } from "./waba-reaction-receipts.service";
+import { resolveTriageWabaChannel } from "../triage/waba-channel";
 
 interface ValidateEntryResultStatus {
 	type: "status";
@@ -139,12 +140,15 @@ class WABAService {
 			}
 
 			// Encontrar client WABA pela instance
-			const client = await prismaService.wppClient.findFirstOrThrow({
+			let client = await prismaService.wppClient.findFirstOrThrow({
 				where: {
 					instance,
 					type: "WABA"
 				}
 			});
+			if (validated.type === "message") {
+				client = await resolveTriageWabaChannel(client, validated.phoneNumberId, validated.accountId);
+			}
 			logger.log("Client WABA encontrado. id: " + client.id);
 
 			switch (validated.type) {
@@ -181,7 +185,9 @@ class WABAService {
 							where: { wabaId: parsedMsg.wabaId }
 						}));
 
-					if (!!existingMessage) {
+					const recovered = existingMessage && existingMessage.chatId == null && existingMessage.from === parsedMsg.from
+						? await messagesDistributionService.recoverTriageInbound(instance,client.id,existingMessage) : null;
+					if (existingMessage && !recovered) {
 						logger.log("Mensagem WABA já existe no banco de dados, ignorando processamento", {
 							messageId: existingMessage.id,
 							wabaId: existingMessage.wabaId
@@ -190,8 +196,8 @@ class WABAService {
 						return { ignored: true, reason: "Webhook WABA ignorado: mensagem duplicada" };
 					}
 
-					const inserted = await messagesService.insertMessage(parsedMsg);
-					const processed = await messagesDistributionService.processMessage(instance, client.id, inserted);
+					const processed = recovered || await messagesDistributionService.processMessage(instance, client.id,
+						await messagesService.insertMessage(parsedMsg));
 
 					if (processed.contactId) {
 						logger.log("Verificando necessidade de atualizar expiration da conversa");

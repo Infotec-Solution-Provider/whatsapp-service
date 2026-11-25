@@ -7,6 +7,63 @@ datasource db {
   url      = env("WHATSAPP_DATABASE_URL")
 }
 
+model TriageSession {
+  chatId        Int      @id @map("chat_id")
+  instance      String   @db.VarChar(191)
+  channelId     Int      @map("channel_id")
+  contactId     Int      @map("contact_id")
+  botId         Int      @map("bot_id")
+  versionId     Int      @map("version_id")
+  definition    Json
+  state         Json
+  status        String   @db.VarChar(20)
+  deadline      DateTime? @db.DateTime(3)
+  lastMessageId Int      @map("last_message_id")
+  createdAt     DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([status, deadline])
+  @@index([instance, botId, versionId, status])
+  @@index([instance, channelId, createdAt], map: "triage_sessions_channel_started_idx")
+  @@index([instance, channelId, status, updatedAt], map: "triage_sessions_channel_status_idx")
+  @@map("triage_sessions")
+}
+
+model TriageEvent {
+  id        Int      @id @default(autoincrement())
+  instance  String   @db.VarChar(191)
+  chatId    Int      @map("chat_id")
+  eventKey  String   @map("event_key") @db.VarChar(96)
+  kind      String   @db.VarChar(24)
+  nodeId    String?  @map("node_id") @db.VarChar(128)
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  @@unique([instance, eventKey])
+  @@index([instance, chatId, id])
+  @@map("triage_events")
+}
+
+model TriageEffect {
+  id         Int      @id @default(autoincrement())
+  instance   String   @db.VarChar(191)
+  chatId     Int      @map("chat_id")
+  eventId    Int      @map("event_id")
+  position   Int
+  kind       String   @db.VarChar(16)
+  payload    Json
+  status     String   @db.VarChar(20)
+  attempts   Int      @default(0)
+  retryAt    DateTime @default(now()) @map("retry_at") @db.DateTime(3)
+  messageId  Int?     @map("message_id")
+  error      String?  @db.VarChar(128)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@unique([eventId, position])
+  @@index([status, retryAt, id])
+  @@index([instance, chatId, status, id])
+  @@map("triage_effects")
+}
+
 // Written by transactional MySQL triggers, including raw SQL writers.
 model SessionChangeStream {
   instance      String @id @db.VarChar(191)
