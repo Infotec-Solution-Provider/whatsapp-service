@@ -128,7 +128,7 @@ export class TriageTriggers {
 	}
 	private async sector(db: TriageReader, instance: string, sectorId: number, lock: boolean) {
 		const rows = await db.$queryRawUnsafe<{ id: number }[]>(
-			"SELECT id FROM sectors WHERE instance=? AND id=? AND receive_chats=1" + (lock ? " FOR UPDATE" : ""),
+			"SELECT id FROM sectors WHERE instance=? AND id=?" + (lock ? " FOR UPDATE" : ""),
 			instance,
 			sectorId
 		);

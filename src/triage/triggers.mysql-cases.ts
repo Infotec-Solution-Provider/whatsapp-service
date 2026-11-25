@@ -26,6 +26,8 @@ export async function exerciseBotTriggers(
 	assert.deepEqual(await api("GET", path), { revision: 0, rules: [], bots: catalog });
 	await api("GET", path, undefined, "supervisor", 403);
 	await api("GET", path, undefined, "outsider", 404);
+	const inactive = await api("GET", "/sectors/13/bot-triggers");
+	assert.deepEqual(inactive.bots, [], "Gestão de um setor sem recebimento deve abrir com catálogo vazio.");
 	await api("PUT", path, {}, "external", 403);
 	const rules = [
 		{ type: "keyword", botId, keywords: ["Orçamento Geral", "vendas"] },
