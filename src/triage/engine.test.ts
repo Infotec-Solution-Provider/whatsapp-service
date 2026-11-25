@@ -51,11 +51,11 @@ test("texto é preservado no resumo e comparação ignora espaço, caixa e acent
 test("opções inválidas e pedido de pessoa encaminham para a contingência", () => {
 	const flow = template();
 	const invalid = { type: "reply", text: "99" } as const;
-	const turns = simulateTriage(flow, [invalid, invalid, invalid], now);
+	const turns = simulateTriage(flow, [invalid, invalid], now);
 	assert.equal(turns[1]!.state.invalidAttempts, 1);
-	assert.match(turns[2]!.messages[0]!, /2\. Suporte/);
-	assert.deepEqual(turns[3]!.handoff, { sectorId: 13, reason: "invalid" });
-	assert.equal(turns[3]!.state.deadline, null);
+	assert.match(turns[1]!.messages[0]!, /2\. Suporte/);
+	assert.deepEqual(turns[2]!.handoff, { sectorId: 13, reason: "invalid" });
+	assert.equal(turns[2]!.state.deadline, null);
 	assert.deepEqual(simulateTriage(flow, [{ type: "reply", text: "Falar com atendente!" }], now)[1]!.handoff, { sectorId: 13, reason: "requested" });
 	assert.deepEqual(advanceTriage(flow, null, { type: "start", text: "atendente" }, now).handoff, { sectorId: 13, reason: "requested" });
 });

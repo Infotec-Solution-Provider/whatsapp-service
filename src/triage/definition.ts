@@ -257,7 +257,7 @@ export function createTriageTemplate(sectors: { sales?: number; support?: number
 		],
 		fallbackSectorId: sectors.fallback ?? null,
 		timeoutMinutes: 30,
-		maxInvalid: 3,
+		maxInvalid: 2,
 		schedule: { timezone: "America/Sao_Paulo", days: [1, 2, 3, 4, 5].map((day) => ({ day, start: "08:00", end: "18:00" })) }
 	};
 }
