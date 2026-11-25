@@ -11,7 +11,7 @@ Esta integração conecta a tela **Canais WhatsApp** e as chamadas na conversa a
 
 ## Operar
 
-Em **Canais WhatsApp → Configurar sessões**, selecionar o canal remoto, escolher uma principal Baileys ou Zapo e preparar um shadow. Para um grupo existente, conferir o número esperado. Usar o assistente do grupo para ler cada QR. A promoção de uma sessão exige pareamento do mesmo número e capacidade de envio.
+Em **Canais WhatsApp**, usar **Gerenciar sessões do canal** na linha do número desejado, escolher uma principal Baileys ou Zapo e preparar um shadow. Para um grupo existente, conferir o número esperado. Usar o assistente do grupo para ler cada QR. A promoção de uma sessão exige pareamento do mesmo número e capacidade de envio.
 
 Grupos novos começam em **Somente comparar**. Depois de validar o número pareado e a cobertura, **Entregar também pelo shadow** permite usar a cópia recebida por uma das sessões para o mesmo canal. O host verifica se o receptor aceita a mesma mensagem de forma idempotente durante a transição. Esta opção controla o recebimento no CRM. A promoção troca a sessão responsável pelos envios.
 
