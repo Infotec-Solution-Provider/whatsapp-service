@@ -1194,3 +1194,60 @@ model InstanceMigrationMap {
   @@index([runId, entity])
   @@map("instance_migration_maps")
 }
+
+model TriageChannel {
+  instance        String  @db.VarChar(128)
+  channelId       Int     @map("channel_id")
+  revision        Int
+  name            String  @db.VarChar(120)
+  definition      String  @db.LongText
+  editedBy        Int     @map("edited_by")
+  editedAt        DateTime @default(now()) @map("edited_at")
+  activeVersionId Int?    @map("active_version_id")
+  paused          Boolean @default(true)
+  versions        TriageVersion[]
+
+  @@id([instance, channelId])
+  @@map("triage_channels")
+}
+
+model TriageVersion {
+  id         Int      @id @default(autoincrement())
+  instance   String   @db.VarChar(128)
+  channelId  Int      @map("channel_id")
+  number     Int
+  name       String   @db.VarChar(120)
+  definition String   @db.LongText
+  createdAt  DateTime @default(now()) @map("created_at")
+  createdBy  Int      @map("created_by")
+  channel    TriageChannel @relation(fields: [instance, channelId], references: [instance, channelId])
+
+  @@unique([instance, channelId, number])
+  @@map("triage_versions")
+}
+
+model TriageGrant {
+  instance  String @db.VarChar(128)
+  channelId Int    @map("channel_id")
+  userId    Int    @map("user_id")
+  userName  String @map("user_name") @db.VarChar(191)
+
+  @@id([instance, channelId, userId])
+  @@index([instance, userId])
+  @@map("triage_grants")
+}
+
+model TriageAudit {
+  id           Int      @id @default(autoincrement())
+  instance     String   @db.VarChar(128)
+  channelId    Int      @map("channel_id")
+  actorId      Int      @map("actor_id")
+  action       String   @db.VarChar(20)
+  versionId    Int?     @map("version_id")
+  previousVersionId Int? @map("previous_version_id")
+  targetUserId Int?     @map("target_user_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([instance, channelId, id])
+  @@map("triage_audit")
+}

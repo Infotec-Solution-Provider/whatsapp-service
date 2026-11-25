@@ -7,6 +7,7 @@ import express, { NextFunction, Request, Response } from "express";
 import "express-async-errors";
 import cron from "node-cron";
 import autoResponseController from "./controllers/auto-response.controller";
+import { createTriageRouter } from "./controllers/triage.controller";
 import chatsController from "./controllers/chats.controller";
 import sessionChangesController from "./controllers/session-changes.controller";
 import retainSessionChanges from "./routines/session-change-retention.routine";
@@ -98,6 +99,7 @@ app.use("/api", (_req, res, next) => {
 
 app.use("/api/internal/admin", express.json({ limit: "1mb" }));
 app.use("/api/whatsapp/meta", metaManagementController);
+app.use("/api/whatsapp/triage", createTriageRouter());
 app.use(express.json({ limit: "2gb" }));
 app.use(express.urlencoded({ extended: true, limit: "2gb" }));
 app.use(createAdminRouter());

@@ -1,5 +1,6 @@
 import prismaService from "./prisma.service";
 import { META_MANAGEMENT_PARAMETER } from "../parameters/meta-management";
+import { resolveTriageFlag, TRIAGE_FLAG } from "../parameters/triage-feature";
 
 const DEFAULT_FEATURE_PARAMETERS: Record<string, string> = {
 	"monitor:wait_warning_minutes": "30",
@@ -119,13 +120,15 @@ class ParametersService {
 
 		// prioridade: instancia < setor < usuario
 		const metaSetting = instanceParams.filter((row) => row.key === META_MANAGEMENT_PARAMETER && row.userId === null && row.sectorId === null).at(-1);
+		const triageSetting = instanceParams.filter((row) => row.key === TRIAGE_FLAG && row.userId === null && row.sectorId === null).at(-1);
 		const mergedParams = {
 			...DEFAULT_FEATURE_PARAMETERS,
 			...toParamMap(instanceParams),
 			...toParamMap(sectorParams),
 			...toParamMap(userParams),
 			// Only operations may enable this feature, always at instance scope.
-			[META_MANAGEMENT_PARAMETER]: String(metaSetting?.value === "true")
+			[META_MANAGEMENT_PARAMETER]: String(metaSetting?.value === "true"),
+			[TRIAGE_FLAG]: String(resolveTriageFlag(triageSetting?.value))
 		};
 
 		return mergedParams;

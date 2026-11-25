@@ -1,5 +1,11 @@
 # SQL direto no banco do tenant em homolog
 
+### Bot de triagem por canal
+
+Antes de disponibilizar o editor, aplicar os DDL aditivos de autoria e execução de `prisma/tenant-sql/` em cada banco operacional preparado do registry de homologação. O modo central usa as migrações Prisma correspondentes. O prefixo das tabelas no modo por tenant é `wpp_runtime_triage_`.
+
+No processo exclusivo `homolog-whatsapp`, definir `INPULSE_ENVIRONMENT=homolog` e `TRIAGE_HOMOLOG_ENABLED=true` para disponibilizar o recurso em todas as empresas desse ambiente. O mesmo resolvedor habilita a API e o parâmetro de sessão consumido pelo menu. Cada canal começa sem bot publicado. O administrador delega o canal aos responsáveis e a publicação da primeira versão inicia a triagem para novas conversas. Remover o override do processo restaura a escolha por instância em `enable_whatsapp_triage`, desabilitada por padrão. A configuração de homologação dispensa gravar parâmetros nos bancos dos clientes.
+
 O modo `WHATSAPP_STORAGE=tenant-sql` usa mysql2 para ler e gravar os dados operacionais do WhatsApp nos bancos CRM dos tenants. O módulo central Prisma não é carregado nesse modo. Os contratos TypeScript e os metadados do schema continuam disponíveis para compatibilidade dos chamadores; nenhuma consulta desse domínio passa pelo Prisma. Logs permanecem no banco dedicado da aplicação.
 
 Esta primeira ativação aceita somente o catálogo de homolog: `homolog` → `127.0.0.1:3306/homolog-crm` e `suprimaxxi` → `127.0.0.1:3306/homolog-crm-suprimaxxi`. Não aceita destinos de produção. A credencial é lida em memória do arquivo privado do ambiente; o registry não contém senha. Não há criação de tabelas ou migração no startup.
