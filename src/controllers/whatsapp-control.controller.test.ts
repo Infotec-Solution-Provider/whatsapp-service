@@ -51,6 +51,7 @@ test("management and call endpoints resolve a tenant channel, peer and operator 
 	};
 	stub("../middlewares/is-authenticated.middleware", authenticate);
 	stub("../middlewares/require-session-monitoring.middleware", ((_req, _res, next) => next()) as RequestHandler);
+	stub("../services/remote-client.service", { hasRunningChannel: (instance: string, clientId: number) => instance === "acme" && clientId === 7 });
 	let assigned = true;
 	stub("../services/prisma.service", {
 		wppClient: { findFirst: async ({ where }: { where: { id: number; instance: string; type: string; isActive: boolean } }) => {
@@ -64,19 +65,26 @@ test("management and call endpoints resolve a tenant channel, peer and operator 
 		wppMessage: { findFirst: async () => ({ clientId: 7 }) }
 	});
 	const router = (require("./whatsapp-control.controller") as typeof import("./whatsapp-control.controller")).default;
-	const server = express().use(router).use(((err, _req, res, _next) =>
+	const remoteEvents = (require("./remote-client.controller") as typeof import("./remote-client.controller")).default;
+	const server = express().use(router, remoteEvents.router).use(((err, _req, res, _next) =>
 		res.status(err.statusCode ?? 403).json({ message: "Denied" })) as express.ErrorRequestHandler).listen(0, "127.0.0.1");
 	await once(server, "listening");
 	t.after(() => server.close());
 	const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/whatsapp`;
 	const admin = { authorization: "ADMIN", "Content-Type": "application/json" };
 	const topology = base + "/session-monitor/clients/7/topology";
+	const capability = base + "/remote/7/event/ingress-capability";
+	assert.deepEqual(await (await fetch(capability + "?instance=acme")).json(), { deduplication: "client-stanza-v1" });
+	assert.equal((await fetch(capability + "?instance=another")).status, 404);
 	assert.equal((await fetch(topology)).status, 401);
 	assert.equal((await fetch(topology, { headers: { authorization: "USER" } })).ok, false);
 	assert.equal(forwarded.length, 0);
 	assert.equal((await fetch(topology + "/group", { method: "PUT", headers: admin, body: JSON.stringify({ expectedPhone: "123" }) })).status, 409);
 	assert.equal((await fetch(topology + "/shadows", { method: "POST", headers: admin, body: JSON.stringify({ library: "WHATSMEOW", instance: "other" }) })).status, 201);
 	assert.deepEqual(forwarded.at(-1)?.body, { library: "WHATSMEOW" });
+	assert.equal((await fetch(topology + "/delivery", { method: "PUT", headers: admin, body: JSON.stringify({ enabled: "true", expectedPrimarySessionId: "s1" }) })).status, 400);
+	assert.equal((await fetch(topology + "/delivery", { method: "PUT", headers: admin, body: JSON.stringify({ enabled: true, expectedPrimarySessionId: "s1" }) })).status, 200);
+	assert.deepEqual(forwarded.at(-1)?.body, { enabled: true, expectedPrimarySessionId: "s1" });
 	const headers = { ...admin, authorization: "USER", "x-whatsapp-call-tab": randomUUID() };
 	const calls = base + "/chats/5/calls";
 	assert.equal((await fetch(calls + "/start", { method: "POST", headers, body: JSON.stringify({ video: false, peerJid: "other", clientId: 9 }) })).status, 200);

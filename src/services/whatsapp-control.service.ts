@@ -79,11 +79,12 @@ export async function operateChatCall(session: SessionData, chatId: number, tab:
 	// A chat can be transferred while ringing. Recheck assignment on every control and media poll.
 	const chat = await database.wppChat.findFirst({
 		where: { id: chatId, instance: session.instance, isFinished: false, userId: session.userId },
-		select: { contact: { select: { instance: true, phone: true, whatsappId: true, isBlocked: true, isDeleted: true } },
+		select: { contact: { select: { instance: true, phone: true, whatsappId: true, isBlocked: true, isDeleted: true, isOnlyAdmin: true } },
 			sector: { select: { defaultClientId: true } } }
 	});
 	if (!chat) throw new WhatsAppControlError(404, "Atendimento ativo não encontrado para este operador.");
-	if (!chat.contact || chat.contact.instance !== session.instance || chat.contact.isBlocked || chat.contact.isDeleted) return disabled();
+	if (!chat.contact || chat.contact.instance !== session.instance || chat.contact.isBlocked || chat.contact.isDeleted ||
+		(chat.contact.isOnlyAdmin && session.role !== "ADMIN")) return disabled();
 	const peerJid = callPeer(chat.contact.phone, chat.contact.whatsappId);
 	if (!peerJid) return disabled();
 	const last = await database.wppMessage.findFirst({

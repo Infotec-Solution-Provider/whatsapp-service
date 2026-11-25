@@ -17,6 +17,10 @@ import { withDatabaseTenant } from "../utils/database-tenant-context";
 import { AsyncConcurrencyLimiter, AsyncKeyedSequencer } from "../utils/async-concurrency-limiter";
 
 class RemoteClientService {
+	public hasRunningChannel(instance: string, clientId: number): boolean {
+		const client = whatsappService.getClient(clientId);
+		return client instanceof RemoteWhatsappClient && client.instance === instance;
+	}
 	private readonly receiptSequencer = new AsyncKeyedSequencer();
 	private readonly receiptProcessing = new AsyncConcurrencyLimiter(4);
 	private async withClientTenant<T>(clientId: number, execute: () => Promise<T>): Promise<T> {

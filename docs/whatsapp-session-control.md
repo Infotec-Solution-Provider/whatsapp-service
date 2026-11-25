@@ -13,6 +13,8 @@ Esta integração conecta a tela **Canais WhatsApp** e as chamadas na conversa a
 
 Em **Canais WhatsApp → Configurar sessões**, selecionar o canal remoto, escolher uma principal Baileys ou Zapo e preparar um shadow. Para um grupo existente, conferir o número esperado. Usar o assistente do grupo para ler cada QR. A promoção de uma sessão exige pareamento do mesmo número e capacidade de envio.
 
+Grupos novos começam em **Somente comparar**. Depois de validar o número pareado e a cobertura, **Entregar também pelo shadow** permite usar a cópia recebida por uma das sessões para o mesmo canal. O host verifica se o receptor aceita a mesma mensagem de forma idempotente durante a transição. Esta opção controla o recebimento no CRM. A promoção troca a sessão responsável pelos envios.
+
 Nas conversas externas abertas e atribuídas ao operador, os controles de chamadas aparecem quando o canal oferece o recurso. O servidor determina o canal pela última mensagem da conversa que tenha canal ou, em um atendimento novo, pelo padrão do setor. O destino é obtido do contato da conversa. Uma única aba assume a chamada. A troca de responsável pela conversa revoga o acesso da aba anterior nas solicitações seguintes.
 
 Validar com uma conta e um celular de homologação. Conferir áudio nos dois sentidos, chamada recebida e originada, recusa, câmera nas duas pontas e liberação do microfone ao desligar. Conferir também que uma promoção preserva o canal do CRM e que mensagens das duas sessões aparecem uma única vez.
