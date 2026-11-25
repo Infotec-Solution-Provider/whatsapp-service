@@ -13,7 +13,7 @@ export interface FlowScenario {
 	querySamples?: Record<string, Record<string, unknown>[]>;
 }
 
-export interface SimulationInput { contactId: number; messageBody?: string; scenario?: FlowScenario }
+export interface SimulationInput { contactId: number; channelId?: number; messageBody?: string; scenario?: FlowScenario }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -26,6 +26,7 @@ const flags = ["isOnlyAdmin", "customerStatus", "customerId", "loyaltyUserId", "
 export function validateSimulationInput(input: unknown): asserts input is SimulationInput {
 	const fail = (field: string): never => { throw new FlowSimulationError(400, "INVALID_SIMULATION_INPUT", `Campo inválido no cenário: ${field}.`); };
 	if (!isRecord(input) || !isId(input["contactId"])) return fail("contato");
+	if (input["channelId"] !== undefined && !isId(input["channelId"])) fail("canal");
 	if (input["messageBody"] !== undefined && (typeof input["messageBody"] !== "string" || input["messageBody"].length > 8192)) fail("mensagem");
 	const s = input["scenario"];
 	if (s === undefined) return;

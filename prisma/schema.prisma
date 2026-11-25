@@ -9,6 +9,7 @@ datasource db {
 
 model TriageSession {
   chatId        Int      @id @map("chat_id")
+  runId         Int?     @map("run_id")
   instance      String   @db.VarChar(191)
   channelId     Int      @map("channel_id")
   contactId     Int      @map("contact_id")
@@ -27,6 +28,49 @@ model TriageSession {
   @@index([instance, channelId, createdAt], map: "triage_sessions_channel_started_idx")
   @@index([instance, channelId, status, updatedAt], map: "triage_sessions_channel_status_idx")
   @@map("triage_sessions")
+}
+
+// One immutable origin per activation. Completed snapshots remain available after re-entry.
+model TriageRun {
+  id           Int      @id @default(autoincrement())
+  instance     String   @db.VarChar(191)
+  chatId       Int      @map("chat_id")
+  originChatId Int?     @map("origin_chat_id")
+  channelId    Int      @map("channel_id")
+  botId        Int      @map("bot_id")
+  versionId    Int      @map("version_id")
+  eventKey     String   @map("event_key") @db.VarChar(96)
+  kind         String   @db.VarChar(20)
+  actorId      Int?     @map("actor_id")
+  finalState   Json?    @map("final_state")
+  finalStatus  String?  @map("final_status") @db.VarChar(20)
+  createdAt    DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  endedAt      DateTime? @map("ended_at") @db.DateTime(3)
+
+  @@unique([instance, eventKey])
+  @@index([instance, channelId, createdAt])
+  @@index([instance, chatId, id])
+  @@map("triage_runs")
+}
+
+model TriageTriggerNotice {
+  id          Int      @id @default(autoincrement())
+  instance    String   @db.VarChar(191)
+  chatId      Int      @map("chat_id")
+  kind        String   @db.VarChar(20)
+  channelId   Int      @map("channel_id")
+  sectorId    Int      @map("sector_id")
+  userId      Int?     @map("user_id")
+  resultId    Int?     @map("result_id")
+  messageId   Int      @map("message_id")
+  versionId   Int      @map("version_id")
+  retryAt     DateTime @default(now()) @map("retry_at") @db.DateTime(3)
+  attempts    Int      @default(0)
+  status      String   @default("pending") @db.VarChar(20)
+
+  @@index([instance, chatId, id])
+  @@index([status, retryAt, id])
+  @@map("triage_trigger_notices")
 }
 
 model TriageEvent {
@@ -743,6 +787,7 @@ enum WppMessageFlowStepType {
   SEND_TO_SECTOR_USER
   SEND_TO_SPECIFIC_USER
   CHECK_CUSTOMER_CAMPAIGN_TYPE
+  START_BOT
 
   @@map("message_flow_step_type")
 }
@@ -1334,4 +1379,16 @@ model TriageAudit {
 
   @@index([instance, channelId, id])
   @@map("triage_audit")
+}
+
+model TriageTriggerSet {
+  instance String   @db.VarChar(128)
+  sectorId Int      @map("sector_id")
+  revision Int
+  rules    String   @db.LongText
+  editedBy Int      @map("edited_by")
+  editedAt DateTime @default(now()) @map("edited_at")
+
+  @@id([instance, sectorId])
+  @@map("triage_trigger_sets")
 }

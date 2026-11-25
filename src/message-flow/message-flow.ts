@@ -2,7 +2,8 @@ import ProcessingLogger from "../utils/processing-logger";
 
 import { WppContact, WppMessage } from "@prisma/client";
 import { applyFlowAiAgentId, FLOW_AI_AGENT_CONTEXT_KEY } from "../utils/ai-agent-request";
-import { BaseStep, ChatPayload, StepContext, StepResult } from "./base/base.step";
+import { BaseStep, ChatPayload, FLOW_ACTIONS, FlowActions, StepContext, StepResult } from "./base/base.step";
+import StartBotStep from "./steps/start-bot.step";
 
 type FlowLogger = Pick<ProcessingLogger, "log" | "failed">;
 
@@ -17,13 +18,19 @@ export default class MessageFlow {
 	private steps: Map<number, BaseStep> = new Map(); // Map<stepNumber, BaseStep>
 	private activeFlows: Map<number, Promise<ChatPayload>> = new Map();
 
-	public async getChatPayload(logger: FlowLogger, contact: WppContact, message: WppMessage): Promise<ChatPayload> {
+	public hasStartBot(): boolean {
+		return Array.from(this.steps.values()).some(step => step instanceof StartBotStep);
+	}
+
+	public async getChatPayload(logger: FlowLogger, contact: WppContact, message: WppMessage, actions?: FlowActions): Promise<ChatPayload> {
 		logger.log("╔═══════════════════════════════════════════════════════════");
 		logger.log("║ INICIANDO PROCESSAMENTO DE FLUXO");
 		logger.log(`║ Contato: ${contact.name || contact.phone} (ID: ${contact.id})`);
 		logger.log(`║ Steps disponíveis: ${this.steps.size} [${Array.from(this.steps.keys()).join(', ')}]`);
 		logger.log("╚═══════════════════════════════════════════════════════════");
 
+		// Each triggering event owns its atomic start, even when two messages arrive for the same contact.
+		if (actions) return this.processFlow(logger, contact, message, actions);
 		const ongoingFlow = this.getOngoingFlow(contact.id);
 		if (ongoingFlow) {
 			logger.log(`⚠ Fluxo já em andamento para contato ${contact.id}. Aguardando conclusão...`);
@@ -49,10 +56,10 @@ export default class MessageFlow {
 		return null;
 	}
 
-	private async processFlow(logger: FlowLogger, contact: WppContact, message: WppMessage): Promise<ChatPayload> {
+	private async processFlow(logger: FlowLogger, contact: WppContact, message: WppMessage, actions?: FlowActions): Promise<ChatPayload> {
 		try {
 			let currentStepNumber = 1; // Começa sempre na etapa #1
-			let context: StepContext = { logger, contact, message };
+			let context: StepContext = { logger, contact, message, ...(actions && { [FLOW_ACTIONS]: actions }) };
 			let iterationCount = 0;
 			const maxIterations = 50; // Proteção contra loops infinitos
 

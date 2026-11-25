@@ -39,7 +39,11 @@ export function validateFlowDefinition(steps: readonly FlowStepDefinition[]): st
 		const connections = record(step.connections);
 		if (step.connections !== undefined && step.connections !== null && !connections)
 			errors.push(`Step #${step.stepNumber} connections must be an object`);
-		if (step.type === "CONDITION" || step.type === "CHECK_USER_ONLINE") {
+		if (step.type === "START_BOT") {
+			if (!positive(record(step.config)?.["botId"])) errors.push(`Etapa ${step.stepNumber}: selecione um bot.`);
+			if (!positive(step.fallbackStepId)) errors.push(`Etapa ${step.stepNumber}: escolha a saída para bot indisponível.`);
+			if (step.nextStepId != null) errors.push(`Etapa ${step.stepNumber}: o acionamento do bot encerra este caminho.`);
+		} else if (step.type === "CONDITION" || step.type === "CHECK_USER_ONLINE") {
 			for (const branch of ["onTrue", "onFalse"]) {
 				target(connections?.[branch] ?? step.nextStepId, branch);
 			}
@@ -53,15 +57,24 @@ export function validateFlowDefinition(steps: readonly FlowStepDefinition[]): st
 			target(step.nextStepId, "continuation");
 		}
 	}
-	const reachable = new Set<number>();
-	const pending = [1];
-	while (pending.length) {
-		const number = pending.pop()!;
-		if (reachable.has(number)) continue;
-		reachable.add(number);
-		pending.push(...(edges.get(number) ?? []));
+	const humanTargets = new Set(active.filter(step => ["ASSIGN", "SEND_TO_ADMIN", "SEND_TO_SECTOR_USER", "CHECK_ONLY_ADMIN", "CHECK_LOALTY", "CHECK_AVAILABLE_USERS"].includes(step.type)).map(step => step.stepNumber));
+	function reachesAssignment(from: number): boolean {
+		const visited = new Set<number>();
+		const pending = [from];
+		while (pending.length) {
+			const number = pending.pop()!;
+			if (humanTargets.has(number)) return true;
+			if (visited.has(number)) continue;
+			visited.add(number);
+			pending.push(...(edges.get(number) ?? []));
+		}
+		return false;
 	}
-	if (!active.some((step) => reachable.has(step.stepNumber) && ["ASSIGN", "SEND_TO_ADMIN", "SEND_TO_SECTOR_USER", "CHECK_ONLY_ADMIN", "CHECK_LOALTY", "CHECK_AVAILABLE_USERS"].includes(step.type)))
+	for (const step of active) {
+		if (step.type === "START_BOT" && positive(step.fallbackStepId) && !reachesAssignment(step.fallbackStepId))
+			errors.push(`Etapa ${step.stepNumber}: a contingência deve alcançar um destino de atendimento.`);
+	}
+	if (!reachesAssignment(1))
 		errors.push("Flow must contain a reachable assignment step");
 	return [...new Set(errors)];
 }

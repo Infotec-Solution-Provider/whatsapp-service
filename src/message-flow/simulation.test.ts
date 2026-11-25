@@ -34,6 +34,8 @@ const session = (id: number): UserOnlineSession => ({
 	data: { instance: tenant, name: "", role: "AMBOS", sectorId: sector, userId: id }, isPaused: false, onlineTokens: ["online"]
 });
 const base: SimulationReads = {
+	previewBot: async (instance, sectorId, channelId, botId) => instance === tenant && sectorId === sector && channelId === 9 && botId === 9
+		? { id: botId, name: "Recepção", version: 3 } : null,
 	contact: async () => contact, resolveCustomer: simulationReads.resolveCustomer,
 	sessions: async () => [session(11), session(22)], eligible: async (_instance, ids) => new Set(ids),
 	chatCounts: async () => new Map([[11, 7], [22, 1]]), loyalty: async () => 33,
@@ -52,6 +54,17 @@ const sampleFlow: FlowStepDefinition[] = [
 	assign, admin
 ];
 async function main() {
+	const botFlow = [{ type: "START_BOT", stepNumber: 1, fallbackStepId: 3, config: { botId: 9 } }, admin];
+	const simulatedBot = await run(botFlow, { channelId: 9 });
+	assert.deepEqual(simulatedBot.destination, { kind: "bot", id: 9, name: "Recepção", version: 3 });
+	assert.deepEqual(simulatedBot.trace.map(entry => entry.stepNumber), [1]);
+	for (const input of [{ channelId: 8 }, {}]) {
+		const unavailable = await run(botFlow, input);
+		assert.equal(unavailable.destination?.kind, "admin");
+		assert.deepEqual(unavailable.trace.map(entry => entry.stepNumber), [1, 3]);
+	}
+	await assert.rejects(run(botFlow, { channelId: 0 }), err => err instanceof FlowSimulationError && err.status === 400);
+	await assert.rejects(run([{ ...botFlow[0]!, fallbackStepId: null }, admin]), err => err instanceof FlowSimulationError && err.status === 422);
 	const odim = buildOdimInboundFlow({ instance: tenant, sectorId: sector, clientId: 20, assigneeId: 11, fallbackUserId: 22 });
 	const linked = await run(odim.steps);
 	assert.deepEqual(linked.destination, { kind: "user", id: 33, name: "Nome 33" });

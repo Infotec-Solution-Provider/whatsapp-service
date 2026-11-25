@@ -35,6 +35,9 @@ async function prepare(db: Connection, schema: string, prefix: string) {
 		await db.query(ddl.replace("CREATE TABLE `" + table + "`", "CREATE TABLE `" + prefix + table + "`"));
 	}
 	for (const ddl of (prefix ? runtimeMigration : centralMigration).split(";").filter(text => text.trim())) await db.query(ddl);
+	const grantBotStep = readFileSync(resolve(prefix ? "prisma/tenant-sql/20261125211000_start_bot_step.sql"
+		: "prisma/migrations/20261125211000_start_bot_step/migration.sql"), "utf8");
+	for (const ddl of grantBotStep.split(";").filter(text => text.trim())) await db.query(ddl);
 }
 async function run() {
 	const admin = await mysql.createConnection(connection);
@@ -71,7 +74,9 @@ async function run() {
 				return ids.filter(id => instance === "a" && [5, 12, 13].includes(id)).map(CODIGO => ({
 					CODIGO, SETOR: CODIGO === 5 ? 1 : 3, ATIVO: "SIM", NIVEL: CODIGO === 13 ? "ADMIN" : "OPERADOR"
 				}));
-			});
+			}, async (instance, sector) => instance === "a" && sector === 1 ? [
+				{ botId: 9, channelId: 9, name: "Recepção", channelName: "Atendimento", version: 2, versionId: 21 }
+			] : []);
 			const state = () => a(() => service.list("a", 1));
 			const create = (name: string, steps: unknown) => a(() => service.create("a", 1, { name, steps }));
 			const activate = (id: number, revision: number, activeFingerprint: string) => a(() => service.activate("a", 1, id, { revision, activeFingerprint }));
@@ -152,6 +157,16 @@ async function run() {
 			const odimPublished = await a(() => service.activate("a", 3, odimDraft.id, { revision: odimDraft.revision, activeFingerprint: odimBefore.active.fingerprint }));
 			assert.deepEqual(odimPublished.active.steps, odimBefore.active.steps);
 			assert(odimPublished.flows.some(flow => flow.name === odim.description));
+			const botSteps = [{ type: "START_BOT", stepNumber: 1, config: { botId: 9 }, fallbackStepId: 2 },
+				{ type: "SEND_TO_ADMIN", stepNumber: 2 }];
+			const draftBot = await create("Recepção pelo gestor", botSteps);
+			const publishedBot = await activate(draftBot.id, draftBot.revision, recovered.active.fingerprint);
+			assert.equal(publishedBot.active.steps[0]?.type, "START_BOT");
+			assert.equal((await state()).active.steps[0]?.fallbackStepId, 2);
+			const foreign = await b(() => service.create("b", sectorB, { name: "Bot alheio", steps: botSteps }));
+			const foreignLibrary = await b(() => service.list("b", sectorB));
+			await assert.rejects(b(() => service.activate("b", sectorB, foreign.id,
+				{ revision: foreign.revision, activeFingerprint: foreignLibrary.active.fingerprint })), status(422));
 			console.log(`Studio integration passed: ${native ? "tenant-sql with overlapping IDs" : "central Prisma"}`);
 		} finally {
 			await db?.$disconnect();

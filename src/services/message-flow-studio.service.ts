@@ -7,6 +7,7 @@ import { messageFlowCache } from "../message-flow/message-flow-cache";
 import { StepRegistry } from "../message-flow/step-registry";
 import { inboundFlowFingerprint } from "./inbound-flow-installation";
 import database from "./prisma.service";
+import { triageTriggers } from "../triage/triggers";
 
 export interface StudioStep extends FlowStepDefinition { description?: string | null }
 export interface StudioFlow { id: number; name: string; revision: number; steps: StudioStep[] }
@@ -174,9 +175,17 @@ const json = (value: unknown) => value as Prisma.InputJsonValue;
 export class MessageFlowStudioService {
 	constructor(private readonly db: typeof database = database,
 		private readonly invalidate: (instance: string, sectorId: number) => void = (instance, sector) => messageFlowCache.invalidate(instance, sector),
-		private readonly operators = distributionReads.operators) {}
+		private readonly operators = distributionReads.operators,
+		private readonly listPublishedBots = (instance: string, sector: number) => triageTriggers.catalog(instance, sector, this.db)) {}
 
 	private async checkDestinations(scope: Scope, steps: StudioStep[]) {
+		const botIds = steps.filter(step => step.enabled !== false && step.type === "START_BOT")
+			.map(step => object(step.config) ? step.config["botId"] : null);
+		if (botIds.length) {
+			const bots = await this.listPublishedBots(scope.instance, scope.sectorId);
+			if (botIds.some(id => !bots.some(bot => bot.botId === id)))
+				throw invalid("Selecione um bot publicado em um canal deste setor.");
+		}
 		const assignments = steps.filter(step => step.enabled !== false && step.type === "ASSIGN")
 			.map(step => object(step.config) ? step.config : {});
 		const wallets = [...new Set(assignments.map(config => config["walletId"]).filter(positive))];

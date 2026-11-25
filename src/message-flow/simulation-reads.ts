@@ -6,8 +6,11 @@ import { ContactCustomerResolutionService } from "../services/contact-customer-r
 import type { ContactCustomerResolutionResult } from "../services/contact-customer-resolution.service";
 import { distributionReads, FlowDistributionReads } from "./distribution-reads";
 import type { FlowScenario } from "./simulation-scenario";
+import type { FlowBotReference } from "./base/base.step";
+import { triageTriggers } from "../triage/triggers";
 
 export interface SimulationReads extends FlowDistributionReads {
+	previewBot(instance: string, sectorId: number, channelId: number, botId: number): Promise<FlowBotReference | null>;
 	contact(instance: string, id: number): Promise<WppContact | null>;
 	resolveCustomer(contact: WppContact, sectorId: number): Promise<ContactCustomerResolutionResult>;
 	walletName(instance: string, id: number): Promise<string | null>;
@@ -15,6 +18,11 @@ export interface SimulationReads extends FlowDistributionReads {
 
 export const simulationReads: SimulationReads = {
 	...distributionReads,
+	async previewBot(instance, sectorId, channelId, botId) {
+		const bots = await triageTriggers.catalog(instance, sectorId);
+		const bot = bots.find(item => item.channelId === channelId && item.botId === botId);
+		return bot ? { id: bot.botId, name: bot.name, version: bot.version } : null;
+	},
 	contact: (instance, id) => db.wppContact.findFirst({ where: { instance, id, isDeleted: false } }),
 	async walletName(instance, id) {
 		const wallet = await db.wppWallet.findFirst({ where: { instance, id }, select: { name: true } });

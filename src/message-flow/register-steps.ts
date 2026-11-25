@@ -14,12 +14,20 @@ import CheckUserOnlineStep from "./steps/check-user-online.step";
 import SendToAdminStep from "./steps/send-to-admin.step";
 import SendToSectorUserStep from "./steps/send-to-sector-user.step";
 import AiAgentStep from "./steps/ai-agent.step";
+import StartBotStep from "./steps/start-bot.step";
 
 /**
  * Registra todos os steps disponíveis no sistema.
  * Este arquivo é carregado automaticamente ao iniciar a aplicação.
  */
 export function registerAllSteps(): void {
+	StepRegistry.register("START_BOT", StartBotStep, {
+		description: "Inicia o bot publicado para o canal de atendimento",
+		requiredConfig: ["botId"],
+		validateConfig: (config) => {
+			if (!Number.isSafeInteger(config["botId"]) || config["botId"] <= 0) throw Error("Selecione um bot válido.");
+		}
+	});
 	// ===== BASE STEPS (Genéricos) =====
 
 	StepRegistry.register("CONDITION", ConditionStep, {

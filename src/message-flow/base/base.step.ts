@@ -37,7 +37,15 @@ export interface StepConfig {
 	fallbackStepNumber?: number; // Posição alternativa em caso de erro
 }
 
+export interface FlowBotReference { id: number; name: string; version: number }
+export interface FlowActions {
+	startBot(botId: number): Promise<FlowBotReference | null>;
+}
+// User-defined QUERY variables are string keys. Keep execution capabilities outside that namespace.
+export const FLOW_ACTIONS = Symbol("message-flow-actions");
+
 export interface StepContext {
+	[FLOW_ACTIONS]?: FlowActions;
 	message: WppMessage;
 	contact: WppContact;
 	logger: Pick<ProcessingLogger, "log" | "failed">;
@@ -58,6 +66,7 @@ export interface StepResult {
 }
 
 export interface ChatPayload {
+	startedBot?: FlowBotReference;
 	instance: string;
 	type: WppChatType;
 	userId?: number | null;
