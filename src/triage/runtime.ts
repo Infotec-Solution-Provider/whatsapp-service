@@ -1,3 +1,4 @@
+import { openChatForChannel } from "../services/chat-channel-scope";
 import { Prisma, TriageSession, WppChat, WppContact, WppMessage } from "@prisma/client";
 import db from "../services/prisma.service";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
@@ -32,28 +33,6 @@ async function channelOf(instance: string, chatId: number) {
 export function noTriageTables(error: unknown) {
 	const code = (error as { code?: string } | null)?.code;
 	return code === "P2021" || code === "ER_NO_SUCH_TABLE";
-}
-
-export async function openChatForChannel(
-	tx: Pick<Tx, "wppChat" | "triageSession">,
-	instance: string,
-	contactId: number,
-	channelId: number,
-	sectorIds: number[]
-) {
-	const candidates = await tx.wppChat.findMany({
-		where: { instance, contactId, isFinished: false, sectorId: { in: sectorIds } },
-		orderBy: { id: "desc" }
-	});
-	if (!candidates.length) return null;
-	const owners = await tx.triageSession.findMany({
-		where: { instance, chatId: { in: candidates.map((c) => c.id) } },
-		select: { chatId: true, channelId: true }
-	});
-	const channels = new Map(owners.map((s) => [s.chatId, s.channelId]));
-	return (
-		candidates.find((c) => channels.get(c.id) === channelId) ?? candidates.find((c) => !channels.has(c.id)) ?? null
-	);
 }
 
 export function acceptsTriageMessage(message: WppMessage) {
@@ -212,7 +191,7 @@ export async function consumeTriage(
 	}
 	const key = "message:" + msg.id;
 	let excludedOtherChannel = false;
-	if (current && (current.botId === TRIAGE_CHAT_MARKER || current.botId == null)) {
+	if (current?.botId === TRIAGE_CHAT_MARKER) {
 		const sourceChannel = await channelOf(instance, current.id);
 		if (sourceChannel && sourceChannel !== channelId) {
 			const channel = await db.wppClient.findFirstOrThrow({

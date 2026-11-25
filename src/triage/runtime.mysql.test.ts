@@ -552,6 +552,9 @@ test("ingresso, persistência, efeitos e intervenção da triagem nos dois modos
 						(await database.triageSession.findUniqueOrThrow({ where: { chatId: queue.id } })).status,
 						"waiting"
 					);
+					const { verifySharedSectorRouting } =
+						require("./shared-sector-routing.mysql-cases") as typeof import("./shared-sector-routing.mysql-cases");
+					const shared = await verifySharedSectorRouting(database);
 					// A process upgraded ahead of a disabled tenant must leave its current conversations usable.
 					await database.parameter.updateMany({
 						where: { instance: "alpha", key: "enable_whatsapp_triage" },
@@ -565,6 +568,13 @@ test("ingresso, persistência, efeitos e intervenção da triagem nos dois modos
 							"triage_sessions, " +
 							prefix +
 							"triage_effects"
+					);
+					const { findChatForContactChannel } =
+						require("../services/chat-channel-scope") as typeof import("../services/chat-channel-scope");
+					assert.equal(
+						(await findChatForContactChannel(database, 8, shared.contact))?.id,
+						shared.otherId,
+						"canal correto mesmo sem tabelas de triagem"
 					);
 					const legacy = await database.wppChat.create({
 						data: { instance: "alpha", type: "RECEPTIVE", sectorId: 5, contactId: contact.id }

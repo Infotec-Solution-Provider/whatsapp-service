@@ -1,3 +1,4 @@
+import { openChatForChannel } from "../services/chat-channel-scope";
 import { createHash } from "node:crypto";
 import type { Prisma, WppChat, WppContact, WppMessage } from "@prisma/client";
 import db from "../services/prisma.service";
@@ -8,7 +9,6 @@ import { advanceTriage } from "./engine";
 import {
 	acceptsTriageMessage,
 	lockSession,
-	openChatForChannel,
 	recordTurn,
 	triageJson,
 	TRIAGE_CHAT_MARKER

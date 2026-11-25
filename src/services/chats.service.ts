@@ -1,3 +1,4 @@
+import { findChatForContactChannel } from "./chat-channel-scope";
 import { transferChatToSectorQueue } from "./chat-sector-transfer";
 import { enqueueTriageNotice } from "../triage/trigger-notices";
 import { tenantSqlEnabled } from "../tenant-sql/registry";
@@ -164,26 +165,7 @@ function formatDateForMySQL(date: Date): string {
 
 class ChatsService {
 	public async getChatForContact(clientId: number, contact: WppContact): Promise<WppChat | null> {
-		const client = await prismaService.wppClient.findUnique({
-			where: { id: clientId },
-			include: { sectors: true }
-		});
-
-		if (!client || !client.sectors || client.sectors.length === 0) {
-			return null;
-		}
-
-		const sectorIds = client.sectors.map((s) => s.id);
-
-		return await prismaService.wppChat.findFirst({
-			where: {
-				contactId: contact.id,
-				isFinished: false,
-				sectorId: {
-					in: sectorIds
-				}
-			}
-		});
+		return findChatForContactChannel(prismaService,clientId,contact);
 	}
 
 	public async getUserChatsBySession(session: SessionData, includeMessages = true, includeContact = true, chatIds?: number[]) {
