@@ -55,10 +55,13 @@ async function channels(command: AdminCommand, query: Query, lock = false) {
   const resources = await query<{ id: number; label: string }[]>("SELECT id,name AS label FROM clients WHERE instance=? ORDER BY name,id", [tenant(command)]);
   const catalog = channelCatalog.map(field => ({ ...field }));
   if (command.target?.resourceId === undefined) return { state: {}, catalog, snapshot: { ...snapshot(command, {}, [], { state: "unknown" }), resources, unavailableReason: "Selecione um canal para consultar e editar." } };
+  const id = resourceId(command);
   const columns = Object.entries(channelColumns).map(([key, column]) => `\`${column}\` AS \`${key}\``).join(",");
-  const rows = await query<Record<string, unknown>[]>(`SELECT id,${columns} FROM clients WHERE id=? AND instance=?${lock ? " FOR UPDATE" : ""}`, [resourceId(command), command.tenant!]);
+  const rows = await query<Record<string, unknown>[]>(`SELECT id,${columns} FROM clients WHERE id=? AND instance=?${lock ? " FOR UPDATE" : ""}`, [id, command.tenant!]);
   if (!rows[0]) throw new AdminProtocolError(404, "Canal não encontrado no tenant alvo.");
-  const result = snapshot(command, rows[0], catalog, { state: "unknown", message: "Reaplique o canal após salvar suas credenciais." });
+  // The query target arrives as text, while a mutation can send a JSON number.
+  const revisionCommand = { ...command, target: { ...command.target, resourceId: String(id) } };
+  const result = snapshot(revisionCommand, rows[0], catalog, { state: "unknown", message: "Reaplique o canal após salvar suas credenciais." });
   result.resources = resources;
   return { state: rows[0], catalog, snapshot: result };
 }
