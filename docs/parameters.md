@@ -51,6 +51,13 @@ a tela sem criar um formulário novo. Chaves fora dele continuam preservadas no 
 - A rotina de inatividade considera ativações por setor/usuário mesmo sem ativação global. A identificação de usuário na rotina inclui o tenant, evitando colisões de códigos entre bancos CRM.
 - A configuração atual de inatividade usa `chat_auto_finish_idle_time`, em **milissegundos**, na rotina
   `src/routines/idle-chats.routine.ts`. A tela converte esse valor para minutos; padrão da rotina: 30 minutos.
+- O ADMIN da instância gerencia dias fechados em `GET /api/whatsapp/parameter-settings/closed-dates`
+  e `PUT` ou `DELETE /api/whatsapp/parameter-settings/closed-dates/:date` (data `AAAA-MM-DD`).
+  O GET também informa se a contagem por calendário está ativa no ambiente.
+- Depois de aplicar a migração e cadastrar as datas de cada instância, ative
+  `CHAT_AUTO_FINISH_CLOSED_DAYS_ENABLED=true` na configuração do processo WhatsApp. A rotina passa
+  a excluir sábados, domingos e datas cadastradas no fuso `America/Sao_Paulo`. Omitir a variável
+  ou usar `false` restaura a contagem corrida e mantém o cadastro disponível.
 - Sincronização de grupos internos possui padrão dependente do provedor; a tela apresenta explicitamente
   **Padrão do provedor**, **Ativada** e **Desativada**.
 

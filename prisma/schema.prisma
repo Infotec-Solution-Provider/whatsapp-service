@@ -530,6 +530,14 @@ model Parameter {
   @@map("parameters")
 }
 
+model ChatAutoFinishClosedDate {
+  instance String   @db.VarChar(191)
+  date     DateTime @db.Date
+
+  @@id([instance, date])
+  @@map("chat_auto_finish_closed_dates")
+}
+
 enum ParameterScope {
   INSTANCE
   SECTOR

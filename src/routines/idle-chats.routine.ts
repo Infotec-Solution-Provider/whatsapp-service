@@ -6,6 +6,8 @@ import chatsService from "../services/chats.service";
 import whatsappService from "../services/whatsapp.service";
 import ProcessingLogger from "../utils/processing-logger";
 import { InstanceQueryUnavailableError } from "../sdk-local/instance.client";
+import { listForInstances } from "../services/chat-closure-dates.service";
+import { ChatClosureCalendar, closedDateKey, isChatClosureCalendarEnabled } from "../utils/chat-closure-calendar";
 
 interface MessageLike {
 	sentAt: Date;
@@ -19,6 +21,7 @@ const ROUTINE_PARAMETERS = [
 
 const DEFAULT_CHAT_IDLE_TIME = 30 * 60 * 1000; // minutos
 const MIN_MESSAGES_WINDOW = 24 * 60 * 60 * 1000;
+const BOT_QUESTION_WAIT = 15 * 60 * 1000;
 // Finalizações por execução: um backlog drena em poucos minutos, sem rajada de notificações.
 const MAX_ACTIONS_PER_RUN = 50;
 // Limita as demais falhas consecutivas na mesma execução.
@@ -52,8 +55,22 @@ export default async function runIdleChatsJob() {
 			if (retryAt <= now) crmRetryAt.delete(instance);
 		}
 		const availableInstances = enabledInstances.filter((instance) => !crmRetryAt.has(instance));
-		const ongoingChats = await getOngoingChats(availableInstances, messagesWindow);
-		process.log("Chats em andamento carregados", { total: ongoingChats.length, messagesWindow });
+		const calendars = await loadCalendars(availableInstances, now).catch((error: unknown) => {
+			process.log("Finalização automática em pausa por falha na leitura do calendário");
+			process.failed(error);
+			return null;
+		});
+		if (!calendars) return;
+
+		const cutoff = (instance: string, duration: number) => calendars.get(instance)?.cutoff(duration) ?? now - duration;
+		const closedInstances = availableInstances.filter((instance) => calendars.get(instance)?.isClosedAt(now));
+		const openInstances = availableInstances.filter((instance) => !closedInstances.includes(instance));
+		if (closedInstances.length) process.log("Finalização automática em pausa pelo calendário", { instances: closedInstances });
+		const messagesSince = new Date(
+			Math.min(now - messagesWindow, ...openInstances.map((instance) => cutoff(instance, messagesWindow)))
+		);
+		const ongoingChats = openInstances.length ? await getOngoingChats(openInstances, messagesSince) : [];
+		process.log("Chats em andamento carregados", { total: ongoingChats.length, messagesSince });
 
 		let processedChats = 0;
 		let finishedChats = 0;
@@ -90,7 +107,10 @@ export default async function runIdleChatsJob() {
 					continue;
 				}
 
-				const isIdle = checkIsIdle(chat.startedAt, chat.messages, idleTime);
+				const calendar = calendars.get(chat.instance);
+				const lastMessageTime = chat.messages[0]?.sentAt.getTime() ?? 0;
+				const idleCutoff = cutoff(chat.instance, idleTime);
+				const isIdle = lastMessageTime < idleCutoff && chat.startedAt.getTime() < idleCutoff;
 				if (!isIdle) {
 					process.log(`Chat ${chat.id} - Não inativo (idleTime: ${idleTime}ms)`);
 					continue;
@@ -100,6 +120,7 @@ export default async function runIdleChatsJob() {
 				process.log(`Chat ${chat.id} - Detectado como inativo`);
 
 				const hasUserMsg = await checkHasUserMessage(chat.messages);
+				if (calendar?.isClosedAt(Date.now())) continue;
 
 				if (!chat.contact) {
 					await finishChatAndNotify(chat, "contato excluído.");
@@ -134,6 +155,7 @@ export default async function runIdleChatsJob() {
 						process.log(`Chat ${chat.id} - Client não encontrado`);
 						continue;
 					}
+					if (calendar?.isClosedAt(Date.now())) continue;
 
 					process.log(`Chat ${chat.id} - Pergunta de volta ao menu enviada`);
 					await chooseSectorBot.askIfWantsToBackToMenu(client.id, chat, chat.contact);
@@ -142,8 +164,7 @@ export default async function runIdleChatsJob() {
 					continue;
 				}
 
-				const timeSinceQuestion = Date.now() - (chat.messages[0]?.sentAt.getTime() || 0);
-				if (timeSinceQuestion > 15 * 60 * 1000) {
+				if (lastMessageTime < cutoff(chat.instance, BOT_QUESTION_WAIT)) {
 					await finishChatAndNotify(chat, "Inatividade após a pergunta do bot.", chat.contact?.name);
 					finishedChats++;
 					actions++;
@@ -169,6 +190,18 @@ export default async function runIdleChatsJob() {
 		process.failed(error);
 		throw error;
 	}
+}
+
+async function loadCalendars(instances: string[], now: number) {
+	const calendars = new Map<string, ChatClosureCalendar>();
+	if (!isChatClosureCalendarEnabled() || !instances.length) return calendars;
+
+	const dates = new Map(instances.map((instance) => [instance, new Set<string>()]));
+	// Include tomorrow so a run that crosses midnight can still check for a closure.
+	const through = closedDateKey(now + MIN_MESSAGES_WINDOW);
+	for (const { instance, date } of await listForInstances(instances, through)) dates.get(instance)?.add(date);
+	for (const [instance, closedDates] of dates) calendars.set(instance, new ChatClosureCalendar(closedDates, now));
+	return calendars;
 }
 
 function pauseForCrmFailure(instance: string, error: unknown): boolean {
@@ -204,7 +237,7 @@ function getMessagesWindow(parameters: Parameter[]) {
 	return Math.max(MIN_MESSAGES_WINDOW, DEFAULT_CHAT_IDLE_TIME, ...idleTimes);
 }
 
-async function getOngoingChats(instances: string[], messagesWindow: number) {
+async function getOngoingChats(instances: string[], messagesSince: Date) {
 	return prismaService.wppChat.findMany({
 		where: {
 			isFinished: false,
@@ -220,7 +253,7 @@ async function getOngoingChats(instances: string[], messagesWindow: number) {
 				orderBy: { sentAt: "desc" },
 				where: {
 					sentAt: {
-						gte: new Date(Date.now() - messagesWindow)
+						gte: messagesSince
 					}
 				}
 			},
@@ -228,7 +261,6 @@ async function getOngoingChats(instances: string[], messagesWindow: number) {
 		}
 	});
 }
-
 async function getRoutineParameters() {
 	return prismaService.parameter.findMany({
 		where: {
@@ -299,15 +331,4 @@ async function finishChatAndNotify(chat: WppChat, reason: string, contactName: s
 			userId: chat.userId ?? null
 		}
 	});
-}
-
-function checkIsIdle(startedAt: Date, messages: MessageLike[], idleTime: number) {
-	const now = Date.now();
-	const lastMessageTime = messages[0]?.sentAt.getTime() || 0;
-
-	const idleDuration = now - lastMessageTime;
-	const chatDuration = now - startedAt.getTime();
-	const isChatIdle = idleDuration > idleTime && chatDuration > idleTime;
-
-	return isChatIdle;
 }

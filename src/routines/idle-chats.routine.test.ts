@@ -5,6 +5,9 @@ import { InstanceQueryUnavailableError } from "../sdk-local/instance.client";
 const HOUR = 60 * 60 * 1000;
 const MINUTE = 60 * 1000;
 const IDLE_TIME = 48 * HOUR;
+const FLAG = "CHAT_AUTO_FINISH_CLOSED_DAYS_ENABLED";
+const previousFlag = process.env[FLAG];
+delete process.env[FLAG];
 
 interface FakeMessage {
 	sentAt: Date;
@@ -38,6 +41,10 @@ let notifications: number[] = [];
 let finishAttempts: number[] = [];
 let failingChats = new Map<number, "before-update" | "after-update" | "crm-before-update" | "crm-after-update">();
 let messagesWindowStart: Date | null = null;
+let closedDates: { instance: string; date: Date }[] = [];
+let calendarFailed = false;
+let calendarReads = 0;
+let calendarFailures = 0;
 const results: Array<{
 	processedChats: number;
 	finishedChats: number;
@@ -71,6 +78,13 @@ mockModule("../services/prisma.service", {
 	__esModule: true,
 	default: {
 		parameter: { findMany: async () => parameters },
+		chatAutoFinishClosedDate: {
+			findMany: async ({ where }: { where: { instance: { in: string[] }; date: { lte: Date } } }) => {
+				calendarReads++;
+				if (calendarFailed) throw new Error("calendar unavailable");
+				return closedDates.filter(({ instance, date }) => where.instance.in.includes(instance) && date <= where.date.lte);
+			}
+		},
 		wppChat: {
 			findMany: async (args: {
 				where: { instance: { in: string[] } };
@@ -125,7 +139,7 @@ mockModule("../utils/processing-logger", {
 		success(result: (typeof results)[number]): void {
 			results.push(result);
 		}
-		failed(): void {}
+		failed(): void { calendarFailures++; }
 	}
 });
 mockModule("@in.pulse-crm/utils", { Logger: { info: () => undefined, error: () => undefined } });
@@ -264,6 +278,93 @@ async function testFailureAfterFinishingStillNotifies(): Promise<void> {
 	assert.deepEqual(results[0], { processedChats: 1, finishedChats: 1, failedChatIds: [], stopReason: null });
 }
 
+async function testWeekendPreservesTheFortyEightHourWindow(): Promise<void> {
+	process.env[FLAG] = "true";
+	now = Date.parse("2026-12-07T12:00:00-03:00");
+	const friday = Date.parse("2026-12-04T15:00:00-03:00");
+	reset([
+		idleChat(8000, now - friday),
+		{ ...idleChat(8001), startedAt: new Date(friday) }
+	]);
+	await runIdleChatsJob();
+	assert.equal(calendarReads, 1);
+	assert.ok(messagesWindowStart!.getTime() <= friday, "Friday's message is older than the old query window");
+	assert.deepEqual(finishAttempts, []);
+
+	now = Date.parse("2026-12-08T15:00:00-03:00");
+	await runIdleChatsJob();
+	assert.deepEqual(finishAttempts, [], "the existing strict deadline is preserved");
+	now += MINUTE;
+	await runIdleChatsJob();
+	assert.deepEqual(notifications, [8000, 8001]);
+}
+
+async function testConsecutiveClosedDatesAreTenantScoped(): Promise<void> {
+	now = Date.parse("2026-12-14T12:00:00-03:00");
+	parameters.push({ ...parameters[0]!, id: 7, instance: "other-tenant" });
+	closedDates = ["2026-12-12", "2026-12-14", "2026-12-15"].map((date) => ({
+		instance: "suprimaxxi",
+		date: new Date(date)
+	}));
+	const friday = Date.parse("2026-12-11T15:00:00-03:00");
+	reset([idleChat(8100), idleChat(8101, now - friday), { ...idleChat(8102), instance: "other-tenant" }]);
+	try {
+		await runIdleChatsJob();
+		assert.deepEqual(notifications, [8102], "the closed date affects only the company that registered it");
+		now = Date.parse("2026-12-15T23:59:00-03:00");
+		await runIdleChatsJob();
+		assert.deepEqual(notifications, [8102]);
+		now = Date.parse("2026-12-16T00:00:00-03:00");
+		await runIdleChatsJob();
+		assert.deepEqual(notifications, [8102, 8100], "the already expired chat resumes at midnight in São Paulo");
+		now = Date.parse("2026-12-17T15:01:00-03:00");
+		await runIdleChatsJob();
+		assert.deepEqual(notifications, [8102, 8100, 8101], "the Saturday closure does not double-count");
+	} finally {
+		parameters.pop();
+		closedDates = [];
+	}
+}
+
+async function testShortTimeoutAndBotQuestionAfterTheWeekend(): Promise<void> {
+	now = Date.parse("2026-12-21T00:05:00-03:00");
+	const sunday = Date.parse("2026-12-20T17:00:00-03:00");
+	const previousValue = parameters[1]!.value;
+	parameters[1]!.value = String(5 * MINUTE);
+	const answeredChat = idleChat(8201, now - sunday);
+	answeredChat.messages[0]!.from = "me:1";
+	reset([idleChat(8200, now - sunday), answeredChat]);
+	try {
+		await runIdleChatsJob();
+		assert.deepEqual(finishAttempts, [], "activity on a closed date has the same deadline as activity at midnight");
+		now = Date.parse("2026-12-21T00:15:00-03:00");
+		await runIdleChatsJob();
+		assert.deepEqual(notifications, [8200]);
+		now += MINUTE;
+		await runIdleChatsJob();
+		assert.deepEqual(notifications, [8200, 8201], "the bot's 15-minute wait follows the same calendar");
+	} finally {
+		parameters[1]!.value = previousValue;
+	}
+}
+
+async function testCalendarFailureAndRollback(): Promise<void> {
+	now = Date.parse("2026-12-12T13:00:00-03:00");
+	reset([idleChat(8300)]);
+	calendarFailed = true;
+	await runIdleChatsJob();
+	assert.equal(calendarFailures, 1);
+	assert.deepEqual(finishAttempts, []);
+	calendarFailed = false;
+	await runIdleChatsJob();
+	assert.deepEqual(finishAttempts, [], "successful read still pauses closures on Saturday");
+	delete process.env[FLAG];
+	const readsBeforeRollback = calendarReads;
+	await runIdleChatsJob();
+	assert.equal(calendarReads, readsBeforeRollback);
+	assert.deepEqual(notifications, [8300], "the rollout switch restores elapsed time");
+}
+
 async function main(): Promise<void> {
 	try {
 		await testBacklogDrainsInBatches();
@@ -313,9 +414,17 @@ async function main(): Promise<void> {
 		reset([idleChat(6003), { ...idleChat(6004), sectorId: 2 }]);
 		await runIdleChatsJob();
 		assert.deepEqual(notifications, [6003], "legacy sector exception enables only that sector");
+		parameters.splice(2);
+		parameters[0]!.value = "true";
+		await testWeekendPreservesTheFortyEightHourWindow();
+		await testConsecutiveClosedDatesAreTenantScoped();
+		await testShortTimeoutAndBotQuestionAfterTheWeekend();
+		await testCalendarFailureAndRollback();
 		console.log("idle-chats.routine tests passed");
 	} finally {
 		Date.now = realDateNow;
+		if (previousFlag === undefined) delete process.env[FLAG];
+		else process.env[FLAG] = previousFlag;
 		for (const [path, previous] of previousModules) {
 			if (previous) require.cache[path] = previous;
 			else delete require.cache[path];

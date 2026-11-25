@@ -11,6 +11,7 @@ import settingsService from "./parameter-settings.service";
 import instances from "./instances.service";
 import targets from "./parameter-settings-targets.service";
 import parametersService from "./parameters.service";
+import { isChatClosureCalendarEnabled } from "../utils/chat-closure-calendar";
 
 type Row = {
 	id: number;
@@ -51,6 +52,29 @@ const originalSession = authService.fetchSessionData;
 const originalSectorFirst = prisma.wppSector.findFirst;
 const originalSectorMany = prisma.wppSector.findMany;
 const originalQuery = instances.executeQuery;
+const closedDateDelegate = prisma.chatAutoFinishClosedDate;
+const originalClosedDates = {
+	findMany: closedDateDelegate.findMany,
+	createMany: closedDateDelegate.createMany,
+	deleteMany: closedDateDelegate.deleteMany
+};
+let closedDates = [{ instance: "tenant-b", date: new Date("2026-12-25") }];
+Object.assign(closedDateDelegate, {
+	async findMany({ where }: { where: { instance: { in: string[] } } }) {
+		return closedDates.filter(({ instance }) => where.instance.in.includes(instance));
+	},
+	async createMany({ data, skipDuplicates }: { data: typeof closedDates; skipDuplicates: boolean }) {
+		assert.equal(skipDuplicates, true);
+		for (const entry of data) {
+			if (!closedDates.some(({ instance, date }) => instance === entry.instance && +date === +entry.date)) {
+				closedDates.push(entry);
+			}
+		}
+	},
+	async deleteMany({ where }: { where: (typeof closedDates)[number] }) {
+		closedDates = closedDates.filter(({ instance, date }) => instance !== where.instance || +date !== +where.date);
+	}
+});
 const sectors = [
 	{ id: 11, instance: "tenant-a", name: "Comercial" },
 	{ id: 22, instance: "tenant-b", name: "Suporte" }
@@ -92,8 +116,8 @@ Object.assign(prisma, {
 });
 Object.assign(authService, {
 	fetchSessionData: async (token: string) => ({
-		instance: "tenant-a",
-		role: token === "admin" ? "ADMIN" : "USER",
+		instance: token === "admin-b" ? "tenant-b" : "tenant-a",
+		role: token === "admin" || token === "admin-b" ? "ADMIN" : "USER",
 		userId: 7
 	})
 });
@@ -322,6 +346,23 @@ async function run() {
 			});
 			assert.equal(response.status, authorization ? 403 : 401);
 		}
+		const calendar = `${url}/closed-dates`;
+		for (const method of ["GET", "PUT", "DELETE"]) {
+			const route = method === "GET" ? calendar : `${calendar}/2026-12-25`;
+			assert.equal((await fetch(route, { method })).status, 401);
+			assert.equal((await fetch(route, { method, headers: { Authorization: "operator" } })).status, 403);
+		}
+		const admin = { Authorization: "admin" };
+		const readCalendar = (headers: typeof admin) => fetch(`${calendar}?instance=tenant-b`, { headers }).then((result) => result.json());
+		const enabled = isChatClosureCalendarEnabled();
+		assert.deepEqual(await readCalendar(admin), { data: [], enabled });
+		assert.equal((await fetch(`${calendar}/2026-02-30`, { method: "PUT", headers: admin })).status, 400);
+		for (const method of ["PUT", "PUT", "DELETE", "DELETE"]) {
+			const result = await fetch(`${calendar}/2026-12-25?instance=tenant-b`, { method, headers: admin });
+			assert.equal(result.status, 204);
+			assert.deepEqual(await readCalendar(admin), { data: method === "PUT" ? ["2026-12-25"] : [], enabled });
+			assert.deepEqual(await readCalendar({ Authorization: "admin-b" }), { data: ["2026-12-25"], enabled });
+		}
 	} finally {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	}
@@ -337,6 +378,7 @@ run()
 	})
 	.finally(async () => {
 		Object.assign(prisma.parameter, { findMany: originalFindMany });
+		Object.assign(closedDateDelegate, originalClosedDates);
 		Object.assign(prisma, { $transaction: originalTransaction });
 		Object.assign(authService, { fetchSessionData: originalSession });
 		Object.assign(prisma.wppSector, { findFirst: originalSectorFirst, findMany: originalSectorMany });
