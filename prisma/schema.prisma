@@ -1370,6 +1370,7 @@ model TriageGrant {
 }
 
 model TriageAudit {
+  botId        Int?     @map("bot_id")
   id           Int      @id @default(autoincrement())
   instance     String   @db.VarChar(128)
   channelId    Int      @map("channel_id")
@@ -1394,4 +1395,40 @@ model TriageTriggerSet {
 
   @@id([instance, sectorId])
   @@map("triage_trigger_sets")
+}
+
+model TriageBot {
+  id              Int      @id @default(autoincrement())
+  instance        String   @db.VarChar(128)
+  channelId       Int      @map("channel_id")
+  defaultSlot     Int?     @map("default_slot") @db.TinyInt
+  revision        Int
+  name            String   @db.VarChar(120)
+  definition      String   @db.LongText
+  editedBy        Int      @map("edited_by")
+  editedAt        DateTime @default(now()) @map("edited_at") @db.DateTime(3)
+  activeVersionId Int?     @map("active_version_id")
+  paused          Boolean  @default(true)
+  versions        TriageBotVersion[]
+
+  @@unique([instance, channelId, defaultSlot], map: "triage_bots_default")
+  @@unique([instance, channelId, name], map: "triage_bots_name")
+  @@unique([instance, channelId, id], map: "triage_bots_scope")
+  @@map("triage_bots")
+}
+
+model TriageBotVersion {
+  id         Int      @id @default(autoincrement())
+  instance   String   @db.VarChar(128)
+  channelId  Int      @map("channel_id")
+  botId      Int      @map("bot_id")
+  number     Int
+  name       String   @db.VarChar(120)
+  definition String   @db.LongText
+  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  createdBy  Int      @map("created_by")
+  bot        TriageBot @relation(fields: [instance, channelId, botId], references: [instance, channelId, id])
+
+  @@unique([instance, channelId, botId, number], map: "triage_bot_versions_number")
+  @@map("triage_bot_versions")
 }

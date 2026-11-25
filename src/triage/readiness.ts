@@ -2,6 +2,8 @@ import type { TriageReader } from "./access";
 
 const tables = [
 	"triage_channels",
+	"triage_bots",
+	"triage_bot_versions",
 	"triage_versions",
 	"triage_grants",
 	"triage_audit",
@@ -39,7 +41,7 @@ export function missingBindingsTable(error: unknown) {
 	const { code, number, message } = mysqlError(error);
 	return (
 		(number === 1146 || code === "1146" || code === "ER_NO_SUCH_TABLE") &&
-		/\b(?:wpp_runtime_)?triage_channels\b/.test(message)
+		/\b(?:wpp_runtime_)?triage_(?:channels|bots)\b/.test(message)
 	);
 }
 export function unavailableDatabase(error: unknown) {

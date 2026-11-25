@@ -34,15 +34,42 @@ export function createTriageRouter(
 	router.get("/channels/:id", async (req, res) => {
 		res.json({ data: await service.get(req.session, positiveResourceId(req.params["id"])) });
 	});
-	router.put("/channels/:id/draft", async (req, res) => {
-		res.json({ data: await service.mutate(req.session, positiveResourceId(req.params["id"]), "save", req.body) });
+	router.get("/channels/:id/bots", async (req, res) => {
+		res.json({ data: await service.listBots(req.session, positiveResourceId(req.params["id"])) });
 	});
-	for (const action of ["publish", "rollback", "pause"] as const) {
-		router.post("/channels/:id/" + action, async (req, res) => {
-			res.json({
-				data: await service.mutate(req.session, positiveResourceId(req.params["id"]), action, req.body)
-			});
+	router.post("/channels/:id/bots", async (req, res) => {
+		res.status(201).json({
+			data: await service.createBot(req.session, positiveResourceId(req.params["id"]), req.body)
 		});
+	});
+	router.get("/channels/:id/bots/:botId", async (req, res) => {
+		res.json({
+			data: await service.get(
+				req.session,
+				positiveResourceId(req.params["id"]),
+				positiveResourceId(req.params["botId"])
+			)
+		});
+	});
+	for (const prefix of ["/channels/:id", "/channels/:id/bots/:botId"]) {
+		for (const [method, path, action] of [
+			["put", "draft", "save"],
+			["post", "publish", "publish"],
+			["post", "rollback", "rollback"],
+			["post", "pause", "pause"]
+		] as const)
+			router[method](prefix + "/" + path, async (req, res) => {
+				const botId = req.params["botId"];
+				res.json({
+					data: await service.mutate(
+						req.session,
+						positiveResourceId(req.params["id"]),
+						action,
+						req.body,
+						botId === undefined ? undefined : positiveResourceId(botId)
+					)
+				});
+			});
 	}
 	for (const action of ["validate", "simulate"] as const) {
 		router.post("/channels/:id/" + action, async (req, res) => {
@@ -78,14 +105,16 @@ export function createTriageRouter(
 		const channelId = positiveResourceId(req.params["id"]),
 			chatId = positiveResourceId(req.params["chatId"]);
 		await service.requireChannel(req.session, channelId);
-		const bot = await checkManual(req.session.instance, channelId, chatId, req.session.userId);
-		res.json({ data: { available: Boolean(bot), botId: bot?.botId ?? null, name: bot?.name ?? null } });
+		const bots = await checkManual(req.session.instance, channelId, chatId, req.session.userId);
+		res.json({ data: { available: bots.length > 0, bots } });
 	});
 	router.post("/channels/:id/chats/:chatId/start", async (req, res) => {
 		const channelId = positiveResourceId(req.params["id"]),
 			chatId = positiveResourceId(req.params["chatId"]);
 		await service.requireChannel(req.session, channelId);
-		const requestId = requestBody(req.body, ["requestId"])["requestId"];
+		const body = requestBody(req.body, ["requestId", "botId"]);
+		const requestId = body["requestId"];
+		const botId = positiveResourceId(body["botId"]);
 		if (
 			typeof requestId !== "string" ||
 			!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)
@@ -94,6 +123,7 @@ export function createTriageRouter(
 		const result = await startManual({
 			instance: req.session.instance,
 			channelId,
+			botId,
 			chatId,
 			type: "manual",
 			actorId: req.session.userId,

@@ -57,13 +57,15 @@ export function validateFlowDefinition(steps: readonly FlowStepDefinition[]): st
 			target(step.nextStepId, "continuation");
 		}
 	}
-	const humanTargets = new Set(active.filter(step => ["ASSIGN", "SEND_TO_ADMIN", "SEND_TO_SECTOR_USER", "CHECK_ONLY_ADMIN", "CHECK_LOALTY", "CHECK_AVAILABLE_USERS"].includes(step.type)).map(step => step.stepNumber));
-	function reachesAssignment(from: number): boolean {
+	const definite = ["ASSIGN", "SEND_TO_ADMIN", "SEND_TO_SECTOR_USER"];
+	const terminalTargets = new Set(active.filter(step => definite.includes(step.type)).map(step => step.stepNumber));
+	const assignmentTargets = new Set(active.filter(step => [...definite, "CHECK_ONLY_ADMIN", "CHECK_LOALTY", "CHECK_AVAILABLE_USERS"].includes(step.type)).map(step => step.stepNumber));
+	function reachesAssignment(from: number, targets: Set<number>): boolean {
 		const visited = new Set<number>();
 		const pending = [from];
 		while (pending.length) {
 			const number = pending.pop()!;
-			if (humanTargets.has(number)) return true;
+			if (targets.has(number)) return true;
 			if (visited.has(number)) continue;
 			visited.add(number);
 			pending.push(...(edges.get(number) ?? []));
@@ -71,10 +73,10 @@ export function validateFlowDefinition(steps: readonly FlowStepDefinition[]): st
 		return false;
 	}
 	for (const step of active) {
-		if (step.type === "START_BOT" && positive(step.fallbackStepId) && !reachesAssignment(step.fallbackStepId))
+		if (step.type === "START_BOT" && positive(step.fallbackStepId) && !reachesAssignment(step.fallbackStepId, terminalTargets))
 			errors.push(`Etapa ${step.stepNumber}: a contingência deve alcançar um destino de atendimento.`);
 	}
-	if (!reachesAssignment(1))
+	if (!reachesAssignment(1, assignmentTargets))
 		errors.push("Flow must contain a reachable assignment step");
 	return [...new Set(errors)];
 }

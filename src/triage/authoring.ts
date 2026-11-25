@@ -28,6 +28,7 @@ import {
 } from "./access";
 
 interface ChannelDraft {
+	id: number;
 	revision: number;
 	name: string;
 	definition: string;
@@ -38,6 +39,7 @@ interface ChannelDraft {
 }
 interface StoredVersion {
 	id: number;
+	bot_id: number;
 	channel_id: number;
 	number: number;
 	name: string;
@@ -119,20 +121,24 @@ function simulationEvents(value: unknown, start: Date): TriageSimulationEvent[] 
 		throw new BadRequestError("Entrada inválida no simulador.");
 	});
 }
-async function draftRow(db: TriageReader, instance: string, channelId: number, lock = false) {
+async function draftRow(db: TriageReader, instance: string, channelId: number, botId?: number, lock = false) {
 	const [slot] = await db.$queryRawUnsafe<ChannelDraft[]>(
-		"SELECT revision,name,definition,active_version_id,paused,edited_by,edited_at FROM triage_channels WHERE instance=? AND channel_id=?" +
+		"SELECT id,revision,name,definition,active_version_id,paused,edited_by,edited_at FROM triage_bots WHERE instance=? AND channel_id=? AND " +
+			(botId === undefined ? "default_slot=1" : "id=?") +
 			(lock ? " FOR UPDATE" : ""),
 		instance,
-		channelId
+		channelId,
+		...(botId === undefined ? [] : [botId])
 	);
+	if (botId !== undefined && !slot) throw new NotFoundError("Bot não encontrado neste canal.");
 	return slot;
 }
-async function versionRow(db: TriageReader, instance: string, channelId: number, versionId: number) {
+async function versionRow(db: TriageReader, instance: string, channelId: number, botId: number, versionId: number) {
 	const [version] = await db.$queryRawUnsafe<StoredVersion[]>(
-		"SELECT id,channel_id,number,name,definition FROM triage_versions WHERE instance=? AND channel_id=? AND id=?",
+		"SELECT id,channel_id,bot_id,number,name,definition FROM triage_bot_versions WHERE instance=? AND channel_id=? AND bot_id=? AND id=?",
 		instance,
 		channelId,
+		botId,
 		versionId
 	);
 	return version;
@@ -144,17 +150,19 @@ async function recordAudit(
 	action: string,
 	versionId: number | null,
 	targetUserId: number | null = null,
-	previousVersionId: number | null = null
+	previousVersionId: number | null = null,
+	botId: number | null = null
 ) {
 	await db.$executeRawUnsafe(
-		"INSERT INTO triage_audit(instance,channel_id,actor_id,action,version_id,target_user_id,previous_version_id) VALUES(?,?,?,?,?,?,?)",
+		"INSERT INTO triage_audit(instance,channel_id,actor_id,action,version_id,target_user_id,previous_version_id,bot_id) VALUES(?,?,?,?,?,?,?,?)",
 		session.instance,
 		channelId,
 		session.userId,
 		action,
 		versionId,
 		targetUserId,
-		previousVersionId
+		previousVersionId,
+		botId
 	);
 }
 
@@ -189,7 +197,7 @@ export class TriageAuthoring {
 			>(
 				"SELECT c.id,c.name,c.phone,CASE WHEN d.channel_id IS NULL THEN 0 WHEN v.id IS NULL OR BINARY d.name<>BINARY v.name OR BINARY d.definition<>BINARY v.definition THEN 1 ELSE 0 END AS hasDraft,d.paused,v.number AS activeVersionNumber FROM clients c" +
 					grantJoin +
-					" LEFT JOIN triage_channels d ON d.instance=? AND d.channel_id=c.id LEFT JOIN triage_versions v ON v.instance=d.instance AND v.channel_id=d.channel_id AND v.id=d.active_version_id" +
+					" LEFT JOIN triage_bots d ON d.instance=? AND d.channel_id=c.id AND d.default_slot=1 LEFT JOIN triage_bot_versions v ON v.instance=d.instance AND v.bot_id=d.id AND v.id=d.active_version_id" +
 					" WHERE c.instance=? AND c.is_active=1 ORDER BY c.name,c.id",
 				...params,
 				session.instance,
@@ -212,27 +220,30 @@ export class TriageAuthoring {
 		});
 	}
 
-	private async detail(db: TriageReader, instance: string, channel: NamedResource) {
-		const row = await draftRow(db, instance, channel.id);
+	private async detail(db: TriageReader, instance: string, channel: NamedResource, botId?: number) {
+		const row = await draftRow(db, instance, channel.id, botId);
 		const sectors = await channelSectors(db, instance, channel.id);
 		const template = templateFor(sectors);
 		const active =
 			row?.active_version_id != null
-				? await versionRow(db, instance, channel.id, row.active_version_id)
+				? await versionRow(db, instance, channel.id, row.id, row.active_version_id)
 				: undefined;
 		const versions = await db.$queryRawUnsafe<
 			{ id: number; number: number; name: string; createdBy: number; createdAt: Date }[]
 		>(
-			"SELECT id,number,name,created_by AS createdBy,created_at AS createdAt FROM triage_versions WHERE instance=? AND channel_id=? ORDER BY number DESC",
+			"SELECT id,number,name,created_by AS createdBy,created_at AS createdAt FROM triage_bot_versions WHERE instance=? AND channel_id=? AND bot_id=? ORDER BY number DESC",
 			instance,
-			channel.id
+			channel.id,
+			row?.id ?? 0
 		);
 		const history = await db.$queryRawUnsafe<AuditEntry[]>(
-			"SELECT action,version_id AS versionId,previous_version_id AS previousVersionId,actor_id AS actorId,target_user_id AS targetUserId,created_at AS createdAt FROM triage_audit WHERE instance=? AND channel_id=? ORDER BY id DESC LIMIT 100",
+			"SELECT action,version_id AS versionId,previous_version_id AS previousVersionId,actor_id AS actorId,target_user_id AS targetUserId,created_at AS createdAt FROM triage_audit WHERE instance=? AND channel_id=? AND (bot_id=? OR bot_id IS NULL) ORDER BY id DESC LIMIT 100",
 			instance,
-			channel.id
+			channel.id,
+			row?.id ?? 0
 		);
 		return {
+			botId: row?.id ?? null,
 			channelId: channel.id,
 			channelName: channel.name,
 			name: row?.name ?? "Triagem de atendimento",
@@ -251,12 +262,12 @@ export class TriageAuthoring {
 		};
 	}
 
-	get(session: SessionData, channelId: number) {
+	get(session: SessionData, channelId: number, botId?: number) {
 		return withDatabaseTenant(session.instance, () =>
 			this.db.$transaction(
 				async (tx) => {
 					const channel = await authorizeChannel(tx, session, channelId);
-					return this.detail(tx, session.instance, channel);
+					return this.detail(tx, session.instance, channel, botId);
 				},
 				{ isolationLevel: "RepeatableRead" }
 			)
@@ -288,7 +299,104 @@ export class TriageAuthoring {
 		});
 	}
 
-	mutate(session: SessionData, channelId: number, action: "save" | "publish" | "rollback" | "pause", input: unknown) {
+	listBots(session: SessionData, channelId: number) {
+		return withDatabaseTenant(session.instance, () =>
+			this.db.$transaction(
+				async (tx) => {
+					await authorizeChannel(tx, session, channelId);
+					const rows = await tx.$queryRawUnsafe<
+						{
+							id: number;
+							name: string;
+							revision: number;
+							activeVersionId: number | null;
+							paused: number;
+							defaultSlot: number | null;
+						}[]
+					>(
+						"SELECT id,name,revision,active_version_id AS activeVersionId,paused,default_slot AS defaultSlot FROM triage_bots WHERE instance=? AND channel_id=? ORDER BY name,id",
+						session.instance,
+						channelId
+					);
+					return {
+						defaultBotId: rows.find((row) => row.defaultSlot === 1)?.id ?? null,
+						bots: rows.map(({ defaultSlot: _slot, ...row }) => ({ ...row, paused: Boolean(row.paused) }))
+					};
+				},
+				{ isolationLevel: "RepeatableRead" }
+			)
+		);
+	}
+
+	createBot(session: SessionData, channelId: number, input: unknown) {
+		const name = nameOf(requestBody(input, ["name"])["name"]);
+		return withDatabaseTenant(session.instance, () =>
+			this.db.$transaction(
+				async (tx) => {
+					const channel = await authorizeChannel(tx, session, channelId, true);
+					const defaultBot = await draftRow(tx, session.instance, channelId);
+					const template = templateFor(await channelSectors(tx, session.instance, channelId));
+					await this.checkName(tx, session.instance, channelId, name);
+					const id = await this.insertBot(
+						tx,
+						session,
+						channelId,
+						name,
+						encodeTriageDraft(template),
+						!defaultBot
+					);
+					return this.detail(tx, session.instance, channel, id);
+				},
+				{ isolationLevel: "ReadCommitted" }
+			)
+		);
+	}
+
+	private async checkName(tx: TriageReader, instance: string, channelId: number, name: string, id = 0) {
+		const [existing] = await tx.$queryRawUnsafe<{ id: number }[]>(
+			"SELECT id FROM triage_bots WHERE instance=? AND channel_id=? AND name=? AND id<>? LIMIT 1",
+			instance,
+			channelId,
+			name,
+			id
+		);
+		if (existing) throw new BadRequestError("Já existe um bot com esse nome neste canal.");
+	}
+
+	private async insertBot(
+		tx: TriageWriter,
+		session: SessionData,
+		channelId: number,
+		name: string,
+		definition: string,
+		primary: boolean
+	) {
+		await tx.$executeRawUnsafe(
+			"INSERT INTO triage_bots(instance,channel_id,default_slot,revision,name,definition,edited_by) VALUES(?,?,?,1,?,?,?)",
+			session.instance,
+			channelId,
+			primary ? 1 : null,
+			name,
+			definition,
+			session.userId
+		);
+		const [created] = await tx.$queryRawUnsafe<{ id: number }[]>(
+			"SELECT id FROM triage_bots WHERE instance=? AND channel_id=? AND name=?",
+			session.instance,
+			channelId,
+			name
+		);
+		if (!created) throw new Error("TRIAGE_BOT_CREATE_FAILED");
+		return created.id;
+	}
+
+	mutate(
+		session: SessionData,
+		channelId: number,
+		action: "save" | "publish" | "rollback" | "pause",
+		input: unknown,
+		botId?: number
+	) {
 		const fields =
 			action === "save"
 				? ["revision", "name", "definition"]
@@ -302,20 +410,24 @@ export class TriageAuthoring {
 			this.db.$transaction(
 				async (tx) => {
 					const channel = await authorizeChannel(tx, session, channelId, true);
-					const draft = await draftRow(tx, instance, channelId, true);
+					const draft = await draftRow(tx, instance, channelId, botId, true);
 					if (expectedRevision !== (draft?.revision ?? 0))
 						throw new ConflictError("Outro usuário alterou a triagem. Recarregue a versão atual.");
 					if (action === "save") {
 						const name = nameOf(body["name"]),
 							definition = encodeTriageDraft(body["definition"]);
-						await tx.$executeRawUnsafe(
-							"INSERT INTO triage_channels(instance,channel_id,revision,name,definition,edited_by) VALUES(?,?,1,?,?,?) ON DUPLICATE KEY UPDATE revision=revision+1,name=VALUES(name),definition=VALUES(definition),edited_by=VALUES(edited_by),edited_at=CURRENT_TIMESTAMP(3)",
-							instance,
-							channelId,
-							name,
-							definition,
-							session.userId
-						);
+						await this.checkName(tx, instance, channelId, name, draft?.id);
+						if (draft)
+							await tx.$executeRawUnsafe(
+								"UPDATE triage_bots SET revision=revision+1,name=?,definition=?,edited_by=?,edited_at=CURRENT_TIMESTAMP(3) WHERE instance=? AND channel_id=? AND id=?",
+								name,
+								definition,
+								session.userId,
+								instance,
+								channelId,
+								draft.id
+							);
+						else await this.insertBot(tx, session, channelId, name, definition, true);
 					} else {
 						if (!draft) throw new BadRequestError("Salve um rascunho antes desta operação.");
 						let versionId = draft.active_version_id;
@@ -326,7 +438,13 @@ export class TriageAuthoring {
 							const sectors = await channelSectors(tx, instance, channelId);
 							const selected =
 								action === "rollback"
-									? await versionRow(tx, instance, channelId, positiveResourceId(body["versionId"]))
+									? await versionRow(
+											tx,
+											instance,
+											channelId,
+											draft.id,
+											positiveResourceId(body["versionId"])
+										)
 									: draft;
 							if (!selected) throw new NotFoundError("Versão não encontrada neste canal.");
 							const issues = validateTriageDefinition(
@@ -339,24 +457,27 @@ export class TriageAuthoring {
 								});
 							if (action === "publish") {
 								const [latest] = await tx.$queryRawUnsafe<{ number: number }[]>(
-									"SELECT number FROM triage_versions WHERE instance=? AND channel_id=? ORDER BY number DESC LIMIT 1 FOR UPDATE",
+									"SELECT number FROM triage_bot_versions WHERE instance=? AND channel_id=? AND bot_id=? ORDER BY number DESC LIMIT 1 FOR UPDATE",
 									instance,
-									channelId
+									channelId,
+									draft.id
 								);
 								const number = (latest?.number ?? 0) + 1;
 								await tx.$executeRawUnsafe(
-									"INSERT INTO triage_versions(instance,channel_id,number,name,definition,created_by) VALUES(?,?,?,?,?,?)",
+									"INSERT INTO triage_bot_versions(instance,channel_id,bot_id,number,name,definition,created_by) VALUES(?,?,?,?,?,?,?)",
 									instance,
 									channelId,
+									draft.id,
 									number,
 									selected.name,
 									selected.definition,
 									session.userId
 								);
 								const [published] = await tx.$queryRawUnsafe<{ id: number }[]>(
-									"SELECT id FROM triage_versions WHERE instance=? AND channel_id=? AND number=?",
+									"SELECT id FROM triage_bot_versions WHERE instance=? AND channel_id=? AND bot_id=? AND number=?",
 									instance,
 									channelId,
+									draft.id,
 									number
 								);
 								versionId = published!.id;
@@ -365,11 +486,12 @@ export class TriageAuthoring {
 							}
 						}
 						await tx.$executeRawUnsafe(
-							"UPDATE triage_channels SET revision=revision+1,active_version_id=?,paused=? WHERE instance=? AND channel_id=?",
+							"UPDATE triage_bots SET revision=revision+1,active_version_id=?,paused=? WHERE instance=? AND channel_id=? AND id=?",
 							versionId,
 							action === "pause",
 							instance,
-							channelId
+							channelId,
+							draft.id
 						);
 						await recordAudit(
 							tx,
@@ -378,10 +500,11 @@ export class TriageAuthoring {
 							action === "pause" ? "PAUSED" : action === "publish" ? "PUBLISHED" : "ROLLED_BACK",
 							versionId,
 							null,
-							draft.active_version_id
+							draft.active_version_id,
+							draft.id
 						);
 					}
-					return this.detail(tx, instance, channel);
+					return this.detail(tx, instance, channel, botId);
 				},
 				{ isolationLevel: "ReadCommitted" }
 			)
@@ -464,32 +587,57 @@ export class TriageAuthoring {
 	}
 
 	activeForChannel(instance: string, channelId: number, tx?: TriageReader) {
+		return this.findActive(instance, channelId, undefined, tx);
+	}
+	activeForBot(instance: string, channelId: number, botId: number, tx?: TriageReader) {
+		return this.findActive(instance, channelId, botId, tx);
+	}
+	async hasActiveBot(instance: string, channelId: number) {
+		return withDatabaseTenant(instance, async () => {
+			if (!(await triageEnabled(this.db, instance))) return false;
+			try {
+				const [row] = await this.db.$queryRawUnsafe<{ id: number }[]>(
+					"SELECT b.id FROM triage_bots b JOIN clients c ON c.instance=? AND c.id=b.channel_id WHERE b.instance=? AND b.channel_id=? AND c.is_active=1 AND b.paused=0 AND b.active_version_id IS NOT NULL LIMIT 1",
+					instance,
+					instance,
+					channelId
+				);
+				return Boolean(row);
+			} catch (error) {
+				if (missingBindingsTable(error)) return false;
+				throw error;
+			}
+		});
+	}
+	private findActive(instance: string, channelId: number, botId: number | undefined, tx?: TriageReader) {
 		return withDatabaseTenant(instance, async () => {
 			const db = tx ?? this.db;
 			if (!(await triageEnabled(db, instance))) return null;
 			if (tx && !(await findChannel(tx, instance, channelId, true))) return null;
-			let versionId: number | null;
+			let slot: { id: number; active_version_id: number } | undefined;
 			try {
-				const [slot] = await db.$queryRawUnsafe<{ active_version_id: number }[]>(
-					"SELECT active_version_id FROM triage_channels WHERE instance=? AND channel_id=? AND paused=0 AND active_version_id IS NOT NULL" +
+				[slot] = await db.$queryRawUnsafe<{ id: number; active_version_id: number }[]>(
+					"SELECT id,active_version_id FROM triage_bots WHERE instance=? AND channel_id=? AND paused=0 AND active_version_id IS NOT NULL AND " +
+						(botId === undefined ? "default_slot=1" : "id=?") +
 						(tx ? " FOR UPDATE" : ""),
 					instance,
-					channelId
+					channelId,
+					...(botId === undefined ? [] : [botId])
 				);
-				versionId = slot?.active_version_id ?? null;
 			} catch (error) {
 				// Only new, unbound chats may keep using legacy routing while the tenant prepares its schema.
 				if (missingBindingsTable(error)) return null;
 				throw error;
 			}
-			if (versionId === null) return null;
+			if (!slot) return null;
 			if (!tx && !(await findChannel(db, instance, channelId))) return null;
 			const [version] = await db.$queryRawUnsafe<StoredVersion[]>(
-				"SELECT id,channel_id,number,name,definition FROM triage_versions WHERE instance=? AND channel_id=? AND id=?" +
+				"SELECT id,channel_id,bot_id,number,name,definition FROM triage_bot_versions WHERE instance=? AND channel_id=? AND bot_id=? AND id=?" +
 					(tx ? " FOR UPDATE" : ""),
 				instance,
 				channelId,
-				versionId
+				slot.id,
+				slot.active_version_id
 			);
 			if (!version) throw new Error("TRIAGE_ACTIVE_VERSION_MISSING");
 			return this.binding(version);
@@ -498,16 +646,27 @@ export class TriageAuthoring {
 	getRuntimeVersion(instance: string, versionId: number) {
 		return withDatabaseTenant(instance, async () => {
 			const [version] = await this.db.$queryRawUnsafe<StoredVersion[]>(
-				"SELECT id,channel_id,number,name,definition FROM triage_versions WHERE instance=? AND id=?",
+				"SELECT id,channel_id,bot_id,number,name,definition FROM triage_bot_versions WHERE instance=? AND id=?",
 				instance,
 				versionId
 			);
 			return version ? this.binding(version) : null;
 		});
 	}
+	getBotRuntimeVersion(instance: string, botId: number, versionId: number, tx?: TriageReader) {
+		return withDatabaseTenant(instance, async () => {
+			const [row] = await (tx ?? this.db).$queryRawUnsafe<StoredVersion[]>(
+				"SELECT id,channel_id,bot_id,number,name,definition FROM triage_bot_versions WHERE instance=? AND bot_id=? AND id=?",
+				instance,
+				botId,
+				versionId
+			);
+			return row ? this.binding(row) : null;
+		});
+	}
 	private binding(row: StoredVersion) {
 		return {
-			botId: row.channel_id,
+			botId: row.bot_id,
 			channelId: row.channel_id,
 			versionId: row.id,
 			version: row.number,

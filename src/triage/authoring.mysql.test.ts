@@ -79,18 +79,22 @@ async function seed(pool: Pool, prefix: string, owners: readonly string[]) {
 	const activation = prefix
 		? "prisma/tenant-sql/20261125194000_triage_activation_runtime.sql"
 		: "prisma/migrations/20261125194000_triage_activation_runtime/migration.sql";
-	await ddl(pool,await readFile(resolve(activation),"utf8"));
+	await ddl(pool, await readFile(resolve(activation), "utf8"));
 	const triggers = prefix
 		? "prisma/tenant-sql/20261125193000_triage_trigger_sets.sql"
 		: "prisma/migrations/20261125193000_triage_trigger_sets/migration.sql";
 	await ddl(pool, await readFile(resolve(triggers), "utf8"));
+	const multi = prefix
+		? "prisma/tenant-sql/20261125220000_triage_multi_bot.sql"
+		: "prisma/migrations/20261125220000_triage_multi_bot/migration.sql";
+	await ddl(pool, await readFile(resolve(multi), "utf8"));
 }
 
 async function exercise(
 	service: TriageAuthoring,
 	triggers: TriageTriggers,
 	changeFlag: (on: boolean) => Promise<void>,
-	renameTable: (table: "triage_channels" | "triage_versions" | "triage_trigger_sets") => Promise<void>
+	renameTable: (table: "triage_bots" | "triage_bot_versions" | "triage_trigger_sets") => Promise<void>
 ) {
 	const app = express();
 	const manualRequestId = "6c90513c-8b4a-47cb-b559-6e4b5a63d036";
@@ -133,12 +137,17 @@ async function exercise(
 			},
 			async (instance, channelId, chatId, actorId) => {
 				assert.deepEqual([instance, channelId, actorId], ["alpha", 1, 2]);
-				return chatId === 7 ? { botId: 1, name: "Recepção" } : null;
+				return chatId === 7
+					? [
+							{ botId: 11, channelId, name: "Recepção", version: 1 },
+							{ botId: 12, channelId, name: "Suporte", version: 3 }
+						]
+					: [];
 			},
 			async (input) => {
 				assert.deepEqual(
-					[input.instance, input.channelId, input.actorId, input.eventKey, input.type],
-					["alpha", 1, 2, manualRequestId, "manual"]
+					[input.instance, input.channelId, input.actorId, input.eventKey, input.type, input.botId],
+					["alpha", 1, 2, manualRequestId, "manual", 12]
 				);
 				assert.ok(input.authorizeTx, "Revalidação da delegação dentro da transação de início");
 				return input.chatId === 7 ? { started: true, chat: { id: 7 } } : null;
@@ -183,18 +192,21 @@ async function exercise(
 		await api("PUT", "/channels/1/grants/2", { enabled: true }, "admin");
 		await api("PUT", "/channels/1/grants/4", { enabled: true }, "supervisor", 403);
 		assert.equal((await api("GET", "/channels/1/grants", undefined, "admin")).users.length, 1);
-		await api("POST", "/channels/1/chats/7/start", { requestId: "invalid" }, "supervisor", 400);
+		await api("POST", "/channels/1/chats/7/start", { requestId: "invalid", botId: 12 }, "supervisor", 400);
+		await api("POST", "/channels/1/chats/7/start", { requestId: manualRequestId }, "supervisor", 400);
 		assert.deepEqual(await api("GET", "/channels/1/chats/7/start"), {
 			available: true,
-			botId: 1,
-			name: "Recepção"
+			bots: [
+				{ botId: 11, channelId: 1, name: "Recepção", version: 1 },
+				{ botId: 12, channelId: 1, name: "Suporte", version: 3 }
+			]
 		});
-		assert.deepEqual(await api("GET", "/channels/1/chats/8/start"), { available: false, botId: null, name: null });
-		assert.deepEqual(await api("POST", "/channels/1/chats/7/start", { requestId: manualRequestId }), {
+		assert.deepEqual(await api("GET", "/channels/1/chats/8/start"), { available: false, bots: [] });
+		assert.deepEqual(await api("POST", "/channels/1/chats/7/start", { requestId: manualRequestId, botId: 12 }), {
 			chatId: 7,
 			started: true
 		});
-		await api("POST", "/channels/1/chats/8/start", { requestId: manualRequestId }, "supervisor", 409);
+		await api("POST", "/channels/1/chats/8/start", { requestId: manualRequestId, botId: 12 }, "supervisor", 409);
 		assert.deepEqual(
 			(await api("GET", "/context")).channels.map((v: { id: number }) => v.id),
 			[1]
@@ -262,7 +274,56 @@ async function exercise(
 		assert.equal(v1.versions[0].createdBy, 2);
 		assert.equal(v1.history.filter((e: { action: string }) => e.action === "GRANTED").length, 1);
 		assert.equal((await service.activeForChannel("alpha", 1))?.versionId, v1.activeVersionId);
-		await exerciseBotTriggers(new URL("/rules", base).toString(), triggers, v1.activeVersionId);
+		const secondary = await api("POST", "/channels/1/bots", { name: "Pós-atendimento" }, "supervisor", 201);
+		const secondaryPath = "/channels/1/bots/" + secondary.botId;
+		assert.notEqual(secondary.botId, v1.botId);
+		const secondaryDraft = await api("PUT", secondaryPath + "/draft", {
+			revision: secondary.revision,
+			name: "Pós-atendimento",
+			definition
+		});
+		const secondRace = await Promise.all(
+			[1, 2].map(() =>
+				fetch(base + secondaryPath + "/publish", {
+					method: "POST",
+					headers: { authorization: "supervisor", "Content-Type": "application/json" },
+					body: JSON.stringify({ revision: secondaryDraft.revision })
+				})
+			)
+		);
+		assert.deepEqual(secondRace.map((r) => r.status).sort(), [200, 409]);
+		await Promise.all(secondRace.map((r) => r.text()));
+		const secondPublished = await api("GET", secondaryPath);
+		const collection = await api("GET", "/channels/1/bots");
+		assert.equal(collection.defaultBotId, v1.botId);
+		assert.deepEqual(
+			collection.bots.map((bot: { id: number }) => bot.id).sort(),
+			[v1.botId, secondary.botId].sort()
+		);
+		await api("POST", "/channels/1/bots", { name: "Pós-atendimento" }, "supervisor", 400);
+		await api("GET", "/channels/2/bots/" + secondary.botId, undefined, "admin", 404);
+		await api("GET", "/channels/2/bots/" + secondary.botId, undefined, "supervisor", 403);
+		await api(
+			"POST",
+			secondaryPath + "/rollback",
+			{ revision: secondPublished.revision, versionId: v1.activeVersionId },
+			"supervisor",
+			404
+		);
+		const publishedBot = (detail: typeof v1) => ({
+			botId: detail.botId,
+			channelId: 1,
+			channelName: "Principal",
+			name: detail.activeName,
+			version: 1,
+			versionId: detail.activeVersionId
+		});
+		await exerciseBotTriggers(
+			new URL("/rules", base).toString(),
+			triggers,
+			publishedBot(v1),
+			publishedBot(secondPublished)
+		);
 		assert.equal(await service.getRuntimeVersion("beta", v1.activeVersionId), null);
 		const updated = structuredClone(definition);
 		updated.nodes[0]!.text = "Bem-vindo à nova triagem";
@@ -278,7 +339,16 @@ async function exercise(
 		const paused = await api("POST", "/channels/1/pause", { revision: 6 });
 		assert.equal(paused.paused, true);
 		assert.equal(await service.activeForChannel("alpha", 1), null);
-		assert.equal(await triggers.match("alpha", 1, { type: "manual", sectorId: 10 }), null);
+		assert.equal(await triggers.match("alpha", 1, { type: "manual", sectorId: 10, botId: v1.botId }), null);
+		assert.deepEqual(
+			(await triggers.manualOptions("alpha", 1, 10)).map((bot) => bot.botId),
+			[secondary.botId]
+		);
+		assert.deepEqual(await triggers.match("alpha", 1, { type: "closed", sectorId: 10 }), {
+			botId: secondary.botId,
+			versionId: secondPublished.activeVersionId,
+			sectorId: 10
+		});
 		assert.deepEqual((await service.getRuntimeVersion("alpha", v2.activeVersionId))?.definition, updated);
 		await api("PUT", "/channels/1/grants/2", { enabled: false }, "admin");
 		await api("POST", "/channels/1/rollback", { revision: 7, versionId: v1.activeVersionId }, "supervisor", 403);
@@ -306,7 +376,7 @@ async function exercise(
 				triggers.settings(admin, 10),
 				(err: unknown) => err instanceof TriggerError && err.status === 503
 			);
-			await renameTable("triage_versions");
+			await renameTable("triage_bot_versions");
 			await api("GET", "/context", undefined, "admin", 503);
 			assert.equal(
 				await service.activeForChannel("alpha", 2),
@@ -318,7 +388,7 @@ async function exercise(
 				"published channel must not fall through to legacy"
 			);
 			await assert.rejects(service.getRuntimeVersion("alpha", v1.activeVersionId));
-			await renameTable("triage_channels");
+			await renameTable("triage_bots");
 			assert.equal(
 				await service.activeForChannel("alpha", 2),
 				null,
