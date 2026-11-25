@@ -8,6 +8,7 @@ import "express-async-errors";
 import cron from "node-cron";
 import autoResponseController from "./controllers/auto-response.controller";
 import { createTriageRouter } from "./controllers/triage.controller";
+import { homologTriageEnabled } from "./parameters/triage-feature";
 import chatsController from "./controllers/chats.controller";
 import sessionChangesController from "./controllers/session-changes.controller";
 import retainSessionChanges from "./routines/session-change-retention.routine";
@@ -87,6 +88,7 @@ app.use(publicBiServiceTokenGuard);
 app.get("/health", (_req, res) => {
 	const native = tenantSqlEnabled();
 	res.json({ service: "whatsapp", storage: native ? "tenant-sql" : "central", storageVersion: 1,
+		triage: { homologDefault: homologTriageEnabled() },
 		operatorPauseAdmission: { version: native ? 1 : 0, storage: native ? "tenant-sql" : "central", sharedCrmTransaction: native, instances: native ? tenantSqlInstanceNames() : [] } });
 });
 
