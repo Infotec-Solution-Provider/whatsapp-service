@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { inspect } from "node:util";
-import { getMetaCredentials, MetaGraphError, MetaManagementGraph } from "./meta-management.graph";
+import { MetaGraphError, MetaManagementGraph } from "./meta-management.graph";
 
 const accountId = "101010";
 const phoneId = "202020";
-const appId = "303030";
 const token = "test-fixture-token-never-log";
 const baseUrl = "https://graph.facebook.com";
 const versionPath = "/v26.0";
@@ -36,26 +35,13 @@ function graphWithReplies(...replies: Reply[]) {
 		assert.ok(reply, `Unexpected Graph call to ${url}`);
 		return reply(call);
 	};
-	return { graph: new MetaManagementGraph({ appId, token }, transport), calls };
+	return { graph: new MetaManagementGraph(token, transport), calls };
 }
 
-test("reads management credentials only for an explicitly configured Messaging account", () => {
-	const key = "WHATSAPP_META_MANAGEMENT_ACCOUNTS";
-	const previous = process.env[key];
-	try {
-		process.env[key] = JSON.stringify({
-			[accountId]: { appId, token },
-			[phoneId]: { appId: "not-a-graph-id", token },
-		});
-		assert.deepEqual(getMetaCredentials(accountId), { appId, token });
-		assert.equal(getMetaCredentials(phoneId), null);
-		assert.equal(getMetaCredentials("404040"), null);
-		process.env[key] = "malformed";
-		assert.equal(getMetaCredentials(accountId), null);
-	} finally {
-		if (previous === undefined) delete process.env[key];
-		else process.env[key] = previous;
-	}
+test("keeps the channel token private if the client is inspected or serialized", () => {
+	const { graph } = graphWithReplies();
+	assert.ok(!inspect(graph, { depth: 6 }).includes(token));
+	assert.ok(!JSON.stringify(graph).includes(token));
 });
 
 test("loads templates with filters and cursors on the authorized account's pinned Graph endpoint", async () => {
@@ -171,9 +157,13 @@ test("uploads the photo's bytes against the signed upload ID, then attaches the 
 		() => json({ data: [{ profile_picture_url: "https://pps.whatsapp.net/localfixture" }] }),
 	);
 	await graph.updatePhoto(phoneId, { bytes: photo, contentType: "image/jpeg" });
-	const [session, upload, attach] = calls;
-	assert.ok(session && upload && attach);
-	assert.equal(session.url.pathname, `${versionPath}/${appId}/uploads`);
+	const [session, upload, attach, readBack] = calls;
+	assert.ok(session && upload && attach && readBack);
+	assert.equal(session.url.pathname, `${versionPath}/app/uploads/`);
+	assert.equal(new Headers(session.init.headers).get("authorization"), `OAuth ${token}`);
+	for (const request of [attach, readBack]) {
+		assert.equal(new Headers(request.init.headers).get("authorization"), `Bearer ${token}`);
+	}
 	assert.equal(session.url.searchParams.get("file_length"), String(photo.length));
 	assert.equal(session.url.searchParams.get("file_type"), "image/jpeg");
 	assert.equal(upload.url.pathname, `${versionPath}/upload:localfixture=`);

@@ -2,11 +2,6 @@ const GRAPH_BASE = "https://graph.facebook.com/v26.0/";
 const TEMPLATE_FIELDS = "id,name,language,category,status,components,rejected_reason";
 const PROFILE_FIELDS = "about,description,email,address,websites,vertical,profile_picture_url";
 
-export interface MetaCredentials {
-	appId: string;
-	token: string;
-}
-
 export interface MetaTemplateInput {
 	name: string;
 	language: string;
@@ -117,21 +112,12 @@ function mapTemplate(value: Json): MetaTemplate {
 	};
 }
 
-export function getMetaCredentials(accountId: string): MetaCredentials | null {
-	const config = process.env["WHATSAPP_META_MANAGEMENT_ACCOUNTS"];
-	if (!config || !/^\d+$/.test(accountId)) return null;
-	try {
-		const account = json(json(JSON.parse(config))[accountId]);
-		const appId = nullableString(account["appId"]);
-		const token = nullableString(account["token"]);
-		return appId && /^\d+$/.test(appId) && token && /^\S+$/.test(token) ? { appId, token } : null;
-	} catch {
-		return null;
-	}
-}
-
 export class MetaManagementGraph {
-	constructor(private credentials: MetaCredentials, private transport: typeof fetch = fetch) {}
+	readonly #token: string;
+
+	constructor(token: string, private readonly transport: typeof fetch = fetch) {
+		this.#token = token;
+	}
 
 	private async request(path: string, query: Record<string, string> = {}, options: RequestInit = {}) {
 		const url = new URL(GRAPH_BASE + path);
@@ -141,7 +127,7 @@ export class MetaManagementGraph {
 		try {
 			response = await this.transport(url, {
 				...options,
-				headers: { Authorization: `Bearer ${this.credentials.token}`, ...options.headers },
+				headers: { Authorization: `Bearer ${this.#token}`, ...options.headers },
 				redirect: "error",
 				signal: AbortSignal.timeout(10_000)
 			});
@@ -162,7 +148,7 @@ export class MetaManagementGraph {
 		const traceId = trace && /^[a-zA-Z0-9_-]{1,100}$/.test(trace) ? trace : undefined;
 		const code = error["code"];
 		if (code === 190 || code === 10 || code === 200 || response.status === 401 || response.status === 403) {
-			throw new MetaGraphError(502, "META_PERMISSION_DENIED", "A Meta recusou a credencial ou a permissão para esta operação.", traceId);
+			throw new MetaGraphError(502, "META_PERMISSION_DENIED", "A Meta recusou o token do canal ou a permissão para esta operação.", traceId);
 		}
 		if (error["error_subcode"] === 2388024) {
 			throw new MetaGraphError(409, "META_TEMPLATE_EXISTS", "Já existe um template com esse nome e idioma nesta conta.", traceId);
@@ -287,14 +273,14 @@ export class MetaManagementGraph {
 
 	async updatePhoto(phoneId: string, photo: MetaPhoto): Promise<MetaProfile> {
 		const extension = photo.contentType === "image/png" ? "png" : "jpg";
-		const session = await this.request(`${this.credentials.appId}/uploads`, {
+		const session = await this.request("app/uploads/", {
 			file_name: `profile.${extension}`, file_length: String(photo.bytes.length), file_type: photo.contentType
-		}, { method: "POST" });
+		}, { method: "POST", headers: { Authorization: `OAuth ${this.#token}` } });
 		const id = nullableString(session["id"]);
 		if (!id || !/^upload:[A-Za-z0-9_=+%.-]+(?:\?sig=[A-Za-z0-9_+=%.-]+)?$/.test(id)) throw invalidResponse();
 		const upload = await this.request(id, {}, {
 			method: "POST",
-			headers: { Authorization: `OAuth ${this.credentials.token}`, file_offset: "0", "Content-Type": photo.contentType },
+			headers: { Authorization: `OAuth ${this.#token}`, file_offset: "0", "Content-Type": photo.contentType },
 			body: Uint8Array.from(photo.bytes)
 		});
 		const handle = nullableString(upload["h"]);

@@ -22,16 +22,9 @@ const parsePhoto: RequestHandler = (req, res, next) => uploadPhoto(req, res, (er
 	next(error);
 });
 
-function parseAccountId(input: unknown): string {
-	if (typeof input !== "string" || !/^\d{1,32}$/.test(input)) {
-		throw new MetaGraphError(400, "META_INVALID_ACCOUNT_ID", "Selecione uma conta Meta válida.");
-	}
-	return input;
-}
-
 function parseClientId(input: unknown): number {
 	if (typeof input !== "string" || !/^[1-9]\d{0,9}$/.test(input) || Number(input) > 2147483647) {
-		throw new MetaGraphError(400, "META_INVALID_CLIENT_ID", "Selecione um número válido.");
+		throw new MetaGraphError(400, "META_INVALID_CLIENT_ID", "Selecione um canal oficial válido.");
 	}
 	return Number(input);
 }
@@ -43,21 +36,21 @@ router.use(isAuthenticated, isAdmin, async (req, _res, next) => {
 	next();
 });
 
-router.get("/accounts", async (req, res) => {
-	res.json({ accounts: await metaManagement.listAccounts(req.session.instance) });
+router.get("/channels", async (req, res) => {
+	res.json({ channels: await metaManagement.listChannels(req.session.instance) });
 });
 
-router.get("/accounts/:accountId/templates", async (req, res) => {
-	res.json(await metaManagement.listTemplates(req.session.instance, parseAccountId(req.params["accountId"]), parseMetaTemplateFilters(req.query)));
+router.get("/channels/:clientId/number", async (req, res) => {
+	res.json({ number: await metaManagement.getNumber(req.session.instance, parseClientId(req.params["clientId"])) });
 });
 
-router.post("/accounts/:accountId/templates", parseJson, async (req, res) => {
-	const template = await metaManagement.createTemplate(req.session, parseAccountId(req.params["accountId"]), parseMetaTemplateInput(req.body));
+router.get("/channels/:clientId/templates", async (req, res) => {
+	res.json(await metaManagement.listTemplates(req.session.instance, parseClientId(req.params["clientId"]), parseMetaTemplateFilters(req.query)));
+});
+
+router.post("/channels/:clientId/templates", parseJson, async (req, res) => {
+	const template = await metaManagement.createTemplate(req.session, parseClientId(req.params["clientId"]), parseMetaTemplateInput(req.body));
 	res.status(201).json({ template });
-});
-
-router.get("/accounts/:accountId/numbers", async (req, res) => {
-	res.json({ numbers: await metaManagement.listNumbers(req.session.instance, parseAccountId(req.params["accountId"])) });
 });
 
 router.get("/numbers/:clientId/profile", async (req, res) => {
