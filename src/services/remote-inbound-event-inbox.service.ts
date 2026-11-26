@@ -12,6 +12,7 @@ import { currentDatabaseTenant, withDatabaseTenant } from "../utils/database-ten
 
 const DEFAULT_PROCESSING_INTERVAL_MS = 250;
 const DEFAULT_LOCK_DURATION_MS = 60_000;
+const TENANT_SCAN_RETRY_DELAY_MS = 5_000;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 191;
 const UNMATCHED_RECEIPT_RETRY_THRESHOLD = 8;
 const ONE_HOUR_MS = 3_600_000;
@@ -131,6 +132,7 @@ export function assertRemoteInboundPayloadMatches(
 export class RemoteInboundEventInboxService {
 	private readonly concurrency = resolveWorkerConcurrency(process.env["REMOTE_INBOUND_EVENT_CONCURRENCY"]);
 	private readonly receiptAdmission = new AsyncConcurrencyLimiter(4);
+	private readonly tenantScanRetryAt = new Map<string, number>();
 	private readonly processingIntervalMs = Math.max(
 		50,
 		Number(process.env["REMOTE_INBOUND_EVENT_INTERVAL_MS"] || DEFAULT_PROCESSING_INTERVAL_MS)
@@ -292,9 +294,12 @@ export class RemoteInboundEventInboxService {
 			// completions for a native batch must use the same tenant connection pool.
 			for (const instance of tenantSqlInstanceNames()) {
 				if (this.stopping) break;
+				if ((this.tenantScanRetryAt.get(instance) ?? 0) > Date.now()) continue;
 				try {
 					await withDatabaseTenant(instance, () => this.processBatch());
+					this.tenantScanRetryAt.delete(instance);
 				} catch (error) {
+					this.tenantScanRetryAt.set(instance, Date.now() + TENANT_SCAN_RETRY_DELAY_MS);
 					Logger.error(`[RemoteInboundInbox] Worker loop error for ${instance}: ${sanitizeErrorMessage(error)}`);
 				}
 			}

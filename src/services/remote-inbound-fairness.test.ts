@@ -11,11 +11,16 @@ const rows: any[] = [];
 const errorLogs: string[] = [];
 const infoLogs: string[] = [];
 let tenantSql = false;
+let homologUnavailable = true;
+let homologScanFailures = 0;
 const tenantRows = () => {
 	if (!tenantSql) return rows;
 	const instance = currentDatabaseTenant();
-	if (instance === "homolog") throw Error("Unavailable homolog runtime");
-	assert.ok(instance === "suprimaxxi" || instance === "infotec");
+	if (instance === "homolog" && homologUnavailable) {
+		homologScanFailures++;
+		throw Error("Unavailable homolog runtime");
+	}
+	assert.ok(instance === "suprimaxxi" || instance === "infotec" || instance === "homolog");
 	return rows.filter(row => row.fixtureTenant === instance);
 };
 const delegate = {
@@ -149,6 +154,31 @@ async function main(): Promise<void> {
 		assert.match(errorLogs.at(-1) ?? "", /Worker loop error for homolog: Unavailable homolog runtime/);
 		assert.equal(currentDatabaseTenant(), null);
 		console.log("PASS: explicit tenant retained, missing tenant isolated, and overlapping inbox IDs recovered and completed in their own scope");
+
+		const realNow = Date.now;
+		let retryClock = realNow();
+		Date.now = () => retryClock;
+		try {
+			const healthy = { ...item("healthy-during-backoff", now - 1000, now - 1000, 0, "message-received"),
+				fixtureTenant: "suprimaxxi" };
+			rows.push(healthy);
+			await service.processOnce();
+			assert.equal(homologScanFailures, 1);
+			assert.equal(healthy.status, "COMPLETED");
+			await assert.rejects(withDatabaseTenant("homolog", () => service.processOnce()), /Unavailable homolog runtime/);
+			assert.equal(homologScanFailures, 2, "Explicit scoped calls still attempt their own batch");
+			retryClock += 5_001;
+			const recoveredPeer = { ...item("homolog-recovered", now - 1000, now - 1000, 0, "message-received"),
+				fixtureTenant: "homolog" };
+			rows.push(recoveredPeer);
+			homologUnavailable = false;
+			await service.processOnce();
+			assert.equal(recoveredPeer.status, "COMPLETED");
+			assert.equal(currentDatabaseTenant(), null);
+		} finally {
+			Date.now = realNow;
+		}
+		console.log("PASS: failed tenant backs off while healthy work continues and resumes after the delay");
 	} finally {
 		if (priorConcurrency === undefined) delete process.env["REMOTE_INBOUND_EVENT_CONCURRENCY"];
 		else process.env["REMOTE_INBOUND_EVENT_CONCURRENCY"] = priorConcurrency;
