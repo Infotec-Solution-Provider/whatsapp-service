@@ -1,4 +1,5 @@
 import type { ParameterScope } from "./parameter-settings.target";
+import { CONVERSATION_RECORDING_PARAMETER } from "./conversation-recording";
 import { MONITOR_WAIT_CRITICAL_KEY, MONITOR_WAIT_DEFAULTS, MONITOR_WAIT_MAX_MINUTES, MONITOR_WAIT_WARNING_KEY } from "./monitor-wait-thresholds";
 
 export interface ParameterSetting {
@@ -224,6 +225,12 @@ export const whatsappParameterSettings: ParameterSetting[] = [
 		"Telefonia"
 	),
 	toggle(
+		CONVERSATION_RECORDING_PARAMETER,
+		"Escutar ligações na conversa",
+		"Autorizar este usuário a ouvir as gravações vinculadas ao histórico no atendimento integrado.",
+		"Telefonia"
+	),
+	toggle(
 		"use_local_contacts_sync",
 		"Sincronizar contatos com o CRM legado",
 		"Utilizar a sincronização local de contatos quando a integração estiver configurada.",
@@ -239,6 +246,10 @@ export const whatsappParameterSettings: ParameterSetting[] = [
 
 // These consumers deliberately resolve fewer levels than the session feature flags.
 for (const setting of whatsappParameterSettings) {
+	if (setting.key === CONVERSATION_RECORDING_PARAMETER) {
+		setting.supportedScopes = ["USER"];
+		continue;
+	}
 	setting.supportedScopes =
 		setting.key.startsWith("require_supervisor_approval_") ||
 		setting.key === "feature_internal_group_whatsapp_sync_enabled"

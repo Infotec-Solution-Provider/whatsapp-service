@@ -4,8 +4,10 @@ import parametersService, { INTERNAL_GROUP_WHATSAPP_SYNC_PARAMETER } from "./par
 import { MESSAGE_FLOW_EDITOR_PARAMETER } from "../parameters/message-flow-editor";
 import prismaService from "./prisma.service";
 import { TRIAGE_FLAG } from "../parameters/triage-feature";
+import { CONVERSATION_RECORDING_PARAMETER } from "../parameters/conversation-recording";
+import { whatsappParameterSettings } from "../parameters/parameter-settings.catalog";
 
-type FindManyArgs = { where?: { scope?: ParameterScope; instance?: string } };
+type FindManyArgs = { where?: { scope?: ParameterScope; instance?: string; userId?: number } };
 type ParameterDelegate = {
 	findMany(args?: FindManyArgs): Promise<Parameter[]>;
 };
@@ -14,6 +16,12 @@ const parameterDelegate = prismaService.parameter as unknown as ParameterDelegat
 const originalFindMany = parameterDelegate.findMany.bind(parameterDelegate);
 
 parameterDelegate.findMany = async ({ where }: FindManyArgs = {}) => {
+	if (where?.instance === "tenant-recording") {
+		const row: Parameter = { id: 1, instance: "tenant-recording", scope: "INSTANCE", userId: null, sectorId: null, key: CONVERSATION_RECORDING_PARAMETER, value: "true" };
+		if (where.scope === "INSTANCE") return [row];
+		if (where.scope === "USER" && where.userId === 9) return [{ ...row, scope: "USER", userId: 9 }];
+		return [];
+	}
 	if (where?.instance === "tenant-flow") {
 		const row: Parameter = { id: 1, instance: "tenant-flow", scope: "INSTANCE", userId: null, sectorId: null, key: MESSAGE_FLOW_EDITOR_PARAMETER, value: "false" };
 		if (where.scope === "USER") return [{ ...row, scope: "USER", userId: 9, value: "true" }];
@@ -69,6 +77,11 @@ parameterDelegate.findMany = async ({ where }: FindManyArgs = {}) => {
 
 async function run() {
 	try {
+		assert.deepEqual(whatsappParameterSettings.find(setting => setting.key === CONVERSATION_RECORDING_PARAMETER)?.supportedScopes, ["USER"]);
+		assert.equal(await parametersService.canPlayConversationRecordings("tenant-recording", 9), true);
+		assert.equal(await parametersService.canPlayConversationRecordings("tenant-recording", 10), false);
+		assert.equal((await parametersService.getSessionParams({ instance: "tenant-recording", userId: 9 }))[CONVERSATION_RECORDING_PARAMETER], "true");
+		assert.equal((await parametersService.getSessionParams({ instance: "tenant-recording", userId: 10 }))[CONVERSATION_RECORDING_PARAMETER], "false");
 		assert.equal((await parametersService.getSessionParams({ instance: "tenant-flow", userId: 9 }))[MESSAGE_FLOW_EDITOR_PARAMETER], "false");
 		assert.equal(await parametersService.isInternalGroupWhatsappSyncEnabled("tenant-default", false), false);
 		assert.equal(await parametersService.isInternalGroupWhatsappSyncEnabled("tenant-default", true), true);

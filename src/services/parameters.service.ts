@@ -2,6 +2,7 @@ import prismaService from "./prisma.service";
 import { META_MANAGEMENT_PARAMETER } from "../parameters/meta-management";
 import { MESSAGE_FLOW_EDITOR_PARAMETER } from "../parameters/message-flow-editor";
 import { homologTriageEnabled, resolveTriageFlag, TRIAGE_FLAG } from "../parameters/triage-feature";
+import { CONVERSATION_RECORDING_PARAMETER } from "../parameters/conversation-recording";
 
 const DEFAULT_FEATURE_PARAMETERS: Record<string, string> = {
 	"monitor:wait_warning_minutes": "30",
@@ -35,6 +36,11 @@ export const CONTACT_APPROVAL_PARAMETERS = {
 	reactivation: "require_supervisor_approval_for_contact_reactivation",
 	deletion: "require_supervisor_approval_for_contact_deletion"
 } as const;
+
+function conversationRecordingEnabled(parameters: { key: string; sectorId: number | null; value: string }[]) {
+	return parameters.filter(parameter => parameter.key === CONVERSATION_RECORDING_PARAMETER && parameter.sectorId === null)
+		.at(-1)?.value === "true";
+}
 
 class ParametersService {
 	public async getUserParams(instance: string, userId: number) {
@@ -87,6 +93,10 @@ class ParametersService {
 		return defaultValue;
 	}
 
+	public async canPlayConversationRecordings(instance: string, userId: number) {
+		return conversationRecordingEnabled(await this.getUserParams(instance, userId));
+	}
+
 	public async isInternalGroupWhatsappSyncEnabled(instance: string, legacyDefault: boolean) {
 		return this.getInstanceBooleanParam(instance, INTERNAL_GROUP_WHATSAPP_SYNC_PARAMETER, legacyDefault);
 	}
@@ -135,6 +145,7 @@ class ParametersService {
 			...toParamMap(instanceParams),
 			...toParamMap(sectorParams),
 			...toParamMap(userParams),
+			[CONVERSATION_RECORDING_PARAMETER]: String(conversationRecordingEnabled(userParams)),
 			[META_MANAGEMENT_PARAMETER]: String(instanceFlags[META_MANAGEMENT_PARAMETER] === "true"),
 			[MESSAGE_FLOW_EDITOR_PARAMETER]: String(homologTriageEnabled() || instanceFlags[MESSAGE_FLOW_EDITOR_PARAMETER] === "true"),
 			[TRIAGE_FLAG]: String(resolveTriageFlag(instanceFlags[TRIAGE_FLAG]))

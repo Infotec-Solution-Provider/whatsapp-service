@@ -650,9 +650,10 @@ class ChatsService {
 	/**
 	 * Chat com contato, cliente do CRM e histórico do contato. Sem escopo, busca em
 	 * todos os tenants (rota interna chamada pelo ai-service antigo); com
-	 * `withMessages: false`, não carrega o histórico (`messages: []`).
+	 * `withMessages: false`, não carrega o histórico (`messages: []`). A opção
+	 * `withCustomer: false` evita buscar a ficha do CRM quando basta o contato.
 	 */
-	public async getChatById(id: number, scope?: ChatScope, opts: { withMessages?: boolean } = {}) {
+	public async getChatById(id: number, scope?: ChatScope, opts: { withMessages?: boolean; withCustomer?: boolean } = {}) {
 		const chat = await prismaService.wppChat.findFirst({
 			where: {
 				id,
@@ -677,7 +678,7 @@ class ChatsService {
 				: [];
 
 		const messages = rawMessages.length ? await messagePresentationService.hydrate(chat.instance, rawMessages) : [];
-		if (chat.contact?.customerId) {
+		if (opts.withCustomer !== false && chat.contact?.customerId) {
 			try {
 				const customerRes = await instancesService.executeQuery<Customer[]>(
 					chat.instance,

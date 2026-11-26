@@ -12,6 +12,7 @@ import sessionChanges from "../services/session-changes/session-changes.service"
 import chatUserPreferencesService, { ChatPreferenceType } from "../services/chat-user-preferences.service";
 import publicReportFieldsService from "../services/public-report-fields.service";
 import transferHistoryService from "../services/transfer-history.service";
+import parametersService from "../services/parameters.service";
 import { TemplateVariables } from "../types/whatsapp-api.types";
 import { parseConversationActivityRange } from "../utils/public-conversation-activity";
 import {
@@ -105,6 +106,7 @@ class ChatsController {
 		);
 		this.router.get("/api/whatsapp/session/chats", isAuthenticated, protectedRead("chats.session", this.getChatsBySession));
 		this.router.get("/api/whatsapp/chats/:id", isAuthenticated, this.getChatById.bind(this));
+		this.router.get("/api/whatsapp/chats/:id/recording-access", isAuthenticated, this.getRecordingAccess.bind(this));
 		this.router.get("/api/whatsapp/chats/:id/messages", isAuthenticated, this.getChatMessages.bind(this));
 		this.router.get(
 			"/api/whatsapp/conversations/:id",
@@ -301,6 +303,29 @@ class ChatsController {
 			message: "Chat messages retrieved successfully!",
 			data
 		});
+	}
+
+	private async getRecordingAccess(req: Request, res: Response) {
+		res.setHeader("Cache-Control", "private, no-store");
+		const id = parsePositiveInt(req.params["id"]);
+		if (id === null) { res.sendStatus(400); return; }
+		const { instance, userId, role } = req.session;
+		const admin = role === "ADMIN";
+		if (!admin && !(await parametersService.canPlayConversationRecordings(instance, userId))) {
+			res.sendStatus(403);
+			return;
+		}
+		const chat = await chatsService.getChatById(id, messagesScopeFromSession(req.session), {
+			withMessages: false,
+			withCustomer: false
+		});
+		const contact = chat?.contact;
+		const customerId = parsePositiveInt(contact?.customerId);
+		if (!contact || contact.instance !== instance || customerId === null || (!admin && contact.isOnlyAdmin)) {
+			res.sendStatus(404);
+			return;
+		}
+		res.json({ instance, userId, customerId });
 	}
 
 	private async getPublicConversationMessages(req: Request, res: Response) {
