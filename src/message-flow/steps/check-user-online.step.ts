@@ -6,21 +6,15 @@ interface CheckUserOnlineConnections {
 	onFalse?: number; // Step se o usuário estiver OFFLINE
 }
 
-/**
- * Step que verifica se um usuário específico está online.
- * 
- * Configuração esperada:
- * - userIdField (string): Nome do campo no contexto onde o userId está armazenado
- *   Ex: "customer.userId", "contact.operatorId", etc (obrigatório)
- * 
- * Comportamento:
- * - Busca o userId do contexto usando o campo especificado
- * - Se o usuário está online: continua para o próximo step
- * - Se o usuário NÃO está online: continua normalmente (pode usar fallback se necessário)
- * 
- * Pode ser usado em fluxos que precisam garantir que um usuário específico
- * está disponível antes de atribuir um chat para ele.
- */
+export function onlineOperatorSource(config: Record<string, unknown>): string | number {
+	// Previously only the field affected execution, even when a legacy config carried other keys.
+	const field = config["userIdField"];
+	if (typeof field === "string" && field.trim()) return field;
+	const id = config["userId"];
+	if (typeof id === "number" && Number.isInteger(id) && id > 0 && id <= 2147483647) return id;
+	throw new Error("Selecione um operador do setor ou informe o campo do fluxo que contém o código do operador.");
+}
+
 export default class CheckUserOnlineStep extends BaseStep {
 	constructor(config: StepConfig, private readonly reads: FlowDistributionReads = distributionReads) {
 		super(config);
@@ -29,9 +23,10 @@ export default class CheckUserOnlineStep extends BaseStep {
 	/**
 	 * Verifica se um usuário específico está online.
 	 */
-	private async isUserOnline(userId: number): Promise<boolean> {
+	private async isUserOnline(userId: number, requireSameSector: boolean): Promise<boolean> {
 		const sessions = await this.reads.sessions(this.instance);
-		if (!sessions.some((session) => session.data.userId === userId && session.onlineTokens.length > 0)) return false;
+		if (!sessions.some(session => session.data.userId === userId && session.onlineTokens.length > 0 &&
+			(!requireSameSector || session.data.sectorId === this.sectorId))) return false;
 		return (await this.reads.eligible(this.instance, [userId])).has(userId);
 	}
 
@@ -39,24 +34,13 @@ export default class CheckUserOnlineStep extends BaseStep {
 	 * Executa o passo.
 	 */
 	public async execute(ctx: StepContext): Promise<StepResult> {
-		const userIdField = this.config['userIdField'];
-
-		if (!userIdField || typeof userIdField !== "string") {
-			ctx.logger.log("❌ Erro: userIdField não configurado ou inválido", {
-				userIdField,
-				hasField: !!userIdField,
-				type: typeof userIdField
-			});
-			throw new Error("CheckUserOnlineStep requer 'userIdField' na configuração");
-		}
-
-		// Resolve o userId do contexto usando dot notation
-		const userId = this.resolveField(ctx, userIdField);
+		const source = onlineOperatorSource(this.config);
+		const userId = typeof source === "number" ? source : this.resolveField(ctx, source);
 		const connections = this.connections as CheckUserOnlineConnections;
 
 		if (!userId || typeof userId !== "number") {
 			ctx.logger.log("⚠️ Aviso: userId não encontrado ou inválido no contexto → Step #" + connections.onFalse, {
-				userIdField,
+				source,
 				userId,
 				hasUserId: !!userId,
 				type: typeof userId
@@ -66,11 +50,11 @@ export default class CheckUserOnlineStep extends BaseStep {
 
 		ctx.logger.log(`Verificando se usuário #${userId} está online...`, {
 			userId,
-			userIdField,
+			source,
 			instance: this.instance
 		});
 
-		const isOnline = await this.isUserOnline(userId);
+		const isOnline = await this.isUserOnline(userId, typeof source === "number");
 
 		if (isOnline) {
 			ctx.logger.log(`✓ Usuário #${userId} está ONLINE → Step #${connections.onTrue}`, { userId });

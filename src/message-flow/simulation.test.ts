@@ -54,6 +54,20 @@ const sampleFlow: FlowStepDefinition[] = [
 	assign, admin
 ];
 async function main() {
+	const onlineFlow = (config: Record<string, unknown>): FlowStepDefinition[] => [
+		{ type: "CHECK_USER_ONLINE", stepNumber: 1, config, connections: { onTrue: 2, onFalse: 3 } }, assign, admin
+	];
+	assert.equal((await run(onlineFlow({ userId: 11 }))).destination?.id, 11);
+	assert.equal((await run(onlineFlow({ userId: 11 }), { scenario: { pausedUserIds: [11] } })).destination?.kind, "admin");
+	assert.equal((await run(onlineFlow({ userId: 33 }))).destination?.kind, "admin");
+	assert.equal((await run(onlineFlow({ userIdField: "contact.customerId", userId: 11 }))).destination?.kind, "admin");
+	const previousField = onlineFlow({ userIdField: "rows.operatorId" });
+	const query = { ...sampleFlow[0]!, stepNumber: 1, nextStepId: 4 };
+	const legacyFlow = [query, { ...previousField[0]!, stepNumber: 4 }, assign, admin];
+	assert.equal((await run(legacyFlow, { scenario: { querySamples: { 1: [{ operatorId: 11 }] } } })).destination?.id, 11);
+	for (const userId of [0, -1, 1.5, "11", 2147483648]) {
+		await assert.rejects(run(onlineFlow({ userId })), err => err instanceof FlowSimulationError && err.status === 422);
+	}
 	const botFlow = [{ type: "START_BOT", stepNumber: 1, fallbackStepId: 3, config: { botId: 9 } }, admin];
 	const simulatedBot = await run(botFlow, { channelId: 9 });
 	assert.deepEqual(simulatedBot.destination, { kind: "bot", id: 9, name: "Recepção", version: 3 });

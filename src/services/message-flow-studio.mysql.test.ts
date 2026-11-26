@@ -102,6 +102,13 @@ async function run() {
 				await assert.rejects(activate(other.id, 1, originalState.active.fingerprint), status(422));
 			}
 			assert(operatorReads.every(instance => instance === "a"));
+			for (const userId of [12, 999]) {
+				const outside = await create("Operador fora do setor", [
+					{ type: "CHECK_USER_ONLINE", stepNumber: 1, config: { userId }, nextStepId: 2 },
+					{ type: "SEND_TO_ADMIN", stepNumber: 2 }
+				]);
+				await assert.rejects(activate(outside.id, 1, originalState.active.fingerprint), status(422));
+			}
 			assert.equal(invalidations, 0);
 			const concurrent = await Promise.allSettled([first, second].map(flow => activate(flow.id, flow.revision, originalState.active.fingerprint)));
 			assert.equal(concurrent.filter(row => row.status === "fulfilled").length, 1);

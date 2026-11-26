@@ -5,6 +5,7 @@ import { DEFAULT_MESSAGE_FLOW_STEPS, validateFlowDefinition, type FlowStepDefini
 import { distributionReads } from "../message-flow/distribution-reads";
 import { messageFlowCache } from "../message-flow/message-flow-cache";
 import { StepRegistry } from "../message-flow/step-registry";
+import { onlineOperatorSource } from "../message-flow/steps/check-user-online.step";
 import { inboundFlowFingerprint } from "./inbound-flow-installation";
 import database from "./prisma.service";
 import { triageTriggers } from "../triage/triggers";
@@ -104,8 +105,8 @@ function definitionErrors(scope: Scope, steps: StudioStep[]): string[] {
 		try {
 			const config = object(step.config) ? step.config : {};
 			StepRegistry.create(step.type, { ...scope, stepNumber: step.stepNumber, config });
-			if (["CONDITION", "ROUTER", "CHECK_USER_ONLINE"].includes(step.type)) {
-				const field = config[step.type === "CHECK_USER_ONLINE" ? "userIdField" : "field"];
+			if (["CONDITION", "ROUTER"].includes(step.type)) {
+				const field = config["field"];
 				if (typeof field !== "string" || !field.trim()) throw Error("Informe o campo usado na decisão.");
 			}
 			if (step.type === "ASSIGN") {
@@ -193,12 +194,19 @@ export class MessageFlowStudioService {
 			const rows = await this.db.wppWallet.findMany({ where: { instance: scope.instance, id: { in: wallets } }, select: { id: true } });
 			if (rows.length !== wallets.length) throw invalid("Uma carteira de destino não pertence a esta empresa.");
 		}
-		const users = [...new Set(assignments.flatMap(config => [config["userId"], config["fallbackUserId"]]).filter(positive))];
+		const onlineOperators = steps.filter(step => step.enabled !== false && step.type === "CHECK_USER_ONLINE")
+			.map(step => onlineOperatorSource(object(step.config) ? step.config : {})).filter(positive);
+		const users = [...new Set([...onlineOperators, ...assignments.flatMap(config => [config["userId"], config["fallbackUserId"]]).filter(positive)])];
 		if (!users.length) return;
 		let rows: Awaited<ReturnType<typeof this.operators>>;
 		try { rows = await this.operators(scope.instance, users); }
 		catch { throw new StudioError(503, "FLOW_DIRECTORY_UNAVAILABLE", "Não foi possível conferir os operadores no CRM. Tente novamente."); }
 		const byId = new Map(rows.map(row => [row.CODIGO, row]));
+		for (const id of onlineOperators) {
+			const operator = byId.get(id);
+			if (!operator || operator.SETOR !== scope.sectorId || operator.ATIVO !== "SIM")
+				throw invalid("O operador selecionado para verificar disponibilidade deve estar ativo e pertencer ao setor.");
+		}
 		for (const config of assignments) {
 			for (const key of ["userId", "fallbackUserId"]) {
 				const id = config[key];
