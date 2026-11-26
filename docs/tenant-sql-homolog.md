@@ -27,11 +27,11 @@ Se houver falha antes da ativação das views, o executor tenta devolver os nome
 
 ## Destino acordado em 26/11/2026
 
-O histórico de cada empresa deve residir no mesmo banco físico de seu CRM. Na Suprimaxxi o destino é `homolog-crm-suprimaxxi`. Para a Infotec, a próxima migração parte de `homolog-infotec-whatsapp-runtime` para o CRM compartilhado `crm-sgr-infotec-prod`. O desenho proposto reserva tabelas exclusivas de homologação nesse CRM e exige segregação de permissões e de rotas. Os dados de teste da antiga instância `homolog` estão destinados ao descarte após identificação dos seus vínculos.
+A Suprimaxxi grava em `homolog-crm-suprimaxxi`. A Infotec grava em 61 tabelas `wpp_hml_*` do CRM compartilhado `crm-sgr-infotec-prod`. Os clientes SQL continuam usando os nomes `wpp_runtime_*` por meio de views no schema `homolog-infotec-whatsapp-runtime`. As permissões de homologação no CRM compartilhado foram concedidas por tabela.
 
-O modo `tenant-sql` atualmente roteia também as filas operacionais. A proposta reserva três entradas para persistência temporária no banco da aplicação, `waba_webhook_queue`, `gupshup_webhook_queue` e `remote_inbound_event_inbox`. Cada worker deve receber a confirmação de uma transação durável no tenant antes de eliminar o payload central. O recibo mínimo de deduplicação precisa sobreviver a uma reentrega. Filas pós-entrada e controles de envio permanecem junto às mensagens no tenant.
+As três filas de ingresso no banco da aplicação conservam o payload até o commit no tenant. O recibo técnico permite deduplicação após esse commit. Filas pós-entrada e controles de envio residem junto às mensagens no tenant.
 
-Para implementar, separar o repositório de ingresso do roteador geral e validar o vínculo entre provedor, canal e instância mesmo durante uma queda do CRM. No REMOTE, incluir o tenant nas chaves de evento. Na WABA, ajustar o caminho de erro que hoje responde HTTP 200 quando falha a persistência. Remover o conteúdo dos webhooks também do logger chamado pelos controllers. Testar queda antes do commit, confirmação perdida depois do commit, repetição de callbacks, canais de tenants com o mesmo ID e descarte do conteúdo após confirmação. O descarte do payload deve preservar a deduplicação e a reconciliação de recibos atrasados.
+No simulador privado da Infotec, a entrada gerou atendimento e mensagem nas tabelas físicas do CRM. Um segundo ensaio conferiu a deduplicação do callback e a remoção do payload central após a entrega.
 
 O plano auditável é `planejamento/cross-service/INF-20260918-001-tenant-data-migration/destino-tabelas-homolog-20261126.md`. A matriz cobre as 52 tabelas físicas do central, os destinos, as condições para retirada e o retorno após novas gravações. As instruções de ativação e cópia inicial abaixo documentam a implantação anterior. Uma nova execução sobre os runtimes atuais exige reconciliação específica.
 
