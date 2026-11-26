@@ -5,14 +5,28 @@ hsql="$root/bin/hsql.sh"
 dir=$(cd -- "$(dirname -- "$0")" && pwd -P)
 central=homolog-whatsapp
 [[ $("$hsql" "$central" -NB -e "SELECT CONCAT(SUBSTRING_INDEX(CURRENT_USER(),'@',1),':',DATABASE())") == homolog:homolog-whatsapp ]]
-"$hsql" "$central" < "$dir/homolog-central-ingress.sql"
+ingress="$dir/../prisma/tenant-sql/homolog-central-ingress.sql"
+reaction="$dir/../prisma/migrations/20261112190000_waba_reaction_operations/migration.sql"
+[[ -f "$ingress" ]] || ingress="$dir/homolog-central-ingress.sql"
+[[ -f "$reaction" ]] || reaction="$dir/waba-reaction-migration.sql"
+"$hsql" "$central" < "$ingress"
 for tenant in infotec suprimaxxi; do
   case $tenant in
     infotec) db=homolog-infotec-whatsapp-runtime ;;
     suprimaxxi) db=homolog-crm-suprimaxxi ;;
   esac
-  "$hsql" "$db" -e 'CREATE TABLE IF NOT EXISTS wpp_runtime_waba_reaction_operations LIKE `homolog-whatsapp`.waba_reaction_operations'
+  exists=$("$hsql" "$db" -NB -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='wpp_runtime_waba_reaction_operations'")
+  if [[ "$exists" == 0 ]]; then
+    sed 's/`waba_reaction_operations`/`wpp_runtime_waba_reaction_operations`/' "$reaction" | "$hsql" "$db"
+  fi
+  client_type=$("$hsql" "$db" -NB -e "SELECT table_type FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='wpp_runtime_clients'")
   for op in INSERT UPDATE DELETE; do
+    if [[ "$client_type" == VIEW ]]; then
+      [[ "$tenant" == infotec && $("$hsql" "$db" -NB -e "SELECT COUNT(*) FROM information_schema.view_table_usage WHERE view_schema=DATABASE() AND view_name='wpp_runtime_clients' AND table_schema='crm-sgr-infotec-prod' AND table_name='wpp_hml_clients'") == 1 ]]
+      [[ $("$hsql" "$db" -NB -e "SELECT COUNT(*) FROM information_schema.triggers WHERE event_object_schema='crm-sgr-infotec-prod' AND event_object_table='wpp_hml_clients' AND event_manipulation='$op' AND action_statement LIKE '%homolog_ingress_routes%'") == 1 ]]
+      continue
+    fi
+    [[ "$client_type" == 'BASE TABLE' ]]
     name="wpp_hml_ingress_route_${op,,}"
     exists=$("$hsql" "$db" -NB -e "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema=DATABASE() AND trigger_name='$name'")
     if [[ "$exists" == 1 ]]; then continue; fi
