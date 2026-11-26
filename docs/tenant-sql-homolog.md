@@ -1,5 +1,30 @@
 # SQL direto no banco do tenant em homolog
 
+## Implantação de 26/11/2026
+
+`homolog-whatsapp` contém dez tabelas após a retirada. O ingresso usa `ingress_waba`, `ingress_gupshup`, `ingress_remote` e `homolog_ingress_routes`. As seis técnicas são o histórico do Prisma, as três tabelas vazias de telemetria do frontend e as duas tabelas vazias do controle de migrações. O health identifica somente `infotec` e `suprimaxxi`. O registro preserva o incremento 4 para a faixa de IDs da Infotec.
+
+O receptor de homologação usa um pool dedicado ao ingresso. Os hosts REMOTE locais usam a porta privada. Chamadas encaminhadas precisam de `X-Inpulse-Webhook-Token` correspondente a `HOMOLOG_REMOTE_CALLBACK_TOKEN`. Para callbacks públicos, a WABA exige a assinatura dos bytes originais com `HOMOLOG_WABA_<TENANT>_SECRET`. O Gupshup usa o cabeçalho de token com `HOMOLOG_GUPSHUP_<TENANT>_SECRET`. A autenticação precede a admissão. A associação entre canal e tenant é atualizada na mesma transação de cadastro do canal. Em homologação há canais ativos REMOTE e nenhum canal público WABA/Gupshup configurado. Provisionar o respectivo segredo por meio do ambiente antes de ativar um deles.
+
+Na topologia homologada, ingresso e tenants estão no mesmo servidor MySQL. Uma transação InnoDB entrega na fila durável do tenant e substitui o conteúdo central por NULL. O comprovante técnico permite identificar reentregas. O worker conserva o evento pendente se a gravação no tenant falhar. Os processos do banco de logs registram metadados operacionais. O histórico `wpp_hml_arquivo_20261009_*` no CRM da Suprimaxxi conserva versões antigas à parte dos cadastros ativos.
+
+### Virada física da Infotec
+
+O executor `scripts/move-infotec-homolog-runtime.cjs` usa apenas a conexão operacional indicada pelo DBA em `HOMOLOG_RESIDENCY_DBA_URL`. O primeiro comando confere servidor, catálogo, tabelas, referências e gatilhos. O segundo cria as tabelas `wpp_hml_*` no CRM compartilhado e concede acesso ao usuário de homologação apenas para esses objetos. A troca reserva os nomes da origem em um único RENAME, copia os dados, verifica contagens e checksums, preserva AUTO_INCREMENT e recompõe as triggers. As views atualizáveis com SECURITY INVOKER preservam os nomes esperados pelos clientes existentes. Elas armazenam zero linhas. A origem física fica retida para verificação antes de sua retirada.
+
+```sh
+node scripts/move-infotec-homolog-runtime.cjs --inspect
+node scripts/move-infotec-homolog-runtime.cjs --apply /caminho-privado/infotec-cutover.json
+```
+
+Após verificar login, leitura e uma operação de escrita pela aplicação Infotec, executar a retirada da origem com o mesmo recibo. O executor exige os checksums das tabelas retidas, as views no destino correto e a ausência de FKs externas.
+
+```sh
+node scripts/move-infotec-homolog-runtime.cjs --retire-origin /caminho-privado/infotec-cutover.json
+```
+
+Se houver falha antes da ativação das views, o executor tenta devolver os nomes originais. DDL parcial no destino exige reconciliação com o inventário antes de uma nova tentativa. Depois da ativação, qualquer retorno precisa preservar as novas gravações no CRM. Manter o ingresso em operação durante a janela e conferir pendências e duplicatas ao terminar. O plano, o resultado dos ensaios e os recibos de implantação ficam em `planejamento/cross-service/INF-20260918-001-tenant-data-migration/execucao-homolog-20261126/`.
+
 ## Destino acordado em 26/11/2026
 
 O histórico de cada empresa deve residir no mesmo banco físico de seu CRM. Na Suprimaxxi o destino é `homolog-crm-suprimaxxi`. Para a Infotec, a próxima migração parte de `homolog-infotec-whatsapp-runtime` para o CRM compartilhado `crm-sgr-infotec-prod`. O desenho proposto reserva tabelas exclusivas de homologação nesse CRM e exige segregação de permissões e de rotas. Os dados de teste da antiga instância `homolog` estão destinados ao descarte após identificação dos seus vínculos.

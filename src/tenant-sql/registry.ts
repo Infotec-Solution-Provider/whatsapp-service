@@ -21,11 +21,13 @@ export interface TenantSqlRegistry {
 
 function allocationIncrement(registry: TenantSqlRegistry, target: TenantSqlTarget): number {
 	// Keep the even series for Suprimaxxi. With three targets split the odd series.
-	return registry.tenants.length === 3 && target.instance !== "suprimaxxi" ? 4 : 2;
+	return registry.tenants.some(item => item.instance === "infotec") && target.instance !== "suprimaxxi" ? 4 : 2;
 }
 
 export function tenantSqlEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
 	const mode = env["WHATSAPP_STORAGE"] ?? "central";
+	if (mode !== "tenant-sql" && (env["WHATSAPP_TENANT_SQL_REGISTRY"] || env["INPULSE_ENVIRONMENT"] === "homolog"))
+		throw new Error("Homolog WhatsApp requires tenant-sql");
 	if (mode !== "central" && mode !== "tenant-sql") throw new Error("Invalid WHATSAPP_STORAGE");
 	return mode === "tenant-sql";
 }
@@ -42,7 +44,7 @@ export function validateRegistry(input: unknown): TenantSqlRegistry {
 	const targets: Record<string, { database: string; offset: number }> = {
 		homolog: { database: "homolog-crm", offset: 1 },
 		suprimaxxi: { database: "homolog-crm-suprimaxxi", offset: 2 },
-		...(registry.tenants.length === 3 ? { infotec: { database: "homolog-infotec-whatsapp-runtime", offset: 3 } } : {}),
+		infotec: { database: "homolog-infotec-whatsapp-runtime", offset: 3 },
 	};
 	const names = new Set<string>();
 	const slots = new Set<number>();
@@ -53,6 +55,7 @@ export function validateRegistry(input: unknown): TenantSqlRegistry {
 		names.add(target.instance);
 		slots.add(target.autoIncrementOffset);
 	}
+	if (!names.has("suprimaxxi")) throw new Error("Tenant SQL target set is invalid");
 	return registry;
 }
 

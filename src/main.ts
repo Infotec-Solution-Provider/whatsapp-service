@@ -68,6 +68,8 @@ import { adminParserError } from "./admin/parser-error";
 import { tenantSqlInstanceNames } from "./tenant-sql/router";
 import { pauseAdmissionFailure } from "./services/operator-pause-admission";
 
+import { centralIngressEnabled, ingressParser } from "./services/homolog-ingress";
+
 whatsappService.buildClients();
 operatorSendService.configureWorker();
 internalWhatsappMessageQueueService.setProcessHandler({
@@ -104,6 +106,17 @@ app.use("/api", (_req, res, next) => {
 });
 
 app.use("/api/internal/admin", express.json({ limit: "1mb" }));
+if (centralIngressEnabled) {
+	const paths = ["/api/whatsapp/waba/:instance/webhooks", "/api/whatsapp/meta/:instance/webhooks",
+		"/api/whatsapp/gupshup/:instance/webhooks", "/api/whatsapp/remote/:clientId/event"];
+	app.post(paths, (req, res, next) => {
+		if (!req.is("application/json")) { res.sendStatus(415); return; }
+		ingressParser()(req, res, err => {
+			if (err) { res.sendStatus(err.status === 403 ? 403 : 400); return; }
+			next();
+		});
+	});
+}
 app.use("/api/whatsapp/meta", metaManagementController);
 app.use("/api/whatsapp/message-flow-studio", messageFlowStudioController);
 app.use("/api/whatsapp/triage", createTriageRouter());

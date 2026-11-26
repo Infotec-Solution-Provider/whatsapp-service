@@ -2,6 +2,7 @@ import { Request, Response, Router } from "express";
 import { Logger } from "@in.pulse-crm/utils";
 import ProcessingLogger from "../utils/processing-logger";
 import wabaWebhookQueueService from "../services/waba-webhook-queue.service";
+import { admit, centralIngressEnabled, providerEvents } from "../services/homolog-ingress";
 
 const ENDPOINT = "/api/whatsapp/waba/:instance";
 
@@ -17,11 +18,13 @@ class WABAController {
 			instance,
 			"waba-webhook-entry",
 			`${instance}-${Date.now()}`,
-			req.body
+			{ instance }
 		);
 
 		try {
-			const queueId = await wabaWebhookQueueService.enqueue(instance, req.body);
+			const queueId = centralIngressEnabled
+				? (await admit("WABA", instance, providerEvents("WABA", req.body)))[0]?.id
+				: await wabaWebhookQueueService.enqueue(instance, req.body);
 			processingLogger.log("Webhook WABA enfileirado para processamento", { queueId, instance });
 			processingLogger.success({ status: "enqueued", queueId, instance });
 			res.status(200).send();
@@ -29,7 +32,7 @@ class WABAController {
 			processingLogger.failed(err);
 			Logger.error("Erro ao enfileirar webhook WABA", err as Error);
 			if (!res.headersSent) {
-				res.status(200).send();
+				res.status(503).send();
 			}
 		}
 	};
@@ -41,8 +44,6 @@ class WABAController {
 			const challenge = req.query["hub.challenge"];
 			const instance = req.params["instance"] as string;
 
-			console.log(token);
-			console.log(process.env["WABA_WEBHOOK_TOKEN"]);
 			if (mode === "subscribe" && token === process.env["WABA_WEBHOOK_TOKEN"]) {
 				Logger.info("WABA Webhook verified successfully for instance " + instance);
 				res.status(200).send(challenge);

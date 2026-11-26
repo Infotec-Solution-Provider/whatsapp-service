@@ -3,6 +3,7 @@ import { Request, Response, Router } from "express";
 import { Logger } from "@in.pulse-crm/utils";
 import gupshupWebhookQueueService from "../services/gupshup-webhook-queue.service";
 import ProcessingLogger from "../utils/processing-logger";
+import { admit, centralIngressEnabled, providerEvents } from "../services/homolog-ingress";
 
 const ENDPOINT = "/api/whatsapp/meta/:instance";
 const ENDPOINT_NEW = "/api/whatsapp/gupshup/:instance";
@@ -21,14 +22,16 @@ class GupshupController {
 			instance,
 			"webhookEntry",
 			`${instance}-${Date.now()}`,
-			req.body
+			{ instance }
 		);
 
 		try {
-			processingLogger.log("Gupshup Webhook Entry Received", { body: req.body });
+			processingLogger.log("Gupshup Webhook Entry Received");
 
 			// Enqueue webhook for processing instead of processing immediately
-			const queueId = await gupshupWebhookQueueService.enqueue(instance, req.body);
+			const queueId = centralIngressEnabled
+				? (await admit("GUPSHUP", instance, providerEvents("GUPSHUP", req.body)))[0]?.id
+				: await gupshupWebhookQueueService.enqueue(instance, req.body);
 
 			processingLogger.log("Webhook enqueued for processing", { queueId, instance });
 			processingLogger.success({ status: "enqueued", queueId, instance });

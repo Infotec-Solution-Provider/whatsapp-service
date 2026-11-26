@@ -1,6 +1,8 @@
 import "dotenv/config";
 import processLogs, { ProcessLogRecord } from "../logs/service";
 import { redactText, serializeLog } from "../logs/serialize";
+import { createHash } from "node:crypto";
+import { centralIngressEnabled } from "../services/homolog-ingress";
 
 /** Snapshot payloads so completed loggers cannot retain request graphs. */
 export default class ProcessingLogger {
@@ -11,10 +13,10 @@ export default class ProcessingLogger {
 	private finished = false;
 
 	constructor(private readonly instance: string, public processName: string, private readonly processId: string, input: unknown) {
-		this.input = serializeLog(input);
+		this.input = centralIngressEnabled ? "null" : serializeLog(input);
 	}
 	public log(entry: string, output?: unknown): void {
-		if (this.finished) return;
+		if (this.finished || centralIngressEnabled) return;
 		if (this.logEntries.length < 100) this.logEntries.push(`${new Date().toISOString()}: ${redactText(entry.slice(0, 2000))}`);
 		if (output !== undefined && this.outputs.length < 50) this.outputs.push(serializeLog(output, 4096));
 	}
@@ -28,10 +30,12 @@ export default class ProcessingLogger {
 		this.finished = true;
 		const endTime = new Date();
 		processLogs.save({
-			instance: this.instance, processName: this.processName, processId: this.processId, status,
+			instance: this.instance, processName: this.processName,
+			processId: centralIngressEnabled ? createHash("sha256").update(String(this.processId)).digest("hex") : this.processId, status,
 			startTime: this.startTime, endTime, duration: endTime.getTime() - this.startTime.getTime(),
-			input: this.input, output: serializeLog(this.outputs.map(value => JSON.parse(value))),
-			error: serializeLog(error), errorMessage: status === "FAILED" ? redactText(error instanceof Error ? error.message.slice(0, 2000) : "Processing failed") : "",
+			input: this.input, output: centralIngressEnabled ? "null" : serializeLog(this.outputs.map(value => JSON.parse(value))),
+			error: centralIngressEnabled ? "null" : serializeLog(error), errorMessage: status === "FAILED" ?
+				(centralIngressEnabled ? "Processing failed" : redactText(error instanceof Error ? error.message.slice(0, 2000) : "Processing failed")) : "",
 			logEntries: serializeLog(this.logEntries),
 		});
 		this.outputs.length = 0; this.logEntries.length = 0;

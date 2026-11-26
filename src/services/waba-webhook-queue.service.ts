@@ -3,6 +3,7 @@ import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { randomUUID } from "crypto";
 import prismaService from "./prisma.service";
 import wabaService from "./waba.service";
+import { startCentralIngress, stopCentralIngress } from "./homolog-ingress";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
 import { pauseAdmissionFailure } from "./operator-pause-admission";
 import { decideWabaWebhookRetry } from "./waba-webhook-retry";
@@ -60,6 +61,7 @@ class WABAWebhookQueueService {
 	}
 
 	public startProcessor(): void {
+		startCentralIngress();
 		if (this.isProcessing) {
 			return;
 		}
@@ -72,6 +74,7 @@ class WABAWebhookQueueService {
 	}
 
 	public stopProcessor(): void {
+		void stopCentralIngress().catch(() => console.error("[homolog-ingress] shutdown incomplete"));
 		this.isProcessing = false;
 		Logger.info("Stopping WABA webhook queue processor");
 	}

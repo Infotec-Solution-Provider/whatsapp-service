@@ -1,0 +1,297 @@
+CREATE TABLE IF NOT EXISTS wpp_hml_arquivo_20261009_client_session_events LIKE `homolog-whatsapp`.`client_session_events`;
+CREATE TABLE IF NOT EXISTS wpp_hml_arquivo_20261009_client_session_snapshots LIKE `homolog-whatsapp`.`client_session_snapshots`;
+CREATE TABLE IF NOT EXISTS wpp_hml_arquivo_20261009_contacts LIKE `homolog-whatsapp`.`contacts`;
+CREATE TABLE IF NOT EXISTS wpp_hml_arquivo_20261009_customer_profile_tags LIKE `homolog-whatsapp`.`customer_profile_tags`;
+CREATE TABLE IF NOT EXISTS wpp_hml_arquivo_20261009_message_flows LIKE `homolog-whatsapp`.`message_flows`;
+CREATE TABLE IF NOT EXISTS wpp_hml_arquivo_20261009_message_flows_steps LIKE `homolog-whatsapp`.`message_flows_steps`;
+CREATE TABLE IF NOT EXISTS wpp_hml_arquivo_20261009_parameters LIKE `homolog-whatsapp`.`parameters`;
+CREATE TEMPORARY TABLE archive_verified (ok INT NOT NULL CHECK(ok=1));
+START TRANSACTION;
+INSERT INTO wpp_hml_arquivo_20261009_client_session_events SELECT s.*
+  FROM `homolog-whatsapp`.`client_session_events` s JOIN `homolog-whatsapp`.clients p ON p.id=s.client_id WHERE p.instance='suprimaxxi' AND NOT EXISTS(SELECT 1 FROM wpp_runtime_client_session_events t WHERE t.`id`=s.`id`
+        AND (BINARY t.`id` <=> BINARY s.`id`)
+        AND (BINARY t.`client_id` <=> BINARY s.`client_id`)
+        AND (BINARY t.`previous_state` <=> BINARY s.`previous_state`)
+        AND (BINARY t.`state` <=> BINARY s.`state`)
+        AND (BINARY t.`reason` <=> BINARY s.`reason`)
+        AND (BINARY t.`occurred_at` <=> BINARY s.`occurred_at`)
+        AND (BINARY t.`trace_id` <=> BINARY s.`trace_id`)
+        AND (BINARY t.`transition_key` <=> BINARY s.`transition_key`)
+        AND (BINARY t.`source` <=> BINARY s.`source`)
+        AND (BINARY t.`created_at` <=> BINARY s.`created_at`)) AND NOT EXISTS(SELECT 1 FROM wpp_hml_arquivo_20261009_client_session_events a WHERE a.`id`=s.`id`);
+INSERT INTO wpp_hml_arquivo_20261009_client_session_snapshots SELECT s.*
+  FROM `homolog-whatsapp`.`client_session_snapshots` s JOIN `homolog-whatsapp`.clients p ON p.id=s.client_id WHERE p.instance='suprimaxxi' AND NOT EXISTS(SELECT 1 FROM wpp_runtime_client_session_snapshots t WHERE t.`client_id`=s.`client_id`
+        AND (BINARY t.`client_id` <=> BINARY s.`client_id`)
+        AND (BINARY t.`contract_version` <=> BINARY s.`contract_version`)
+        AND (BINARY t.`state` <=> BINARY s.`state`)
+        AND (BINARY t.`phone` <=> BINARY s.`phone`)
+        AND (BINARY t.`process_started_at` <=> BINARY s.`process_started_at`)
+        AND (BINARY t.`state_changed_at` <=> BINARY s.`state_changed_at`)
+        AND (BINARY t.`last_activity_at` <=> BINARY s.`last_activity_at`)
+        AND (BINARY t.`connected_since` <=> BINARY s.`connected_since`)
+        AND (BINARY t.`last_connected_at` <=> BINARY s.`last_connected_at`)
+        AND (BINARY t.`last_disconnected_at` <=> BINARY s.`last_disconnected_at`)
+        AND (BINARY t.`last_disconnect_reason` <=> BINARY s.`last_disconnect_reason`)
+        AND (BINARY t.`reconnect_attempts` <=> BINARY s.`reconnect_attempts`)
+        AND (BINARY t.`last_reconnect_at` <=> BINARY s.`last_reconnect_at`)
+        AND (BINARY t.`last_observed_at` <=> BINARY s.`last_observed_at`)
+        AND (BINARY t.`current_operation_id` <=> BINARY s.`current_operation_id`)
+        AND (BINARY t.`current_operation_type` <=> BINARY s.`current_operation_type`)
+        AND (BINARY t.`current_operation_started_at` <=> BINARY s.`current_operation_started_at`)
+        AND (BINARY t.`consecutive_poll_failures` <=> BINARY s.`consecutive_poll_failures`)
+        AND (BINARY t.`created_at` <=> BINARY s.`created_at`)
+        AND (BINARY t.`updated_at` <=> BINARY s.`updated_at`)) AND NOT EXISTS(SELECT 1 FROM wpp_hml_arquivo_20261009_client_session_snapshots a WHERE a.`client_id`=s.`client_id`);
+INSERT INTO wpp_hml_arquivo_20261009_contacts SELECT s.*
+  FROM `homolog-whatsapp`.`contacts` s  WHERE s.instance='suprimaxxi' AND NOT EXISTS(SELECT 1 FROM wpp_runtime_contacts t WHERE t.`id`=s.`id`
+        AND (BINARY t.`id` <=> BINARY s.`id`)
+        AND (BINARY t.`name` <=> BINARY s.`name`)
+        AND (BINARY t.`phone` <=> BINARY s.`phone`)
+        AND (BINARY t.`customer_id` <=> BINARY s.`customer_id`)
+        AND (BINARY t.`instance` <=> BINARY s.`instance`)
+        AND (BINARY t.`is_deleted` <=> BINARY s.`is_deleted`)
+        AND (BINARY t.`is_blocked` <=> BINARY s.`is_blocked`)
+        AND (BINARY t.`is_only_admin` <=> BINARY s.`is_only_admin`)
+        AND (BINARY t.`avatar_url` <=> BINARY s.`avatar_url`)
+        AND (BINARY t.`created_at` <=> BINARY s.`created_at`)
+        AND (BINARY t.`updated_at` <=> BINARY s.`updated_at`)
+        AND (BINARY t.`last_out_of_hours_reply_sent_at` <=> BINARY s.`last_out_of_hours_reply_sent_at`)
+        AND (BINARY t.`conversation_expiration` <=> BINARY s.`conversation_expiration`)
+        AND (BINARY t.`whatsapp_id` <=> BINARY s.`whatsapp_id`)) AND NOT EXISTS(SELECT 1 FROM wpp_hml_arquivo_20261009_contacts a WHERE a.`id`=s.`id`);
+INSERT INTO wpp_hml_arquivo_20261009_customer_profile_tags SELECT s.*
+  FROM `homolog-whatsapp`.`customer_profile_tags` s  WHERE s.instance='suprimaxxi' AND NOT EXISTS(SELECT 1 FROM wpp_runtime_customer_profile_tags t WHERE t.`id`=s.`id`
+        AND (BINARY t.`id` <=> BINARY s.`id`)
+        AND (BINARY t.`instance` <=> BINARY s.`instance`)
+        AND (BINARY t.`customer_id` <=> BINARY s.`customer_id`)
+        AND (BINARY t.`tag_type` <=> BINARY s.`tag_type`)
+        AND (BINARY t.`tag_value` <=> BINARY s.`tag_value`)
+        AND (BINARY t.`label` <=> BINARY s.`label`)
+        AND (BINARY t.`color` <=> BINARY s.`color`)
+        AND (BINARY t.`calculated_at` <=> BINARY s.`calculated_at`)
+        AND (BINARY t.`metadata_json` <=> BINARY s.`metadata_json`)) AND NOT EXISTS(SELECT 1 FROM wpp_hml_arquivo_20261009_customer_profile_tags a WHERE a.`id`=s.`id`);
+INSERT INTO wpp_hml_arquivo_20261009_message_flows SELECT s.*
+  FROM `homolog-whatsapp`.`message_flows` s  WHERE s.instance='suprimaxxi' AND NOT EXISTS(SELECT 1 FROM wpp_runtime_message_flows t WHERE t.`id`=s.`id`
+        AND (BINARY t.`id` <=> BINARY s.`id`)
+        AND (BINARY t.`instance` <=> BINARY s.`instance`)
+        AND (BINARY t.`sector_id` <=> BINARY s.`sector_id`)
+        AND (BINARY t.`description` <=> BINARY s.`description`)
+        AND (BINARY t.`created_at` <=> BINARY s.`created_at`)
+        AND (BINARY t.`updated_at` <=> BINARY s.`updated_at`)) AND NOT EXISTS(SELECT 1 FROM wpp_hml_arquivo_20261009_message_flows a WHERE a.`id`=s.`id`);
+INSERT INTO wpp_hml_arquivo_20261009_message_flows_steps SELECT s.*
+  FROM `homolog-whatsapp`.`message_flows_steps` s JOIN `homolog-whatsapp`.message_flows p ON p.id=s.message_flow_id WHERE p.instance='suprimaxxi' AND NOT EXISTS(SELECT 1 FROM wpp_runtime_message_flows_steps t WHERE t.`id`=s.`id`
+        AND (BINARY t.`id` <=> BINARY s.`id`)
+        AND (BINARY t.`type` <=> BINARY s.`type`)
+        AND (BINARY t.`message_flow_id` <=> BINARY s.`message_flow_id`)
+        AND (BINARY t.`step_number` <=> BINARY s.`step_number`)
+        AND (BINARY t.`config` <=> BINARY s.`config`)
+        AND (BINARY t.`connections` <=> BINARY s.`connections`)
+        AND (BINARY t.`next_step_id` <=> BINARY s.`next_step_id`)
+        AND (BINARY t.`fallback_step_id` <=> BINARY s.`fallback_step_id`)
+        AND (BINARY t.`enabled` <=> BINARY s.`enabled`)
+        AND (BINARY t.`description` <=> BINARY s.`description`)
+        AND (BINARY t.`created_at` <=> BINARY s.`created_at`)
+        AND (BINARY t.`updated_at` <=> BINARY s.`updated_at`)) AND NOT EXISTS(SELECT 1 FROM wpp_hml_arquivo_20261009_message_flows_steps a WHERE a.`id`=s.`id`);
+INSERT INTO wpp_hml_arquivo_20261009_parameters SELECT s.*
+  FROM `homolog-whatsapp`.`parameters` s  WHERE s.instance='suprimaxxi' AND NOT EXISTS(SELECT 1 FROM wpp_runtime_parameters t WHERE t.`id`=s.`id`
+        AND (BINARY t.`id` <=> BINARY s.`id`)
+        AND (BINARY t.`scope` <=> BINARY s.`scope`)
+        AND (BINARY t.`key` <=> BINARY s.`key`)
+        AND (BINARY t.`value` <=> BINARY s.`value`)
+        AND (BINARY t.`instance` <=> BINARY s.`instance`)
+        AND (BINARY t.`sectorId` <=> BINARY s.`sectorId`)
+        AND (BINARY t.`userId` <=> BINARY s.`userId`)) AND NOT EXISTS(SELECT 1 FROM wpp_hml_arquivo_20261009_parameters a WHERE a.`id`=s.`id`);
+INSERT INTO archive_verified SELECT (SELECT COUNT(*) FROM wpp_hml_arquivo_20261009_client_session_events)=1
+ AND (SELECT sem_preservacao FROM (SELECT 'client_session_events' AS tabela,COUNT(*) AS sem_preservacao
+  FROM `homolog-whatsapp`.`client_session_events` s
+  LEFT JOIN `homolog-whatsapp`.clients p ON p.id=s.client_id WHERE p.instance IS NULL OR p.instance NOT IN ('homolog','suprimaxxi') OR (p.instance='suprimaxxi' AND NOT EXISTS(SELECT 1 FROM wpp_runtime_client_session_events t WHERE t.`id`=s.`id`
+        AND (BINARY t.`id` <=> BINARY s.`id`)
+        AND (BINARY t.`client_id` <=> BINARY s.`client_id`)
+        AND (BINARY t.`previous_state` <=> BINARY s.`previous_state`)
+        AND (BINARY t.`state` <=> BINARY s.`state`)
+        AND (BINARY t.`reason` <=> BINARY s.`reason`)
+        AND (BINARY t.`occurred_at` <=> BINARY s.`occurred_at`)
+        AND (BINARY t.`trace_id` <=> BINARY s.`trace_id`)
+        AND (BINARY t.`transition_key` <=> BINARY s.`transition_key`)
+        AND (BINARY t.`source` <=> BINARY s.`source`)
+        AND (BINARY t.`created_at` <=> BINARY s.`created_at`)) AND NOT EXISTS(SELECT 1 FROM wpp_hml_arquivo_20261009_client_session_events a WHERE a.`id`=s.`id`
+        AND (BINARY a.`id` <=> BINARY s.`id`)
+        AND (BINARY a.`client_id` <=> BINARY s.`client_id`)
+        AND (BINARY a.`previous_state` <=> BINARY s.`previous_state`)
+        AND (BINARY a.`state` <=> BINARY s.`state`)
+        AND (BINARY a.`reason` <=> BINARY s.`reason`)
+        AND (BINARY a.`occurred_at` <=> BINARY s.`occurred_at`)
+        AND (BINARY a.`trace_id` <=> BINARY s.`trace_id`)
+        AND (BINARY a.`transition_key` <=> BINARY s.`transition_key`)
+        AND (BINARY a.`source` <=> BINARY s.`source`)
+        AND (BINARY a.`created_at` <=> BINARY s.`created_at`)))) v)=0
+ AND (SELECT COUNT(*) FROM wpp_hml_arquivo_20261009_client_session_snapshots)=1
+ AND (SELECT sem_preservacao FROM (SELECT 'client_session_snapshots' AS tabela,COUNT(*) AS sem_preservacao
+  FROM `homolog-whatsapp`.`client_session_snapshots` s
+  LEFT JOIN `homolog-whatsapp`.clients p ON p.id=s.client_id WHERE p.instance IS NULL OR p.instance NOT IN ('homolog','suprimaxxi') OR (p.instance='suprimaxxi' AND NOT EXISTS(SELECT 1 FROM wpp_runtime_client_session_snapshots t WHERE t.`client_id`=s.`client_id`
+        AND (BINARY t.`client_id` <=> BINARY s.`client_id`)
+        AND (BINARY t.`contract_version` <=> BINARY s.`contract_version`)
+        AND (BINARY t.`state` <=> BINARY s.`state`)
+        AND (BINARY t.`phone` <=> BINARY s.`phone`)
+        AND (BINARY t.`process_started_at` <=> BINARY s.`process_started_at`)
+        AND (BINARY t.`state_changed_at` <=> BINARY s.`state_changed_at`)
+        AND (BINARY t.`last_activity_at` <=> BINARY s.`last_activity_at`)
+        AND (BINARY t.`connected_since` <=> BINARY s.`connected_since`)
+        AND (BINARY t.`last_connected_at` <=> BINARY s.`last_connected_at`)
+        AND (BINARY t.`last_disconnected_at` <=> BINARY s.`last_disconnected_at`)
+        AND (BINARY t.`last_disconnect_reason` <=> BINARY s.`last_disconnect_reason`)
+        AND (BINARY t.`reconnect_attempts` <=> BINARY s.`reconnect_attempts`)
+        AND (BINARY t.`last_reconnect_at` <=> BINARY s.`last_reconnect_at`)
+        AND (BINARY t.`last_observed_at` <=> BINARY s.`last_observed_at`)
+        AND (BINARY t.`current_operation_id` <=> BINARY s.`current_operation_id`)
+        AND (BINARY t.`current_operation_type` <=> BINARY s.`current_operation_type`)
+        AND (BINARY t.`current_operation_started_at` <=> BINARY s.`current_operation_started_at`)
+        AND (BINARY t.`consecutive_poll_failures` <=> BINARY s.`consecutive_poll_failures`)
+        AND (BINARY t.`created_at` <=> BINARY s.`created_at`)
+        AND (BINARY t.`updated_at` <=> BINARY s.`updated_at`)) AND NOT EXISTS(SELECT 1 FROM wpp_hml_arquivo_20261009_client_session_snapshots a WHERE a.`client_id`=s.`client_id`
+        AND (BINARY a.`client_id` <=> BINARY s.`client_id`)
+        AND (BINARY a.`contract_version` <=> BINARY s.`contract_version`)
+        AND (BINARY a.`state` <=> BINARY s.`state`)
+        AND (BINARY a.`phone` <=> BINARY s.`phone`)
+        AND (BINARY a.`process_started_at` <=> BINARY s.`process_started_at`)
+        AND (BINARY a.`state_changed_at` <=> BINARY s.`state_changed_at`)
+        AND (BINARY a.`last_activity_at` <=> BINARY s.`last_activity_at`)
+        AND (BINARY a.`connected_since` <=> BINARY s.`connected_since`)
+        AND (BINARY a.`last_connected_at` <=> BINARY s.`last_connected_at`)
+        AND (BINARY a.`last_disconnected_at` <=> BINARY s.`last_disconnected_at`)
+        AND (BINARY a.`last_disconnect_reason` <=> BINARY s.`last_disconnect_reason`)
+        AND (BINARY a.`reconnect_attempts` <=> BINARY s.`reconnect_attempts`)
+        AND (BINARY a.`last_reconnect_at` <=> BINARY s.`last_reconnect_at`)
+        AND (BINARY a.`last_observed_at` <=> BINARY s.`last_observed_at`)
+        AND (BINARY a.`current_operation_id` <=> BINARY s.`current_operation_id`)
+        AND (BINARY a.`current_operation_type` <=> BINARY s.`current_operation_type`)
+        AND (BINARY a.`current_operation_started_at` <=> BINARY s.`current_operation_started_at`)
+        AND (BINARY a.`consecutive_poll_failures` <=> BINARY s.`consecutive_poll_failures`)
+        AND (BINARY a.`created_at` <=> BINARY s.`created_at`)
+        AND (BINARY a.`updated_at` <=> BINARY s.`updated_at`)))) v)=0
+ AND (SELECT sem_preservacao FROM (SELECT 'clients' AS tabela,COUNT(*) AS sem_preservacao
+  FROM `homolog-whatsapp`.`clients` s  WHERE s.instance IS NULL OR s.instance NOT IN ('homolog','suprimaxxi') OR (s.instance='suprimaxxi' AND NOT EXISTS(SELECT 1 FROM wpp_runtime_clients t WHERE t.`id`=s.`id`
+        AND (BINARY t.`id` <=> BINARY s.`id`)
+        AND (BINARY t.`name` <=> BINARY s.`name`)
+        AND (BINARY t.`phone` <=> BINARY s.`phone`)
+        AND (BINARY t.`instance` <=> BINARY s.`instance`)
+        AND (BINARY t.`type` <=> BINARY s.`type`)
+        AND (BINARY t.`is_active` <=> BINARY s.`is_active`)
+        AND (BINARY t.`waba_phone_id` <=> BINARY s.`waba_phone_id`)
+        AND (BINARY t.`waba_account_id` <=> BINARY s.`waba_account_id`)
+        AND (BINARY t.`waba_token` <=> BINARY s.`waba_token`)
+        AND (BINARY t.`gupshup_token` <=> BINARY s.`gupshup_token`)
+        AND (BINARY t.`gupshup_app_name` <=> BINARY s.`gupshup_app_name`)
+        AND (BINARY t.`gupshup_app_id` <=> BINARY s.`gupshup_app_id`)
+        AND (BINARY t.`remote_client_url` <=> BINARY s.`remote_client_url`)))) v)=0
+ AND (SELECT COUNT(*) FROM wpp_hml_arquivo_20261009_contacts)=567
+ AND (SELECT sem_preservacao FROM (SELECT 'contacts' AS tabela,COUNT(*) AS sem_preservacao
+  FROM `homolog-whatsapp`.`contacts` s  WHERE s.instance IS NULL OR s.instance NOT IN ('homolog','suprimaxxi') OR (s.instance='suprimaxxi' AND NOT EXISTS(SELECT 1 FROM wpp_runtime_contacts t WHERE t.`id`=s.`id`
+        AND (BINARY t.`id` <=> BINARY s.`id`)
+        AND (BINARY t.`name` <=> BINARY s.`name`)
+        AND (BINARY t.`phone` <=> BINARY s.`phone`)
+        AND (BINARY t.`customer_id` <=> BINARY s.`customer_id`)
+        AND (BINARY t.`instance` <=> BINARY s.`instance`)
+        AND (BINARY t.`is_deleted` <=> BINARY s.`is_deleted`)
+        AND (BINARY t.`is_blocked` <=> BINARY s.`is_blocked`)
+        AND (BINARY t.`is_only_admin` <=> BINARY s.`is_only_admin`)
+        AND (BINARY t.`avatar_url` <=> BINARY s.`avatar_url`)
+        AND (BINARY t.`created_at` <=> BINARY s.`created_at`)
+        AND (BINARY t.`updated_at` <=> BINARY s.`updated_at`)
+        AND (BINARY t.`last_out_of_hours_reply_sent_at` <=> BINARY s.`last_out_of_hours_reply_sent_at`)
+        AND (BINARY t.`conversation_expiration` <=> BINARY s.`conversation_expiration`)
+        AND (BINARY t.`whatsapp_id` <=> BINARY s.`whatsapp_id`)) AND NOT EXISTS(SELECT 1 FROM wpp_hml_arquivo_20261009_contacts a WHERE a.`id`=s.`id`
+        AND (BINARY a.`id` <=> BINARY s.`id`)
+        AND (BINARY a.`name` <=> BINARY s.`name`)
+        AND (BINARY a.`phone` <=> BINARY s.`phone`)
+        AND (BINARY a.`customer_id` <=> BINARY s.`customer_id`)
+        AND (BINARY a.`instance` <=> BINARY s.`instance`)
+        AND (BINARY a.`is_deleted` <=> BINARY s.`is_deleted`)
+        AND (BINARY a.`is_blocked` <=> BINARY s.`is_blocked`)
+        AND (BINARY a.`is_only_admin` <=> BINARY s.`is_only_admin`)
+        AND (BINARY a.`avatar_url` <=> BINARY s.`avatar_url`)
+        AND (BINARY a.`created_at` <=> BINARY s.`created_at`)
+        AND (BINARY a.`updated_at` <=> BINARY s.`updated_at`)
+        AND (BINARY a.`last_out_of_hours_reply_sent_at` <=> BINARY s.`last_out_of_hours_reply_sent_at`)
+        AND (BINARY a.`conversation_expiration` <=> BINARY s.`conversation_expiration`)
+        AND (BINARY a.`whatsapp_id` <=> BINARY s.`whatsapp_id`)))) v)=0
+ AND (SELECT COUNT(*) FROM wpp_hml_arquivo_20261009_customer_profile_tags)=6
+ AND (SELECT sem_preservacao FROM (SELECT 'customer_profile_tags' AS tabela,COUNT(*) AS sem_preservacao
+  FROM `homolog-whatsapp`.`customer_profile_tags` s  WHERE s.instance IS NULL OR s.instance NOT IN ('homolog','suprimaxxi') OR (s.instance='suprimaxxi' AND NOT EXISTS(SELECT 1 FROM wpp_runtime_customer_profile_tags t WHERE t.`id`=s.`id`
+        AND (BINARY t.`id` <=> BINARY s.`id`)
+        AND (BINARY t.`instance` <=> BINARY s.`instance`)
+        AND (BINARY t.`customer_id` <=> BINARY s.`customer_id`)
+        AND (BINARY t.`tag_type` <=> BINARY s.`tag_type`)
+        AND (BINARY t.`tag_value` <=> BINARY s.`tag_value`)
+        AND (BINARY t.`label` <=> BINARY s.`label`)
+        AND (BINARY t.`color` <=> BINARY s.`color`)
+        AND (BINARY t.`calculated_at` <=> BINARY s.`calculated_at`)
+        AND (BINARY t.`metadata_json` <=> BINARY s.`metadata_json`)) AND NOT EXISTS(SELECT 1 FROM wpp_hml_arquivo_20261009_customer_profile_tags a WHERE a.`id`=s.`id`
+        AND (BINARY a.`id` <=> BINARY s.`id`)
+        AND (BINARY a.`instance` <=> BINARY s.`instance`)
+        AND (BINARY a.`customer_id` <=> BINARY s.`customer_id`)
+        AND (BINARY a.`tag_type` <=> BINARY s.`tag_type`)
+        AND (BINARY a.`tag_value` <=> BINARY s.`tag_value`)
+        AND (BINARY a.`label` <=> BINARY s.`label`)
+        AND (BINARY a.`color` <=> BINARY s.`color`)
+        AND (BINARY a.`calculated_at` <=> BINARY s.`calculated_at`)
+        AND (BINARY a.`metadata_json` <=> BINARY s.`metadata_json`)))) v)=0
+ AND (SELECT COUNT(*) FROM wpp_hml_arquivo_20261009_message_flows)=1
+ AND (SELECT sem_preservacao FROM (SELECT 'message_flows' AS tabela,COUNT(*) AS sem_preservacao
+  FROM `homolog-whatsapp`.`message_flows` s  WHERE s.instance IS NULL OR s.instance NOT IN ('homolog','suprimaxxi') OR (s.instance='suprimaxxi' AND NOT EXISTS(SELECT 1 FROM wpp_runtime_message_flows t WHERE t.`id`=s.`id`
+        AND (BINARY t.`id` <=> BINARY s.`id`)
+        AND (BINARY t.`instance` <=> BINARY s.`instance`)
+        AND (BINARY t.`sector_id` <=> BINARY s.`sector_id`)
+        AND (BINARY t.`description` <=> BINARY s.`description`)
+        AND (BINARY t.`created_at` <=> BINARY s.`created_at`)
+        AND (BINARY t.`updated_at` <=> BINARY s.`updated_at`)) AND NOT EXISTS(SELECT 1 FROM wpp_hml_arquivo_20261009_message_flows a WHERE a.`id`=s.`id`
+        AND (BINARY a.`id` <=> BINARY s.`id`)
+        AND (BINARY a.`instance` <=> BINARY s.`instance`)
+        AND (BINARY a.`sector_id` <=> BINARY s.`sector_id`)
+        AND (BINARY a.`description` <=> BINARY s.`description`)
+        AND (BINARY a.`created_at` <=> BINARY s.`created_at`)
+        AND (BINARY a.`updated_at` <=> BINARY s.`updated_at`)))) v)=0
+ AND (SELECT COUNT(*) FROM wpp_hml_arquivo_20261009_message_flows_steps)=18
+ AND (SELECT sem_preservacao FROM (SELECT 'message_flows_steps' AS tabela,COUNT(*) AS sem_preservacao
+  FROM `homolog-whatsapp`.`message_flows_steps` s
+  LEFT JOIN `homolog-whatsapp`.message_flows p ON p.id=s.message_flow_id WHERE p.instance IS NULL OR p.instance NOT IN ('homolog','suprimaxxi') OR (p.instance='suprimaxxi' AND NOT EXISTS(SELECT 1 FROM wpp_runtime_message_flows_steps t WHERE t.`id`=s.`id`
+        AND (BINARY t.`id` <=> BINARY s.`id`)
+        AND (BINARY t.`type` <=> BINARY s.`type`)
+        AND (BINARY t.`message_flow_id` <=> BINARY s.`message_flow_id`)
+        AND (BINARY t.`step_number` <=> BINARY s.`step_number`)
+        AND (BINARY t.`config` <=> BINARY s.`config`)
+        AND (BINARY t.`connections` <=> BINARY s.`connections`)
+        AND (BINARY t.`next_step_id` <=> BINARY s.`next_step_id`)
+        AND (BINARY t.`fallback_step_id` <=> BINARY s.`fallback_step_id`)
+        AND (BINARY t.`enabled` <=> BINARY s.`enabled`)
+        AND (BINARY t.`description` <=> BINARY s.`description`)
+        AND (BINARY t.`created_at` <=> BINARY s.`created_at`)
+        AND (BINARY t.`updated_at` <=> BINARY s.`updated_at`)) AND NOT EXISTS(SELECT 1 FROM wpp_hml_arquivo_20261009_message_flows_steps a WHERE a.`id`=s.`id`
+        AND (BINARY a.`id` <=> BINARY s.`id`)
+        AND (BINARY a.`type` <=> BINARY s.`type`)
+        AND (BINARY a.`message_flow_id` <=> BINARY s.`message_flow_id`)
+        AND (BINARY a.`step_number` <=> BINARY s.`step_number`)
+        AND (BINARY a.`config` <=> BINARY s.`config`)
+        AND (BINARY a.`connections` <=> BINARY s.`connections`)
+        AND (BINARY a.`next_step_id` <=> BINARY s.`next_step_id`)
+        AND (BINARY a.`fallback_step_id` <=> BINARY s.`fallback_step_id`)
+        AND (BINARY a.`enabled` <=> BINARY s.`enabled`)
+        AND (BINARY a.`description` <=> BINARY s.`description`)
+        AND (BINARY a.`created_at` <=> BINARY s.`created_at`)
+        AND (BINARY a.`updated_at` <=> BINARY s.`updated_at`)))) v)=0
+ AND (SELECT COUNT(*) FROM wpp_hml_arquivo_20261009_parameters)=17
+ AND (SELECT sem_preservacao FROM (SELECT 'parameters' AS tabela,COUNT(*) AS sem_preservacao
+  FROM `homolog-whatsapp`.`parameters` s  WHERE s.instance IS NULL OR s.instance NOT IN ('homolog','suprimaxxi') OR (s.instance='suprimaxxi' AND NOT EXISTS(SELECT 1 FROM wpp_runtime_parameters t WHERE t.`id`=s.`id`
+        AND (BINARY t.`id` <=> BINARY s.`id`)
+        AND (BINARY t.`scope` <=> BINARY s.`scope`)
+        AND (BINARY t.`key` <=> BINARY s.`key`)
+        AND (BINARY t.`value` <=> BINARY s.`value`)
+        AND (BINARY t.`instance` <=> BINARY s.`instance`)
+        AND (BINARY t.`sectorId` <=> BINARY s.`sectorId`)
+        AND (BINARY t.`userId` <=> BINARY s.`userId`)) AND NOT EXISTS(SELECT 1 FROM wpp_hml_arquivo_20261009_parameters a WHERE a.`id`=s.`id`
+        AND (BINARY a.`id` <=> BINARY s.`id`)
+        AND (BINARY a.`scope` <=> BINARY s.`scope`)
+        AND (BINARY a.`key` <=> BINARY s.`key`)
+        AND (BINARY a.`value` <=> BINARY s.`value`)
+        AND (BINARY a.`instance` <=> BINARY s.`instance`)
+        AND (BINARY a.`sectorId` <=> BINARY s.`sectorId`)
+        AND (BINARY a.`userId` <=> BINARY s.`userId`)))) v)=0;
+COMMIT;

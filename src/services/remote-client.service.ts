@@ -9,7 +9,12 @@ import remoteInboundEventInboxService, {
 	RemoteInboundInboxProcessResult,
 	RemoteInboundPayload
 } from "./remote-inbound-event-inbox.service";
-import { RemoteInboundEventInbox } from "@prisma/client";
+import { RemoteInboundEventInbox, WppMessageStatus } from "@prisma/client";
+import { admit, centralIngressEnabled, IngressConflict, remoteReceiptCompleted } from "./homolog-ingress";
+import {
+	getRemoteInboundProviderMessageId, hashRemoteInboundPayload, RemoteInboundInboxRequestError,
+	resolveRemoteInboundIdempotencyKey
+} from "./remote-inbound-event-inbox.service";
 import prismaService from "./prisma.service";
 import messageReactionsService from "./message-reactions.service";
 import { tenantSqlEnabled } from "../tenant-sql/registry";
@@ -62,6 +67,33 @@ class RemoteClientService {
 		event: RemoteClientEvent,
 		idempotencyKey?: string
 	): Promise<RemoteInboundInboxEnqueueResult | void> {
+		if (centralIngressEnabled && (event.type === "message-received" || event.type === "message-status-received")) {
+			if (!Number.isSafeInteger(clientId) || clientId < 1) throw new RemoteInboundInboxRequestError("Invalid client", 400);
+			if (event.type === "message-status-received" && (typeof event.messageId !== "string" || !event.messageId.trim() ||
+				event.messageId.length > 255 || !Object.values(WppMessageStatus).includes(event.status as WppMessageStatus))) {
+				throw new RemoteInboundInboxRequestError("Invalid remote status", 400);
+			}
+			const payload: RemoteInboundPayload = event.type === "message-received"
+				? { type: event.type, clientId, message: event.message }
+				: { type: event.type, clientId, messageId: event.messageId.trim(), status: event.status as WppMessageStatus };
+			const providerId = payload.type === "message-received" ? getRemoteInboundProviderMessageId(payload.message) : payload.messageId;
+			if (providerId.length > 255) throw new RemoteInboundInboxRequestError("Invalid provider ID", 400);
+			const eventType = payload.type === "message-received" ? payload.type : payload.type + ":" + payload.status;
+			const hash = hashRemoteInboundPayload(payload);
+			const key = payload.type === "message-received" ? resolveRemoteInboundIdempotencyKey(idempotencyKey, clientId, payload.message) : "remote-status:v1:" + hash;
+			try {
+				const [receipt] = await admit("REMOTE", currentDatabaseTenant() ?? undefined, [{
+					route: String(clientId), key: JSON.stringify([eventType,providerId]), transportKey: key,
+					content: { payload, key, providerId, eventType }, hash
+				}]);
+				if (!receipt) throw new Error("Missing ingress receipt");
+				const completed = receipt.handedOff && await remoteReceiptCompleted(receipt.tenant, clientId, eventType, providerId);
+				return { id: receipt.id, created: receipt.created, idempotencyKey: key, status: completed ? "COMPLETED" : "PENDING" };
+			} catch (error) {
+				if (error instanceof IngressConflict) throw new RemoteInboundInboxRequestError("Conflicting remote event", 409);
+				throw error;
+			}
+		}
 		return this.withClientTenant(clientId, async () => {
 		Logger.info(`[RemoteClientService] Handling remote event | clientId=${clientId} | type=${event.type}`);
 
