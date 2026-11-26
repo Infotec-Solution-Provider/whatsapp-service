@@ -17,6 +17,7 @@ interface DatabaseContactRow {
 	customer_CELULAR: string | null;
 	customer_EMAIL: string | null;
 	operator_NOME: string | null;
+	active_chat_id: number | null;
 	sector_ids: string | null;
 }
 
@@ -42,6 +43,7 @@ interface MappedContact {
 	sectors: Array<{ sectorId: number }>;
 	customer: MappedCustomer | null;
 	chatingWith: string | null;
+	activeChatId: number | null;
 }
 
 /**
@@ -65,7 +67,8 @@ export class ContactMapper {
 			isDeleted: row.is_deleted,
 			sectors: sectorIds.map((sectorId) => ({ sectorId })),
 			customer,
-			chatingWith
+			chatingWith,
+			activeChatId: row.active_chat_id == null ? null : Number(row.active_chat_id)
 		};
 	}
 

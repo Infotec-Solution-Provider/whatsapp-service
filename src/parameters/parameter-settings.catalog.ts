@@ -1,4 +1,5 @@
 import type { ParameterScope } from "./parameter-settings.target";
+import { TRANSFER_FROM_CONTACT_SEARCH } from "./transfer-from-contact-search";
 import { CONVERSATION_RECORDING_PARAMETER } from "./conversation-recording";
 import { MONITOR_WAIT_CRITICAL_KEY, MONITOR_WAIT_DEFAULTS, MONITOR_WAIT_MAX_MINUTES, MONITOR_WAIT_WARNING_KEY } from "./monitor-wait-thresholds";
 
@@ -65,6 +66,15 @@ export const whatsappParameterSettings: ParameterSetting[] = [
 		"Solicitar aprovação de um supervisor antes de excluir contatos.",
 		"Contatos"
 	),
+	{
+		...toggle(
+			TRANSFER_FROM_CONTACT_SEARCH,
+			"Transferir ao iniciar conversa",
+			"Autorizar este usuário a transferir atendimentos em andamento pelo modal Iniciar Conversa.",
+			"Conversas"
+		),
+		supportedScopes: ["USER"]
+	},
 	toggle(
 		"customer_detail_modal_enabled",
 		"Detalhes do cliente",
@@ -246,6 +256,7 @@ export const whatsappParameterSettings: ParameterSetting[] = [
 
 // These consumers deliberately resolve fewer levels than the session feature flags.
 for (const setting of whatsappParameterSettings) {
+	if (setting.supportedScopes) continue;
 	if (setting.key === CONVERSATION_RECORDING_PARAMETER) {
 		setting.supportedScopes = ["USER"];
 		continue;

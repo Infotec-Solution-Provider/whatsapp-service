@@ -162,7 +162,7 @@ export class ContactQueryBuilder {
 	/**
 	 * Build data query for contacts with all joined tables
 	 */
-	public static buildDataQuery(whereClause: string): string {
+	public static buildDataQuery(whereClause: string, tenantRuntime = false): string {
 		return `
 			SELECT 
 				ctt.*,
@@ -175,10 +175,11 @@ export class ContactQueryBuilder {
 				cli.FONE2 as customer_CELULAR,
 				cli.EMAIL as customer_EMAIL,
 				op.NOME as operator_NOME,
+				MAX(${tenantRuntime ? "chat.id" : "chat.original_id"}) as active_chat_id,
 				GROUP_CONCAT(wcs.sector_id) as sector_ids
 			FROM wpp_contacts ctt
 			LEFT JOIN clientes cli ON ctt.customer_id = cli.CODIGO
-			LEFT JOIN wpp_chats chat ON ctt.id = chat.contact_id AND chat.is_finished = false
+			LEFT JOIN wpp_chats chat ON ctt.id = chat.contact_id AND ctt.instance = chat.instance AND chat.is_finished = false
 			LEFT JOIN operadores op ON chat.user_id = op.CODIGO
 			LEFT JOIN wpp_contact_sectors wcs ON ctt.id = wcs.contact_id
 			WHERE ${whereClause}

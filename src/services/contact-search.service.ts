@@ -58,6 +58,7 @@ export interface EnrichedContact {
 	sectors?: { sectorId: number }[];
 	customer: Customer | null;
 	chatingWith: string | null;
+	activeChatId: number | null;
 }
 
 // ============================================================================
@@ -262,7 +263,7 @@ class ContactEnricher {
 		try {
 			return await prismaService.wppChat.findMany({
 				where: { instance: this.instance, isFinished: false, contactId: { in: contactIds } },
-				select: { contactId: true, userId: true },
+				select: { id: true, contactId: true, userId: true },
 				// buildChatsMap keeps the last entry: newest active chat wins.
 				orderBy: { id: "asc" }
 			});
@@ -319,7 +320,8 @@ class ContactEnricher {
 		return {
 			...contact,
 			customer,
-			chatingWith
+			chatingWith,
+			activeChatId: chat?.id ?? null
 		};
 	}
 

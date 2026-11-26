@@ -290,7 +290,7 @@ class ContactsService {
 		}
 
 		// Execute data query with pagination
-		const dataQuery = ContactQueryBuilder.buildDataQuery(whereClause);
+		const dataQuery = ContactQueryBuilder.buildDataQuery(whereClause, tenantSqlEnabled());
 		const offset = PaginationHelper.calculateOffset(page, perPage);
 		const dataQueryParams = [...params, perPage, offset];
 

@@ -11,6 +11,8 @@ import contactsService, {
 import contactActionRequestsService from "../services/contact-action-requests.service";
 import ContactSearchService from "../services/contact-search.service";
 import parametersService, { CONTACT_APPROVAL_PARAMETERS } from "../services/parameters.service";
+import { TRANSFER_FROM_CONTACT_SEARCH } from "../parameters/transfer-from-contact-search";
+import { isTransferAllowedByTenant } from "../services/chat-sector-transfer";
 
 class ContactsController {
 	constructor(public readonly router: Router) {
@@ -133,9 +135,13 @@ class ContactsController {
 			result = await contactSearchService.search(req.session.instance, filters, { page, perPage });
 		}
 
+		const canTransfer = isTransferAllowedByTenant(req.session) &&
+			(req.session.role === "ADMIN" || parameters[TRANSFER_FROM_CONTACT_SEARCH] === "true");
 		const resBody = {
 			message: "Contacts retrieved successfully!",
-			...result
+			...result,
+			canTransfer,
+			data: canTransfer ? result.data : result.data.map(({ activeChatId: _activeChatId, ...contact }) => contact)
 		};
 		return resBody;
 	}

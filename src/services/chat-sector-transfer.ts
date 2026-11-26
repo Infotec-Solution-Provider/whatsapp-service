@@ -5,26 +5,29 @@ import db from "./prisma.service";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
 import { latestTriageInbound } from "../triage/trigger-start";
 import { enqueueTriageNotice } from "../triage/trigger-notices";
+import parametersService from "./parameters.service";
 import { requireFeature } from "../triage/access";
 
 /** Homolog and Odim distributions can supply the same server policy used to build session capabilities. */
-function assertTransferPolicy(session: SessionData) {
+export function isTransferAllowedByTenant(session: SessionData, targetUserId?: number) {
 	let path: string;
 	try {
 		path = require.resolve("../tenant-policies/odim.policy");
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "MODULE_NOT_FOUND") return;
+		if ((error as NodeJS.ErrnoException).code === "MODULE_NOT_FOUND") return true;
 		throw error;
 	}
 	const policy = require(path) as {
-		odimSessionCapabilities(session: SessionData): { canTransferAttendance: boolean } | null;
+		odimSessionCapabilities(session: SessionData): { canTransferAttendance: boolean; canUseAdminTransferTarget: boolean; excludedOperatorIds: number[] } | null;
 	};
-	if (policy.odimSessionCapabilities(session)?.canTransferAttendance === false)
-		throw new UnauthorizedError("Seu perfil não permite transferir atendimentos.");
+	const capabilities = policy.odimSessionCapabilities(session);
+	return !capabilities || (capabilities.canTransferAttendance &&
+		(targetUserId === undefined || (!capabilities.excludedOperatorIds.includes(targetUserId) &&
+			(targetUserId !== -1 || capabilities.canUseAdminTransferTarget))));
 }
 async function transferScope(tx: Prisma.TransactionClient, session: SessionData, chatId: number, write: boolean) {
 	await requireFeature(tx, session);
-	assertTransferPolicy(session);
+	if (!isTransferAllowedByTenant(session)) throw new UnauthorizedError("Seu perfil não permite transferir atendimentos.");
 	if (write)
 		await tx.$queryRawUnsafe("SELECT id FROM chats WHERE instance=? AND id=? FOR UPDATE", session.instance, chatId);
 	const chat = await tx.wppChat.findFirst({ where: { instance: session.instance, id: chatId, isFinished: false } });
@@ -34,7 +37,8 @@ async function transferScope(tx: Prisma.TransactionClient, session: SessionData,
 		!(
 			session.role === "ADMIN" ||
 			(session.role === "SUPERVISOR" && session.sectorId === chat.sectorId) ||
-			(chat.userId === session.userId && session.userId > 0)
+			(chat.userId === session.userId && session.userId > 0) ||
+			(await parametersService.canTransferFromContactSearch(session.instance, session.userId))
 		)
 	)
 		throw new NotFoundError("Atendimento indisponível.");

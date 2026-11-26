@@ -1,5 +1,5 @@
 import { findChatForContactChannel } from "./chat-channel-scope";
-import { transferChatToSectorQueue } from "./chat-sector-transfer";
+import { isTransferAllowedByTenant, transferChatToSectorQueue } from "./chat-sector-transfer";
 import { enqueueTriageNotice } from "../triage/trigger-notices";
 import { tenantSqlEnabled } from "../tenant-sql/registry";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
@@ -7,7 +7,7 @@ import { cancelTriageTx, TRIAGE_CHAT_MARKER } from "../triage/runtime";
 import { Customer, SessionData, SocketEventType, SocketServerMonitorRoom, SocketServerUserRoom } from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { Prisma, WppChat, WppContact, WppMessage, WppSector } from "@prisma/client";
-import { BadRequestError, ConflictError, NotFoundError } from "@rgranatodutra/http-errors";
+import { BadRequestError, ConflictError, NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
 import { TemplateMessage } from "../adapters/template.adapter";
 import exatronSatisfactionBot from "../bots/exatron-satisfaction.bot";
 import { CustomerSchedule } from "../message-flow/base/base.step";
@@ -814,22 +814,34 @@ class ChatsService {
 		usersService.setAuth(token);
 
 		const chats = await prismaService.wppChat.findFirst({
-			where: { id, instance }
+			where: { id, instance, isFinished: false }
 		});
-		if (!chats) {
-			throw new NotFoundError("Chat não encontrado.");
+		if (!chats) throw new NotFoundError("Atendimento não encontrado ou já encerrado.");
+		if (!isTransferAllowedByTenant(session, userId) || (
+			session.role !== "ADMIN" && !(session.userId > 0 && chats.userId === session.userId) &&
+			!(await parametersService.canTransferFromContactSearch(instance, session.userId))
+		)) throw new UnauthorizedError("Seu perfil não permite transferir este atendimento.");
+
+		if (userId !== -1) {
+			const destination = await usersService.getUserById(userId);
+			const hidden = destination?.DESATIVAR_EXIBICAO_WHATS;
+			if (!destination || destination.ATIVO === "NAO" || String(hidden) === "true" || (Number.isFinite(Number(hidden)) && Number(hidden) !== 0)) {
+				throw new BadRequestError("Usuário indisponível para receber atendimentos.");
+			}
 		}
-		if (!chats.userId) {
-			throw new Error("Chat não possui userId!");
-		}
-		const user = await usersService.getUserById(chats.userId);
 
 		const chat = await chatUserPreferencesService.withUnreadAssignment(async (tx) => {
 			await cancelTriageTx(tx, chats);
-			return tx.wppChat.update({ where: { id }, data: { userId, ...(chats.botId === TRIAGE_CHAT_MARKER ? { botId: null } : {}) } });
+			const updated = await tx.wppChat.updateMany({
+				where: { id, instance, isFinished: false, userId: chats.userId, sectorId: chats.sectorId, botId: chats.botId, agentId: chats.agentId },
+				data: { userId, agentId: null, botId: null }
+			});
+			if (!updated.count) throw new ConflictError("O atendimento mudou. Consulte-o novamente antes de transferir.");
+			return { ...chats, userId, agentId: null, botId: null };
 		}, { instance, recipientId: userId, chatId: id });
 
-		await this.syncChatToLocal(chat);
+		const logger = new ProcessingLogger(instance, "manual-transfer", String(id), {});
+		await this.runAfterAgentAction(logger, "sincronizar o chat", () => this.syncChatToLocal(chat));
 		await transferHistoryService.recordTransfer({
 			previousChat: {
 				id: chats.id,
@@ -845,7 +857,7 @@ class ChatsService {
 			},
 			source: "manual",
 			initiatedByUserId: session.userId,
-			reason: `Manual transfer from ${user.NOME} to user ${userId}`
+			reason: "Transferência manual"
 		});
 
 		const event = SocketEventType.WppChatTransfer;
@@ -857,16 +869,17 @@ class ChatsService {
 
 		const userRoom: SocketServerUserRoom = `${chat.instance}:user:${chat.userId}`;
 
-		const transferMsg = `Atendimento transferido por ${user.NOME}.`;
-		await messagesDistributionService.addSystemMessage(chat, transferMsg);
-		await socketService.emit(event, `${instance}:chat:${chat.id}`, {
-			chatId: chat.id
-		});
-		await socketService.emit(SocketEventType.WppChatStarted, monitorRoom, {
-			chatId: chat.id
-		});
-		await socketService.emit(SocketEventType.WppChatStarted, userRoom, {
-			chatId: chat.id
+		await this.runAfterAgentAction(logger, "registrar a mensagem de sistema", () =>
+			messagesDistributionService.addSystemMessage(chat, `Atendimento transferido por ${session.name}.`)
+		);
+		await this.runAfterAgentAction(logger, "avisar as telas", async () => {
+			const data = { chatId: chat.id };
+			await socketService.emit(event, `${instance}:chat:${chat.id}`, data);
+			if (chats.userId && chats.userId > 0 && chats.userId !== userId) {
+				await socketService.emit(event, `${instance}:user:${chats.userId}`, data);
+			}
+			await socketService.emit(SocketEventType.WppChatStarted, monitorRoom, data);
+			await socketService.emit(SocketEventType.WppChatStarted, userRoom, data);
 		});
 	}
 

@@ -31,6 +31,7 @@ export interface User {
 	WHATSAPP?: string | null;
 	/** Nível de acesso do usuário */
 	NIVEL: UserRole | null;
+	DESATIVAR_EXIBICAO_WHATS?: number | string | boolean | null;
 	/** Horário de trabalho do usuário */
 	HORARIO: number;
 	/** Data de cadastro do usuário */

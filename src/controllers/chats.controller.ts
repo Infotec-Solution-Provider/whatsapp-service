@@ -544,20 +544,10 @@ class ChatsController {
 	}
 
 	private async transferAttendance(req: Request, res: Response) {
-		const { id } = req.params;
-		const userId = req.body.userId;
-
-		if (!id || isNaN(Number(id))) {
-			throw new BadRequestError("Chat ID is required!");
-		}
-
-		if (!userId || isNaN(Number(userId))) {
-			throw new BadRequestError("User ID is required!");
-		}
-
-		const session = req.session;
-
-		await chatsService.transferAttendance(req.headers["authorization"] as string, session, Number(id), +userId);
+		const id = positiveResourceId(req.params["id"]);
+		const rawUserId = req.body?.userId;
+		const userId = rawUserId === -1 || rawUserId === "-1" ? -1 : positiveResourceId(rawUserId);
+		await chatsService.transferAttendance(req.headers["authorization"] as string, req.session, id, userId);
 
 		res.status(200).send({
 			message: "Attendance transfer successfully!"

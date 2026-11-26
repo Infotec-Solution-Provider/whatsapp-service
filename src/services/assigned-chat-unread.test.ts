@@ -20,6 +20,11 @@ const db: any = {
 		findMany: async () => [{ ...row, contact: { id: 10, customerId: null }, schedule: null }],
 		findFirst: async () => ({ ...row }),
 		update: async ({ data }: any) => Object.assign(row, data),
+		updateMany: async ({ where, data }: any) => {
+			if (row.isFinished || where.userId !== row.userId) return { count: 0 };
+			Object.assign(row, data);
+			return { count: 1 };
+		},
 		create: async ({ data }: any) => (row = { ...row, ...data })
 	},
 	wppMessage: { groupBy: async () => [], findMany: async () => [], updateMany: async ({ where }: any) => { assert.equal(where.instance, "exatron"); return { count: 0 }; } },
@@ -50,7 +55,8 @@ stub("./instances.service", { executeQuery: async () => { throw new Error("wpp_m
 stub("./local-sync.service", { ensureLocalTables: noop });
 stub("./whatsapp.service", {});
 stub("./contacts.service", { resolveContactAddress: () => null });
-stub("./parameters.service", {});
+let grant: number | null = null;
+stub("./parameters.service", { canTransferFromContactSearch: async (_instance: string, userId: number) => userId === grant });
 stub("./message-queue.service", { setProcessHandler() {} });
 stub("./message-presentation.service", { hydrate: async (_instance: string, values: unknown[]) => values });
 stub("./message-mentions.service", {});
@@ -81,7 +87,15 @@ const recipient = () => prefs.get("exatron:7:wpp:1");
 
 test("assignment persists recipient unread, survives old reads and clears on own read", async () => {
 	prefs.set("exatron:7:wpp:1", { isPinned: true, isMarkedUnread: false });
-	await chats.transferAttendance("test", { instance: "exatron", userId: 2, sectorId: 5, role: "RECEP", name: "Operator" }, 1, 7);
+	const actor = { ...session, userId: 3 };
+	await assert.rejects(chats.transferAttendance("test", actor, 1, 7), /perfil/);
+	assert.equal(row.userId, 2);
+	grant = actor.userId;
+	try {
+		await chats.transferAttendance("test", actor, 1, 7);
+	} finally {
+		grant = null;
+	}
 	assert.equal(row.userId, 7);
 	assert.deepEqual(recipient(), { isPinned: true, isMarkedUnread: true });
 	for (let poll = 0; poll < 3; poll++) {

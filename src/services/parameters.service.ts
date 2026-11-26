@@ -1,4 +1,5 @@
 import prismaService from "./prisma.service";
+import { TRANSFER_FROM_CONTACT_SEARCH } from "../parameters/transfer-from-contact-search";
 import { META_MANAGEMENT_PARAMETER } from "../parameters/meta-management";
 import { MESSAGE_FLOW_EDITOR_PARAMETER } from "../parameters/message-flow-editor";
 import { homologTriageEnabled, resolveTriageFlag, TRIAGE_FLAG } from "../parameters/triage-feature";
@@ -37,8 +38,8 @@ export const CONTACT_APPROVAL_PARAMETERS = {
 	deletion: "require_supervisor_approval_for_contact_deletion"
 } as const;
 
-function conversationRecordingEnabled(parameters: { key: string; sectorId: number | null; value: string }[]) {
-	return parameters.filter(parameter => parameter.key === CONVERSATION_RECORDING_PARAMETER && parameter.sectorId === null)
+function userPermissionEnabled(parameters: { key: string; sectorId: number | null; value: string }[], key: string) {
+	return parameters.filter(parameter => parameter.key === key && parameter.sectorId === null)
 		.at(-1)?.value === "true";
 }
 
@@ -94,7 +95,12 @@ class ParametersService {
 	}
 
 	public async canPlayConversationRecordings(instance: string, userId: number) {
-		return conversationRecordingEnabled(await this.getUserParams(instance, userId));
+		return userPermissionEnabled(await this.getUserParams(instance, userId), CONVERSATION_RECORDING_PARAMETER);
+	}
+
+	public async canTransferFromContactSearch(instance: string, userId: number) {
+		if (userId <= 0) return false;
+		return userPermissionEnabled(await this.getUserParams(instance, userId), TRANSFER_FROM_CONTACT_SEARCH);
 	}
 
 	public async isInternalGroupWhatsappSyncEnabled(instance: string, legacyDefault: boolean) {
@@ -145,7 +151,8 @@ class ParametersService {
 			...toParamMap(instanceParams),
 			...toParamMap(sectorParams),
 			...toParamMap(userParams),
-			[CONVERSATION_RECORDING_PARAMETER]: String(conversationRecordingEnabled(userParams)),
+			[CONVERSATION_RECORDING_PARAMETER]: String(userPermissionEnabled(userParams, CONVERSATION_RECORDING_PARAMETER)),
+			[TRANSFER_FROM_CONTACT_SEARCH]: String(userPermissionEnabled(userParams, TRANSFER_FROM_CONTACT_SEARCH)),
 			[META_MANAGEMENT_PARAMETER]: String(instanceFlags[META_MANAGEMENT_PARAMETER] === "true"),
 			[MESSAGE_FLOW_EDITOR_PARAMETER]: String(homologTriageEnabled() || instanceFlags[MESSAGE_FLOW_EDITOR_PARAMETER] === "true"),
 			[TRIAGE_FLAG]: String(resolveTriageFlag(instanceFlags[TRIAGE_FLAG]))
