@@ -7,9 +7,14 @@ export function createActiveUsersReportRouter() {
 	const router = Router();
 	router.get("/api/whatsapp/reports/active-users", isAuthenticated, async (req, res) => {
 		res.setHeader("Cache-Control", "no-store");
-		const instance = currentDatabaseTenant();
+		const instance = req.session.instance;
 		if (!instance || req.session.role.toUpperCase() !== "ADMIN") {
 			res.status(403).json({ message: "Acesso restrito aos administradores da empresa." });
+			return;
+		}
+		const databaseTenant = currentDatabaseTenant();
+		if (databaseTenant && databaseTenant !== instance) {
+			res.status(409).json({ code: "CRM_INSTANCE_CHANGED", message: "A sessão pertence a outra empresa. Atualize a tela." });
 			return;
 		}
 		const context = req.get("X-CRM-Instance");
