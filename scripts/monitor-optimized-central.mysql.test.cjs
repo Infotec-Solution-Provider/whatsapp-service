@@ -50,9 +50,9 @@ async function main(){
  stub('../src/services/prisma.service.ts',{});stub('../src/services/parameters.service.ts',{});stub('../src/services/instances.service.ts',{});
  const {parseMonitorRequest}=require('../src/services/monitor/monitor-contract.ts');
  const {buildMonitorQuery,monitorOrder}=require('../src/services/monitor/monitor-query.ts');
- const {readOptimizedCentralMonitorSearch:readOdimModernMonitorSearch,buildOptimizedClosedSearch:buildOdimClosedSearch}=require('../src/services/monitor/optimized-search.ts');
+ const {readOptimizedMonitorSearch,buildOptimizedClosedSearch:buildOdimClosedSearch}=require('../src/services/monitor/optimized-search.ts');
  const {mapMonitorRow}=require('../src/services/monitor/monitor-reader.ts');
- const {readOptimizedCentralMonitorSummary}=require('../src/services/monitor/optimized-summary.ts');
+ const {readOptimizedMonitorSummary}=require('../src/services/monitor/optimized-summary.ts');
  assert.equal(typeof buildOdimClosedSearch,'function');
  const execute=async(query,...values)=>{assert.match(query,/^SELECT/);assert(!/\b(?:UPDATE|INSERT|DELETE|ALTER|DROP)\b/i.test(query));assert.match(query,/MAX_EXECUTION_TIME\((5000|10000)\)/);if(query.includes('MAX_EXECUTION_TIME(10000)'))assert.match(query,/unread_chat_ids|archive_monitor_page|AS unread FROM chats c/);if(query.includes('archive_monitor_page'))assert.match(query,/closed_candidates/);queries.push({query,values});return real.$queryRawUnsafe(query,...values);};
  const session={instance:'odim',role:'ADMIN',userId:9,sectorId:138};
@@ -87,12 +87,12 @@ async function main(){
  };
  async function check(input={},slaMinutes=30,customerIds=[]){
   const request=parseMonitorRequest(input),context={session,local:false,slaMinutes,now:new Date(now),customerIds,filters:request.filters};
-  const expected=await oracle(context,request),actual=await readOdimModernMonitorSearch(context,request,execute);
+  const expected=await oracle(context,request),actual=await readOptimizedMonitorSearch(context,request,false,execute);
   assert.equal(actual.totalCount,expected.totalCount,'count '+JSON.stringify(input));assert.equal(actual.page,request.page);assert.equal(actual.pageSize,request.pageSize);
   assert.deepEqual(actual.rows.map(row=>row.category+':'+row.id),expected.rows.map(row=>row.category+':'+row.id),'global order/page '+JSON.stringify(input));
   assert.deepEqual(actual.rows.map(projection),expected.rows.map(projection),'hydrated facts '+JSON.stringify(input));
   assert(actual.rows.every(row=>row.instance===session.instance));
-  assert.deepEqual(await readOptimizedCentralMonitorSummary(context,execute),await summaryOracle(context),'summary '+JSON.stringify(input));
+  assert.deepEqual(await readOptimizedMonitorSummary(context,false,execute),await summaryOracle(context),'summary '+JSON.stringify(input));
   cases++;return actual;
  }
  for(const page of [1,2,3,4,5,8,10,11,20])await check({page,pageSize:5});
@@ -118,8 +118,8 @@ async function main(){
  sql(`USE ${schema};`+['contacts','chats','messages','schedules','internalchats','internalmessages'].map(table=>`UPDATE ${table} SET instance='infotec' WHERE instance='odim';`).join(''));
  for(const filters of [{},{sortBy:'lastMessage',sortOrder:'asc'},{operationalStatus:'unread'},{lastMessageChannelId:14},{searchText:'LATEST',searchColumn:'message'}])await check({pageSize:100,filters});
  const request=parseMonitorRequest({});const before=queries.length;
- for(const denied of [{...session,instance:'foreign'},{...session,role:'USER'}])await assert.rejects(readOdimModernMonitorSearch({session:denied,local:false,slaMinutes:30,now:new Date(now),customerIds:[],filters:request.filters},request,execute));
- await assert.rejects(readOdimModernMonitorSearch({session,local:true,slaMinutes:30,now:new Date(now),customerIds:[],filters:request.filters},request,execute));assert.equal(queries.length,before);
+ for(const denied of [{...session,instance:'foreign'},{...session,role:'USER'}])await assert.rejects(readOptimizedMonitorSearch({session:denied,local:false,slaMinutes:30,now:new Date(now),customerIds:[],filters:request.filters},request,false,execute));
+ await assert.rejects(readOptimizedMonitorSearch({session,local:true,slaMinutes:30,now:new Date(now),customerIds:[],filters:request.filters},request,false,execute));assert.equal(queries.length,before);
  console.log(JSON.stringify({passed:true,actualMysql:true,differentialCases:cases,infotecEmptyAndPopulatedFixtures:true,globalCategoryPagination:true,deepPriorityBoundary:true,allSortsAndDirections:true,latestChannelAndMessageFilters:true,rawFactsEqual:true,preparedReexecution:true,tenantIsolation:true,strictScope:true,injectionBound:true}));
 }
 main().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(real)await real.$disconnect();if(created){assert.match(schema,/^odim_monitor_homolog_qa_20261113_search_[0-9a-f]{8}$/);sql(`DROP DATABASE ${schema};`);}});
