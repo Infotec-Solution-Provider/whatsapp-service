@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { Logger } from "@in.pulse-crm/utils";
 import PrismaOperatorOutboundRepository from "./operator-outbound.repository";
+import { tenantSqlEnabled } from "../tenant-sql/registry";
+import { tenantSqlInstanceNames } from "../tenant-sql/router";
+import { AsyncConcurrencyLimiter } from "../utils/async-concurrency-limiter";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
 import {
 	OperatorOutboundDeliveryResult,
@@ -21,8 +24,10 @@ export const REMOTE_RECONCILIATION_INTERVAL_MS = 30_000;
 export const REMOTE_RECONCILIATION_DELAY_MS = 5 * 60_000;
 export const REMOTE_RECONCILIATION_MAX_AGE_MS = 24 * 60 * 60_000;
 const REMOTE_RECONCILIATION_BATCH = 4;
+const TENANT_SCAN_RETRY_DELAY_MS = 5_000;
 
 interface OperatorOutboundServiceOptions {
+	workerTenants?: () => readonly string[];
 	now?: () => Date;
 	intervalMs?: number;
 	lockMs?: number;
@@ -41,6 +46,10 @@ export class OperatorOutboundService {
 	private reconciliationTimer: NodeJS.Timeout | null = null;
 	private processing = false;
 	private reconciling = false;
+	private readonly processingTenants = new Set<string>();
+	private readonly nextTenantAttempt = new Map<string, number>();
+	private readonly tenantWorkLimiter: AsyncConcurrencyLimiter | undefined;
+	private readonly workerTenants: OperatorOutboundServiceOptions["workerTenants"];
 	private readonly now: () => Date;
 	private readonly intervalMs: number;
 	private readonly lockMs: number;
@@ -52,12 +61,14 @@ export class OperatorOutboundService {
 	private readonly onError: (error: unknown) => void;
 
 	constructor(private readonly repository: OperatorOutboundRepository, options: OperatorOutboundServiceOptions = {}) {
+		this.workerTenants = options.workerTenants;
 		this.now = options.now ?? (() => new Date());
 		this.intervalMs = options.intervalMs ?? 500;
 		this.lockMs = options.lockMs ?? 60_000;
 		this.retryMs = options.retryMs ?? 2_000;
 		const configuredConcurrency = options.concurrency ?? Number(process.env["OPERATOR_OUTBOUND_CONCURRENCY"] ?? 4);
 		this.concurrency = Math.min(8, Math.max(1, Math.floor(Number.isFinite(configuredConcurrency) ? configuredConcurrency : 4)));
+		this.tenantWorkLimiter = this.workerTenants ? new AsyncConcurrencyLimiter(this.concurrency) : undefined;
 		this.maxRemoteAttempts = options.maxRemoteAttempts ?? 10;
 		this.maxRemotePendingAgeMs = options.maxRemotePendingAgeMs ?? 5 * 60 * 1_000;
 		this.maxUnacknowledgedRemoteAgeMs = options.maxUnacknowledgedRemoteAgeMs ?? 23 * 60 * 60 * 1_000;
@@ -96,7 +107,7 @@ export class OperatorOutboundService {
 	async stopAndDrain(timeoutMs = 30_000): Promise<void> {
 		this.stopWorker();
 		const deadline = Date.now() + timeoutMs;
-		while ((this.processing || this.reconciling) && Date.now() < deadline) {
+		while ((this.processing || this.processingTenants.size || this.reconciling) && Date.now() < deadline) {
 			await new Promise((resolve) => setTimeout(resolve, 50));
 		}
 	}
@@ -108,6 +119,11 @@ export class OperatorOutboundService {
 		try {
 			const now = this.now();
 			const since = new Date(now.getTime() - REMOTE_RECONCILIATION_MAX_AGE_MS);
+			const tenants = this.workerTenants?.();
+			if (tenants) {
+				await this.reconcileTenants(tenants, now, since);
+				return;
+			}
 			const ids = await this.repository.reconciliationCandidates(now, since, REMOTE_RECONCILIATION_BATCH);
 			for (const id of ids) await this.reconcileItem(id);
 		} catch (error) {
@@ -115,6 +131,23 @@ export class OperatorOutboundService {
 		} finally {
 			this.reconciling = false;
 		}
+	}
+
+	private async reconcileTenants(tenants: readonly string[], now: Date, since: Date): Promise<void> {
+		let remaining = REMOTE_RECONCILIATION_BATCH;
+		let work = Promise.resolve();
+		await Promise.all(tenants.map((tenant) => withDatabaseTenant(tenant, async () => {
+			try {
+				const ids = await this.repository.reconciliationCandidates(now, since, REMOTE_RECONCILIATION_BATCH);
+				for (const id of ids.slice(0, remaining)) {
+					remaining--;
+					work = work.then(() => withDatabaseTenant(tenant, () => this.reconcileItem(id))).catch(this.onError);
+				}
+			} catch (error) {
+				this.onError(error);
+			}
+		})));
+		await work;
 	}
 
 	private async reconcileItem(id: string): Promise<void> {
@@ -143,19 +176,43 @@ export class OperatorOutboundService {
 	}
 
 	async processOnce(): Promise<void> {
-		if (this.processing || !this.handler) return;
+		if (!this.handler) return;
+		const tenants = this.workerTenants?.();
+		if (tenants) {
+			await Promise.all(tenants.map((tenant) => this.processTenant(tenant)));
+			return;
+		}
+		if (this.processing) return;
 		this.processing = true;
 		try {
-			await this.repository.recoverExpired(this.now());
-			const ids = await this.repository.candidates(this.now(), 20);
-			await this.runBounded(ids, (id) => this.processItem(id));
-			const notifications = await this.repository.notificationCandidates(this.now(), 20);
-			await this.runBounded(notifications, (id) => this.notify(id));
+			await this.processBatch();
 		} catch (error) {
 			this.onError(error);
 		} finally {
 			this.processing = false;
 		}
+	}
+
+	private async processTenant(tenant: string): Promise<void> {
+		if (this.processingTenants.has(tenant) || (this.nextTenantAttempt.get(tenant) ?? 0) > this.now().getTime()) return;
+		this.processingTenants.add(tenant);
+		this.nextTenantAttempt.delete(tenant);
+		try {
+			await withDatabaseTenant(tenant, () => this.processBatch());
+		} catch (error) {
+			this.nextTenantAttempt.set(tenant, this.now().getTime() + TENANT_SCAN_RETRY_DELAY_MS);
+			this.onError(error);
+		} finally {
+			this.processingTenants.delete(tenant);
+		}
+	}
+
+	private async processBatch(): Promise<void> {
+		await this.repository.recoverExpired(this.now());
+		const ids = await this.repository.candidates(this.now(), 20);
+		await this.runBounded(ids, (id) => this.processItem(id));
+		const notifications = await this.repository.notificationCandidates(this.now(), 20);
+		await this.runBounded(notifications, (id) => this.notify(id));
 	}
 
 	private async processItem(id: string): Promise<void> {
@@ -249,8 +306,10 @@ export class OperatorOutboundService {
 	}
 
 	private async runBounded(ids: string[], process: (id: string) => Promise<void>): Promise<void> {
+		const limiter = this.tenantWorkLimiter;
+		const run = limiter ? (id: string) => limiter.run(() => process(id)) : process;
 		for (let offset = 0; offset < ids.length; offset += this.concurrency) {
-			await Promise.all(ids.slice(offset, offset + this.concurrency).map(process));
+			await Promise.all(ids.slice(offset, offset + this.concurrency).map(run));
 		}
 	}
 
@@ -289,4 +348,5 @@ export class OperatorOutboundService {
 	}
 }
 
-export default new OperatorOutboundService(new PrismaOperatorOutboundRepository());
+export default new OperatorOutboundService(new PrismaOperatorOutboundRepository(),
+	tenantSqlEnabled() ? { workerTenants: tenantSqlInstanceNames } : {});

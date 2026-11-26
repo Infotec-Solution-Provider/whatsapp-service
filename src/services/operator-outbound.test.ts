@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { currentDatabaseTenant } from "../utils/database-tenant-context";
 import { Prisma, PrismaClient } from "@prisma/client";
+import { createTenantSqlRouter } from "../tenant-sql/router";
 import PrismaOperatorOutboundRepository from "./operator-outbound.repository";
 import { OperatorOutboundService } from "./operator-outbound.service";
 import { deliverOperatorMessage, type OperatorDeliveryClient } from "../utils/operator-send-delivery";
@@ -207,6 +208,67 @@ function fixture(
 
 const tests: Array<[string, () => Promise<void>]> = [];
 const test = (name: string, body: () => Promise<void>) => tests.push([name, body]);
+
+test("tenant SQL outbound keeps healthy tenants moving while a peer database is unavailable", async () => {
+	const now = () => new Date(Date.now() + 1_000);
+	const first = new IsolatedDatabase(now);
+	const second = new IsolatedDatabase(now);
+	const down = new Error("missing tenant database");
+	const errors: unknown[] = [];
+	let releasePeer!: () => void;
+	const unavailable = new Promise<void>((resolve) => { releasePeer = resolve; });
+	const tenants = new Map<string, Record<string, any>>([
+		["tenant-down", { operatorOutboundSend: { findMany: async () => { await unavailable; throw down; } } }],
+		["tenant-a", first.client()],
+		["tenant-b", second.client()],
+	]);
+	const repository = new PrismaOperatorOutboundRepository(createTenantSqlRouter(new Map(), tenants) as PrismaClient);
+	const service = new OperatorOutboundService(repository, {
+		now, concurrency: 1, workerTenants: () => [...tenants.keys()], onError: (error) => errors.push(error),
+	});
+	let active = 0;
+	let maxActive = 0;
+	let finished!: () => void;
+	const notified = new Promise<void>((resolve) => { finished = resolve; });
+	const delivered: string[] = [];
+	const notifications: string[] = [];
+	service.setHandler({
+		deliver: async (job) => {
+			assert.equal(currentDatabaseTenant(), job.instance);
+			maxActive = Math.max(maxActive, ++active);
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			active--;
+			delivered.push(job.instance);
+			return { status: "SENT" };
+		},
+		onMessage: async (message) => {
+			assert.equal(currentDatabaseTenant(), message.instance);
+			notifications.push(message.instance);
+			if (notifications.length === 2) finished();
+		},
+	});
+	await Promise.all(["tenant-a", "tenant-b"].map((instance) => service.enqueue(input({ instance, message: { ...input().message, instance } }))));
+
+	const cycle = service.processOnce();
+	let timeout: NodeJS.Timeout | undefined;
+	try {
+		await Promise.race([notified, new Promise<never>((_, reject) => {
+			timeout = setTimeout(() => reject(new Error("Healthy tenant waited for unavailable peer")), 1_000);
+		})]);
+		assert.deepEqual(delivered.sort(), ["tenant-a", "tenant-b"]);
+		assert.equal(maxActive, 1);
+		assert.deepEqual(errors, []);
+	} finally {
+		clearTimeout(timeout);
+		releasePeer();
+		await cycle;
+	}
+	assert.deepEqual(errors, [down]);
+	await service.processOnce();
+	assert.deepEqual(errors, [down], "Unavailable tenant must back off between scans");
+	assert.equal(first.state.jobs[0]?.["notificationPending"], false);
+	assert.equal(second.state.jobs[0]?.["notificationPending"], false);
+});
 
 test("worker tenant context survives delivery and transactional finalization without leaking", async () => {
 	const observed: string[] = [];
