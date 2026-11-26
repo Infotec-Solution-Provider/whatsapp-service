@@ -3,6 +3,8 @@ import ProcessingLogger from "../utils/processing-logger";
 import { Logger } from "@in.pulse-crm/utils";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
 import { pauseAdmissionFailure } from "./operator-pause-admission";
+import { tenantSqlEnabled } from "../tenant-sql/registry";
+import { tenantSqlInstanceNames } from "../tenant-sql/router";
 
 interface QueueMessageData {
   instance: string;
@@ -21,11 +23,15 @@ export interface MessageQueueProcessHandler {
 type QueueItem = Awaited<ReturnType<typeof prismaService.wppMessageProcessingQueue.findMany>>[number];
 
 class MessageQueueService {
-  private isProcessing = false;
+  private readonly processingScopes = new Set<string | null>();
+  private readonly recoveredScopes = new Set<string>();
+  private readonly unavailableUntil = new Map<string, number>();
+  private activeContacts = 0;
   private processingInterval: NodeJS.Timeout | null = null;
   private readonly PROCESSING_INTERVAL_MS = 250; // Processa com menos pressão no banco
   private readonly LOCK_DURATION_MS = 30000; // Lock expira em 30 segundos
   private readonly MAX_CONCURRENT_CONTACTS = 5; // Reduz concorrência para aliviar o pool do Prisma
+  private readonly TENANT_RETRY_MS = 60_000;
   private readonly workerId = `worker-${process.pid}-${Date.now()}`;
   private processHandler: MessageQueueProcessHandler | null = null;
   private stopping = false;
@@ -92,12 +98,16 @@ class MessageQueueService {
     }
 
     this.stopping = false;
+    this.recoveredScopes.clear();
+    this.unavailableUntil.clear();
 
     Logger.info(`[MessageQueueService] 🚀 Iniciando worker de processamento da fila (intervalo: ${this.PROCESSING_INTERVAL_MS}ms)`);
 
-    this.recoverOrphanProcessingItems().catch((err) => {
-      Logger.info(`[MessageQueueService] Error recovering orphan processing items: ${err.message}`);
-    });
+    if (!tenantSqlEnabled()) {
+      this.recoverOrphanProcessingItems().catch((err) => {
+        Logger.info(`[MessageQueueService] Error recovering orphan processing items: ${err.message}`);
+      });
+    }
 
     this.processingInterval = setInterval(() => {
       this.processQueue().catch((err) => {
@@ -129,7 +139,7 @@ class MessageQueueService {
   public async stopAndDrain(timeoutMs = 30_000): Promise<void> {
     this.stopWorker();
     const deadline = Date.now() + timeoutMs;
-    while (this.isProcessing && Date.now() < deadline) {
+    while (this.processingScopes.size > 0 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
   }
@@ -138,45 +148,69 @@ class MessageQueueService {
    * Processa itens pendentes da fila
    */
   private async processQueue() {
-    if (this.stopping || this.isProcessing) {
-      return;
-    }
-    this.isProcessing = true;
+    if (this.stopping) return;
+    const scopes = tenantSqlEnabled() ? tenantSqlInstanceNames() : [null];
+    await Promise.all(scopes.map((scope) => this.processScope(scope)));
+  }
+
+  private async processScope(scope: string | null) {
+    if (this.processingScopes.has(scope)) return;
+    if (scope && (this.unavailableUntil.get(scope) ?? 0) > Date.now()) return;
+    this.processingScopes.add(scope);
 
     try {
-      // Libera locks expirados
-      await this.releaseExpiredLocks();
-
-      // Busca próximos itens para processar, respeitando o limite de contatos simultâneos
-      const pendingItems = await prismaService.wppMessageProcessingQueue.findMany({
-        where: {
-          status: "PENDING",
-          OR: [
-            { lockedUntil: null },
-            { lockedUntil: { lt: new Date() } }
-          ]
-        },
-        orderBy: {
-          createdAt: "asc"
-        },
-        take: this.MAX_CONCURRENT_CONTACTS * 3 // Pega mais para filtrar por contato
-      }) as QueueItem[];
-
-      if (pendingItems.length === 0) {
-        return;
+      if (scope === null) {
+        await this.processPendingItems(null);
+      } else {
+        await withDatabaseTenant(scope, async () => {
+          if (!this.recoveredScopes.has(scope)) {
+            await this.recoverOrphanProcessingItems(scope);
+            this.recoveredScopes.add(scope);
+          }
+          await this.processPendingItems(scope);
+        });
       }
+    } catch (error) {
+      if (scope === null) throw error;
+      this.unavailableUntil.set(scope, Date.now() + this.TENANT_RETRY_MS);
+      Logger.error(`[MessageQueueService] Error processing tenant queue (${scope})`, error as Error);
+    } finally {
+      this.processingScopes.delete(scope);
+    }
+  }
 
-      // Agrupa por contato e pega apenas o primeiro de cada
-      const contactMap = new Map<string, typeof pendingItems[0]>();
-      for (const item of pendingItems) {
-        if (!contactMap.has(item.contactPhone)) {
-          contactMap.set(item.contactPhone, item);
-        }
+  private async processPendingItems(scope: string | null) {
+    await this.releaseExpiredLocks(scope);
+
+    const pendingItems = await prismaService.wppMessageProcessingQueue.findMany({
+      where: {
+        ...(scope === null ? {} : { instance: scope }),
+        status: "PENDING",
+        OR: [
+          { lockedUntil: null },
+          { lockedUntil: { lt: new Date() } }
+        ]
+      },
+      orderBy: {
+        createdAt: "asc"
+      },
+      take: this.MAX_CONCURRENT_CONTACTS * 3 // Pega mais para filtrar por contato
+    }) as QueueItem[];
+
+    // Agrupa por contato e pega apenas o primeiro de cada.
+    const contactMap = new Map<string, QueueItem>();
+    for (const item of pendingItems) {
+      if (!contactMap.has(item.contactPhone)) {
+        contactMap.set(item.contactPhone, item);
       }
+    }
 
-      // Limita ao número máximo de contatos simultâneos
-      const itemsToProcess = Array.from(contactMap.values()).slice(0, this.MAX_CONCURRENT_CONTACTS);
+    // Reserva antes de adquirir o lease para preservar o limite global entre bancos.
+    const itemsToProcess = Array.from(contactMap.values()).slice(0, this.MAX_CONCURRENT_CONTACTS - this.activeContacts);
+    if (itemsToProcess.length === 0) return;
+    this.activeContacts += itemsToProcess.length;
 
+    try {
       const claimedIds = await this.claimQueueItems(itemsToProcess.map((item) => item.id));
 
       if (claimedIds.length === 0) {
@@ -194,7 +228,7 @@ class MessageQueueService {
       // Processa cada item em paralelo (mas apenas um por contato)
       await Promise.allSettled(claimedItems.map((item) => withDatabaseTenant(item.instance, () => this.processQueueItem(item))));
     } finally {
-      this.isProcessing = false;
+      this.activeContacts -= itemsToProcess.length;
     }
   }
 
@@ -243,10 +277,11 @@ class MessageQueueService {
   /**
    * Libera locks que expiraram
    */
-  private async releaseExpiredLocks() {
+  private async releaseExpiredLocks(scope: string | null) {
     try {
-      const result = await prismaService.wppMessageProcessingQueue.updateMany({
+      await prismaService.wppMessageProcessingQueue.updateMany({
         where: {
+          ...(scope === null ? {} : { instance: scope }),
           status: "PROCESSING",
           lockedUntil: {
             lt: new Date()
@@ -259,19 +294,18 @@ class MessageQueueService {
           processingStartedAt: null
         }
       });
-
-      if (result.count > 0) {
-      }
     } catch (error) {
+      if (scope !== null) throw error;
     }
   }
 
   /**
    * Recupera itens PROCESSING órfãos (sem lock válido) para evitar mensagens travadas.
    */
-  private async recoverOrphanProcessingItems(): Promise<number> {
+  private async recoverOrphanProcessingItems(scope: string | null = null): Promise<number> {
     const result = await prismaService.wppMessageProcessingQueue.updateMany({
       where: {
+        ...(scope === null ? {} : { instance: scope }),
         status: "PROCESSING",
         OR: [
           { lockedUntil: null },
