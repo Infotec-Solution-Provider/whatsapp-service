@@ -1,7 +1,7 @@
 import { UnauthorizedError } from "@rgranatodutra/http-errors";
 import type { MonitorCategory, MonitorFilters, MonitorRequest } from "./monitor-contract";
 import { buildMonitorQuery, inboundSql, monitorLike, monitorOrder, type MonitorQuery, type MonitorQueryContext } from "./optimized-query";
-import { hasOptimizedCentralScope } from "./optimized-access";
+import { useOptimizedMonitor } from "./optimized-access";
 import type { MonitorRow } from "./monitor-reader";
 export type SearchExecute = (sql: string, ...params: unknown[]) => Promise<MonitorRow[]>;
 
@@ -121,8 +121,8 @@ async function candidatePage(context: MonitorQueryContext, request: MonitorReque
 }
 
 /** Counts include every selected category; only a proven high-priority prefix may bypass closed-page scans. */
-export async function readOptimizedCentralMonitorSearch(context: MonitorQueryContext, request: MonitorRequest, execute: SearchExecute) {
-  if (!hasOptimizedCentralScope(context.session) || context.local) throw new UnauthorizedError("Modern monitor scope unavailable");
+export async function readOptimizedMonitorSearch(context: MonitorQueryContext, request: MonitorRequest, tenantSql: boolean, execute: SearchExecute) {
+  if (!useOptimizedMonitor(context, tenantSql)) throw new UnauthorizedError("Modern monitor scope unavailable");
   const sources = sourceQueries(context), nonempty: SearchSource[] = [];
   let unreadIds: number[] | undefined;
   const loadClosedUnreadIds = async () => {

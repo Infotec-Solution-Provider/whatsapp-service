@@ -19,9 +19,9 @@ import {
 import { readMonitorMessages, type MonitorHistoryInput } from "./monitor/monitor-history";
 import messagePresentationService from "./message-presentation.service";
 import { monitorChannelQuery } from "./monitor/monitor-channels";
-import { useOptimizedCentralMonitor } from "./monitor/optimized-access";
-import { readOptimizedCentralMonitorSearch } from "./monitor/optimized-search";
-import { readOptimizedCentralMonitorSummary } from "./monitor/optimized-summary";
+import { useOptimizedMonitor } from "./monitor/optimized-access";
+import { readOptimizedMonitorSearch } from "./monitor/optimized-search";
+import { readOptimizedMonitorSummary } from "./monitor/optimized-summary";
 import { observeMonitorRead, monitorQueryStage } from "./monitor/optimized-observation";
 
 class MonitorService {
@@ -52,7 +52,8 @@ class MonitorService {
 		const request = parseMonitorRequest(input);
 		if (summary) request.filters.operationalStatus = "all";
 		const params = await parametersService.getSessionParams(session);
-		const local = !tenantSqlEnabled() && params["monitor:use_local_search"] === "true";
+		const tenantSql = tenantSqlEnabled();
+		const local = !tenantSql && params["monitor:use_local_search"] === "true";
 		const slaMinutes = parseSlaMinutes(params["monitor:sla_minutes"]);
 		const { searchText, searchColumn, categories } = request.filters;
 		// Central WhatsApp has customer IDs; names live in the CRM. Fetch matching IDs
@@ -76,14 +77,14 @@ class MonitorService {
 			now: new Date(),
 			customerIds: customers.map((customer) => Number(customer.CODIGO))
 		};
-		return { context, request };
+		return { context, request, tenantSql };
 	}
 
 	public async searchMonitorData(session: SessionData, input: MonitorSearchInput) {
-		const { context, request } = await this.context(session, input);
-		const { rows, ...page } = useOptimizedCentralMonitor(context, tenantSqlEnabled())
+		const { context, request, tenantSql } = await this.context(session, input);
+		const { rows, ...page } = useOptimizedMonitor(context, tenantSql)
 			? await observeMonitorRead(session.instance, "search", context.filters, measure =>
-				readOptimizedCentralMonitorSearch(context, request, (sql, ...params) =>
+				readOptimizedMonitorSearch(context, request, tenantSql, (sql, ...params) =>
 					measure(monitorQueryStage(sql), () => this.execute(session)(false, { sql, params }))))
 			: await monitorPage(this.execute(session), monitorSources(context), request);
 		const items = rows.map(mapMonitorRow);
@@ -144,10 +145,10 @@ class MonitorService {
 	}
 
 	public async getMonitorSummary(session: SessionData, input: MonitorSearchInput) {
-		const { context } = await this.context(session, input, true);
-		if (useOptimizedCentralMonitor(context, tenantSqlEnabled())) {
+		const { context, tenantSql } = await this.context(session, input, true);
+		if (useOptimizedMonitor(context, tenantSql)) {
 			return observeMonitorRead(session.instance, "summary", context.filters, measure =>
-				readOptimizedCentralMonitorSummary(context, (sql, ...params) =>
+				readOptimizedMonitorSummary(context, tenantSql, (sql, ...params) =>
 					measure(sql.includes("AS unread") ? "closedUnread" : "summary", () =>
 						prismaService.$queryRawUnsafe<Array<Record<string, bigint | number | null>>>(sql, ...params))));
 		}

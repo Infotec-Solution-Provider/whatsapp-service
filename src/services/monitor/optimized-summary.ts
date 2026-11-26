@@ -1,6 +1,6 @@
 import type { MonitorFilters, MonitorSummary } from "./monitor-contract";
 import { buildMonitorQuery, inboundSql, monitorLike, type MonitorQueryContext, type MonitorQuery } from "./optimized-query";
-import { hasOptimizedCentralScope } from "./optimized-access";
+import { useOptimizedMonitor } from "./optimized-access";
 
 type SummaryRow = Record<string, bigint | number | null>;
 export type SummaryExecute = (sql: string, ...params: unknown[]) => Promise<SummaryRow[]>;
@@ -91,8 +91,8 @@ export function buildOptimizedWhatsappSummary(context: MonitorQueryContext, over
   return { sql: "SELECT /*+ MAX_EXECUTION_TIME(5000) */ COUNT(*) AS overdue FROM (SELECT c.id,CASE WHEN c.human_key IS NOT NULL AND (c.inbound_key IS NULL OR c.human_key>c.inbound_key) THEN CAST(responded.timestamp AS UNSIGNED) ELSE COALESCE(MIN(CAST(pending.timestamp AS UNSIGNED)),TIMESTAMPDIFF(MICROSECOND,'1970-01-01 00:00:00',c.started_at)/1000) END AS waiting_since FROM (" + classified + ") c LEFT JOIN messages responded ON responded.id=CAST(RIGHT(c.human_key,20) AS UNSIGNED) AND responded.instance=c.instance LEFT JOIN messages pending ON pending.instance=c.instance AND pending.chat_id=c.id AND (" + inboundSql("pending") + ") AND (responded.id IS NULL OR pending.sent_at>responded.sent_at OR (pending.sent_at=responded.sent_at AND pending.id>responded.id)) " + latestJoin + "WHERE " + finalFilters.join(" AND ") + " GROUP BY c.id,c.started_at,c.human_key,c.inbound_key,responded.timestamp HAVING waiting_since<=" + (now.getTime() - slaMinutes * 60000) + ") overdue_chats", params };
 }
 
-export async function readOptimizedCentralMonitorSummary(context: MonitorQueryContext, execute: SummaryExecute): Promise<MonitorSummary> {
-  if (!hasOptimizedCentralScope(context.session) || context.local) throw new Error("MODERN_SUMMARY_SCOPE_REQUIRED");
+export async function readOptimizedMonitorSummary(context: MonitorQueryContext, tenantSql: boolean, execute: SummaryExecute): Promise<MonitorSummary> {
+  if (!useOptimizedMonitor(context, tenantSql)) throw new Error("MODERN_SUMMARY_SCOPE_REQUIRED");
   const current = { ...context, filters: { ...context.filters, operationalStatus: "all" as const } };
   const f = current.filters;
   const queries: MonitorQuery[] = [];
