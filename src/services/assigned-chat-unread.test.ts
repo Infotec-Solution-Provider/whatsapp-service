@@ -15,6 +15,7 @@ let failPreference = false;
 const key = (v: any) => `${v.instance}:${v.userId}:${v.chatType}:${v.chatId}`;
 const emitted: any[] = [];
 const db: any = {
+	wppWallet: { findMany: async () => [] },
 	wppChat: {
 		findUnique: async () => ({ ...row }),
 		findMany: async () => [{ ...row, contact: { id: 10, customerId: null }, schedule: null }],

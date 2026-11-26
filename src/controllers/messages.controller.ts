@@ -23,7 +23,7 @@ class MessagesController {
 	constructor(public readonly router: Router) {
 		this.router.get("/api/whatsapp/messages/export", publicBiAuthenticated, publicBiRateLimit, this.exportMessages);
 		this.router.get("/api/whatsapp/messages/report-export", isAuthenticated, this.exportChatReport);
-		this.router.get("/api/whatsapp/messages/:id", this.getMessageById);
+		this.router.get("/api/whatsapp/messages/:id", isAuthenticated, this.getMessageById);
 		this.router.patch("/api/whatsapp/messages/mark-as-read", isAuthenticated, this.readContactMessages);
 		this.router.post(
 			"/api/whatsapp/:clientId/messages",

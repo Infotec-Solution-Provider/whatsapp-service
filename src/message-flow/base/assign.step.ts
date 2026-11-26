@@ -70,7 +70,7 @@ export class AssignStep extends BaseStep {
 			type: config.type || "RECEPTIVE",
 			sectorId: this.sectorId,
 			contactId: context.contact.id,
-			userId: (userId as number) ?? -1,
+			userId: (userId as number) ?? (walletId == null ? -1 : null),
 			walletId: (walletId as number) ?? null
 		};
 

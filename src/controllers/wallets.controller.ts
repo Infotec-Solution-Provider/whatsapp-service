@@ -3,8 +3,19 @@ import walletsService from "../services/wallets.service";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 
+import onlyLocal from "../middlewares/only-local.middleware";
+import { withDatabaseTenant } from "../utils/database-tenant-context";
+import positiveResourceId from "../utils/positive-resource-id";
+
 class WalletsController {
 	constructor(public readonly router: Router) {
+		this.router.get("/api/internal/whatsapp/event-recipients/:instance/:kind/:id", onlyLocal, async (req, res) => {
+			const { instance, kind } = req.params;
+			if (typeof instance !== "string" || !instance || (kind !== "wallet" && kind !== "chat")) throw new BadRequestError("Destino inválido.");
+			const id = positiveResourceId(req.params["id"]);
+			const data = await withDatabaseTenant(instance, () => walletsService.eventRecipients(instance, kind, id));
+			res.json({ data });
+		});
 		this.router.get("/api/wallets", isAuthenticated, this.getUserWallets);
 		this.router.get("/api/users/:userId/wallets", isAuthenticated, async (req, res) => {
 			if (Object.keys(req.query).some(key => key !== "instance") || req.query["instance"] !== undefined && req.query["instance"] !== req.session.instance) throw new BadRequestError("Consulta inválida para esta empresa.");
@@ -14,6 +25,9 @@ class WalletsController {
 			if (Object.keys(req.query).some(key => key !== "after")) throw new BadRequestError("Consulta inválida.");
 			res.json({ message: "Carteiras consultadas.", ...await walletsService.list(req.session, req.query["after"]) });
 		});
+		this.router.get("/api/wallets/choices", isAuthenticated, async (req, res) => res.json({ data: await walletsService.choices(req.session) }));
+		this.router.post("/api/wallets/preview", isAuthenticated, async (req, res) => res.json({ data: await walletsService.preview(req.session, req.body) }));
+		this.router.put("/api/wallets/:walletId", isAuthenticated, async (req, res) => res.json({ data: await walletsService.save(req.session, req.params["walletId"], req.body) }));
 		this.router.get("/api/wallets/:walletId", isAuthenticated, async (req, res) => res.json({ data: await walletsService.get(req.session, req.params["walletId"]) }));
 		this.router.get("/api/wallets/:walletId/users", isAuthenticated, async (req, res) => res.json({ data: (await walletsService.get(req.session, req.params["walletId"])).userIds }));
 		this.router.post("/api/wallets", isAuthenticated, async (req, res) => res.status(201).json({ data: await walletsService.create(req.session, req.body) }));

@@ -29,6 +29,11 @@ test("journal migration, atomic publication, late linkage, authorization and ret
 		await db.query("INSERT INTO contacts (id,instance,name,phone) VALUES (10,'alpha','Contact A','100'),(20,'beta','Contact B','200')");
 		await db.query("INSERT INTO chats (id,instance,contact_id,user_id,type) VALUES (1,'alpha',10,2,'RECEPTIVE'),(2,'beta',20,2,'RECEPTIVE')");
 		process.env["WHATSAPP_DATABASE_URL"] = `mysql://root@127.0.0.1:13328/${database}`;
+		await db.query("CREATE TABLE operadores (CODIGO INT PRIMARY KEY, NOME VARCHAR(40), SETOR INT, NIVEL VARCHAR(20), ATIVO VARCHAR(3))");
+		await db.query("INSERT INTO operadores VALUES (2,'Ana',135,'RECEP','SIM'),(3,'Beto',135,'ATIVO','SIM')");
+		require.cache[require.resolve("../instances.service")] = { exports: { __esModule: true, default: {
+			executeQuery: async (_instance: string, sql: string, params: number[]) => (await db.query(sql, params))[0]
+		} } } as NodeModule;
 		const { SessionChangeRepository } = require("./session-change.repository") as typeof import("./session-change.repository");
 		const { default: prisma } = require("../prisma.service") as typeof import("../prisma.service");
 		disconnect = () => prisma.$disconnect();

@@ -1,3 +1,4 @@
+import walletsService from "./wallets.service";
 import { BadRequestError } from "@rgranatodutra/http-errors";
 import { Prisma } from "@prisma/client";
 import { SessionData } from "../sdk-local";
@@ -18,7 +19,7 @@ class ChatUserPreferencesService {
 	/** Publish the assignment and the recipient's unread preference atomically.
 	 * Message READ status belongs to the conversation, not its new attendant.
 	 */
-	public async withUnreadAssignment<T extends { id: number; instance: string; userId: number | null }>(
+	public async withUnreadAssignment<T extends { id: number; instance: string; userId: number | null; walletId?: number | null }>(
 		write: (tx: Prisma.TransactionClient) => Promise<T>,
 		admission?: ChatAssignmentAdmission,
 		isolationLevel?: Prisma.TransactionIsolationLevel
@@ -27,6 +28,10 @@ class ChatUserPreferencesService {
 		const run = () => prismaService.$transaction(async (tx) => {
 			if (admission) await operatorPauseAdmission.assert(tx, admission, tenantSqlEnabled());
 			const chat = await write(tx);
+			if (chat.walletId != null) {
+				const target = await tx.$queryRawUnsafe<{ id: number }[]>("SELECT id FROM wallets WHERE id=? AND instance=? FOR UPDATE", chat.walletId, chat.instance);
+				if (!target.length) throw new BadRequestError("Carteira de destino indisponível nesta empresa.");
+			}
 			if (chat.userId !== null && chat.userId > 0) {
 				const key = { instance: chat.instance, userId: chat.userId, chatType: "wpp", chatId: chat.id };
 				await tx.chatUserPreference.upsert({
@@ -70,14 +75,15 @@ class ChatUserPreferencesService {
 			return;
 		}
 
+		const wallets = await walletsService.effectiveWallets(session.instance, session.userId);
 		const chat = await prismaService.wppChat.findFirst({
 			where: {
 				id: chatId,
 				instance: session.instance,
 				OR: [
 					{ userId: session.userId },
-					{ wallet: { WppWalletUser: { some: { userId: session.userId } } } },
-					...(session.role === "ADMIN" ? [{ sectorId: session.sectorId, userId: -1 }] : [])
+					...wallets.map(row => ({ walletId: row.id })),
+					...(session.role === "ADMIN" ? [{ sectorId: session.sectorId, userId: -1, walletId: null }] : [])
 				]
 			},
 			select: { id: true }

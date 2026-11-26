@@ -1,3 +1,4 @@
+import walletsService from "../wallets.service";
 import { Prisma } from "@prisma/client";
 import type { SessionData } from "../../sdk-local";
 import prismaService from "../prisma.service";
@@ -8,15 +9,12 @@ import type { ChangeRepository, JournalRow, StreamHead } from "./session-change-
 export function previousChatAccess(session: SessionData, row: JournalRow, wallets: number[]): boolean {
 	return row.previousUserId === session.userId ||
 		(row.previousWalletId !== null && wallets.includes(row.previousWalletId)) ||
-		(session.role === "ADMIN" && row.previousUserId === -1 && row.previousSectorId === session.sectorId);
+		(session.role === "ADMIN" && row.previousWalletId === null && row.previousUserId === -1 && row.previousSectorId === session.sectorId);
 }
 
 export class SessionChangeRepository implements ChangeRepository {
 	public async wallets(session: SessionData) {
-		const rows = await prismaService.wppWalletUser.findMany({
-			where: { userId: session.userId, WppWallet: { instance: session.instance } }, select: { walletId: true }
-		});
-		return rows.map((row) => row.walletId);
+		return (await walletsService.getUserWallets(session)).map(row => row.id);
 	}
 	public async read(instance: string, after: string | null, limit: number) {
 		return prismaService.$transaction(async (tx) => {

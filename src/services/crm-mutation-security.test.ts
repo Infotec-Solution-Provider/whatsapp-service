@@ -146,7 +146,7 @@ for (const input of [{ instance: "fixture-b" }, { scheduledBy: 99 }, { scheduled
 }
 test("wallet queries default to self, deny another operator and always use authenticated tenant", async () => {
 	reset(); await walletService.getUserWallets(actor);
-	assert.equal(queries[0]!["instance"], "fixture-a"); assert.equal(queries[0]!["WppWalletUser"].some.userId, 7);
+	assert.equal(queries[0]!["instance"], "fixture-a"); assert.equal(queries[0]!["OR"][1].WppWalletUser.some.userId, 7);
 	await assert.rejects(() => walletService.getUserWallets(actor, "8")); assert.equal(queries.length, 1);
 	await walletService.getUserWallets({ ...actor, role: "ADMIN" }, "8"); assert.equal(queries[1]!["instance"], "fixture-a");
 	await assert.rejects(() => walletService.getUserWallets(actor, "7 OR 1=1"));

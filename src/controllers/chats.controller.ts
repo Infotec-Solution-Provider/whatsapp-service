@@ -1,3 +1,4 @@
+import prismaService from "../services/prisma.service";
 import positiveResourceId from "../utils/positive-resource-id";
 import { listChatTransferSectors } from "../services/chat-sector-transfer";
 import { Request, Response, Router } from "express";
@@ -6,7 +7,7 @@ import { BadRequestError, NotFoundError } from "@rgranatodutra/http-errors";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
 import onlyLocal from "../middlewares/only-local.middleware";
 import publicBiRateLimit from "../middlewares/public-bi-rate-limit.middleware";
-import publicBiAuthenticated from "../middlewares/public-bi-auth.middleware";
+import publicBiAuthenticated, { getPublicBiServiceIdentity } from "../middlewares/public-bi-auth.middleware";
 import protectedRead from "../middlewares/protected-read";
 import sessionChanges from "../services/session-changes/session-changes.service";
 import chatUserPreferencesService, { ChatPreferenceType } from "../services/chat-user-preferences.service";
@@ -104,6 +105,12 @@ class ChatsController {
 			publicBiRateLimit,
 			this.getPublicConversations.bind(this)
 		);
+		this.router.get("/api/whatsapp/session/chat-rooms/:id", isAuthenticated, async (req, res) => {
+			const { instance, userId, role, sectorId } = req.session;
+			const chat = await prismaService.wppChat.findFirst({ where: { instance, id: positiveResourceId(req.params["id"]), walletId: null,
+				...(role === "ADMIN" ? (instance === "nunes" && sectorId !== 3 ? { sectorId } : {}) : { userId }) }, select: { id: true } });
+			res.json({ data: !!chat });
+		});
 		this.router.get("/api/whatsapp/session/chats", isAuthenticated, protectedRead("chats.session", this.getChatsBySession));
 		this.router.get("/api/whatsapp/chats/:id", isAuthenticated, this.getChatById.bind(this));
 		this.router.get("/api/whatsapp/chats/:id/recording-access", isAuthenticated, this.getRecordingAccess.bind(this));
@@ -284,7 +291,7 @@ class ChatsController {
 			throw new BadRequestError("Chat ID is required!");
 		}
 
-		const chat = await chatsService.getChatById(id, chatScopeFromSession(req.session));
+		const chat = await chatsService.getChatById(id, { ...chatScopeFromSession(req.session), actor: req.session });
 
 		if (!chat) {
 			throw new NotFoundError("Chat não encontrado.");
@@ -315,7 +322,7 @@ class ChatsController {
 			res.sendStatus(403);
 			return;
 		}
-		const chat = await chatsService.getChatById(id, messagesScopeFromSession(req.session), {
+		const chat = await chatsService.getChatById(id, { ...messagesScopeFromSession(req.session), actor: req.session }, {
 			withMessages: false,
 			withCustomer: false
 		});
@@ -329,7 +336,10 @@ class ChatsController {
 	}
 
 	private async getPublicConversationMessages(req: Request, res: Response) {
-		const data = await this.fetchChatMessagesPage(req);
+		const { chatId, limit, beforeId } = this.parseChatMessagesPageRequest(req);
+		const scope = messagesScopeFromSession(req.session);
+		if (!getPublicBiServiceIdentity(req) && req.session.role !== "ADMIN") scope.actor = req.session;
+		const data = await chatsService.getChatMessagesPage(scope, chatId, limit, beforeId);
 		const messages = await publicReportFieldsService.withMessageReport(req.session.instance, data.messages);
 
 		res.status(200).send({
@@ -357,7 +367,7 @@ class ChatsController {
 	private async fetchChatMessagesPage(req: Request) {
 		const { chatId, limit, beforeId } = this.parseChatMessagesPageRequest(req);
 
-		return chatsService.getChatMessagesPage(messagesScopeFromSession(req.session), chatId, limit, beforeId);
+		return chatsService.getChatMessagesPage({ ...messagesScopeFromSession(req.session), actor: req.session }, chatId, limit, beforeId);
 	}
 
 	/** Página de mensagens para o agente de IA: mesmo contrato da rota autenticada, escopo só por tenant. */

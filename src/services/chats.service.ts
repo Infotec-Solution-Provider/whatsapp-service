@@ -1,3 +1,5 @@
+import walletsService from "./wallets.service";
+import { walletHistoryFilter } from "./wallet-membership";
 import { findChatForContactChannel } from "./chat-channel-scope";
 import { isTransferAllowedByTenant, transferChatToSectorQueue } from "./chat-sector-transfer";
 import { enqueueTriageNotice } from "../triage/trigger-notices";
@@ -169,43 +171,22 @@ class ChatsService {
 	}
 
 	public async getUserChatsBySession(session: SessionData, includeMessages = true, includeContact = true, chatIds?: number[]) {
+		const walletIds = (await walletsService.getUserWallets(session)).map(row => row.id);
+		const history = walletHistoryFilter(session.userId, walletIds);
 		const foundChats = await prismaService.wppChat.findMany({
 			where: {
 				isFinished: false,
 				instance: session.instance,
 				...(chatIds ? { id: { in: chatIds } } : {}),
 				OR: [
-					{
-						userId: session.userId
-					},
-					{
-						wallet: {
-							WppWalletUser: {
-								some: {
-									userId: session.userId
-								}
-							}
-						}
-					}
+					{ userId: session.userId },
+					...(walletIds.length ? [{ walletId: { in: walletIds } }] : []),
+					...(session.role === "ADMIN" ? [{ userId: -1, walletId: null, sectorId: session.sectorId }] : [])
 				]
 			},
 			include: { contact: true, schedule: true }
 		});
 
-		if (session.role === "ADMIN") {
-			const foundAdminChats = await prismaService.wppChat.findMany({
-				where: {
-					isFinished: false,
-					sectorId: session.sectorId,
-					instance: session.instance,
-					userId: -1,
-					...(chatIds ? { id: { in: chatIds } } : {})
-				},
-				include: { contact: true, schedule: true }
-			});
-
-			foundChats.push(...foundAdminChats);
-		}
 		const preferences = await chatUserPreferencesService.getMap(
 			session,
 			foundChats.map((chat) => chat.id),
@@ -227,7 +208,7 @@ class ChatsService {
 		const messages: Array<WppMessage> =
 			includeMessages && contactIds.length
 				? await prismaService.wppMessage.findMany({
-						where: { instance: session.instance, contactId: { in: contactIds } }
+						where: { instance: session.instance, ...history, contactId: { in: contactIds } }
 					})
 				: [];
 		const lastMessageByContact = new Map<number, WppMessage>();
@@ -237,12 +218,13 @@ class ChatsService {
 			const [lastMessageGroups, unreadMessages] = await Promise.all([
 				prismaService.wppMessage.groupBy({
 					by: ["contactId"],
-					where: { instance: session.instance, contactId: { in: contactIds } },
+					where: { instance: session.instance, ...history, contactId: { in: contactIds } },
 					_max: { id: true }
 				}),
 				prismaService.wppMessage.findMany({
 					where: {
 						instance: session.instance,
+						...history,
 						contactId: { in: contactIds },
 						status: { not: "READ" },
 						AND: [
@@ -340,12 +322,13 @@ class ChatsService {
 			where: {
 				id: chatId,
 				instance,
-				...(scope.sectorId !== null && scope.sectorId !== undefined ? { sectorId: scope.sectorId } : {})
+				...(scope.sectorId != null ? { OR: [{ sectorId: scope.sectorId }, ...(scope.actor ? [{ walletId: { not: null } }] : [])] } : {})
 			},
-			select: { id: true }
+			select: { id: true, walletId: true, userId: true }
 		});
 
 		if (!chat) throw new BadRequestError("Chat not found!");
+		if (scope.actor) await walletsService.assertChatMember(scope.actor, chat);
 
 		const page = await prismaService.wppMessage.findMany({
 			where: {
@@ -397,16 +380,19 @@ class ChatsService {
 	public async getChatsMonitor(session: SessionData, includeMessages = true, includeCustomer = true) {
 		const isTI = session.sectorId === 3 || session.instance !== "nunes";
 
+		const walletIds = session.role === "ADMIN" ? [] : (await walletsService.getUserWallets(session)).map(wallet => wallet.id);
+		const walletAccess = session.role === "ADMIN" ? {} : { OR: [{ walletId: null }, { userId: session.userId }, { walletId: { in: walletIds } }] };
 		const ongoingChats = await prismaService.wppChat.findMany({
 			where: {
 				instance: session.instance,
+				...walletAccess,
 				isFinished: false,
 				...(isTI ? {} : { sectorId: session.sectorId })
 			},
 			include: {
 				contact: {
 					include: {
-						WppMessage: includeMessages
+						WppMessage: includeMessages && (session.role === "ADMIN" || { where: walletHistoryFilter(session.userId, walletIds) })
 					}
 				},
 				schedule: true
@@ -416,6 +402,7 @@ class ChatsService {
 		const finishedChats = await prismaService.wppChat.findMany({
 			where: {
 				instance: session.instance,
+				...walletAccess,
 				...(isTI ? {} : { sectorId: session.sectorId }),
 				isFinished: true
 			},
@@ -669,10 +656,14 @@ class ChatsService {
 			return null;
 		}
 
+		if (scope?.actor) await walletsService.assertChatMember(scope.actor, chat);
+		const history = scope?.actor && opts.withMessages !== false
+			? walletHistoryFilter(scope.actor.userId, (await walletsService.effectiveWallets(scope.instance, scope.actor.userId)).map(w => w.id))
+			: {};
 		const rawMessages =
 			opts.withMessages !== false && chat.contactId
 				? await prismaService.wppMessage.findMany({
-						where: { contactId: chat.contactId },
+						where: { instance: chat.instance, contactId: chat.contactId, ...history },
 						orderBy: { timestamp: "asc" }
 					})
 				: [];
@@ -778,7 +769,7 @@ class ChatsService {
 	}
 
 	public async transferToSectorQueue(session: SessionData, chatId: number, sectorId: number) {
-		const { chat, previousSectorId, previousUserId, name } = await transferChatToSectorQueue(
+		const { chat, previousSectorId, previousUserId, previousWalletId, name } = await transferChatToSectorQueue(
 			session,
 			chatId,
 			sectorId
@@ -796,6 +787,7 @@ class ChatsService {
 				`${session.instance}:${previousSectorId}:monitor`,
 				data
 			);
+			if (previousWalletId) await socketService.emit(SocketEventType.WppChatTransfer, `${session.instance}:wallet:${previousWalletId}`, data);
 			if (previousUserId && previousUserId > 0)
 				await socketService.emit(
 					SocketEventType.WppChatTransfer,
@@ -817,8 +809,9 @@ class ChatsService {
 			where: { id, instance, isFinished: false }
 		});
 		if (!chats) throw new NotFoundError("Atendimento não encontrado ou já encerrado.");
+		await walletsService.assertChatMember(session, chats);
 		if (!isTransferAllowedByTenant(session, userId) || (
-			session.role !== "ADMIN" && !(session.userId > 0 && chats.userId === session.userId) &&
+			!chats.walletId && session.role !== "ADMIN" && !(session.userId > 0 && chats.userId === session.userId) &&
 			!(await parametersService.canTransferFromContactSearch(instance, session.userId))
 		)) throw new UnauthorizedError("Seu perfil não permite transferir este atendimento.");
 
@@ -833,11 +826,11 @@ class ChatsService {
 		const chat = await chatUserPreferencesService.withUnreadAssignment(async (tx) => {
 			await cancelTriageTx(tx, chats);
 			const updated = await tx.wppChat.updateMany({
-				where: { id, instance, isFinished: false, userId: chats.userId, sectorId: chats.sectorId, botId: chats.botId, agentId: chats.agentId },
-				data: { userId, agentId: null, botId: null }
+				where: { id, instance, isFinished: false, walletId: chats.walletId, userId: chats.userId, sectorId: chats.sectorId, botId: chats.botId, agentId: chats.agentId },
+				data: { userId, walletId: null, agentId: null, botId: null }
 			});
 			if (!updated.count) throw new ConflictError("O atendimento mudou. Consulte-o novamente antes de transferir.");
-			return { ...chats, userId, agentId: null, botId: null };
+			return { ...chats, userId, walletId: null, agentId: null, botId: null };
 		}, { instance, recipientId: userId, chatId: id });
 
 		const logger = new ProcessingLogger(instance, "manual-transfer", String(id), {});
@@ -875,11 +868,12 @@ class ChatsService {
 		await this.runAfterAgentAction(logger, "avisar as telas", async () => {
 			const data = { chatId: chat.id };
 			await socketService.emit(event, `${instance}:chat:${chat.id}`, data);
+			if (chats.walletId) await socketService.emit(event, `${instance}:wallet:${chats.walletId}`, data);
 			if (chats.userId && chats.userId > 0 && chats.userId !== userId) {
 				await socketService.emit(event, `${instance}:user:${chats.userId}`, data);
 			}
 			await socketService.emit(SocketEventType.WppChatStarted, monitorRoom, data);
-			await socketService.emit(SocketEventType.WppChatStarted, userRoom, data);
+			await socketService.emit(SocketEventType.WppChatStarted, userId === -1 ? `${instance}:${chat.sectorId!}:admin` : userRoom, data);
 		});
 	}
 
@@ -904,13 +898,15 @@ class ChatsService {
 
 			const scopedChat = await prismaService.wppChat.findFirst({
 				where: { id, instance: session.instance, ...options.expectedChat },
-				select: { id: true, instance: true, botId: true }
+				select: { id: true, instance: true, botId: true, walletId: true, userId: true }
 			});
 
 			if (!scopedChat) {
 				logger.log(`Chat não encontrado na instância ${session.instance}. Chat ID: ${id}`);
 				throw new NotFoundError("Chat não encontrado.");
 			}
+
+			if (session.userId > 0) await walletsService.assertChatMember(session, scopedChat);
 
 			logger.log(`Buscando resultado no banco de dados da instância com resultId: ${resultId}`);
 			const results = await instancesService.executeQuery<InpulseResult[]>(session.instance, FETCH_RESULT_QUERY, [
@@ -994,6 +990,7 @@ class ChatsService {
 					id,
 					instance,
 					isFinished: false,
+					walletId: scopedChat.walletId,
 					...options.expectedChat
 				},
 				data: {

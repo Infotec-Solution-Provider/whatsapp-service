@@ -23,6 +23,7 @@ const database: any = {
     create: async ({ data }: any) => { rows.find(row => row.id === data.walletId)!.userIds.push(data.userId); },
     deleteMany: async ({ where }: any) => { assert.equal(where.WppWallet.instance, actor.instance); const row = rows.find(row => row.id === where.walletId)!; row.userIds = row.userIds.filter(id => id !== where.userId); }
   },
+  wppMessageFlowStep: { findMany: async () => [] },
   wppChat: { count: async ({ where }: any) => { assert.equal(where.instance, actor.instance); return chats; } }
 };
 const saved = new Map<string, NodeModule | undefined>();

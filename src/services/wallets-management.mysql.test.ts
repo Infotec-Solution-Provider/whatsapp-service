@@ -18,13 +18,20 @@ test("wallet native tenant SQL persists membership, serializes concurrent rename
     await pool.query("CREATE TABLE wpp_runtime_wallets (id INT PRIMARY KEY AUTO_INCREMENT, instance VARCHAR(191) NOT NULL, name VARCHAR(191) NOT NULL) ENGINE=InnoDB");
     await pool.query("CREATE TABLE wpp_runtime_wallets_users (wallet_id INT, user_id INT, UNIQUE(wallet_id,user_id)) ENGINE=InnoDB");
     await pool.query("CREATE TABLE wpp_runtime_chats (id INT PRIMARY KEY, instance VARCHAR(191),wallet_id INT) ENGINE=InnoDB");
+    await pool.query("ALTER TABLE wpp_runtime_wallets ADD COLUMN member_rules TEXT NULL");
+    await pool.query("CREATE TABLE wpp_runtime_message_flows (id INT PRIMARY KEY, instance VARCHAR(191))");
+    await pool.query("CREATE TABLE wpp_runtime_message_flows_steps (id INT PRIMARY KEY, message_flow_id INT, type VARCHAR(32), config JSON, connections JSON, step_number INT, next_step_id INT, fallback_step_id INT, enabled BOOL, description TEXT, created_at DATETIME, updated_at DATETIME)");
     const database = createTenantSqlRouter(new Map([["fixture-a", pool]]));
     for (const [path, value] of [["./prisma.service", database], ["./instances.service", { executeQuery: async () => [{ CODIGO: 7 }] }]] as const) {
       const file = require.resolve(path); saved.set(file, require.cache[file]);
       require.cache[file] = { id: file, filename: file, loaded: true, exports: { __esModule: true, default: value } } as NodeModule;
     }
     const { WalletsService } = require("./wallets.service") as typeof import("./wallets.service");
-    const service = new WalletsService(database as any, { executeQuery: async () => [{ CODIGO: 7 }] } as any);
+    const crm = pool;
+    await crm.query("CREATE TABLE operadores (CODIGO INT PRIMARY KEY,NOME VARCHAR(30),SETOR INT,NIVEL VARCHAR(10),ATIVO VARCHAR(3))");
+    await crm.query("INSERT INTO operadores VALUES (7,'Ana',3,'ADMIN','SIM'),(8,'Bia',3,'RECEP','SIM'),(9,'Caio',4,'RECEP','SIM')");
+    const service = new WalletsService(database as any, { executeQuery: async (_instance: string, sql: string, params: unknown[]) =>
+      (await crm.query(sql, params))[0] } as any);
     const actor: SessionData = { instance: "fixture-a", role: "ADMIN", userId: 7, sectorId: 3, name: "Fixture" };
     await withDatabaseTenant(actor.instance, async () => {
       const wallet = await service.create(actor, { name: "Before" });
@@ -41,6 +48,24 @@ test("wallet native tenant SQL persists membership, serializes concurrent rename
       await pool!.query("DELETE FROM wpp_runtime_chats WHERE id=1");
       await service.remove(actor, wallet.id, { version: empty.version });
       assert.equal((await service.list(actor)).data.length, 0);
+      const config = { name: "Compartilhada", userIds: [7, 8], rules: [{ sectorId: 3, role: "RECEP" }, { role: "ADMIN" }] };
+      const shared = await service.create(actor, config);
+      assert.equal(shared.memberCount, 2);
+      assert.deepEqual(await service.preview(actor, { userIds: config.userIds, rules: config.rules }), [
+        { id: 7, name: "Ana", manual: true, matchedRules: [2] }, { id: 8, name: "Bia", manual: true, matchedRules: [1] }
+      ]);
+      const updated = await service.save(actor, shared.id, { ...config, userIds: [7], version: shared.version });
+      assert.equal(updated.memberCount, 2);
+      await assert.rejects(service.save(actor, shared.id, { ...config, version: shared.version }), /mudou/);
+      await crm.query("UPDATE operadores SET SETOR=IF(CODIGO=9,3,4),ATIVO=IF(CODIGO=7,'NAO','SIM')");
+      assert.deepEqual(await service.eventRecipients(actor.instance, "wallet", shared.id), [9]);
+      assert.equal((await service.effectiveWallets(actor.instance, 8)).length, 0);
+      assert.equal((await service.effectiveWallets(actor.instance, 7)).length, 0);
+      assert.equal((await service.effectiveWallets(actor.instance, 9))[0]?.id, shared.id);
+      const cleared = await service.save(actor, shared.id, { ...config, userIds: [], rules: [], version: updated.version });
+      await crm.execute("INSERT INTO wpp_runtime_message_flows VALUES (1,'fixture-a')");
+      await crm.execute("INSERT INTO wpp_runtime_message_flows_steps (id,message_flow_id,type,config) VALUES (1,1,'ASSIGN',?)", [JSON.stringify({ walletId: shared.id })]);
+      await assert.rejects(service.remove(actor, shared.id, { version: cleared.version }), /fluxo publicado/);
       await assert.rejects(() => service.rename({ ...actor, instance: "fixture-b" }, wallet.id, { newName: "Other", version: empty.version }));
     });
   } finally {

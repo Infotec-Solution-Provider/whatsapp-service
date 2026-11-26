@@ -1,3 +1,5 @@
+import { walletHistoryFilter } from "./wallet-membership";
+import walletsService from "./wallets.service";
 import { SessionData } from "../sdk-local";
 import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import { InternalMessage, WppChat, WppClient, WppClientType, WppContact, WppMessage, WppSector } from "@prisma/client";
@@ -227,6 +229,10 @@ class WhatsappService {
 				}
 			});
 
+			if (message.chatId) {
+				const chat = await prismaService.wppChat.findFirst({ where: { id: message.chatId, instance: session.instance }, select: { walletId: true, userId: true } });
+				if (chat) await walletsService.assertChatMember(session, chat);
+			}
 			if (!message.clientId) {
 				throw new BadRequestError("Mensagem não possui client associado.");
 			}
@@ -952,8 +958,9 @@ class WhatsappService {
 		const originalMessages: Array<WppMessage> | Array<InternalMessage> = [];
 
 		if (sourceType === "whatsapp") {
+			const memberIds = (await walletsService.getUserWallets(session)).map(row => row.id);
 			const whatsappMessages = await prismaService.wppMessage.findMany({
-				where: { id: { in: messageIds } }
+				where: { instance: session.instance, id: { in: messageIds }, ...walletHistoryFilter(session.userId, memberIds) }
 			});
 			(originalMessages as Array<WppMessage>).push(...whatsappMessages);
 		} else if (sourceType === "internal") {

@@ -1,3 +1,5 @@
+import { walletHistoryFilter } from "./wallet-membership";
+import walletsService from "./wallets.service";
 import { assertChatReportSize, buildChatReportQuery } from "./chat-report-export";
 import { tenantSqlEnabled } from "../tenant-sql/registry";
 import { SessionData, SocketEventType, SocketServerChatRoom } from "../sdk-local";
@@ -245,9 +247,12 @@ class MessagesService {
 	}
 
 	public async markContactMessagesAsRead(instance: string, contactId: number, userId?: number) {
+		const memberIds = userId ? (await walletsService.effectiveWallets(instance, userId)).map(row => row.id) : [];
+		const history = userId ? walletHistoryFilter(userId, memberIds) : {};
+		const allowedChats = userId ? { OR: [{ walletId: null }, { userId }, { walletId: { in: memberIds } }] } : {};
 		await prismaService.wppMessage.updateMany({
 			where: {
-				instance,
+				instance, AND: [history],
 				OR: [
 					{
 						to: {
@@ -269,6 +274,7 @@ class MessagesService {
 			where: {
 				instance,
 				contactId,
+				...allowedChats,
 				isFinished: false
 			}
 		});
@@ -281,22 +287,23 @@ class MessagesService {
 		}
 
 		if (tenantSqlEnabled()) return;
+		const localRead = async () => {
+			const denied = userId ? await prismaService.wppChat.findMany({
+				where: { instance, contactId, walletId: { not: null, notIn: memberIds }, OR: [{ userId: null }, { userId: { not: userId } }] }, select: { id: true }
+			}) : [];
+			const skip = denied.length ? " AND (chat_id IS NULL OR chat_id NOT IN (" + denied.map(() => "?").join(",") + "))" : "";
+			return instancesService.executeQuery(instance,
+				"UPDATE wpp_messages SET status = 'READ' WHERE contact_id = ? AND (`to` LIKE 'me:%' OR `to` = 'system')" + skip,
+				[contactId, ...denied.map(row => row.id)]);
+		};
 		try {
-			await instancesService.executeQuery(
-				instance,
-				`UPDATE wpp_messages SET status = 'READ' WHERE contact_id = ? AND (\`to\` LIKE 'me:%' OR \`to\` = 'system')`,
-				[contactId]
-			);
+			await localRead();
 		} catch (err: any) {
 			const errMsg = String(err?.message || "");
 			if (errMsg.includes("wpp_messages") && errMsg.includes("doesn't exist")) {
 				try {
 					await localSyncService.ensureLocalTables(instance);
-					await instancesService.executeQuery(
-						instance,
-						`UPDATE wpp_messages SET status = 'READ' WHERE contact_id = ? AND (\`to\` LIKE 'me:%' OR \`to\` = 'system')`,
-						[contactId]
-					);
+					await localRead();
 					return;
 				} catch (retryErr) {
 					console.error(
@@ -324,10 +331,15 @@ class MessagesService {
 			throw new UnauthorizedError("This message does not belong to your instance!");
 		}
 
+		if (message.chatId) {
+			const chat = await prismaService.wppChat.findFirst({ where: { instance: session.instance, id: message.chatId }, select: { userId: true, walletId: true } });
+			if (chat) await walletsService.assertChatMember(session, chat);
+		}
 		return message;
 	}
 
 	public async fetchMessages(session: SessionData, filters: FetchMessagesFilter) {
+		const history = walletHistoryFilter(session.userId, (await walletsService.getUserWallets(session)).map(w => w.id));
 		const minDate = new Date(filters.minDate || "2000-01-01");
 		minDate.setHours(0, 0, 0, 0);
 
@@ -351,6 +363,7 @@ class MessagesService {
 
 			const messages = await prismaService.wppMessage.findMany({
 				where: {
+					...history,
 					instance: session.instance,
 					sentAt: {
 						gte: minDate,
@@ -370,6 +383,7 @@ class MessagesService {
 		if (filters.chatId) {
 			const messages = await prismaService.wppMessage.findMany({
 				where: {
+					...history,
 					instance: session.instance,
 					chatId: filters.chatId
 				},
@@ -383,6 +397,7 @@ class MessagesService {
 		if (filters.contactId) {
 			const messages = await prismaService.wppMessage.findMany({
 				where: {
+					...history,
 					instance: session.instance,
 					contactId: filters.contactId
 				},
@@ -396,6 +411,7 @@ class MessagesService {
 
 		const messages = await prismaService.wppMessage.findMany({
 			where: {
+				...history,
 				instance: session.instance,
 				sentAt: {
 					gte: minDate,

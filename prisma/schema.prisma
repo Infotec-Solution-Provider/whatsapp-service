@@ -615,6 +615,7 @@ model WppWallet {
   name          String
   WppChat       WppChat[]
   WppWalletUser WppWalletUser[]
+  memberRules   String?         @map("member_rules") @db.Text
 
   @@map("wallets")
 }

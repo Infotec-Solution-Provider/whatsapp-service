@@ -6,6 +6,7 @@ import type { SessionData } from "../sdk-local/types/auth.types";
  * exigir, também o setor.
  */
 export interface ChatScope {
+	actor?: Pick<SessionData, "instance" | "userId">;
 	instance: string;
 	sectorId?: number | null;
 }

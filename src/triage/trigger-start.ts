@@ -59,7 +59,7 @@ export async function latestTriageInbound(tx: Tx, instance: string, chatId: numb
 }
 function available(chat: WppChat, input: Pick<StartInput, "type" | "actorId" | "fromSectorMenu">) {
 	if (input.type === "closed") return chat.isFinished;
-	if (chat.isFinished || chat.agentId != null) return false;
+	if (chat.isFinished || chat.agentId != null || chat.walletId != null) return false;
 	if (input.fromSectorMenu) return chat.botId === 1 && !chat.userId;
 	return (
 		chat.botId == null && ((chat.userId ?? 0) <= 0 || (input.type === "manual" && chat.userId === input.actorId))
@@ -258,6 +258,7 @@ export async function startTriggeredTriage(input: StartInput) {
 							instance,
 							isFinished: false,
 							userId: chat.userId,
+							walletId: chat.walletId,
 							botId: chat.botId,
 							agentId: chat.agentId
 						},

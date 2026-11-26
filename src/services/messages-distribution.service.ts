@@ -577,7 +577,7 @@ class MessagesDistributionService {
 		if (
 			existing?.handled ||
 			!acceptsTriageMessage(message) ||
-			(current && (current.botId != null || current.agentId != null || (current.userId ?? 0) > 0))
+			(current && (current.botId != null || current.agentId != null || current.walletId != null || (current.userId ?? 0) > 0))
 		)
 			return { current, handled: existing?.handled ?? false, opened: false };
 		if (["chat", "text"].includes(message.type)) {
@@ -833,7 +833,7 @@ class MessagesDistributionService {
 
 			const updatedChat = await chatUserPreferencesService.withUnreadAssignment((tx) => tx.wppChat.update({
 				where: { id: chat.id },
-				data: { ...data, userId: operador.CODIGO, botId: null }
+				data: { ...data, walletId: null, userId: operador.CODIGO, botId: null }
 			}), { instance: sector.instance, recipientId: operador.CODIGO, chatId: chat.id });
 			await chatsService.syncChatToLocal(updatedChat);
 			await transferHistoryService.recordTransfer({
@@ -878,13 +878,13 @@ class MessagesDistributionService {
 				process.log(`Chat enviado para o socket: /${walletRoom}/ room!`);
 			}
 
-			if (chat.userId === -1) {
+			if (chat.userId === -1 && !chat.walletId) {
 				const adminRoom: SocketServerAdminRoom = `${chat.instance}:${chat.sectorId!}:admin`;
 				await socketService.emit(SocketEventType.WppChatStarted, adminRoom, data);
 				process.log(`Chat enviado para o socket: /${adminRoom}/ room!`);
 			}
 
-			if (chat.userId) {
+			if (chat.userId && chat.userId > 0) {
 				const userRoom: SocketServerUserRoom = `${chat.instance}:user:${chat.userId}`;
 				await socketService.emit(SocketEventType.WppChatStarted, userRoom, data);
 				process.log(`Chat enviado para o socket: /${userRoom}/ room!`);
@@ -922,7 +922,7 @@ class MessagesDistributionService {
 
 			if (this.isIncomingCustomerMessage(message)) {
 				const chat = await prismaService.wppChat.findUnique({ where: { id: message.chatId } });
-				if (chat?.userId !== null && chat?.userId !== undefined) {
+				if (chat?.userId && chat.userId > 0) {
 					void this.sendPushNotification(chat.userId, message.instance, {
 						event: "new_message",
 						title: "Nova mensagem",

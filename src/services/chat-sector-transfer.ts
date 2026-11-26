@@ -1,3 +1,4 @@
+import walletsService from "./wallets.service";
 import type { Prisma } from "@prisma/client";
 import { BadRequestError, ConflictError, NotFoundError, UnauthorizedError } from "@rgranatodutra/http-errors";
 import type { SessionData } from "../sdk-local";
@@ -31,11 +32,12 @@ async function transferScope(tx: Prisma.TransactionClient, session: SessionData,
 	if (write)
 		await tx.$queryRawUnsafe("SELECT id FROM chats WHERE instance=? AND id=? FOR UPDATE", session.instance, chatId);
 	const chat = await tx.wppChat.findFirst({ where: { instance: session.instance, id: chatId, isFinished: false } });
+	if (chat) await walletsService.assertChatMember(session, chat);
 	if (
 		!chat ||
 		!chat.sectorId ||
 		!(
-			session.role === "ADMIN" ||
+			chat.walletId || session.role === "ADMIN" ||
 			(session.role === "SUPERVISOR" && session.sectorId === chat.sectorId) ||
 			(chat.userId === session.userId && session.userId > 0) ||
 			(await parametersService.canTransferFromContactSearch(session.instance, session.userId))
@@ -93,6 +95,7 @@ export function transferChatToSectorQueue(session: SessionData, chatId: number, 
 					chat: updated,
 					previousSectorId: chat.sectorId!,
 					previousUserId: chat.userId,
+					previousWalletId: chat.walletId,
 					name: target.name
 				};
 			},

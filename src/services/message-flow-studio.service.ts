@@ -288,6 +288,12 @@ export class MessageFlowStudioService {
 		await this.checkDestinations(scope, steps);
 		const result = await this.db.$transaction(async tx => {
 			await checkSector(tx, scope, true);
+			const walletIds = [...new Set(steps.filter(step => step.enabled !== false && step.type === "ASSIGN")
+				.map(step => object(step.config) ? step.config["walletId"] : undefined).filter(positive))].sort((a, b) => a - b);
+			for (const walletId of walletIds) {
+				const rows = await tx.$queryRawUnsafe<{ id: number }[]>("SELECT id FROM wallets WHERE id=? AND instance=? FOR UPDATE", walletId, instance);
+				if (!rows.length) throw invalid("A carteira de destino deixou de existir nesta empresa.");
+			}
 			await lockLive(tx, scope);
 			const row = await selected(tx, scope, id, revision);
 			if (!isDeepStrictEqual(row.steps, candidate.steps) || row.name !== candidate.name) throw conflict();

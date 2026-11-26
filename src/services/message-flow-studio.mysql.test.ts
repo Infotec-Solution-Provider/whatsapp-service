@@ -34,6 +34,8 @@ async function prepare(db: Connection, schema: string, prefix: string) {
 		const ddl = original.slice(start, original.indexOf(";", start) + 1);
 		await db.query(ddl.replace("CREATE TABLE `" + table + "`", "CREATE TABLE `" + prefix + table + "`"));
 	}
+	await db.query(readFileSync(resolve(prefix ? "prisma/tenant-sql/20261126160000_shared_wallet_rules.sql"
+		: "prisma/migrations/20261126160000_shared_wallet_rules/migration.sql"), "utf8"));
 	for (const ddl of (prefix ? runtimeMigration : centralMigration).split(";").filter(text => text.trim())) await db.query(ddl);
 	const grantBotStep = readFileSync(resolve(prefix ? "prisma/tenant-sql/20261125211000_start_bot_step.sql"
 		: "prisma/migrations/20261125211000_start_bot_step/migration.sql"), "utf8");
