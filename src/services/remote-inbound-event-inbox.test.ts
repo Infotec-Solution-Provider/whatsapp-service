@@ -79,8 +79,8 @@ async function testDurableEnqueueContract(): Promise<void> {
 		)
 	) ?? null;
 	delegate.findFirst = async ({ where }: any) => {
-		const key = where.OR.find((condition: any) => condition.idempotencyKey)?.idempotencyKey;
-		if (key === "concurrent-key" && !findByWhere(where) && concurrentFinds < 2) {
+		const stanza = where.OR.find((condition: any) => condition.providerMessageId)?.providerMessageId;
+		if (stanza === "stanza-concurrent" && !findByWhere(where) && concurrentFinds < 2) {
 			concurrentFinds += 1;
 			if (concurrentFinds === 2) releaseConcurrentFinds?.();
 			await concurrentFindGate;
@@ -132,10 +132,26 @@ async function testDurableEnqueueContract(): Promise<void> {
 	assert.equal(duplicate.created, false);
 	assert.equal(duplicate.id, first.id);
 
-	const legacyKeyDuplicate = await remoteInboundEventInboxService.enqueue(7, message, "legacy-direct-key");
+	const legacyCopy = { ...message, wwebjsId: "legacy-copy", body: "legacy interpretation" };
+	const legacyKeyDuplicate = await remoteInboundEventInboxService.enqueue(7, legacyCopy);
 	assert.equal(legacyKeyDuplicate.created, false);
 	assert.equal(legacyKeyDuplicate.id, first.id);
 	assert.equal(legacyKeyDuplicate.idempotencyKey, "delivery-key");
+	assert.equal(rows.get(first.idempotencyKey).payload.message.body, message.body);
+
+	const oldFirst = { ...legacyCopy, wwebjsIdStanza: "stanza-legacy-first" };
+	const oldResult = await remoteInboundEventInboxService.enqueue(7, oldFirst);
+	const newResult = await remoteInboundEventInboxService.enqueue(
+		7,
+		{ ...oldFirst, wwebjsId: "canonical-copy", body: "canonical interpretation" },
+		"wa-inbound:v1:legacy-first"
+	);
+	assert.equal(oldResult.created, true);
+	assert.equal(newResult.created, false);
+	assert.equal(newResult.id, oldResult.id);
+	assert.equal(newResult.idempotencyKey, "remote-message:v1:7:stanza-legacy-first");
+	assert.equal(rows.get(oldResult.idempotencyKey).payload.message.wwebjsId, "legacy-copy");
+
 	const divergentSecondSource = await remoteInboundEventInboxService.enqueue(
 		7,
 		{ ...message, body: "interpretação diferente do segundo produtor" },
@@ -149,13 +165,19 @@ async function testDurableEnqueueContract(): Promise<void> {
 		(error) => error instanceof RemoteInboundInboxRequestError && error.statusCode === 409
 	);
 
-	const concurrentMessage = { ...message, wwebjsIdStanza: "stanza-concurrent" };
+	const concurrentLegacy = { ...legacyCopy, wwebjsIdStanza: "stanza-concurrent" };
+	const concurrentCanonical = { ...concurrentLegacy, wwebjsId: "canonical-copy", body: "canonical interpretation" };
 	const concurrent = await Promise.all([
-		remoteInboundEventInboxService.enqueue(7, concurrentMessage, "concurrent-key"),
-		remoteInboundEventInboxService.enqueue(7, concurrentMessage, "concurrent-key")
+		remoteInboundEventInboxService.enqueue(7, concurrentLegacy),
+		remoteInboundEventInboxService.enqueue(7, concurrentCanonical, "wa-inbound:v1:concurrent")
 	]);
 	assert.deepEqual(concurrent.map((result) => result.created).sort(), [false, true]);
 	assert.equal(concurrent[0]?.id, concurrent[1]?.id);
+	assert.equal(concurrent[0]?.idempotencyKey, concurrent[1]?.idempotencyKey);
+	const winner = concurrent[0].created ? concurrentLegacy : concurrentCanonical;
+	assert.equal(rows.get(concurrent[0].idempotencyKey).payload.message.wwebjsId, winner.wwebjsId);
+	assert.equal(concurrentFinds, 2);
+	assert.equal([...rows.values()].filter((row) => row.providerMessageId === "stanza-concurrent").length, 1);
 
 	const receipt = await remoteInboundEventInboxService.enqueueStatus(7, "stanza-123", "READ");
 	const replay = await remoteInboundEventInboxService.enqueueStatus(7, "stanza-123", "READ");

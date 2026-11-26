@@ -36,6 +36,7 @@ import publicDirectoryController from "./controllers/public-directory.controller
 import readyMessagesController from "./controllers/ready-messages.controller";
 import remoteClientController from "./controllers/remote-client.controller";
 import remoteSessionMonitorController from "./controllers/remote-session-monitor.controller";
+import whatsappControlController from "./controllers/whatsapp-control.controller";
 import resultsController from "./controllers/results.controller";
 import schedulesController from "./controllers/schedules.controller";
 import sectorsController from "./controllers/sectors.controller";
@@ -105,6 +106,7 @@ app.use("/api/internal/admin", express.json({ limit: "1mb" }));
 app.use("/api/whatsapp/meta", metaManagementController);
 app.use("/api/whatsapp/message-flow-studio", messageFlowStudioController);
 app.use("/api/whatsapp/triage", createTriageRouter());
+app.use(whatsappControlController);
 app.use(express.json({ limit: "2gb" }));
 app.use(express.urlencoded({ extended: true, limit: "2gb" }));
 app.use(createAdminRouter());

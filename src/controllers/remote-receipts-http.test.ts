@@ -6,7 +6,10 @@ async function main(): Promise<void> {
 		require.cache[id] = { id, filename: id, loaded: true, exports } as NodeModule;
 	};
 	let handler!: (req: any, res: any) => Promise<void>;
-	stub("express", { Router: () => ({ post: (_path: unknown, callback: typeof handler) => { handler = callback; } }) });
+	stub("express", { Router: () => ({
+		post: (_path: unknown, callback: typeof handler) => { handler = callback; },
+		get() {}
+	}) });
 	stub("@in.pulse-crm/utils", { Logger: { info() {}, error() {} } });
 	let result: unknown = { status: "PENDING", id: "durable-item", created: true };
 	let error: Error | null = null;

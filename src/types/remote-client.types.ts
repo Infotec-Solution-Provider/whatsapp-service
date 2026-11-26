@@ -167,7 +167,7 @@ export interface RemoteAuthBatchItem {
 	sessionId: string;
 	clientId: number;
 	instance: string;
-	library: "BAILEYS" | "ZAPO";
+	library: "BAILEYS" | "ZAPO" | "WHATSMEOW";
 	role: "PRIMARY" | "SHADOW";
 	position: number;
 	status: RemoteAuthItemStatus;
@@ -195,7 +195,7 @@ export interface RemoteSessionDirectoryItem {
 	sessionId: string;
 	clientId: number;
 	instance: string;
-	library: "BAILEYS" | "ZAPO";
+	library: "BAILEYS" | "ZAPO" | "WHATSMEOW";
 	monitorGroupId: string | null;
 	monitorRole: "PRIMARY" | "SHADOW";
 	authBatchId: string | null;

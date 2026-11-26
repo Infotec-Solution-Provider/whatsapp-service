@@ -3,12 +3,22 @@ import { Logger } from "@in.pulse-crm/utils";
 import remoteClientService from "../services/remote-client.service";
 import { RemoteClientEvent } from "../types/remote-client.types";
 import { RemoteInboundInboxRequestError } from "../services/remote-inbound-event-inbox.service";
+import { normalizeDatabaseTenant } from "../utils/database-tenant-context";
+import { parsePositiveInt } from "../utils/chat-scope";
 
 const ENDPOINT = "/api/whatsapp/remote/:clientId";
 
 class RemoteClientController {
 	constructor(public readonly router: Router) {
 		router.post(ENDPOINT + "/event", this.eventReceived);
+		// The host checks this read-only contract before changing between inbound delivery modes.
+		router.get(ENDPOINT + "/event/ingress-capability", (req, res) => {
+			const id = parsePositiveInt(req.params["clientId"]);
+			const instance = normalizeDatabaseTenant(req.query["instance"]);
+			if (!id || !instance) { res.sendStatus(400); return; }
+			if (!remoteClientService.hasRunningChannel(instance, id)) { res.sendStatus(404); return; }
+			res.json({ deduplication: "client-stanza-v1" });
+		});
 	}
 
 	private eventReceived = async (req: Request, res: Response) => {

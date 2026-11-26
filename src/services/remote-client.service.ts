@@ -20,6 +20,10 @@ import { AsyncConcurrencyLimiter, AsyncKeyedSequencer } from "../utils/async-con
 const INFOTEC_ID_FLOOR = 2_000_000_000;
 
 class RemoteClientService {
+	public hasRunningChannel(instance: string, clientId: number): boolean {
+		const client = whatsappService.getClient(clientId);
+		return client instanceof RemoteWhatsappClient && client.instance === instance;
+	}
 	private readonly receiptSequencer = new AsyncKeyedSequencer();
 	private readonly receiptProcessing = new AsyncConcurrencyLimiter(4);
 	private async withClientTenant<T>(clientId: number, execute: () => Promise<T>): Promise<T> {
