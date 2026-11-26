@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { currentDatabaseTenant } from "../utils/database-tenant-context";
+import { currentDatabaseTenant, withDatabaseTenant } from "../utils/database-tenant-context";
 
 async function main(): Promise<void> {
 	const stub = (path: string, exports: unknown): void => {
@@ -8,8 +8,9 @@ async function main(): Promise<void> {
 	};
 	const calls: Array<{ clientId: number; stage: string; tenant: string | null }> = [];
 	const infotecClientId = 2_000_000_003;
+	const suprimaxxiSimulatorId = 12;
 	const legacyTenants = new Map([[7, "homolog"], [9, "suprimaxxi"]]);
-	const tenants = new Map([...legacyTenants, [infotecClientId, "infotec"]]);
+	const tenants = new Map([...legacyTenants, [suprimaxxiSimulatorId, "suprimaxxi"], [infotecClientId, "infotec"]]);
 	let peerUnavailable = false;
 	class RuntimeClient {
 		constructor(readonly id: number, readonly instance: string) {}
@@ -21,7 +22,8 @@ async function main(): Promise<void> {
 	const clients = new Map([...tenants].map(([id, instance]) => [id, new RuntimeClient(id, instance)]));
 	stub("@in.pulse-crm/utils", { Logger: { info() {}, error() {} } });
 	stub("../tenant-sql/registry", { tenantSqlEnabled: () => true });
-	stub("../tenant-sql/router", { isTenantSqlTargetPrepared: (_db: unknown, instance: string) => instance === "infotec" });
+	stub("../tenant-sql/router", { isTenantSqlTargetPrepared: (_db: unknown, instance: string) =>
+		["homolog", "infotec", "suprimaxxi"].includes(instance) });
 	stub("../whatsapp-client/remote-whatsapp-client", { __esModule: true, default: RuntimeClient });
 	stub("./whatsapp.service", { __esModule: true, default: { getClient: (id: number) => clients.get(id) } });
 	stub("./remote-session-monitor.service", { __esModule: true, default: {} });
@@ -58,7 +60,10 @@ async function main(): Promise<void> {
 
 	peerUnavailable = true;
 	const infotecReceipt = { ...receipt, clientId: infotecClientId };
+	const infotecClient = clients.get(infotecClientId)!;
+	clients.delete(infotecClientId);
 	assert.equal((await service.handleEventReceived(infotecClientId, { ...infotecReceipt, timestamp: 1 }))?.status, "PENDING");
+	clients.set(infotecClientId, infotecClient);
 	await service.processInboundInboxItem({ id: "inbox-infotec", clientId: infotecClientId } as any, infotecReceipt);
 	assert.deepEqual(calls.slice(4), [
 		{ clientId: infotecClientId, stage: "admit", tenant: "infotec" },
@@ -68,6 +73,19 @@ async function main(): Promise<void> {
 	await assert.rejects(service.handleEventReceived(unknownInfotecId, { ...receipt, clientId: unknownInfotecId, timestamp: 1 }), /Remote client not found/);
 	clients.set(infotecClientId, new RuntimeClient(infotecClientId, "suprimaxxi"));
 	await assert.rejects(service.processInboundInboxItem({ id: "wrong-owner", clientId: infotecClientId } as any, infotecReceipt), /Client with id 2000000003 not found/);
+
+	const simulatorReceipt = { ...receipt, clientId: suprimaxxiSimulatorId, timestamp: 1 };
+	assert.equal((await service.handleEventReceived(suprimaxxiSimulatorId, simulatorReceipt))?.status, "PENDING");
+	await withDatabaseTenant("suprimaxxi", () => service.processInboundInboxItem(
+		{ id: "inbox-suprimaxxi", clientId: suprimaxxiSimulatorId } as any, simulatorReceipt
+	));
+	await assert.rejects(withDatabaseTenant("homolog", () => service.handleEventReceived(suprimaxxiSimulatorId, simulatorReceipt)), /Remote client not found/);
+	clients.set(suprimaxxiSimulatorId, new RuntimeClient(suprimaxxiSimulatorId, "infotec"));
+	await assert.rejects(service.handleEventReceived(suprimaxxiSimulatorId, simulatorReceipt), /Remote client not found/);
+	assert.deepEqual(calls.slice(6), [
+		{ clientId: suprimaxxiSimulatorId, stage: "admit", tenant: "suprimaxxi" },
+		{ clientId: suprimaxxiSimulatorId, stage: "process", tenant: "suprimaxxi" }
+	]);
 	assert.equal(currentDatabaseTenant(), null);
 	console.log("Durable REMOTE receipt admission and asynchronous processing retain each tenant; mismatched and missing clients are rejected");
 }

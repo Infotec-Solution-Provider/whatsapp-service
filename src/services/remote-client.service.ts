@@ -27,8 +27,14 @@ class RemoteClientService {
 		// Infotec was provisioned above every historical ID and owns offset 3 of increment 4.
 		const infotec = Number.isSafeInteger(clientId) && clientId >= INFOTEC_ID_FLOOR && clientId % 4 === 3 &&
 			isTenantSqlTargetPrepared(prismaService, "infotec");
+		// Runtime registration rejects cross-tenant channel collisions. Confirm the
+		// hinted owner in its own database before accepting an event.
+		const loaded = whatsappService.getClient(clientId);
+		const loadedTenant = loaded instanceof RemoteWhatsappClient && isTenantSqlTargetPrepared(prismaService, loaded.instance)
+			? loaded.instance : undefined;
+		const instance = infotec ? "infotec" : currentDatabaseTenant() ?? loadedTenant;
 		const registered = await prismaService.wppClient.findFirst({
-			where: { id: clientId, type: "REMOTE", ...(infotec ? { instance: "infotec" } : {}) },
+			where: { id: clientId, type: "REMOTE", ...(instance ? { instance } : {}) },
 			select: { instance: true }
 		});
 		if (!registered) throw new NotFoundError("Remote client not found");

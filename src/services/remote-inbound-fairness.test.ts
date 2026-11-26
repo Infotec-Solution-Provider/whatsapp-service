@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { currentDatabaseTenant, withDatabaseTenant } from "../utils/database-tenant-context";
 
 const mock = (path: string, exports: unknown) => {
 	const id = require.resolve(path);
@@ -9,10 +10,18 @@ const day = 86_400_000;
 const rows: any[] = [];
 const errorLogs: string[] = [];
 const infoLogs: string[] = [];
+let tenantSql = false;
+const tenantRows = () => {
+	if (!tenantSql) return rows;
+	const instance = currentDatabaseTenant();
+	if (instance === "homolog") throw Error("Unavailable homolog runtime");
+	assert.ok(instance === "suprimaxxi" || instance === "infotec");
+	return rows.filter(row => row.fixtureTenant === instance);
+};
 const delegate = {
 	findMany: async ({ where, orderBy, take }: any) => {
 		const orders = Array.isArray(orderBy) ? orderBy : [orderBy];
-		return rows.filter((row) => row.status === where.status && row.nextAttemptAt <= where.nextAttemptAt.lte)
+		return tenantRows().filter((row) => row.status === where.status && row.nextAttemptAt <= where.nextAttemptAt.lte)
 			.sort((a, b) => {
 				for (const order of orders) {
 					const [key, direction] = Object.entries(order)[0]!;
@@ -23,7 +32,7 @@ const delegate = {
 			}).slice(0, take).map(({ id }) => ({ id }));
 	},
 	updateMany: async ({ where, data }: any) => {
-		const matches = rows.filter((row) =>
+		const matches = tenantRows().filter((row) =>
 			(!where.id || row.id === where.id) && (!where.status || row.status === where.status) &&
 			(!where.lockedBy || row.lockedBy === where.lockedBy) &&
 			(!where.nextAttemptAt || row.nextAttemptAt <= where.nextAttemptAt.lte) &&
@@ -32,13 +41,16 @@ const delegate = {
 		return { count: matches.length };
 	},
 	findUnique: async ({ where }: any) => {
-		const row = rows.find((candidate) => candidate.id === where.id);
+		const row = tenantRows().find((candidate) => candidate.id === where.id);
 		return row ? { ...row } : null;
 	}
 };
 mock("./prisma.service", { __esModule: true, default: { remoteInboundEventInbox: delegate } });
+mock("../tenant-sql/registry", { tenantSqlEnabled: () => tenantSql });
+mock("../tenant-sql/router", { tenantSqlInstanceNames: () => ["homolog", "suprimaxxi", "infotec"] });
 mock("@in.pulse-crm/utils", {
-	Logger: { error: (message: string) => errorLogs.push(message), info: (message: string) => infoLogs.push(message) }
+	Logger: { error: (message: string) => errorLogs.push(message), info: (message: string) => infoLogs.push(message) },
+	sanitizeErrorMessage: (error: unknown) => error instanceof Error ? error.message : "Unknown error"
 });
 const { RemoteInboundEventInboxService, calculateRemoteInboundRetryDelayMs } =
 	require("./remote-inbound-event-inbox.service") as typeof import("./remote-inbound-event-inbox.service");
@@ -113,6 +125,30 @@ async function main(): Promise<void> {
 		assert.equal(calculateRemoteInboundRetryDelayMs(100, "message-status-received:READ", "P2024", day), 256000);
 		assert.equal(calculateRemoteInboundRetryDelayMs(100, "message-status-received:READ", "REMOTE_RECEIPT_AMBIGUOUS_MESSAGE", day), 256000);
 		console.log("PASS: 1200 historical retries, fresh receipt/inbound progress in two batches, bounded concurrency, durable late recovery and scoped backoff");
+
+		tenantSql = true;
+		const suprimaxxi = { ...item("shared-inbox-id", now - 1000, now - 1000, 0, "message-received"),
+			fixtureTenant: "suprimaxxi", status: "PROCESSING", lockedUntil: new Date(now - 1000) };
+		const infotec = { ...item("shared-inbox-id", now - 1000, now - 1000, 0, "message-received"),
+			fixtureTenant: "infotec" };
+		rows.push(suprimaxxi, infotec);
+		const scopedRuns: Array<string | null> = [];
+		service.setProcessor({ process: async () => {
+			const instance = currentDatabaseTenant();
+			scopedRuns.push(instance);
+			return { messageId: instance === "suprimaxxi" ? 7 : 8 };
+		} });
+		await withDatabaseTenant("infotec", () => service.processOnce());
+		assert.equal(suprimaxxi.status, "PROCESSING");
+		assert.equal(infotec.status, "COMPLETED");
+		await service.processOnce();
+		assert.deepEqual(scopedRuns, ["infotec", "suprimaxxi"]);
+		assert.equal(suprimaxxi.status, "COMPLETED");
+		assert.equal(suprimaxxi.messageId, 7);
+		assert.equal(infotec.messageId, 8);
+		assert.match(errorLogs.at(-1) ?? "", /Worker loop error for homolog: Unavailable homolog runtime/);
+		assert.equal(currentDatabaseTenant(), null);
+		console.log("PASS: explicit tenant retained, missing tenant isolated, and overlapping inbox IDs recovered and completed in their own scope");
 	} finally {
 		if (priorConcurrency === undefined) delete process.env["REMOTE_INBOUND_EVENT_CONCURRENCY"];
 		else process.env["REMOTE_INBOUND_EVENT_CONCURRENCY"] = priorConcurrency;

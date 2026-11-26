@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
 import { hostname } from "node:os";
 import { Prisma, RemoteInboundEventInbox, RemoteInboundEventInboxStatus, WppMessageStatus } from "@prisma/client";
-import { Logger } from "@in.pulse-crm/utils";
+import { Logger, sanitizeErrorMessage } from "@in.pulse-crm/utils";
 import MessageDto from "../types/remote-client.types";
 import prismaService from "./prisma.service";
 import { resolveWorkerConcurrency } from "../utils/worker-concurrency";
 import { AsyncConcurrencyLimiter } from "../utils/async-concurrency-limiter";
+import { tenantSqlEnabled } from "../tenant-sql/registry";
+import { tenantSqlInstanceNames } from "../tenant-sql/router";
+import { currentDatabaseTenant, withDatabaseTenant } from "../utils/database-tenant-context";
 
 const DEFAULT_PROCESSING_INTERVAL_MS = 250;
 const DEFAULT_LOCK_DURATION_MS = 60_000;
@@ -281,24 +284,40 @@ export class RemoteInboundEventInboxService {
 		if (this.stopping || this.processing || !this.processor) return;
 		this.processing = true;
 		try {
-			await this.releaseExpiredLocks();
-			const now = new Date();
-			const candidates = await prismaService.remoteInboundEventInbox.findMany({
-				where: { status: "PENDING", nextAttemptAt: { lte: now } },
-				// A retry goes behind events already due, regardless of its original
-				// creation date. Uses the existing (status, next_attempt_at) index.
-				orderBy: [{ nextAttemptAt: "asc" }, { id: "asc" }],
-				take: this.concurrency,
-				select: { id: true }
-			});
-			// A failed claim must not release the loop guard while sibling jobs
-			// still hold payloads and leases. Drain this batch before admitting more.
-			const results = await Promise.allSettled(candidates.map((item) => this.claimAndProcess(item.id)));
-			const failed = results.find((result) => result.status === "rejected");
-			if (failed?.status === "rejected") throw failed.reason;
+			if (!tenantSqlEnabled() || currentDatabaseTenant()) {
+				await this.processBatch();
+				return;
+			}
+			// Retain one in-flight batch across the worker. All reads, leases and
+			// completions for a native batch must use the same tenant connection pool.
+			for (const instance of tenantSqlInstanceNames()) {
+				if (this.stopping) break;
+				try {
+					await withDatabaseTenant(instance, () => this.processBatch());
+				} catch (error) {
+					Logger.error(`[RemoteInboundInbox] Worker loop error for ${instance}: ${sanitizeErrorMessage(error)}`);
+				}
+			}
 		} finally {
 			this.processing = false;
 		}
+	}
+
+	private async processBatch(): Promise<void> {
+		await this.releaseExpiredLocks();
+		const candidates = await prismaService.remoteInboundEventInbox.findMany({
+			where: { status: "PENDING", nextAttemptAt: { lte: new Date() } },
+			// A retry goes behind events already due, regardless of its original
+			// creation date. Uses the existing (status, next_attempt_at) index.
+			orderBy: [{ nextAttemptAt: "asc" }, { id: "asc" }],
+			take: this.concurrency,
+			select: { id: true }
+		});
+		// A failed claim must not release the loop guard while sibling jobs
+		// still hold payloads and leases. Drain this batch before admitting more.
+		const results = await Promise.allSettled(candidates.map((item) => this.claimAndProcess(item.id)));
+		const failed = results.find((result) => result.status === "rejected");
+		if (failed?.status === "rejected") throw failed.reason;
 	}
 
 	private async claimAndProcess(id: string): Promise<void> {
