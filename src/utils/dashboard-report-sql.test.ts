@@ -92,8 +92,8 @@ test("aguardando retorno considera a mensagem mais recente do cliente por atendi
 			"DATE_SUB(customer.sent_at, INTERVAL 1 HOUR)", "datetime(customer.sent_at, '-1 hour')"
 		);
 		const rows: Array<Record<string, unknown>> = db.prepare(query).all("tenant-a");
-		deepEqual(rows.map((row) => [row["CODIGO_ATENDIMENTO"], row["DATA_MENSAGEM_CLIENTE"]]), [
-			[1, "2026-10-02 10:03:00"], [6, "2026-10-02 10:06:00"]
+		deepEqual(rows.map((row) => [row["CODIGO_ATENDIMENTO"], row["contactId"], row["DATA_MENSAGEM_CLIENTE"]]), [
+			[1, 1, "2026-10-02 10:03:00"], [6, 1, "2026-10-02 10:06:00"]
 		]);
 	} finally {
 		db.close();

@@ -508,6 +508,24 @@ class ContactsService {
 		return contact;
 	}
 
+	public async getContactDetail(session: SessionData, rawId: unknown) {
+		if (typeof rawId !== "string" || !/^[1-9]\d*$/.test(rawId) || Number(rawId) > 2147483647)
+			throw new BadRequestError("Código de contato inválido.");
+		const parameters = await parametersService.getSessionParams(session);
+		if (String(session.role) === "EXTERNO" || parameters["disable_contacts_crud"] === "true")
+			throw new UnauthorizedError("Perfil sem acesso ao cadastro de contatos.");
+		const contact = await prismaService.wppContact.findFirst({
+			where: {
+				id: Number(rawId), instance: session.instance, isDeleted: false,
+				...(session.role === "ADMIN" ? {} : { isOnlyAdmin: false }),
+			},
+			select: { id: true, instance: true, name: true, phone: true, whatsappId: true, customerId: true,
+				isDeleted: true, isBlocked: true, isOnlyAdmin: true, sectors: { select: { contactId: true, sectorId: true } } },
+		});
+		if (!contact || contact.whatsappId?.endsWith("@g.us")) throw new NotFoundError("Contato indisponível.");
+		return contact;
+	}
+
 	private async editableContact(session: SessionData, contactId: number) {
 		const contact = await prismaService.wppContact.findFirst({
 			where: { id: contactId, instance: session.instance, isDeleted: false }, include: { sectors: true }

@@ -21,6 +21,7 @@ class ContactsController {
 		this.router.post("/api/internal/whatsapp/contacts/customer", onlyLocal, this.getInternalContactsWithCustomer);
 		this.router.get("/api/whatsapp/contacts", isAuthenticated, protectedRead("contacts.list", this.getContacts));
 		this.router.get("/api/whatsapp/contacts/deleted", isAuthenticated, isAdmin, protectedRead("contacts.deleted", this.getDeletedContacts));
+		this.router.get("/api/whatsapp/contacts/:contactId", isAuthenticated, protectedRead("contacts.detail", this.getContactDetail));
 		this.router.post("/api/whatsapp/customers/:id/contacts", isAuthenticated, this.createContact);
 		this.router.post("/api/whatsapp/contacts", isAuthenticated, this.createContact);
 		this.router.post("/api/whatsapp/contacts/:contactId/reactivate", isAuthenticated, this.reactivateContact);
@@ -62,6 +63,11 @@ class ContactsController {
 			message: "Chats retrieved successfully!",
 			data
 		};
+	}
+
+	private async getContactDetail(req: Request) {
+		const data = await contactsService.getContactDetail(req.session, req.params["contactId"]);
+		return { message: "Contact retrieved successfully.", data };
 	}
 
 	private async getContactsWithCustomer(req: Request) {

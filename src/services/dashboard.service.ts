@@ -27,6 +27,7 @@ interface CustomerRow {
 
 interface AwaitingResponseRow {
 	CODIGO_ATENDIMENTO: number;
+	contactId: number;
 	CONTATO: string;
 	customerId: number | null;
 	userId: number | null;
@@ -129,6 +130,9 @@ class DashboardService {
 
 			return {
 				CODIGO_ATENDIMENTO: row.CODIGO_ATENDIMENTO,
+				contactId: row.contactId,
+				customerId: customer?.CODIGO ?? null,
+				userId: operator ? row.userId : null,
 				CONTATO: row.CONTATO,
 				CLIENTE: customer?.RAZAO || null,
 				OPERADOR: operator?.NOME || null,

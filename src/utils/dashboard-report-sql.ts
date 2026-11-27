@@ -70,6 +70,7 @@ export function buildMessagesPerContactQuery(
 export const CONTACTS_WAITING_RESPONSE_SQL = `
 	SELECT
 		ch.id AS CODIGO_ATENDIMENTO,
+		ct.id AS contactId,
 		ct.name AS CONTATO,
 		ct.customer_id AS customerId,
 		ch.user_id AS userId,
