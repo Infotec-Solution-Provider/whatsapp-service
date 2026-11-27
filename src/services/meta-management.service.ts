@@ -13,6 +13,7 @@ const directoryFields = { id: true, name: true, phone: true, ...assetFields } as
 const officialChannel = {
 	type: "WABA", AND: [{ WABAToken: { not: null } }, { WABAToken: { not: "" } }]
 } satisfies Prisma.WppClientWhereInput;
+const pricingOnlyClient = { isActive: false, WABAToken: null, WABAAccountId: null, WABAPhoneId: null } as const;
 type DirectoryRow = Pick<WppClient, keyof typeof directoryFields>;
 type ConfiguredAssets = { WABAAccountId: string; WABAPhoneId: string };
 
@@ -68,18 +69,19 @@ export class MetaManagementService {
 	public async listChannels(instance: string) {
 		const pricingOnlyId = await this.pricingOnlyChannelId(instance);
 		const normal = { ...officialChannel, isActive: true };
+		const binding = pricingOnlyId === null ? null : await this.pricingOnlyCredential(instance, pricingOnlyId);
 		const where: Prisma.WppClientWhereInput = pricingOnlyId === null
 			? { instance, ...normal }
 			: { instance, type: "WABA", OR: [
 				{ ...normal, id: { not: pricingOnlyId } },
-				...(await this.pricingOnlyCredential(instance, pricingOnlyId)
-					? [{ id: pricingOnlyId, isActive: false, WABAToken: null }]
-					: [])
+				...(binding ? [{ id: pricingOnlyId, ...pricingOnlyClient }] : [])
 			] };
 		const rows = await this.db.wppClient.findMany({
 			where, select: directoryFields, orderBy: [{ name: "asc" }, { id: "asc" }]
 		});
-		const channels = rows.filter(eligibleAssets);
+		const channels = rows.map(row => binding && row.id === pricingOnlyId
+			? { ...row, WABAAccountId: binding.accountId, WABAPhoneId: binding.phoneId }
+			: row).filter(eligibleAssets);
 		const shared = await this.sharedAccounts(instance, channels);
 		return channels.filter((channel) => !shared.has(channel.WABAAccountId))
 			.map(channel => publicChannel(channel, channel.id === pricingOnlyId));
@@ -103,10 +105,14 @@ export class MetaManagementService {
 			throw new MetaGraphError(403, "META_CHANNEL_PRICING_ONLY", "Este canal está disponível para consulta de custos.");
 		}
 		const where: Prisma.WppClientWhereInput = pricingOnly
-			? { id: clientId, instance, type: "WABA", isActive: false, WABAToken: null }
+			? { id: clientId, instance, type: "WABA", ...pricingOnlyClient }
 			: { id: clientId, instance, ...officialChannel, isActive: true };
-		const channel = await this.db.wppClient.findFirst({ where, select: { ...directoryFields, WABAToken: true } });
-		const token = pricingOnly ? await this.pricingOnlyCredential(instance, clientId) : channel?.WABAToken;
+		const row = await this.db.wppClient.findFirst({ where, select: { ...directoryFields, WABAToken: true } });
+		const binding = pricingOnly ? await this.pricingOnlyCredential(instance, clientId) : null;
+		const channel = row && binding
+			? { ...row, WABAAccountId: binding.accountId, WABAPhoneId: binding.phoneId }
+			: row;
+		const token = pricingOnly ? binding?.token : row?.WABAToken;
 		if (!channel || !eligibleAssets(channel) || !token || /\s/.test(token)
 			|| (await this.sharedAccounts(instance, [channel])).has(channel.WABAAccountId)) {
 			throw unavailableChannel();
