@@ -273,7 +273,7 @@ test("cost routes use authenticated tenant scope and validate budgets before mut
 });
 
 
-test("an inactive pricing-only channel can query cost and rejects management operations before Graph", async () => {
+test("the isolated WABA can list templates and only creates them with explicit management opt-in", async () => {
 	const inactive = { ...channels.find(row => row.id === 10)!, WABAToken: null, WABAAccountId: null, WABAPhoneId: null };
 	const scopedDb = {
 		wppClient: {
@@ -309,31 +309,52 @@ test("an inactive pricing-only channel can query cost and rejects management ope
 		}
 		if (endpoint === "100") return Response.json({ currency: "BRL" });
 		if (endpoint === "100/pricing_analytics") return Response.json({ data: [] });
+		if (endpoint === "100/message_templates") return init?.method === "POST"
+			? Response.json({ id: "901", status: "PENDING", category: "UTILITY" })
+			: Response.json({ data: [
+				{ id: "900", name: "existente", category: "UTILITY", language: "pt_BR", status: "APPROVED", components: [] }
+			] });
 		assert.fail("Unexpected Graph request");
 	};
+	const binding = { token: "fixture-pricing-credential", accountId: "100", phoneId: "110" };
+	let allowTemplateCreation: boolean | undefined;
 	const service = new MetaManagementService(
 		scopedDb as unknown as Pick<DatabaseClient, "wppClient">,
 		token => new MetaManagementGraph(token, graph),
 		async instance => instance === "tenant-a" ? 10 : null,
 		async (instance, clientId) => instance === "tenant-a" && clientId === 10
-			? { token: "fixture-pricing-credential", accountId: "100", phoneId: "110" }
+			? { ...binding, ...(allowTemplateCreation === undefined ? {} : { allowTemplateCreation }) }
 			: null
 	);
 	await withDatabaseTenant("tenant-a", async () => {
-		assert.deepEqual((await service.listChannels("tenant-a"))[1], {
-			clientId: 10, name: "Canal 10", phone: null, managementMode: "pricing-only"
-		});
+		const isolatedChannel = { clientId: 10, name: "Canal 10", phone: null, managementMode: "pricing-only" };
+		const session = { instance: "tenant-a", role: "ADMIN" as const, userId: 7, sectorId: 1, name: "Fixture" };
+		const input = { name: "aviso", category: "UTILITY" as const, language: "pt_BR", body: "Conteúdo de teste", examples: [] };
+		assert.deepEqual((await service.listChannels("tenant-a"))[1], { ...isolatedChannel, templateCreationEnabled: false });
 		await assert.rejects(() => service.getNumber("tenant-a", 10), { code: "META_CHANNEL_PRICING_ONLY" });
 		await assert.rejects(() => service.getProfile("tenant-a", 10), { code: "META_CHANNEL_PRICING_ONLY" });
-		await assert.rejects(() => service.listTemplates("tenant-a", 10, {}), { code: "META_CHANNEL_PRICING_ONLY" });
-		await assert.rejects(() => service.updateProfile(
-			{ instance: "tenant-a", role: "ADMIN", userId: 7, sectorId: 1, name: "Fixture" }, 10, { about: "change" }
-		), { code: "META_CHANNEL_PRICING_ONLY" });
+		await assert.rejects(() => service.createTemplate(session, 10, input), { code: "META_TEMPLATE_CREATION_DISABLED" });
 		assert.equal(requests.length, 0);
+
+		const { templates } = await service.listTemplates("tenant-a", 10, {});
+		assert.equal(templates[0]?.name, "existente");
+		assert.deepEqual(requests.splice(0), [["GET", "100/phone_numbers"], ["GET", "100/message_templates"]]);
+
+		allowTemplateCreation = true;
+		assert.deepEqual((await service.listChannels("tenant-a"))[1], { ...isolatedChannel, templateCreationEnabled: true });
+		await assert.rejects(() => service.updateProfile(session, 10, { about: "change" }), { code: "META_CHANNEL_PRICING_ONLY" });
+		assert.equal(requests.length, 0);
+		const created = await service.createTemplate(session, 10, input);
+		assert.equal(created.status, "PENDING");
+		assert.deepEqual(requests.splice(0), [["GET", "100/phone_numbers"], ["POST", "100/message_templates"]]);
+		assert.doesNotMatch(JSON.stringify(logEvents), /fixture-pricing-credential|Conteúdo de teste/);
 		const report = await service.getChannelPricing("tenant-a", 10, {
 			start: new Date("2026-11-01"), end: new Date("2026-11-02")
 		});
 		assert.equal(report?.currency, "BRL");
 		assert.deepEqual(requests.map(([method]) => method), ["GET", "GET", "GET"]);
+		allowTemplateCreation = false;
+		await assert.rejects(() => service.createTemplate(session, 10, input), { code: "META_TEMPLATE_CREATION_DISABLED" });
+		assert.equal(requests.length, 3);
 	});
 });

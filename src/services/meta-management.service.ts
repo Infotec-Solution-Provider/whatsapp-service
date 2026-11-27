@@ -16,16 +16,17 @@ const officialChannel = {
 const pricingOnlyClient = { isActive: false, WABAToken: null, WABAAccountId: null, WABAPhoneId: null } as const;
 type DirectoryRow = Pick<WppClient, keyof typeof directoryFields>;
 type ConfiguredAssets = { WABAAccountId: string; WABAPhoneId: string };
+type ChannelOperation = "costs" | "templates-read" | "templates-create" | "number-profile";
 
 function eligibleAssets(row: DirectoryRow): row is DirectoryRow & ConfiguredAssets {
 	const metaId = /^[1-9]\d{0,31}$/;
 	return Boolean(row.WABAAccountId && metaId.test(row.WABAAccountId) && row.WABAPhoneId && metaId.test(row.WABAPhoneId));
 }
 
-function publicChannel(channel: DirectoryRow, pricingOnly = false) {
+function publicChannel(channel: DirectoryRow, isolated?: { templateCreationEnabled: boolean }) {
 	return {
 		clientId: channel.id, name: channel.name, phone: channel.phone,
-		...(pricingOnly ? { managementMode: "pricing-only" as const } : {})
+		...(isolated ? { managementMode: "pricing-only" as const, ...isolated } : {})
 	};
 }
 
@@ -84,7 +85,9 @@ export class MetaManagementService {
 			: row).filter(eligibleAssets);
 		const shared = await this.sharedAccounts(instance, channels);
 		return channels.filter((channel) => !shared.has(channel.WABAAccountId))
-			.map(channel => publicChannel(channel, channel.id === pricingOnlyId));
+			.map(channel => publicChannel(channel, binding && channel.id === pricingOnlyId
+				? { templateCreationEnabled: binding.allowTemplateCreation === true }
+				: undefined));
 	}
 
 	public async listCostReceiptChannels(instance: string) {
@@ -99,16 +102,19 @@ export class MetaManagementService {
 		}));
 	}
 
-	private async verifiedChannel(instance: string, clientId: number, pricing = false) {
+	private async verifiedChannel(instance: string, clientId: number, operation: ChannelOperation = "number-profile") {
 		const pricingOnly = clientId === await this.pricingOnlyChannelId(instance);
-		if (pricingOnly && !pricing) {
-			throw new MetaGraphError(403, "META_CHANNEL_PRICING_ONLY", "Este canal está disponível para consulta de custos.");
+		if (pricingOnly && operation === "number-profile") {
+			throw new MetaGraphError(403, "META_CHANNEL_PRICING_ONLY", "Este vínculo permite acessar custos e templates da Meta.");
+		}
+		const binding = pricingOnly ? await this.pricingOnlyCredential(instance, clientId) : null;
+		if (pricingOnly && operation === "templates-create" && binding?.allowTemplateCreation !== true) {
+			throw new MetaGraphError(403, "META_TEMPLATE_CREATION_DISABLED", "Cadastro de templates indisponível para este canal.");
 		}
 		const where: Prisma.WppClientWhereInput = pricingOnly
 			? { id: clientId, instance, type: "WABA", ...pricingOnlyClient }
 			: { id: clientId, instance, ...officialChannel, isActive: true };
 		const row = await this.db.wppClient.findFirst({ where, select: { ...directoryFields, WABAToken: true } });
-		const binding = pricingOnly ? await this.pricingOnlyCredential(instance, clientId) : null;
 		const channel = row && binding
 			? { ...row, WABAAccountId: binding.accountId, WABAPhoneId: binding.phoneId }
 			: row;
@@ -124,7 +130,7 @@ export class MetaManagementService {
 	}
 
 	public async getChannelPricing(instance: string, clientId: number, period: { start: Date; end: Date }) {
-		const { graph, accountId, number } = await this.verifiedChannel(instance, clientId, true);
+		const { graph, accountId, number } = await this.verifiedChannel(instance, clientId, "costs");
 		return number.phone ? graph.getPricingAnalytics(accountId, number.phone, period.start, period.end) : null;
 	}
 
@@ -137,12 +143,12 @@ export class MetaManagementService {
 	}
 
 	public async listTemplates(instance: string, clientId: number, filters: MetaTemplateFilters) {
-		const { graph, accountId } = await this.verifiedChannel(instance, clientId);
+		const { graph, accountId } = await this.verifiedChannel(instance, clientId, "templates-read");
 		return graph.listTemplates(accountId, filters);
 	}
 
 	public async createTemplate(session: SessionData, clientId: number, input: MetaTemplateInput) {
-		const { graph, accountId } = await this.verifiedChannel(session.instance, clientId);
+		const { graph, accountId } = await this.verifiedChannel(session.instance, clientId, "templates-create");
 		return this.audit(session, "template-create", { accountId, clientId, templateName: input.name, language: input.language },
 			() => graph.createTemplate(accountId, input));
 	}
