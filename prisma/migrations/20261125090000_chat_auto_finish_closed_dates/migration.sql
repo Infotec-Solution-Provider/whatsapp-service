@@ -1,4 +1,4 @@
-CREATE TABLE `chat_auto_finish_closed_dates` (
+CREATE TABLE IF NOT EXISTS `chat_auto_finish_closed_dates` (
     `instance` VARCHAR(191) NOT NULL,
     `date` DATE NOT NULL,
 
