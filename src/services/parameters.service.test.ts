@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { Parameter, ParameterScope } from "@prisma/client";
 import parametersService, { INTERNAL_GROUP_WHATSAPP_SYNC_PARAMETER } from "./parameters.service";
 import { MESSAGE_FLOW_EDITOR_PARAMETER } from "../parameters/message-flow-editor";
+import { CHANGELOG_CORRECTIONS_PARAMETER } from "../parameters/changelog-corrections";
 import prismaService from "./prisma.service";
 import { TRIAGE_FLAG } from "../parameters/triage-feature";
 import { CONVERSATION_RECORDING_PARAMETER } from "../parameters/conversation-recording";
@@ -26,6 +27,23 @@ parameterDelegate.findMany = async ({ where }: FindManyArgs = {}) => {
 		const row: Parameter = { id: 1, instance: "tenant-flow", scope: "INSTANCE", userId: null, sectorId: null, key: MESSAGE_FLOW_EDITOR_PARAMETER, value: "false" };
 		if (where.scope === "USER") return [{ ...row, scope: "USER", userId: 9, value: "true" }];
 		if (where.scope === "INSTANCE") return [row, { ...row, id: 2, userId: 9, value: "true" }];
+		return [];
+	}
+	if (where?.instance === "infotec" || where?.instance === "tenant-user-corrections") {
+		const tenantEnabled = where.instance === "infotec";
+		const row: Parameter = {
+			id: 1,
+			instance: where.instance,
+			scope: "INSTANCE",
+			userId: null,
+			sectorId: tenantEnabled ? null : 11,
+			key: CHANGELOG_CORRECTIONS_PARAMETER,
+			value: "true"
+		};
+		if (where.scope === "INSTANCE") return [row];
+		if (where.scope === "USER") {
+			return [{ ...row, scope: "USER", userId: 9, sectorId: null, value: String(!tenantEnabled) }];
+		}
 		return [];
 	}
 	if (where?.scope !== "INSTANCE") {
@@ -83,6 +101,9 @@ async function run() {
 		assert.equal((await parametersService.getSessionParams({ instance: "tenant-recording", userId: 9 }))[CONVERSATION_RECORDING_PARAMETER], "true");
 		assert.equal((await parametersService.getSessionParams({ instance: "tenant-recording", userId: 10 }))[CONVERSATION_RECORDING_PARAMETER], "false");
 		assert.equal((await parametersService.getSessionParams({ instance: "tenant-flow", userId: 9 }))[MESSAGE_FLOW_EDITOR_PARAMETER], "false");
+		assert.equal((await parametersService.getSessionParams({ instance: "infotec", userId: 9 }))[CHANGELOG_CORRECTIONS_PARAMETER], "true");
+		assert.equal((await parametersService.getSessionParams({ instance: "tenant-user-corrections", userId: 9 }))[CHANGELOG_CORRECTIONS_PARAMETER], "false");
+		assert.equal((await parametersService.getSessionParams({ instance: "tenant-default" }))[CHANGELOG_CORRECTIONS_PARAMETER], "false");
 		assert.equal(await parametersService.isInternalGroupWhatsappSyncEnabled("tenant-default", false), false);
 		assert.equal(await parametersService.isInternalGroupWhatsappSyncEnabled("tenant-default", true), true);
 		assert.equal(await parametersService.isInternalGroupWhatsappSyncEnabled("tenant-enabled", false), true);

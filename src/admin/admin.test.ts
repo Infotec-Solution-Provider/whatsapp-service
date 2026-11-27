@@ -6,6 +6,7 @@ import { validateChannel } from "./channel-contract";
 import { redactLog } from "./processing-logs";
 import { diff, snapshot } from "./settings-utils";
 import { monitorWaitThresholdsError } from "../parameters/monitor-wait-thresholds";
+import { CHANGELOG_CORRECTIONS_PARAMETER } from "../parameters/changelog-corrections";
 
 process.env["ADMIN_REVISION_KEY"] = "local-test-revision-key-longer-than-thirty-two";
 const actor = { instance: "infotec" as const, userId: 7, role: "ADMIN" as const, name: "Test" };
@@ -22,6 +23,9 @@ assert.throws(() => verifyAdminCommand(header, command, { ...options, environmen
 for (const key of ["feature_perf_paginated_chat_history_enabled", "feature_perf_stable_socket_listeners_enabled", "feature_perf_virtualized_chat_list_enabled", "monitor:use_local_search", "monitor:sla_minutes", "customer_linking_timeout_ms", "satisfaction_survey_timeout_ms"]) assert.ok(parameterCatalog.some(field => field.key === key), key);
 assert.equal(parameterCatalog.filter(field => field.key.startsWith("human_behavior.")).length, 10);
 assert.deepEqual(parameterCatalog.find(field => field.key === "human_behavior.enabled")!.supportedScopes, ["INSTANCE"]);
+const changelogCorrections = parameterCatalog.find(field => field.key === CHANGELOG_CORRECTIONS_PARAMETER)!;
+assert.deepEqual(changelogCorrections.supportedScopes, ["INSTANCE"]);
+assert.equal(changelogCorrections.defaultValue, false);
 for (const [key, value] of [["monitor:wait_warning_minutes", 30], ["monitor:wait_critical_minutes", 1440]] as const) {
   const field = parameterCatalog.find(field => field.key === key)!;
   assert.equal(field.defaultValue, value);

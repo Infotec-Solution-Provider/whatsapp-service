@@ -1,6 +1,7 @@
 import { whatsappParameterSettings } from "../parameters/parameter-settings.catalog";
 import { META_MANAGEMENT_PARAMETER } from "../parameters/meta-management";
 import { MESSAGE_FLOW_EDITOR_PARAMETER } from "../parameters/message-flow-editor";
+import { CHANGELOG_CORRECTIONS_PARAMETER } from "../parameters/changelog-corrections";
 import { DEFAULT_HUMAN_BEHAVIOR_CONFIG as human } from "../utils/human-behavior.simulator";
 import type { AdminSetting } from "./admin-protocol";
 
@@ -42,6 +43,7 @@ flag(META_MANAGEMENT_PARAMETER, "Gerenciamento Meta", "WhatsApp", false, ["INSTA
 flag(MESSAGE_FLOW_EDITOR_PARAMETER, "Editor de fluxos de mensagens", "WhatsApp", false, ["INSTANCE"]);
 flag("feature_new_frontend_enabled", "Interface nova do CRM", "Interface");
 flag("feature_frontend_switch_enabled", "Troca de interface", "Interface");
+flag(CHANGELOG_CORRECTIONS_PARAMETER, "Correções na Central de Novidades", "Interface", false, ["INSTANCE"]);
 for (const field of parameterCatalog) {
   if (["feature_new_frontend_enabled", "feature_frontend_switch_enabled"].includes(field.key))
     field.description = "Disponível somente quando a interface nova está publicada para o tenant.";

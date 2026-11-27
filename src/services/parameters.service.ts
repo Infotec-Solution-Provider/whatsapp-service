@@ -2,6 +2,7 @@ import prismaService from "./prisma.service";
 import { TRANSFER_FROM_CONTACT_SEARCH } from "../parameters/transfer-from-contact-search";
 import { META_MANAGEMENT_PARAMETER } from "../parameters/meta-management";
 import { MESSAGE_FLOW_EDITOR_PARAMETER } from "../parameters/message-flow-editor";
+import { CHANGELOG_CORRECTIONS_PARAMETER } from "../parameters/changelog-corrections";
 import { homologTriageEnabled, resolveTriageFlag, TRIAGE_FLAG } from "../parameters/triage-feature";
 import { CONVERSATION_RECORDING_PARAMETER } from "../parameters/conversation-recording";
 
@@ -154,6 +155,7 @@ class ParametersService {
 			[CONVERSATION_RECORDING_PARAMETER]: String(userPermissionEnabled(userParams, CONVERSATION_RECORDING_PARAMETER)),
 			[TRANSFER_FROM_CONTACT_SEARCH]: String(userPermissionEnabled(userParams, TRANSFER_FROM_CONTACT_SEARCH)),
 			[META_MANAGEMENT_PARAMETER]: String(instanceFlags[META_MANAGEMENT_PARAMETER] === "true"),
+			[CHANGELOG_CORRECTIONS_PARAMETER]: String(instanceFlags[CHANGELOG_CORRECTIONS_PARAMETER] === "true"),
 			[MESSAGE_FLOW_EDITOR_PARAMETER]: String(homologTriageEnabled() || instanceFlags[MESSAGE_FLOW_EDITOR_PARAMETER] === "true"),
 			[TRIAGE_FLAG]: String(resolveTriageFlag(instanceFlags[TRIAGE_FLAG]))
 		};
