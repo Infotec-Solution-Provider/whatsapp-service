@@ -274,12 +274,15 @@ test("cost routes use authenticated tenant scope and validate budgets before mut
 
 
 test("an inactive pricing-only channel can query cost and rejects management operations before Graph", async () => {
-	const inactive = channels.find(row => row.id === 10)!;
+	const inactive = { ...channels.find(row => row.id === 10)!, WABAToken: null };
 	const scopedDb = {
 		wppClient: {
 			findMany: async (args: { where: Record<string, unknown>; select: Record<string, boolean> }) => {
 				if (args.where["type"] === "WABA") {
-					assert.deepEqual(args.where["OR"], [{ isActive: true, id: { not: 10 } }, { id: 10, isActive: false }]);
+					assert.deepEqual(args.where["OR"], [
+						{ type: "WABA", AND: [{ WABAToken: { not: null } }, { WABAToken: { not: "" } }], isActive: true, id: { not: 10 } },
+						{ id: 10, isActive: false, WABAToken: null }
+					]);
 					return [channels[0]!, inactive].map(row => projection(row, args.select));
 				}
 				return database.wppClient.findMany(args);
@@ -287,6 +290,7 @@ test("an inactive pricing-only channel can query cost and rejects management ope
 			findFirst: async ({ where, select }: { where: Record<string, unknown>; select: Record<string, boolean> }) => {
 				assert.equal(currentDatabaseTenant(), "tenant-a");
 				assert.equal(where["isActive"], false);
+				assert.equal(where["WABAToken"], null);
 				assert.equal(where["id"], 10);
 				return projection(inactive, select);
 			}
@@ -297,6 +301,7 @@ test("an inactive pricing-only channel can query cost and rejects management ope
 		const url = new URL(String(input));
 		const endpoint = url.pathname.split("/").slice(2).join("/");
 		requests.push([init?.method ?? "GET", endpoint]);
+		assert.equal(new Headers(init?.headers).get("Authorization"), "Bearer fixture-pricing-credential");
 		if (endpoint === "100/phone_numbers") {
 			return Response.json({ data: [{ id: "110", display_phone_number: "+55 11 91234-5678" }] });
 		}
@@ -307,7 +312,8 @@ test("an inactive pricing-only channel can query cost and rejects management ope
 	const service = new MetaManagementService(
 		scopedDb as unknown as Pick<DatabaseClient, "wppClient">,
 		token => new MetaManagementGraph(token, graph),
-		async instance => instance === "tenant-a" ? 10 : null
+		async instance => instance === "tenant-a" ? 10 : null,
+		async (instance, clientId) => instance === "tenant-a" && clientId === 10 ? "fixture-pricing-credential" : null
 	);
 	await withDatabaseTenant("tenant-a", async () => {
 		assert.deepEqual((await service.listChannels("tenant-a"))[1], {

@@ -5,6 +5,7 @@ import { withDatabaseTenant } from "../utils/database-tenant-context";
 import ProcessingLogger from "../utils/processing-logger";
 import database, { type DatabaseClient } from "./prisma.service";
 import parameters from "./parameters.service";
+import { readMetaPricingOnlyCredential } from "./meta-pricing-only-credential";
 import { MetaGraphError, MetaManagementGraph, type MetaPhoto, type MetaProfilePatch, type MetaTemplateFilters, type MetaTemplateInput } from "./meta-management.graph";
 
 const assetFields = { WABAAccountId: true, WABAPhoneId: true } as const;
@@ -39,7 +40,8 @@ export class MetaManagementService {
 	constructor(
 		private readonly db: Pick<DatabaseClient, "wppClient"> = database,
 		private readonly createGraph = (token: string) => new MetaManagementGraph(token),
-		private readonly pricingOnlyChannelId = (instance: string) => parameters.getMetaPricingOnlyChannelId(instance)
+		private readonly pricingOnlyChannelId = (instance: string) => parameters.getMetaPricingOnlyChannelId(instance),
+		private readonly pricingOnlyCredential = readMetaPricingOnlyCredential
 	) {}
 
 	private async sharedAccounts(instance: string, channels: ConfiguredAssets[]): Promise<Set<string | null>> {
@@ -65,11 +67,17 @@ export class MetaManagementService {
 
 	public async listChannels(instance: string) {
 		const pricingOnlyId = await this.pricingOnlyChannelId(instance);
-		const availability: Prisma.WppClientWhereInput = pricingOnlyId === null
-			? { isActive: true }
-			: { OR: [{ isActive: true, id: { not: pricingOnlyId } }, { id: pricingOnlyId, isActive: false }] };
+		const normal = { ...officialChannel, isActive: true };
+		const where: Prisma.WppClientWhereInput = pricingOnlyId === null
+			? { instance, ...normal }
+			: { instance, type: "WABA", OR: [
+				{ ...normal, id: { not: pricingOnlyId } },
+				...(await this.pricingOnlyCredential(instance, pricingOnlyId)
+					? [{ id: pricingOnlyId, isActive: false, WABAToken: null }]
+					: [])
+			] };
 		const rows = await this.db.wppClient.findMany({
-			where: { instance, ...officialChannel, ...availability }, select: directoryFields, orderBy: [{ name: "asc" }, { id: "asc" }]
+			where, select: directoryFields, orderBy: [{ name: "asc" }, { id: "asc" }]
 		});
 		const channels = rows.filter(eligibleAssets);
 		const shared = await this.sharedAccounts(instance, channels);
@@ -94,15 +102,16 @@ export class MetaManagementService {
 		if (pricingOnly && !pricing) {
 			throw new MetaGraphError(403, "META_CHANNEL_PRICING_ONLY", "Este canal está disponível para consulta de custos.");
 		}
-		const channel = await this.db.wppClient.findFirst({
-			where: { id: clientId, instance, ...officialChannel, isActive: !pricingOnly },
-			select: { ...directoryFields, WABAToken: true }
-		});
-		if (!channel || !eligibleAssets(channel) || !channel.WABAToken || /\s/.test(channel.WABAToken)
+		const where: Prisma.WppClientWhereInput = pricingOnly
+			? { id: clientId, instance, type: "WABA", isActive: false, WABAToken: null }
+			: { id: clientId, instance, ...officialChannel, isActive: true };
+		const channel = await this.db.wppClient.findFirst({ where, select: { ...directoryFields, WABAToken: true } });
+		const token = pricingOnly ? await this.pricingOnlyCredential(instance, clientId) : channel?.WABAToken;
+		if (!channel || !eligibleAssets(channel) || !token || /\s/.test(token)
 			|| (await this.sharedAccounts(instance, [channel])).has(channel.WABAAccountId)) {
 			throw unavailableChannel();
 		}
-		const graph = this.createGraph(channel.WABAToken);
+		const graph = this.createGraph(token);
 		const number = (await graph.listNumbers(channel.WABAAccountId)).find((item) => item.id === channel.WABAPhoneId);
 		if (!number) throw inconsistentBinding();
 		return { graph, local: publicChannel(channel), accountId: channel.WABAAccountId, phoneId: channel.WABAPhoneId, number };
