@@ -67,6 +67,18 @@ export class MetaManagementService {
 		return channels.filter((channel) => !shared.has(channel.WABAAccountId)).map(publicChannel);
 	}
 
+	public async listCostReceiptChannels(instance: string) {
+		const rows = await this.db.wppClient.findMany({
+			where: { instance, type: "WABA", WABAAccountId: { not: null }, WABAPhoneId: { not: null } },
+			select: directoryFields, orderBy: { id: "asc" }
+		});
+		const channels = rows.filter(eligibleAssets);
+		const shared = await this.sharedAccounts(instance, channels);
+		return channels.filter(channel => !shared.has(channel.WABAAccountId)).map(channel => ({
+			clientId: channel.id, phoneId: channel.WABAPhoneId
+		}));
+	}
+
 	private async verifiedChannel(instance: string, clientId: number) {
 		const channel = await this.db.wppClient.findFirst({
 			where: { id: clientId, instance, ...officialChannel }, select: { ...directoryFields, WABAToken: true }
@@ -79,6 +91,11 @@ export class MetaManagementService {
 		const number = (await graph.listNumbers(channel.WABAAccountId)).find((item) => item.id === channel.WABAPhoneId);
 		if (!number) throw inconsistentBinding();
 		return { graph, local: publicChannel(channel), accountId: channel.WABAAccountId, phoneId: channel.WABAPhoneId, number };
+	}
+
+	public async getChannelPricing(instance: string, clientId: number, period: { start: Date; end: Date }) {
+		const { graph, accountId, number } = await this.verifiedChannel(instance, clientId);
+		return number.phone ? graph.getPricingAnalytics(accountId, number.phone, period.start, period.end) : null;
 	}
 
 	public async getNumber(instance: string, clientId: number) {

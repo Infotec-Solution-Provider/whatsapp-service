@@ -76,6 +76,99 @@ test("keeps paginated status and quality data on the authorized numbers endpoint
 	assert.equal(calls[1]?.url.searchParams.get("after"), "another-page");
 });
 
+const pricingFrom = new Date("2026-11-01T03:00:00Z");
+const pricingTo = new Date("2026-12-01T03:00:00Z");
+const pricingPhone = "551100000000";
+const marketingPoint = {
+	phone_number: pricingPhone, pricing_category: "MARKETING", pricing_type: "REGULAR", volume: 2, cost: 0.1
+};
+
+test("queries costs and billing currency for the selected number and aggregates all safe pages", async () => {
+	const { graph, calls } = graphWithReplies(() => json({ currency: "BRL" }), () => json({
+		data: [{ data_points: [marketingPoint] }],
+		paging: { cursors: { after: "next-pricing-page" }, next: "https://wrong.example/?access_token=ignore" }
+	}), () => json({
+		data: [{ data_points: [
+			{ ...marketingPoint, cost: 0.2 },
+			{ ...marketingPoint, pricing_category: "SERVICE", pricing_type: "FREE_CUSTOMER_SERVICE", volume: 3, cost: 0 }
+		] }]
+	}));
+	const result = await graph.getPricingAnalytics(accountId, "+55 (11) 0000-0000", pricingFrom, pricingTo);
+	assert.deepEqual(result, {
+		currency: "BRL", totalCost: 0.3, totalVolume: 7,
+		buckets: [
+			{ category: "MARKETING", pricingType: "REGULAR", volume: 4, cost: 0.3 },
+			{ category: "SERVICE", pricingType: "FREE_CUSTOMER_SERVICE", volume: 3, cost: 0 },
+		]
+	});
+	assert.deepEqual(calls.map(({ url }) => url.pathname), [
+		`${versionPath}/${accountId}`, `${versionPath}/${accountId}/pricing_analytics`, `${versionPath}/${accountId}/pricing_analytics`
+	]);
+	assert.equal(calls[0]?.url.searchParams.get("fields"), "currency");
+	for (const call of calls.slice(1)) {
+		assert.equal(call.url.searchParams.get("start"), String(pricingFrom.getTime() / 1000));
+		assert.equal(call.url.searchParams.get("end"), String(pricingTo.getTime() / 1000));
+		assert.equal(call.url.searchParams.get("phone_numbers"), JSON.stringify([pricingPhone]));
+		assert.equal(call.url.searchParams.get("metric_types"), '["COST","VOLUME"]');
+		assert.equal(call.url.searchParams.get("dimensions"), '["PHONE","PRICING_CATEGORY","PRICING_TYPE"]');
+		assert.equal(new Headers(call.init.headers).get("authorization"), `Bearer ${token}`);
+	}
+	assert.equal(calls[2]?.url.searchParams.get("after"), "next-pricing-page");
+});
+
+test("retains zero and missing costs distinctly, including incomplete buckets", async () => {
+	const { graph } = graphWithReplies(() => json({ currency: "USD" }), () => json({
+		data: [{ data_points: [
+			marketingPoint,
+			{ ...marketingPoint, cost: undefined },
+			{ ...marketingPoint, pricing_category: "UTILITY", cost: null },
+			{ ...marketingPoint, pricing_category: "SERVICE", pricing_type: "FREE_CUSTOMER_SERVICE", cost: 0 }
+		] }]
+	}));
+	const result = await graph.getPricingAnalytics(accountId, pricingPhone, pricingFrom, pricingTo);
+	assert.deepEqual(result, {
+		currency: "USD", totalCost: null, totalVolume: 8,
+		buckets: [
+			{ category: "MARKETING", pricingType: "REGULAR", volume: 4, cost: null },
+			{ category: "UTILITY", pricingType: "REGULAR", volume: 2, cost: null },
+			{ category: "SERVICE", pricingType: "FREE_CUSTOMER_SERVICE", volume: 2, cost: 0 },
+		]
+	});
+});
+
+test("distinguishes an empty period with a known currency from a missing currency", async () => {
+	const empty = graphWithReplies(() => json({ currency: "BRL" }), () => json({ data: [] })).graph;
+	assert.deepEqual(await empty.getPricingAnalytics(accountId, pricingPhone, pricingFrom, pricingTo), {
+		currency: "BRL", totalCost: 0, totalVolume: 0, buckets: []
+	});
+	const missing = graphWithReplies(() => json({}), () => json({ data: [{ data_points: [marketingPoint] }] })).graph;
+	assert.deepEqual(await missing.getPricingAnalytics(accountId, pricingPhone, pricingFrom, pricingTo), {
+		currency: null, totalCost: null, totalVolume: 2,
+		buckets: [{ category: "MARKETING", pricingType: "REGULAR", volume: 2, cost: null }]
+	});
+});
+
+test("rejects unscoped, mismatched or denied pricing requests without exposing upstream credentials", async () => {
+	const unused = graphWithReplies();
+	await assert.rejects(unused.graph.getPricingAnalytics(accountId, "", pricingFrom, pricingTo), { code: "META_PRICING_PHONE_UNAVAILABLE" });
+	assert.equal(unused.calls.length, 0);
+
+	const mismatched = graphWithReplies(() => json({ currency: "BRL" }), () => json({
+		data: [{ data_points: [{ ...marketingPoint, phone_number: "551100000001" }] }]
+	})).graph;
+	await assert.rejects(mismatched.getPricingAnalytics(accountId, pricingPhone, pricingFrom, pricingTo), { code: "META_INVALID_RESPONSE" });
+
+	const denied = graphWithReplies(() => json({ currency: "BRL" }), () => json({
+		error: { code: 200, message: `Raw upstream error: ${token}` }
+	}, 403)).graph;
+	await assert.rejects(denied.getPricingAnalytics(accountId, pricingPhone, pricingFrom, pricingTo), (error: unknown) => {
+		assert.ok(error instanceof MetaGraphError);
+		assert.equal(error.code, "META_PERMISSION_DENIED");
+		assert.doesNotMatch(inspect(error, { depth: 6 }), /Raw upstream error|test-fixture-token-never-log/);
+		return true;
+	});
+});
+
 test("submits positional examples once and never repeats a create whose response was lost", async () => {
 	const { graph, calls } = graphWithReplies(() => {
 		throw new Error(`Transport disconnected with fixture ${token}`);

@@ -140,6 +140,17 @@ stub("../services/meta-management.service", new MetaManagementService(
 	database as unknown as Pick<DatabaseClient, "wppClient">,
 	(token) => new MetaManagementGraph(token, graphFetch)
 ));
+const costCalls: unknown[] = [];
+stub("../services/meta-costs.service", {
+	getCosts: async (instance: string, { month }: { month: string }) => ({ instance, month }),
+	getOfficialCosts: async (instance: string, clientId: number, { month }: { month: string }) => ({
+		instance, clientId, month
+	}),
+	setBudget: async (session: { instance: string; userId: number }, month: string, operatorId: number, budgetCents: number | null) => {
+		costCalls.push({ instance: session.instance, actor: session.userId, month, operatorId, budgetCents });
+		return { budgetCents };
+	}
+});
 const router = (require("./meta-management.controller") as typeof import("./meta-management.controller")).default;
 for (const [filename, previous] of overrides) {
 	if (previous) require.cache[filename] = previous;
@@ -223,5 +234,39 @@ test("Meta routes require ADMIN and instance opt-in, then enforce exclusive WABA
 		assert.deepEqual(graphRequests, []);
 	} finally {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
+});
+
+
+test("cost routes use authenticated tenant scope and validate budgets before mutation", async () => {
+	const app = express().use("/api/whatsapp/meta", router);
+	const server = app.listen(0, "127.0.0.1");
+	await once(server, "listening");
+	const { port } = server.address() as { port: number };
+	const base = `http://127.0.0.1:${port}/api/whatsapp/meta`;
+	const headers = { Authorization: "Bearer admin", "Content-Type": "application/json" };
+	const updateBudget = (id: string, value: unknown, authorization = headers.Authorization) =>
+		fetch(`${base}/budgets/${id}?month=2026-11`, {
+			method: "PUT", headers: { ...headers, Authorization: authorization }, body: JSON.stringify(value)
+		});
+	try {
+		const costs = await fetch(`${base}/costs?month=2026-11`, { headers });
+		assert.equal(costs.headers.get("Cache-Control"), "no-store");
+		assert.deepEqual(await costs.json(), { instance: "tenant-a", month: "2026-11" });
+		const report = await fetch(`${base}/channels/1/costs?month=2026-11`, { headers });
+		assert.deepEqual(await report.json(), { instance: "tenant-a", clientId: 1, month: "2026-11" });
+		assert.equal((await fetch(`${base}/costs?month=2026-31`, { headers })).status, 400);
+		assert.equal((await updateBudget("12", { budgetCents: 1100 }, "Bearer operator")).status, 403);
+		assert.equal((await updateBudget("12", { budgetCents: 1100 }, "Bearer disabled")).status, 403);
+		assert.equal((await updateBudget("0", { budgetCents: 1100 })).status, 400);
+		assert.equal((await updateBudget("12", { budgetCents: "1100" })).status, 400);
+		assert.deepEqual(await (await updateBudget("12", { budgetCents: 0, instance: "tenant-b" })).json(), { budgetCents: 0 });
+		assert.deepEqual(await (await updateBudget("12", { budgetCents: null })).json(), { budgetCents: null });
+		assert.deepEqual(costCalls, [
+			{ instance: "tenant-a", actor: 7, month: "2026-11", operatorId: 12, budgetCents: 0 },
+			{ instance: "tenant-a", actor: 7, month: "2026-11", operatorId: 12, budgetCents: null }
+		]);
+	} finally {
+		await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
 	}
 });
