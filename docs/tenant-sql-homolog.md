@@ -10,6 +10,8 @@ Na topologia homologada, ingresso e tenants estão no mesmo servidor MySQL. Uma 
 
 ### Virada física da Infotec
 
+Em 27/11/2026, o executor retirou as 61 cópias congeladas depois de conferir os checksums do recibo de migração. O schema `homolog-infotec-whatsapp-runtime` contém apenas 61 views atualizáveis. As 61 tabelas físicas e suas 12 triggers ficam em `crm-sgr-infotec-prod`. O simulador privado confirmou a gravação de uma nova conversa após a retirada.
+
 O executor `scripts/move-infotec-homolog-runtime.cjs` usa apenas a conexão operacional indicada pelo DBA em `HOMOLOG_RESIDENCY_DBA_URL`. O primeiro comando confere servidor, catálogo, tabelas, referências e gatilhos. O segundo cria as tabelas `wpp_hml_*` no CRM compartilhado e concede acesso ao usuário de homologação apenas para esses objetos. A troca reserva os nomes da origem em um único RENAME, copia os dados, verifica contagens e checksums, preserva AUTO_INCREMENT e recompõe as triggers. As views atualizáveis com SECURITY INVOKER preservam os nomes esperados pelos clientes existentes. Elas armazenam zero linhas. A origem física fica retida para verificação antes de sua retirada.
 
 ```sh
