@@ -107,7 +107,10 @@ async function withService(rows: Contact[], execute: (service: ContactsModule["d
 		// Install all external-service stubs before loading ContactsService. No database,
 		// HTTP client, cron or worker is started by this regression suite.
 		stubDefault("./prisma.service", f.db);
-		stubDefault("./parameters.service", {});
+		stubDefault("./parameters.service", {
+			getSessionParams: async (session: { instance: string }) =>
+				session.instance === "tenant-disabled" ? { disable_contacts_crud: "true" } : {},
+		});
 		stubDefault("./instances.service", { executeQuery: async (instance: string, query: string, values: unknown[]) => {
 			f.localWrites.push({ instance, query, values });
 			return [];
@@ -349,6 +352,27 @@ test("a P2002 race cannot reactivate a concurrently deleted contact", async () =
 			return true;
 		});
 		assertUnchanged(f, [winner]);
+	});
+});
+
+test("contact detail enforces tenant, active record and role without writing", async () => {
+	const visible = contact({ id: 41, isOnlyAdmin: false, customerId: null });
+	const adminOnly = contact();
+	const foreign = contact({ id: 43, instance: "tenant-b", isOnlyAdmin: false });
+	const deleted = contact({ id: 44, isDeleted: true, isOnlyAdmin: false });
+	const group = contact({ id: 45, whatsappId: "5511@g.us", isOnlyAdmin: false });
+	const rows = [visible, adminOnly, foreign, deleted, group];
+	await withService(rows, async (service, f) => {
+		const operator = { instance: "tenant-a", role: "ATIVO", userId: 17, sectorId: 7, name: "Operador de teste" };
+		assert.equal((await service.getContactDetail(operator, "41")).id, 41);
+		assert.equal((await service.getContactDetail({ ...operator, role: "ADMIN" }, "42")).id, 42);
+		for (const id of ["42", "43", "44", "45", "99"]) {
+			await assert.rejects(service.getContactDetail(operator, id), /Contato indisponível/);
+		}
+		await assert.rejects(service.getContactDetail(operator, "040"), /Código de contato inválido/);
+		await assert.rejects(service.getContactDetail({ ...operator, role: "EXTERNO" }, "41"), /Perfil sem acesso/);
+		await assert.rejects(service.getContactDetail({ ...operator, instance: "tenant-disabled" }, "41"), /Perfil sem acesso/);
+		assertUnchanged(f, rows);
 	});
 });
 
