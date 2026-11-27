@@ -1,4 +1,5 @@
-import { MetaGraphError, MetaPhoto, MetaProfilePatch, MetaTemplateFilters, MetaTemplateInput } from "./meta-management.graph";
+import { isTemplateVariableSources, type MetaTemplateCreateInput } from "../utils/meta-template-variable-sources";
+import { MetaGraphError, MetaPhoto, MetaProfilePatch, MetaTemplateFilters } from "./meta-management.graph";
 
 export const META_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -24,7 +25,7 @@ function requiredText(value: unknown, limit: number, message: string) {
 	return value.trim();
 }
 
-export function parseMetaTemplateInput(value: unknown): MetaTemplateInput {
+export function parseMetaTemplateInput(value: unknown): MetaTemplateCreateInput {
 	const input = object(value);
 	const name = requiredText(input["name"], 512, "Informe um nome válido para o template.");
 	if (!/^[a-z0-9_]+$/.test(name)) invalid("Use letras minúsculas, números e sublinhados no nome do template.");
@@ -41,9 +42,14 @@ export function parseMetaTemplateInput(value: unknown): MetaTemplateInput {
 	}
 	const examples = input["examples"];
 	if (!Array.isArray(examples) || examples.length !== positions.size) invalid("Preencha um exemplo para cada variável do template.");
+	const variableSources = input["variableSources"];
+	if (variableSources !== undefined && !isTemplateVariableSources(variableSources, positions.size)) {
+		invalid("Selecione uma fonte válida para cada variável do template.");
+	}
 	return {
 		name, language, category, body,
-		examples: examples.map((example) => requiredText(example, 1024, "Preencha um exemplo válido para cada variável."))
+		examples: examples.map((example) => requiredText(example, 1024, "Preencha um exemplo válido para cada variável.")),
+		...(variableSources !== undefined ? { variableSources } : {})
 	};
 }
 

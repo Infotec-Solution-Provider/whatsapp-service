@@ -38,6 +38,17 @@ test("rejects category, name, placeholders and examples outside the text templat
 	}
 });
 
+test("variable sources use positional order and known in.pulse keys or manual entry", () => {
+	const configured = { ...template, variableSources: ["contato_primeiro_nome", "manual"] };
+	assert.deepEqual(parseMetaTemplateInput(configured), configured);
+	assert.deepEqual(parseMetaTemplateInput({ ...configured, body: "{{2}} recebeu aviso de {{1}} e {{2}}." }), {
+		...configured, body: "{{2}} recebeu aviso de {{1}} e {{2}}."
+	});
+	for (const variableSources of [["manual"], ["manual", "unknown"], ["bodyValues", "manual"], ["manual", null], "manual", null]) {
+		assert.throws(() => parseMetaTemplateInput({ ...template, variableSources }), { code: "META_INVALID_INPUT" });
+	}
+});
+
 test("preserves opaque pagination cursors while validating request filter types", () => {
 	const filters = { after: "Opaque+cursor==", language: "pt_BR", status: "APPROVED" };
 	const parsed = parseMetaTemplateFilters(filters);

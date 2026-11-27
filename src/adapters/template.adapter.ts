@@ -1,5 +1,6 @@
 import { WABAMessageTemplate } from "../types/whatsapp-api.types";
 import { GSMessageTemplate } from "../types/gupshup-api.types";
+import type { TemplateVariableSource } from "../utils/meta-template-variable-sources";
 
 type TemplateSource = "waba" | "gupshup";
 
@@ -17,6 +18,7 @@ export interface TemplateMessage {
 export interface WABATemplateMessage extends TemplateMessage {
 	source: "waba";
 	raw: WABAMessageTemplate;
+	variableSources?: TemplateVariableSource[];
 }
 
 export interface GupshupTemplateMessage extends TemplateMessage {

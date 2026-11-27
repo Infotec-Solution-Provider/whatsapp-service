@@ -29,6 +29,8 @@ const channels = [
 ];
 const flagReads: string[] = [];
 const channelReads: number[] = [];
+const bindings = new Map<string, { templateId: string; bodyHash: string; variableSources: unknown }>();
+const variableFixture = { body: "Olá, {{1}}. Prazo até {{2}}.", ids: ["900", "901"], failWrites: false, failReads: false };
 
 function projection(row: Record<string, unknown>, select: Record<string, boolean>) {
 	return Object.fromEntries(Object.entries(row).filter(([key]) => select[key]));
@@ -43,6 +45,20 @@ function localChannels(where: Record<string, unknown>) {
 }
 
 const database = {
+	$executeRawUnsafe: async (sql: string, instance: string, accountId: string, templateId: string, bodyHash: string, sources: string) => {
+		assert.match(sql, /INSERT INTO meta_template_variable_bindings/);
+		assert.equal(currentDatabaseTenant(), instance);
+		if (variableFixture.failWrites) throw new Error("fixture table unavailable");
+		bindings.set(JSON.stringify([instance, accountId, templateId]), { templateId, bodyHash, variableSources: JSON.parse(sources) });
+		return 1;
+	},
+	metaTemplateVariableBinding: {
+		findMany: async ({ where }: { where: { instance: string; accountId: string; templateId: { in: string[] } } }) => {
+			assert.equal(currentDatabaseTenant(), where.instance);
+			if (variableFixture.failReads) throw new Error("fixture table unavailable");
+			return where.templateId.in.flatMap(id => bindings.get(JSON.stringify([where.instance, where.accountId, id])) ?? []);
+		}
+	},
 	parameter: {
 		findFirst: async ({ where }: { where: Record<string, unknown> }) => {
 			assert.deepEqual(where, {
@@ -89,6 +105,8 @@ const database = {
 
 const graphRequests: Array<{ method: string; path: string; credential: string | null }> = [];
 const logEvents: unknown[] = [];
+const graphTemplates: Array<{ name: string; language: string; category: string; id: string; status: string; components: unknown }> = [];
+const graphTemplateWrites: unknown[] = [];
 const graphFetch: typeof fetch = async (input, options) => {
 	const path = new URL(String(input)).pathname.split("/").slice(2).join("/");
 	const method = options?.method ?? "GET";
@@ -102,8 +120,14 @@ const graphFetch: typeof fetch = async (input, options) => {
 	if (path === "101/whatsapp_business_profile") return Response.json({ data: [{ about: "Perfil autorizado" }] });
 	if (path === "109/whatsapp_business_profile") return method === "POST"
 		? Response.json({ success: true }) : Response.json({ data: [{ about: "Perfil alterado" }] });
-	if (path === "100/message_templates") return method === "POST"
-		? Response.json({ id: "900", status: "PENDING", category: "UTILITY" }) : Response.json({ data: [] });
+	if (path === "100/message_templates") {
+		if (method !== "POST") return Response.json({ data: graphTemplates });
+		const post = JSON.parse(String(options?.body));
+		graphTemplateWrites.push(post);
+		const id = variableFixture.ids[graphTemplates.length];
+		graphTemplates.push({ ...post, id, status: "PENDING" });
+		return Response.json({ id, status: "PENDING", category: "UTILITY" });
+	}
 	assert.fail(`unexpected mock path: ${path}`);
 };
 
@@ -210,12 +234,50 @@ test("Meta routes require ADMIN and instance opt-in, then enforce exclusive WABA
 			assert.deepEqual(graphRequests.splice(0), [graphCall(channelId, "100/phone_numbers"), graphCall(channelId, "100/message_templates")]);
 		}
 
-		const created = await fetch(`${base}/channels/9/templates`, {
+		const variableSources = ["contato_primeiro_nome", "manual"];
+		const input = { name: "aviso", category: "UTILITY", language: "pt_BR", body: variableFixture.body, examples: ["Ana", "sexta-feira"], variableSources };
+		const create = (payload: object) => fetch(`${base}/channels/9/templates`, {
 			method: "POST", headers: { ...admin, "Content-Type": "application/json" },
-			body: JSON.stringify({ name: "aviso", category: "UTILITY", language: "pt_BR", body: "Conteúdo de teste", examples: [] })
+			body: JSON.stringify(payload)
 		});
+		const invalidSources = await create({ ...input, variableSources: ["manual"] });
+		assert.equal(invalidSources.status, 400);
+		assert.deepEqual(graphRequests, []);
+
+		const created = await create(input);
 		assert.equal(created.status, 201);
+		assert.deepEqual((await created.json() as { template: object }).template, {
+			id: "900", name: input.name, language: input.language, category: input.category, status: "PENDING",
+			body: input.body, rejectionReason: null, variableSources
+		});
 		assert.deepEqual(graphRequests.splice(0), [graphCall(9, "100/phone_numbers"), graphCall(9, "100/message_templates", "POST")]);
+		assert.deepEqual(graphTemplateWrites[0], {
+			name: input.name, language: input.language, category: input.category, parameter_format: "POSITIONAL",
+			components: [{ type: "BODY", text: input.body, example: { body_text: [input.examples] } }]
+		});
+
+		variableFixture.failWrites = true;
+		const fallback = await create({ ...input, name: "aviso_fallback" });
+		variableFixture.failWrites = false;
+		assert.equal(fallback.status, 201);
+		assert.deepEqual((await fallback.json() as { template: object }).template, {
+			id: "901", name: "aviso_fallback", language: input.language, category: input.category, status: "PENDING",
+			body: input.body, rejectionReason: null, variableSourcesSaved: false
+		});
+		assert.deepEqual(graphRequests.splice(0), [graphCall(9, "100/phone_numbers"), graphCall(9, "100/message_templates", "POST")]);
+
+		const list = async () => {
+			const response = await fetch(`${base}/channels/1/templates`, { headers: admin });
+			assert.equal(response.status, 200);
+			assert.deepEqual(graphRequests.splice(0), [graphCall(1, "100/phone_numbers"), graphCall(1, "100/message_templates")]);
+			return (await response.json() as { templates: Array<{ variableSources?: string[] }> }).templates;
+		};
+		assert.deepEqual((await list()).map(template => template.variableSources), [variableSources, undefined]);
+		variableFixture.failReads = true;
+		assert.deepEqual((await list()).map(template => template.variableSources), [undefined, undefined]);
+		variableFixture.failReads = false;
+		graphTemplates[0]!.components = [{ type: "BODY", text: "Olá, {{2}}. Prazo até {{1}}." }];
+		assert.deepEqual((await list()).map(template => template.variableSources), [undefined, undefined]);
 
 		const profile = await fetch(`${base}/numbers/1/profile`, { headers: admin });
 		assert.equal(profile.status, 200);
@@ -226,7 +288,7 @@ test("Meta routes require ADMIN and instance opt-in, then enforce exclusive WABA
 		});
 		assert.equal(patch.status, 200);
 		assert.deepEqual(graphRequests.splice(0), [graphCall(9, "100/phone_numbers"), graphCall(9, "109/whatsapp_business_profile", "POST"), graphCall(9, "109/whatsapp_business_profile")]);
-		assert.doesNotMatch(JSON.stringify(logEvents), /mock-channel-token|Conteúdo de teste|Perfil alterado/);
+		assert.doesNotMatch(JSON.stringify(logEvents), /mock-channel-token|Prazo até|sexta-feira|Perfil alterado/);
 
 		const malformedPhoto = await fetch(`${base}/numbers/1/photo`, {
 			method: "POST", headers: { ...admin, "Content-Type": "multipart/form-data" }, body: "malformed"

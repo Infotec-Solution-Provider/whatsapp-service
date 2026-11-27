@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import type { SendFileOptions, SendTemplateOptions } from "../types/whatsapp-instance.types";
+import { currentDatabaseTenant, withDatabaseTenant } from "../utils/database-tenant-context";
 import { WabaDeliveryError, WabaTemplateBodyValuesError } from "../utils/waba-send";
 
 async function main() {
@@ -12,19 +14,36 @@ async function main() {
 	const bodies: any[] = [];
 	const uploads: Array<[number, string | undefined]> = [];
 	const logs: unknown[] = [];
+	const templateBody = "Olá, {{1}}. Seu pedido {{2}} está pronto.";
+	const catalog = [{ id: "300", name: "pedido_pronto", language: "pt_BR", category: "UTILITY", status: "APPROVED",
+		components: [{ type: "BODY", text: templateBody }] }];
+	let variableReads = 0;
 	let send: () => unknown = () => ({ messages: [{ id: "wamid.sent" }] });
 	let upload: (rejected?: string) => string = (rejected) => rejected ? "222" : "111";
 	try {
 		stub("../services/files.service", { __esModule: true, default: {
 			getWabaMedia: async (fileId: number, rejected?: string) => { uploads.push([fileId, rejected]); return upload(rejected); },
 		} });
-		stub("../services/prisma.service", { __esModule: true, default: {} });
-		stub("../adapters/template.adapter", { __esModule: true, default: {} });
-		stub("@in.pulse-crm/utils", { Logger: { info: () => {}, error: (...data: unknown[]) => logs.push(data) } });
-		stub("axios", { __esModule: true, default: { post: async (_url: string, body: unknown) => {
-			bodies.push(structuredClone(body));
-			return { data: await send() };
+		stub("../services/prisma.service", { __esModule: true, default: { metaTemplateVariableBinding: {
+			findMany: async ({ where }: { where: object }) => {
+				variableReads++;
+				assert.equal(currentDatabaseTenant(), "tenant");
+				assert.deepEqual(where, { instance: "tenant", accountId: "200", templateId: { in: ["300"] } });
+				return [{ templateId: "300", bodyHash: createHash("sha256").update(templateBody).digest("hex"),
+					variableSources: ["contato_primeiro_nome", "manual"] }];
+			}
 		} } });
+		stub("@in.pulse-crm/utils", { Logger: { info: () => {}, error: (...data: unknown[]) => logs.push(data) } });
+		stub("axios", { __esModule: true, default: {
+			get: async (url: string) => {
+				assert.match(url, /\/200\/message_templates\?/);
+				return { data: { data: catalog } };
+			},
+			post: async (_url: string, body: unknown) => {
+				bodies.push(structuredClone(body));
+				return { data: await send() };
+			}
+		} });
 		stub("../utils/processing-logger", { __esModule: true, default: class {
 			log(...data: unknown[]) { logs.push(data); }
 			success(data: unknown) { logs.push(data); }
@@ -35,6 +54,14 @@ async function main() {
 		delete require.cache[path];
 		const Client = (require("./waba-whatsapp-client") as typeof import("./waba-whatsapp-client")).default;
 		const client = new Client(6, "tenant", "Official", "5500000000", "phone-id", "account-id", "never-log-this-token");
+		const templateClient = new Client(6, "tenant", "Official", "5500000000", "100", "200", "never-log-this-token");
+		const [template] = await withDatabaseTenant("tenant", () => templateClient.getTemplates());
+		assert.equal(template?.id, "pedido_pronto");
+		assert.equal(template?.raw.id, "300");
+		assert.deepEqual(template?.variableSources, ["contato_primeiro_nome", "manual"]);
+		const [foreignTemplate] = await withDatabaseTenant("foreign", () => templateClient.getTemplates());
+		assert.equal(foreignTemplate?.variableSources, undefined);
+		assert.equal(variableReads, 1);
 		const options = {
 			to: "5511999999999", text: "Caption", fileId: 42,
 			file: { id: 42, name: "image.png", size: 52831, mime_type: "image/png" },

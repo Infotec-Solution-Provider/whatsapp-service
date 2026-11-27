@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import type { Prisma, WppClient } from "@prisma/client";
 import type { SessionData } from "../sdk-local/types/auth.types";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
+import type { MetaTemplateCreateInput, TemplateVariableSource } from "../utils/meta-template-variable-sources";
 import ProcessingLogger from "../utils/processing-logger";
 import database, { type DatabaseClient } from "./prisma.service";
 import parameters from "./parameters.service";
 import { readMetaPricingOnlyCredential } from "./meta-pricing-only-credential";
-import { MetaGraphError, MetaManagementGraph, type MetaPhoto, type MetaProfilePatch, type MetaTemplateFilters, type MetaTemplateInput } from "./meta-management.graph";
+import { MetaGraphError, MetaManagementGraph, type MetaPhoto, type MetaProfilePatch, type MetaTemplate, type MetaTemplateFilters } from "./meta-management.graph";
+import { loadTemplateVariableSources, saveTemplateVariableSources } from "./meta-template-variables.service";
 
 const assetFields = { WABAAccountId: true, WABAPhoneId: true } as const;
 const directoryFields = { id: true, name: true, phone: true, ...assetFields } as const;
@@ -17,6 +19,7 @@ const pricingOnlyClient = { isActive: false, WABAToken: null, WABAAccountId: nul
 type DirectoryRow = Pick<WppClient, keyof typeof directoryFields>;
 type ConfiguredAssets = { WABAAccountId: string; WABAPhoneId: string };
 type ChannelOperation = "costs" | "templates-read" | "templates-create" | "number-profile";
+type ManagedMetaTemplate = MetaTemplate & { variableSources?: TemplateVariableSource[]; variableSourcesSaved?: false };
 
 function eligibleAssets(row: DirectoryRow): row is DirectoryRow & ConfiguredAssets {
 	const metaId = /^[1-9]\d{0,31}$/;
@@ -142,15 +145,26 @@ export class MetaManagementService {
 		};
 	}
 
-	public async listTemplates(instance: string, clientId: number, filters: MetaTemplateFilters) {
+	public async listTemplates(instance: string, clientId: number, filters: MetaTemplateFilters): Promise<{ templates: ManagedMetaTemplate[]; nextCursor: string | null }> {
 		const { graph, accountId } = await this.verifiedChannel(instance, clientId, "templates-read");
-		return graph.listTemplates(accountId, filters);
+		const page = await graph.listTemplates(accountId, filters);
+		const bindings = await loadTemplateVariableSources(instance, accountId, page.templates);
+		return { ...page, templates: page.templates.map(template => {
+			const variableSources = bindings.get(template.id);
+			return variableSources ? { ...template, variableSources } : template;
+		}) };
 	}
 
-	public async createTemplate(session: SessionData, clientId: number, input: MetaTemplateInput) {
+	public async createTemplate(session: SessionData, clientId: number, input: MetaTemplateCreateInput): Promise<ManagedMetaTemplate> {
 		const { graph, accountId } = await this.verifiedChannel(session.instance, clientId, "templates-create");
 		return this.audit(session, "template-create", { accountId, clientId, templateName: input.name, language: input.language },
-			() => graph.createTemplate(accountId, input));
+			async () => {
+				const { variableSources, ...providerInput } = input;
+				const template = await graph.createTemplate(accountId, providerInput);
+				if (!variableSources?.length) return template;
+				const saved = await saveTemplateVariableSources(session.instance, accountId, template.id, template.body, variableSources);
+				return saved ? { ...template, variableSources } : { ...template, variableSourcesSaved: false as const };
+			});
 	}
 
 	public async getProfile(instance: string, clientId: number) {

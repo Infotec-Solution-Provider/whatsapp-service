@@ -175,6 +175,17 @@ model MetaOperatorBudget {
   @@map("meta_operator_budgets")
 }
 
+model MetaTemplateVariableBinding {
+  instance        String @db.VarChar(191)
+  accountId       String @map("account_id") @db.VarChar(32)
+  templateId      String @map("template_id") @db.VarChar(32)
+  bodyHash        String @map("body_hash") @db.Char(64)
+  variableSources Json   @map("variable_sources")
+
+  @@id([instance, accountId, templateId])
+  @@map("meta_template_variable_bindings")
+}
+
 model WppClientSessionSnapshot {
   clientId                Int       @id @map("client_id")
   contractVersion         Int       @map("contract_version")

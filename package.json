@@ -46,7 +46,7 @@
     "test:send-reliability": "npm run test:internal-message-status && npm run test:ops-alerts && npm run test:session-directory",
     "test:legacy-message-encoding": "ts-node src/services/messages-local-encoding.test.ts",
     "test:parameters": "ts-node src/services/parameters.service.test.ts",
-    "test:meta-management": "ts-node src/services/meta-management.graph.test.ts && ts-node src/services/meta-management.validation.test.ts && ts-node --files src/controllers/meta-management.controller.test.ts && ts-node src/services/meta-costs.calculation.test.ts && ts-node --files src/services/meta-cost-receipts.test.ts && ts-node --files src/services/meta-costs.mysql.test.ts",
+    "test:meta-management": "ts-node src/services/meta-management.graph.test.ts && ts-node src/services/meta-management.validation.test.ts && ts-node --files src/controllers/meta-management.controller.test.ts && ts-node src/services/meta-costs.calculation.test.ts && ts-node --files src/services/meta-cost-receipts.test.ts && ts-node --files src/services/meta-costs.mysql.test.ts && ts-node --files src/services/meta-template-variables.mysql.test.ts",
     "test:admin": "ts-node --files src/admin/admin.test.ts",
     "test:admin:mysql": "npx tsc && node --test scripts/admin-mysql.test.cjs",
     "test:parameter-settings": "ts-node --files src/services/parameter-settings.service.test.ts",

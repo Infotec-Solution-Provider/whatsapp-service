@@ -1,8 +1,9 @@
 import { Logger } from "@in.pulse-crm/utils";
 import axios from "axios";
-import TemplateAdapter from "../adapters/template.adapter";
+import TemplateAdapter, { type WABATemplateMessage } from "../adapters/template.adapter";
 import CreateMessageDto from "../dtos/create-message.dto";
 import filesService from "../services/files.service";
+import { loadTemplateVariableSources } from "../services/meta-template-variables.service";
 import prismaService from "../services/prisma.service";
 import { TemplateVariables, WABAMessageTemplate } from "../types/whatsapp-api.types";
 import {
@@ -426,12 +427,16 @@ class WABAWhatsappClient implements WhatsappClient {
 		});
 	}
 
-	public async getTemplates(): Promise<any> {
+	public async getTemplates(): Promise<WABATemplateMessage[]> {
 		const requestURL = `https://graph.facebook.com/v16.0/${this.wabaAccountId}/message_templates?limit=999`;
 		const response = await axios.get(requestURL, this.reqOptions);
-		const templates = response.data.data;
-
-		return templates.map((t: WABAMessageTemplate) => TemplateAdapter.fromWABATemplate(t));
+		const templates = (response.data.data as WABAMessageTemplate[]).map(TemplateAdapter.fromWABATemplate);
+		const bindings = await loadTemplateVariableSources(this.instance, this.wabaAccountId,
+			templates.map(template => ({ id: template.raw.id, body: template.text })));
+		return templates.map(template => {
+			const variableSources = bindings.get(template.raw.id);
+			return variableSources ? { ...template, variableSources } : template;
+		});
 	}
 
 	public async getGroups(): Promise<WhatsappGroup[]> {
