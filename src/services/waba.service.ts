@@ -1,3 +1,4 @@
+import { WabaSystemEventsService } from "./waba-system-events.service";
 import { WppClient } from "@prisma/client";
 import WABAMessageParser from "../parsers/waba-message.parser";
 import { Message, ReceiveMessageBody, WABAMessageStatusData } from "../types/whatsapp-api.types";
@@ -113,6 +114,13 @@ class WABAService {
 				return { ignored: true, reason: validated.reason };
 			}
 
+			if (validated.type === "message" && validated.data.type === "system") {
+				const result = await new WabaSystemEventsService(prismaService,
+					(data) => messagesService.insertMessage(data)).record(instance, validated.data, validated.phoneNumberId, validated.accountId);
+				logger.log("Notificação técnica WABA registrada sem distribuição", result);
+				logger.success("Evento de sistema WABA processado sem atividade do cliente");
+				return { ignored: true, reason: "Evento técnico WABA registrado sem abrir atendimento" };
+			}
 			if (validated.type === "message" && validated.data.type === "reaction") {
 				if (!validated.phoneNumberId || !validated.accountId) throw new Error("WABA_REACTION_CHANNEL_REQUIRED");
 				const channels = await prismaService.wppClient.findMany({ where: { instance, type: "WABA", isActive: true,
