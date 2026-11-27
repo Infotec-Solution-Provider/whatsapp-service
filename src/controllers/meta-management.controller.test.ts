@@ -138,7 +138,8 @@ stub("../utils/processing-logger", class {
 const { MetaManagementService } = require("../services/meta-management.service") as typeof import("../services/meta-management.service");
 stub("../services/meta-management.service", new MetaManagementService(
 	database as unknown as Pick<DatabaseClient, "wppClient">,
-	(token) => new MetaManagementGraph(token, graphFetch)
+	(token) => new MetaManagementGraph(token, graphFetch),
+	async () => null
 ));
 const costCalls: unknown[] = [];
 stub("../services/meta-costs.service", {
@@ -269,4 +270,60 @@ test("cost routes use authenticated tenant scope and validate budgets before mut
 	} finally {
 		await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
 	}
+});
+
+
+test("an inactive pricing-only channel can query cost and rejects management operations before Graph", async () => {
+	const inactive = channels.find(row => row.id === 10)!;
+	const scopedDb = {
+		wppClient: {
+			findMany: async (args: { where: Record<string, unknown>; select: Record<string, boolean> }) => {
+				if (args.where["type"] === "WABA") {
+					assert.deepEqual(args.where["OR"], [{ isActive: true, id: { not: 10 } }, { id: 10, isActive: false }]);
+					return [channels[0]!, inactive].map(row => projection(row, args.select));
+				}
+				return database.wppClient.findMany(args);
+			},
+			findFirst: async ({ where, select }: { where: Record<string, unknown>; select: Record<string, boolean> }) => {
+				assert.equal(currentDatabaseTenant(), "tenant-a");
+				assert.equal(where["isActive"], false);
+				assert.equal(where["id"], 10);
+				return projection(inactive, select);
+			}
+		}
+	};
+	const requests: Array<[string, string]> = [];
+	const graph: typeof fetch = async (input, init) => {
+		const url = new URL(String(input));
+		const endpoint = url.pathname.split("/").slice(2).join("/");
+		requests.push([init?.method ?? "GET", endpoint]);
+		if (endpoint === "100/phone_numbers") {
+			return Response.json({ data: [{ id: "110", display_phone_number: "+55 11 91234-5678" }] });
+		}
+		if (endpoint === "100") return Response.json({ currency: "BRL" });
+		if (endpoint === "100/pricing_analytics") return Response.json({ data: [] });
+		assert.fail("Unexpected Graph request");
+	};
+	const service = new MetaManagementService(
+		scopedDb as unknown as Pick<DatabaseClient, "wppClient">,
+		token => new MetaManagementGraph(token, graph),
+		async instance => instance === "tenant-a" ? 10 : null
+	);
+	await withDatabaseTenant("tenant-a", async () => {
+		assert.deepEqual((await service.listChannels("tenant-a"))[1], {
+			clientId: 10, name: "Canal 10", phone: null, managementMode: "pricing-only"
+		});
+		await assert.rejects(() => service.getNumber("tenant-a", 10), { code: "META_CHANNEL_PRICING_ONLY" });
+		await assert.rejects(() => service.getProfile("tenant-a", 10), { code: "META_CHANNEL_PRICING_ONLY" });
+		await assert.rejects(() => service.listTemplates("tenant-a", 10, {}), { code: "META_CHANNEL_PRICING_ONLY" });
+		await assert.rejects(() => service.updateProfile(
+			{ instance: "tenant-a", role: "ADMIN", userId: 7, sectorId: 1, name: "Fixture" }, 10, { about: "change" }
+		), { code: "META_CHANNEL_PRICING_ONLY" });
+		assert.equal(requests.length, 0);
+		const report = await service.getChannelPricing("tenant-a", 10, {
+			start: new Date("2026-11-01"), end: new Date("2026-11-02")
+		});
+		assert.equal(report?.currency, "BRL");
+		assert.deepEqual(requests.map(([method]) => method), ["GET", "GET", "GET"]);
+	});
 });

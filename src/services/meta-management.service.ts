@@ -4,12 +4,13 @@ import type { SessionData } from "../sdk-local/types/auth.types";
 import { withDatabaseTenant } from "../utils/database-tenant-context";
 import ProcessingLogger from "../utils/processing-logger";
 import database, { type DatabaseClient } from "./prisma.service";
+import parameters from "./parameters.service";
 import { MetaGraphError, MetaManagementGraph, type MetaPhoto, type MetaProfilePatch, type MetaTemplateFilters, type MetaTemplateInput } from "./meta-management.graph";
 
 const assetFields = { WABAAccountId: true, WABAPhoneId: true } as const;
 const directoryFields = { id: true, name: true, phone: true, ...assetFields } as const;
 const officialChannel = {
-	type: "WABA", isActive: true, AND: [{ WABAToken: { not: null } }, { WABAToken: { not: "" } }]
+	type: "WABA", AND: [{ WABAToken: { not: null } }, { WABAToken: { not: "" } }]
 } satisfies Prisma.WppClientWhereInput;
 type DirectoryRow = Pick<WppClient, keyof typeof directoryFields>;
 type ConfiguredAssets = { WABAAccountId: string; WABAPhoneId: string };
@@ -19,8 +20,11 @@ function eligibleAssets(row: DirectoryRow): row is DirectoryRow & ConfiguredAsse
 	return Boolean(row.WABAAccountId && metaId.test(row.WABAAccountId) && row.WABAPhoneId && metaId.test(row.WABAPhoneId));
 }
 
-function publicChannel(channel: DirectoryRow) {
-	return { clientId: channel.id, name: channel.name, phone: channel.phone };
+function publicChannel(channel: DirectoryRow, pricingOnly = false) {
+	return {
+		clientId: channel.id, name: channel.name, phone: channel.phone,
+		...(pricingOnly ? { managementMode: "pricing-only" as const } : {})
+	};
 }
 
 function unavailableChannel(): MetaGraphError {
@@ -34,7 +38,8 @@ function inconsistentBinding(): MetaGraphError {
 export class MetaManagementService {
 	constructor(
 		private readonly db: Pick<DatabaseClient, "wppClient"> = database,
-		private readonly createGraph = (token: string) => new MetaManagementGraph(token)
+		private readonly createGraph = (token: string) => new MetaManagementGraph(token),
+		private readonly pricingOnlyChannelId = (instance: string) => parameters.getMetaPricingOnlyChannelId(instance)
 	) {}
 
 	private async sharedAccounts(instance: string, channels: ConfiguredAssets[]): Promise<Set<string | null>> {
@@ -59,12 +64,17 @@ export class MetaManagementService {
 	}
 
 	public async listChannels(instance: string) {
+		const pricingOnlyId = await this.pricingOnlyChannelId(instance);
+		const availability: Prisma.WppClientWhereInput = pricingOnlyId === null
+			? { isActive: true }
+			: { OR: [{ isActive: true, id: { not: pricingOnlyId } }, { id: pricingOnlyId, isActive: false }] };
 		const rows = await this.db.wppClient.findMany({
-			where: { instance, ...officialChannel }, select: directoryFields, orderBy: [{ name: "asc" }, { id: "asc" }]
+			where: { instance, ...officialChannel, ...availability }, select: directoryFields, orderBy: [{ name: "asc" }, { id: "asc" }]
 		});
 		const channels = rows.filter(eligibleAssets);
 		const shared = await this.sharedAccounts(instance, channels);
-		return channels.filter((channel) => !shared.has(channel.WABAAccountId)).map(publicChannel);
+		return channels.filter((channel) => !shared.has(channel.WABAAccountId))
+			.map(channel => publicChannel(channel, channel.id === pricingOnlyId));
 	}
 
 	public async listCostReceiptChannels(instance: string) {
@@ -79,9 +89,14 @@ export class MetaManagementService {
 		}));
 	}
 
-	private async verifiedChannel(instance: string, clientId: number) {
+	private async verifiedChannel(instance: string, clientId: number, pricing = false) {
+		const pricingOnly = clientId === await this.pricingOnlyChannelId(instance);
+		if (pricingOnly && !pricing) {
+			throw new MetaGraphError(403, "META_CHANNEL_PRICING_ONLY", "Este canal está disponível para consulta de custos.");
+		}
 		const channel = await this.db.wppClient.findFirst({
-			where: { id: clientId, instance, ...officialChannel }, select: { ...directoryFields, WABAToken: true }
+			where: { id: clientId, instance, ...officialChannel, isActive: !pricingOnly },
+			select: { ...directoryFields, WABAToken: true }
 		});
 		if (!channel || !eligibleAssets(channel) || !channel.WABAToken || /\s/.test(channel.WABAToken)
 			|| (await this.sharedAccounts(instance, [channel])).has(channel.WABAAccountId)) {
@@ -94,7 +109,7 @@ export class MetaManagementService {
 	}
 
 	public async getChannelPricing(instance: string, clientId: number, period: { start: Date; end: Date }) {
-		const { graph, accountId, number } = await this.verifiedChannel(instance, clientId);
+		const { graph, accountId, number } = await this.verifiedChannel(instance, clientId, true);
 		return number.phone ? graph.getPricingAnalytics(accountId, number.phone, period.start, period.end) : null;
 	}
 
