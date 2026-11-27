@@ -262,6 +262,7 @@ export interface WppContactMessagesReadEventData {
 	contactId: number;
 }
 export interface WppMessageEventData {
+	pushUserId?: number;
 	message: WppMessage;
 }
 

@@ -130,5 +130,5 @@ test("não altera atendimento aberto com encerramento automático habilitado", a
 test("a recuperação histórica não importa rotas de distribuição, envio, bot ou push", () => {
 	const sourcePath = __filename.replace(/\.test(?=\.[jt]s$)/, "");
 	const text = readFileSync(sourcePath, "utf8");
-	assert.doesNotMatch(text, /messages-distribution|whatsapp\.service|socket\.service|sendMessage|sendPushNotification|\bbots\/|\.wppChat\.(?:create|update)/);
+	assert.doesNotMatch(text, /messages-distribution|whatsapp\.service|socket\.service|sendMessage|notifyAssignedOperator|sendPushNotification|\bbots\/|\.wppChat\.(?:create|update)/);
 });

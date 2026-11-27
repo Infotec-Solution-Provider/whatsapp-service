@@ -10,6 +10,7 @@ import {
 	WppMessageEventData
 } from "../sdk-local";
 import { sanitizeErrorMessage } from "@in.pulse-crm/utils";
+import { env } from "node:process";
 import {
 	AutomaticResponseRule,
 	AutomaticResponseSchedule,
@@ -100,32 +101,32 @@ class MessagesDistributionService {
 		);
 	}
 
-	private async sendPushNotification(
-		userId: number,
-		instance: string,
-		payload: {
-			event: "new_message" | "new_conversation";
-			title: string;
-			body: string;
-			url: string;
-			tag: string;
-		},
-	): Promise<void> {
-		const secret = process.env["PUSH_NOTIFICATIONS_SECRET"];
-		if (!secret) {
-			return;
-		}
-
-		const usersApiUrl = process.env["USERS_API_RL"] || "http://localhost:8001";
-		const axios = (await import("axios")).default;
-		await axios.post(
-			`${usersApiUrl}/api/_internal/push-notifications`,
-			{ userId, instance, payload },
-			{
+	// Only individual assignments have a single push recipient.
+	public notifyAssignedOperator(
+		process: ProcessingLogger | null,
+		chat: Pick<WppChat, "id" | "instance" | "userId" | "walletId" | "isFinished">,
+		event: "new_message" | "new_conversation",
+	): number | undefined {
+		const secret = env["PUSH_NOTIFICATIONS_SECRET"];
+		if (!secret || !chat.userId || chat.userId <= 0 || chat.walletId || chat.isFinished) return;
+		const userId = chat.userId;
+		const usersApiUrl = (env["USERS_API_RL"] || "http://localhost:8001").replace(/\/$/, "");
+		const payload = {
+			event,
+			title: event === "new_message" ? "Nova mensagem de WhatsApp" : "Nova conversa de WhatsApp",
+			body: event === "new_message" ? "Abra o CRM para ler a mensagem." : "Uma conversa foi atribuída a você.",
+			url: `/${encodeURIComponent(chat.instance)}?pushChat=${chat.id}`,
+			tag: `whatsapp:${chat.instance}:${chat.id}`,
+		};
+		void import("axios").then(({ default: axios }) =>
+			axios.post(`${usersApiUrl}/api/_internal/push-notifications`, { userId, instance: chat.instance, payload }, {
 				headers: { "x-inpulse-push-secret": secret },
 				timeout: 10_000,
-			},
-		);
+			}),
+		).catch(() => {
+			process?.log(`Falha ao enviar push de WhatsApp para a conversa ${chat.id}.`);
+		});
+		return userId;
 	}
 
 	private isIncomingCustomerMessage(message: WppMessage): boolean {
@@ -865,7 +866,8 @@ class MessagesDistributionService {
 	}
 	public async notifyChatStarted(process: ProcessingLogger, chat: WppChat) {
 		try {
-			const data = { chatId: chat.id };
+			const pushUserId = this.notifyAssignedOperator(process, chat, "new_conversation");
+			const data = { chatId: chat.id, pushUserId };
 			const monitorRoom: SocketServerMonitorRoom = `${chat.instance}:${chat.sectorId!}:monitor`;
 
 			await socketService.emit(SocketEventType.WppChatStarted, monitorRoom, data);
@@ -888,15 +890,6 @@ class MessagesDistributionService {
 				const userRoom: SocketServerUserRoom = `${chat.instance}:user:${chat.userId}`;
 				await socketService.emit(SocketEventType.WppChatStarted, userRoom, data);
 				process.log(`Chat enviado para o socket: /${userRoom}/ room!`);
-				void this.sendPushNotification(chat.userId, chat.instance, {
-					event: "new_conversation",
-					title: "Nova conversa",
-					body: "Uma conversa foi atribuída a você.",
-					url: `/${chat.instance}`,
-					tag: `chat-${chat.id}`,
-				}).catch((error: unknown) => {
-					process.log(`Falha ao enviar push de nova conversa: ${sanitizeErrorMessage(error)}`);
-				});
 			}
 		} catch (err) {
 			const msg = sanitizeErrorMessage(err);
@@ -916,24 +909,21 @@ class MessagesDistributionService {
 			}
 
 			const room: SocketServerChatRoom = `${instance}:chat:${message.chatId}`;
-			const data: WppMessageEventData = { message: (await messagePresentationService.hydrate(instance, [message]))[0]! };
+			let pushUserId: number | undefined;
+			if (env["PUSH_NOTIFICATIONS_SECRET"] && this.isIncomingCustomerMessage(message)) {
+				const chat = await prismaService.wppChat.findFirst({
+					where: { id: message.chatId, instance },
+					select: { id: true, instance: true, userId: true, walletId: true, isFinished: true },
+				}).catch(() => {
+					process?.log("Falha ao consultar o destinatário do push de WhatsApp.");
+					return null;
+				});
+				if (chat) pushUserId = this.notifyAssignedOperator(process, chat, "new_message");
+			}
+			const presentedMessage = (await messagePresentationService.hydrate(instance, [message]))[0]!;
+			const data: WppMessageEventData = { message: presentedMessage, ...(pushUserId ? { pushUserId } : {}) };
 			await socketService.emit(SocketEventType.WppMessage, room, data);
 			process?.log(`Mensagem transmitida para a sala: /${room}/ room!`);
-
-			if (this.isIncomingCustomerMessage(message)) {
-				const chat = await prismaService.wppChat.findUnique({ where: { id: message.chatId } });
-				if (chat?.userId && chat.userId > 0) {
-					void this.sendPushNotification(chat.userId, message.instance, {
-						event: "new_message",
-						title: "Nova mensagem",
-						body: message.body.slice(0, 180) || "Você recebeu uma nova mensagem.",
-						url: `/${message.instance}`,
-						tag: `chat-${chat.id}`,
-					}).catch((error: unknown) => {
-						process?.log(`Falha ao enviar push de nova mensagem: ${sanitizeErrorMessage(error)}`);
-					});
-				}
-			}
 		} catch (err) {
 			const msg = sanitizeErrorMessage(err);
 			process?.log(`Falha ao transmitir mensagem: ${msg}`);

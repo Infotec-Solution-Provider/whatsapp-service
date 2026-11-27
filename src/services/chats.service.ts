@@ -865,8 +865,11 @@ class ChatsService {
 		await this.runAfterAgentAction(logger, "registrar a mensagem de sistema", () =>
 			messagesDistributionService.addSystemMessage(chat, `Atendimento transferido por ${session.name}.`)
 		);
+		const pushUserId = chats.userId !== userId
+			? messagesDistributionService.notifyAssignedOperator(logger, chat, "new_conversation")
+			: undefined;
 		await this.runAfterAgentAction(logger, "avisar as telas", async () => {
-			const data = { chatId: chat.id };
+			const data = { chatId: chat.id, pushUserId };
 			await socketService.emit(event, `${instance}:chat:${chat.id}`, data);
 			if (chats.walletId) await socketService.emit(event, `${instance}:wallet:${chats.walletId}`, data);
 			if (chats.userId && chats.userId > 0 && chats.userId !== userId) {
