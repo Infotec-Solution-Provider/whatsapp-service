@@ -30,7 +30,7 @@ const channels = [
 const flagReads: string[] = [];
 const channelReads: number[] = [];
 
-function projection(row: (typeof channels)[number], select: Record<string, boolean>) {
+function projection(row: Record<string, unknown>, select: Record<string, boolean>) {
 	return Object.fromEntries(Object.entries(row).filter(([key]) => select[key]));
 }
 
@@ -274,14 +274,14 @@ test("cost routes use authenticated tenant scope and validate budgets before mut
 
 
 test("an inactive pricing-only channel can query cost and rejects management operations before Graph", async () => {
-	const inactive = { ...channels.find(row => row.id === 10)!, WABAToken: null };
+	const inactive = { ...channels.find(row => row.id === 10)!, WABAToken: null, WABAAccountId: null, WABAPhoneId: null };
 	const scopedDb = {
 		wppClient: {
 			findMany: async (args: { where: Record<string, unknown>; select: Record<string, boolean> }) => {
 				if (args.where["type"] === "WABA") {
 					assert.deepEqual(args.where["OR"], [
 						{ type: "WABA", AND: [{ WABAToken: { not: null } }, { WABAToken: { not: "" } }], isActive: true, id: { not: 10 } },
-						{ id: 10, isActive: false, WABAToken: null }
+						{ id: 10, isActive: false, WABAToken: null, WABAAccountId: null, WABAPhoneId: null }
 					]);
 					return [channels[0]!, inactive].map(row => projection(row, args.select));
 				}
@@ -291,6 +291,8 @@ test("an inactive pricing-only channel can query cost and rejects management ope
 				assert.equal(currentDatabaseTenant(), "tenant-a");
 				assert.equal(where["isActive"], false);
 				assert.equal(where["WABAToken"], null);
+				assert.equal(where["WABAAccountId"], null);
+				assert.equal(where["WABAPhoneId"], null);
 				assert.equal(where["id"], 10);
 				return projection(inactive, select);
 			}
@@ -313,7 +315,9 @@ test("an inactive pricing-only channel can query cost and rejects management ope
 		scopedDb as unknown as Pick<DatabaseClient, "wppClient">,
 		token => new MetaManagementGraph(token, graph),
 		async instance => instance === "tenant-a" ? 10 : null,
-		async (instance, clientId) => instance === "tenant-a" && clientId === 10 ? "fixture-pricing-credential" : null
+		async (instance, clientId) => instance === "tenant-a" && clientId === 10
+			? { token: "fixture-pricing-credential", accountId: "100", phoneId: "110" }
+			: null
 	);
 	await withDatabaseTenant("tenant-a", async () => {
 		assert.deepEqual((await service.listChannels("tenant-a"))[1], {
