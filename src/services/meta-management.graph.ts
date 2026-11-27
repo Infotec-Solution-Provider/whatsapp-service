@@ -1,3 +1,5 @@
+import { Decimal } from "@prisma/client/runtime/library";
+
 const GRAPH_BASE = "https://graph.facebook.com/v26.0/";
 const TEMPLATE_FIELDS = "id,name,language,category,status,components,rejected_reason";
 const PROFILE_FIELDS = "about,description,email,address,websites,vertical,profile_picture_url";
@@ -58,6 +60,20 @@ export interface MetaPhoto {
 	contentType: "image/png" | "image/jpeg";
 }
 
+export interface MetaPricingBucket {
+	category: string;
+	pricingType: string;
+	volume: number;
+	cost: number | null;
+}
+
+export interface MetaPricingReport {
+	currency: string | null;
+	totalCost: number | null;
+	totalVolume: number;
+	buckets: MetaPricingBucket[];
+}
+
 export class MetaGraphError extends Error {
 	constructor(public status: number, public code: string, message: string, public traceId?: string) {
 		super(message);
@@ -110,6 +126,44 @@ function mapTemplate(value: Json): MetaTemplate {
 		body: nullableString(body?.["text"]) ?? "",
 		rejectionReason: nullableString(value["rejected_reason"])
 	};
+}
+
+function pricingPhone(value: unknown): string | null {
+	const normalized = nullableString(value)?.replace(/[\s()-]/g, "");
+	return normalized && /^\+?[1-9]\d{5,14}$/.test(normalized) ? normalized.replace(/^\+/, "") : null;
+}
+
+function pricingDimension(value: unknown): string {
+	const name = nullableString(value);
+	if (!name || !/^[A-Z][A-Z0-9_]{0,47}$/.test(name)) throw invalidResponse();
+	return name;
+}
+
+function pricingPoint(value: Json, phone: string) {
+	if (pricingPhone(value["phone_number"]) !== phone) throw invalidResponse();
+	const volume = value["volume"];
+	if (typeof volume !== "number" || !Number.isSafeInteger(volume) || volume < 0) throw invalidResponse();
+	const cost = value["cost"];
+	if (cost != null && (typeof cost !== "number" || !Number.isFinite(cost) || cost < 0)) throw invalidResponse();
+	return {
+		category: pricingDimension(value["pricing_category"]),
+		pricingType: pricingDimension(value["pricing_type"]),
+		volume,
+		cost: cost == null ? null : new Decimal(cost)
+	};
+}
+
+type PricingAccumulator = ReturnType<typeof pricingPoint>;
+
+function addPricingPoint(buckets: Map<string, PricingAccumulator>, point: PricingAccumulator) {
+	const key = `${point.category}:${point.pricingType}`;
+	const previous = buckets.get(key);
+	if (!previous) {
+		buckets.set(key, point);
+		return;
+	}
+	previous.volume += point.volume;
+	previous.cost = previous.cost !== null && point.cost !== null ? previous.cost.add(point.cost) : null;
 }
 
 export class MetaManagementGraph {
@@ -241,6 +295,59 @@ export class MetaManagementGraph {
 			if (after) seen.add(after);
 		} while (after);
 		return numbers;
+	}
+
+	async getPricingAnalytics(accountId: string, phone: string, from: Date, to: Date): Promise<MetaPricingReport> {
+		const number = pricingPhone(phone);
+		if (!number) throw new MetaGraphError(422, "META_PRICING_PHONE_UNAVAILABLE", "Número do canal indisponível para consultar os custos na Meta.");
+		const start = Math.floor(from.getTime() / 1000);
+		const end = Math.floor(to.getTime() / 1000);
+		if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start) {
+			throw new MetaGraphError(422, "META_PRICING_RANGE_INVALID", "Período inválido para consultar os custos na Meta.");
+		}
+
+		const [account, buckets] = await Promise.all([
+			this.request(accountId, { fields: "currency" }),
+			this.pricingBuckets(accountId, number, start, end)
+		]);
+		const accountCurrency = nullableString(account["currency"]);
+		const currency = accountCurrency && /^[A-Z]{3}$/.test(accountCurrency) ? accountCurrency : null;
+		const totalCost = buckets.reduce<Decimal | null>((total, bucket) =>
+			total !== null && bucket.cost !== null ? total.add(bucket.cost) : null, new Decimal(0));
+		return {
+			currency,
+			totalCost: currency ? totalCost?.toNumber() ?? null : null,
+			totalVolume: buckets.reduce((total, bucket) => total + bucket.volume, 0),
+			buckets: buckets.map((bucket) => ({
+				...bucket,
+				cost: currency ? bucket.cost?.toNumber() ?? null : null
+			}))
+		};
+	}
+
+	private async pricingBuckets(accountId: string, phone: string, start: number, end: number): Promise<PricingAccumulator[]> {
+		const query = {
+			start: String(start), end: String(end), granularity: "DAILY",
+			phone_numbers: JSON.stringify([phone]),
+			metric_types: JSON.stringify(["COST", "VOLUME"]),
+			dimensions: JSON.stringify(["PHONE", "PRICING_CATEGORY", "PRICING_TYPE"])
+		};
+		const buckets = new Map<string, PricingAccumulator>();
+		const seen = new Set<string>();
+		let after: string | null = null;
+		do {
+			const response = await this.request(`${accountId}/pricing_analytics`, after ? { ...query, after } : query);
+			const page = getPage(response);
+			for (const item of page.data) {
+				const points = item["data_points"];
+				if (!Array.isArray(points)) throw invalidResponse();
+				for (const point of points) addPricingPoint(buckets, pricingPoint(json(point), phone));
+			}
+			after = page.nextCursor;
+			if (json(response["paging"])["next"] && (!after || seen.has(after) || seen.size >= 20)) throw invalidResponse();
+			if (after) seen.add(after);
+		} while (after);
+		return Array.from(buckets.values());
 	}
 
 	async getProfile(phoneId: string): Promise<MetaProfile> {

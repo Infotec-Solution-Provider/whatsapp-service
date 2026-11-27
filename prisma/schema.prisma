@@ -163,6 +163,18 @@ model WppClient {
   @@map("clients")
 }
 
+model MetaOperatorBudget {
+  instance    String   @db.VarChar(191)
+  month       String   @db.Char(7)
+  operatorId  Int      @map("operator_id")
+  budgetCents Int      @map("budget_cents")
+  updatedBy   Int      @map("updated_by")
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.DateTime(0)
+
+  @@id([instance, month, operatorId])
+  @@map("meta_operator_budgets")
+}
+
 model WppClientSessionSnapshot {
   clientId                Int       @id @map("client_id")
   contractVersion         Int       @map("contract_version")
@@ -919,6 +931,7 @@ model WABAWebhookQueue {
 
   @@index([instance, status])
   @@index([status, createdAt])
+  @@index([instance, createdAt], map: "waba_webhook_queue_instance_created_at_idx")
   @@map("waba_webhook_queue")
 }
 

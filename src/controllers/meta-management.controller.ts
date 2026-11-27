@@ -3,6 +3,8 @@ import { Router, json, type ErrorRequestHandler, type RequestHandler } from "exp
 import multer from "multer";
 import isAdmin from "../middlewares/is-admin.middleware";
 import isAuthenticated from "../middlewares/is-authenticated.middleware";
+import { parseMetaBudget, parseMetaCostPeriod } from "../services/meta-costs.calculation";
+import metaCosts from "../services/meta-costs.service";
 import { MetaGraphError } from "../services/meta-management.graph";
 import metaManagement from "../services/meta-management.service";
 import { META_PHOTO_MAX_BYTES, parseMetaPhoto, parseMetaProfilePatch, parseMetaTemplateFilters, parseMetaTemplateInput } from "../services/meta-management.validation";
@@ -38,6 +40,28 @@ router.use(isAuthenticated, isAdmin, async (req, _res, next) => {
 
 router.get("/channels", async (req, res) => {
 	res.json({ channels: await metaManagement.listChannels(req.session.instance) });
+});
+
+router.get("/costs", async (req, res) => {
+	res.set("Cache-Control", "no-store");
+	res.json(await metaCosts.getCosts(req.session.instance, parseMetaCostPeriod(req.query["month"])));
+});
+
+router.get("/channels/:clientId/costs", async (req, res) => {
+	res.set("Cache-Control", "no-store");
+	res.json(await metaCosts.getOfficialCosts(
+		req.session.instance, parseClientId(req.params["clientId"]), parseMetaCostPeriod(req.query["month"])
+	));
+});
+
+router.put("/budgets/:operatorId", parseJson, async (req, res) => {
+	res.set("Cache-Control", "no-store");
+	const { month } = parseMetaCostPeriod(req.query["month"]);
+	const { operatorId } = req.params;
+	if (typeof operatorId !== "string" || !/^[1-9]\d{0,9}$/.test(operatorId) || Number(operatorId) > 2147483647) {
+		throw new MetaGraphError(400, "META_COST_INVALID_OPERATOR", "Selecione um operador válido.");
+	}
+	res.json(await metaCosts.setBudget(req.session, month, Number(operatorId), parseMetaBudget(req.body)));
 });
 
 router.get("/channels/:clientId/number", async (req, res) => {
