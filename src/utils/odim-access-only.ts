@@ -80,6 +80,7 @@ export function odimQueueSql(): string {
 // Exact Express templates only. External chat/message/schedule resources and BI exports
 // are not part of CRM-only access, even when their old handlers lack tenant checks.
 const LOCAL_READS = new Set([
+	"/api/whatsapp/parameter-settings/closed-dates",
 	"/api/whatsapp/reports/active-users",
  "/api/whatsapp/monitor",
  "/api/whatsapp/session/monitor", "/api/whatsapp/chats/:id", "/api/whatsapp/chats/:id/messages", "/api/whatsapp/messages/:id",
@@ -92,7 +93,9 @@ const LOCAL_READS = new Set([
 	"/api/internal/chats/:id/messages", "/api/internal/groups", "/api/internal/whatsapp-senders/names",
 	"/api/ready-messages", "/api/wallets", "/api/results",
 ]);
-const INTERNAL_WRITES = [
+const LOCAL_WRITES = [
+	"PUT /api/whatsapp/parameter-settings/closed-dates/:date",
+	"DELETE /api/whatsapp/parameter-settings/closed-dates/:date",
 	"POST /api/internal/chats", "DELETE /api/internal/chats/:id", "POST /api/internal/chats/:id/finish",
 	"POST /api/internal/chats/:id/messages", "PUT /api/internal/messages/:id", "POST /api/internal/messages/:id/reaction",
 	"PUT /api/internal/groups/:id", "PUT /api/internal/groups/:id/image", "PATCH /api/internal/chat/:id/mark-as-read",
@@ -100,7 +103,7 @@ const INTERNAL_WRITES = [
 
 export function odimLocalRequestAllowed(method: string, route: unknown): boolean {
 	if (typeof route !== "string") return false;
-	return (method === "GET" && LOCAL_READS.has(route)) || (method === "POST" && route === "/api/whatsapp/monitor/search") || INTERNAL_WRITES.includes(`${method} ${route}`);
+	return (method === "GET" && LOCAL_READS.has(route)) || (method === "POST" && route === "/api/whatsapp/monitor/search") || LOCAL_WRITES.includes(`${method} ${route}`);
 }
 
 /** Service BI credentials bypass ordinary isAuthenticated; fence them after its trusted global guard. */
