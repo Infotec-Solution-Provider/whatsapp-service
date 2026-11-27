@@ -1,6 +1,6 @@
 import prismaService from "./prisma.service";
 import { TRANSFER_FROM_CONTACT_SEARCH } from "../parameters/transfer-from-contact-search";
-import { META_MANAGEMENT_PARAMETER } from "../parameters/meta-management";
+import { META_MANAGEMENT_PARAMETER, META_PRICING_ONLY_CHANNEL_PARAMETER } from "../parameters/meta-management";
 import { MESSAGE_FLOW_EDITOR_PARAMETER } from "../parameters/message-flow-editor";
 import { CHANGELOG_CORRECTIONS_PARAMETER } from "../parameters/changelog-corrections";
 import { homologTriageEnabled, resolveTriageFlag, TRIAGE_FLAG } from "../parameters/triage-feature";
@@ -110,6 +110,16 @@ class ParametersService {
 
 	public async isMetaManagementEnabled(instance: string) {
 		return this.isInstanceFeatureEnabled(instance, META_MANAGEMENT_PARAMETER);
+	}
+
+	public async getMetaPricingOnlyChannelId(instance: string): Promise<number | null> {
+		const parameter = await prismaService.parameter.findFirst({
+			where: { instance, scope: "INSTANCE", key: META_PRICING_ONLY_CHANNEL_PARAMETER, userId: null, sectorId: null },
+			orderBy: { id: "desc" },
+			select: { value: true }
+		});
+		const value = parameter?.value;
+		return value && /^[1-9]\d{0,9}$/.test(value) && Number(value) <= 2147483647 ? Number(value) : null;
 	}
 
 	public async isMessageFlowEditorEnabled(instance: string) {
