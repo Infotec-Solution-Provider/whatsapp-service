@@ -128,6 +128,7 @@ async function run() {
       '../utils/waba-reaction': load('utils/waba-reaction'),
       './waba-reaction-receipts.service': { WabaReactionReceiptsService: class { async applyStatus() { return null; } } },
       '../utils/incoming-contact-name': { wabaContactName: () => null },
+      '../triage/waba-channel': { resolveTriageWabaChannel: async client => client },
       './waba-system-events.service': { WabaSystemEventsService },
     }).default;
     waba.checkAndUpdateContactConversationExpiration = async () => { expiration++; };

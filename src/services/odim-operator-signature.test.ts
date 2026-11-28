@@ -30,10 +30,12 @@ async function run(): Promise<void> {
 			return { data: { messages: [{ id: `wamid.synthetic-${bodies.length}` }] } };
 		} });
 		for (const path of ["./instances.service", "./internal-chats.service", "./contacts.service", "./ready-messages.service",
-			"./message-presentation.service", "./odim-operational-channel.service", "../adapters/template.adapter"])
+			"./message-presentation.service", "../adapters/template.adapter"])
 			stub(path, unexpected(path));
 		for (const provider of ["gupshup", "remote", "wwebjs"])
 			stub(`../whatsapp-client/${provider}-whatsapp-client`, class {});
+		isolate("./operator-pause-admission.runtime", { admitHumanSend: async () => {} });
+		stub("./manual-chat-authorization.service", { assertCanSend: async () => {} });
 		stub("./prisma.service", {
 			wppClient: { findFirst: async () => ({ id: 13, instance: currentSession.instance, type: "WABA", isActive: true }) },
 			wppContact: { findFirst: async () => ({ id: 42, instance: currentSession.instance }) },

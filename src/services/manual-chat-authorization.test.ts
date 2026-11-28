@@ -25,7 +25,7 @@ function world() {
 		effects: [] as string[],
 		crmReads: [] as Array<{ instance: string; query: string; values: unknown[] }>,
 		flagReads: [] as Row[],
-		targets: [{ CODIGO: 55 }] as Row[],
+		targets: [{ CODIGO: 55 }] as Row[], destinationError: null as Error | null,
 		transferChecks: [] as Row[],
 		beforeTransferUpdate: null as (() => void) | null,
 		replay: null as Row | null
@@ -94,7 +94,7 @@ async function withWorld(f: World, run: (s: Services) => Promise<void>) {
 					return chat;
 				}
 			},
-			wppSector: { findUnique: async () => ({ id: 3, defaultClientId: 7 }) }
+			wppSector: { findFirst: async () => ({ id: 3, defaultClientId: 7 }), findUnique: async () => ({ id: 3, defaultClientId: 7 }) }
 		});
 		stub("./instances.service", { executeQuery: async (instance: string, query: string, values: unknown[]) => {
 			if (query === "SELECT CODIGO FROM operadores WHERE CODIGO = ? LIMIT 1") {
@@ -112,7 +112,7 @@ async function withWorld(f: World, run: (s: Services) => Promise<void>) {
 			f.effects.push("local-sync");
 			return [];
 		} });
-		stub("./users.service", () => ({ setAuth() {}, getUserById: async () => ({ NOME: "Operator" }) }));
+		stub("./users.service", () => ({ setAuth() {}, getUserById: async (id: number) => { if (f.destinationError) throw f.destinationError; return id === 12 || f.targets.some(t => Number(t["CODIGO"]) === id) ? { NOME: "Operator", ATIVO: "SIM" } : null; } }));
 		stub("./messages-distribution.service", {
 			addSystemMessage: async () => { f.effects.push("system-message"); },
 			notifyChatStarted: async () => { f.effects.push("notify-chat"); },
@@ -133,6 +133,7 @@ async function withWorld(f: World, run: (s: Services) => Promise<void>) {
 		for (const path of ["./internal-chats.service", "./chat-user-preferences.service",
 			"./public-report-fields.service", "../bots/exatron-satisfaction.bot", "./message-reactions.service"])
 			stub(path, {});
+		stub("./chat-user-preferences.service", { withUnreadAssignment: (write: (db: unknown) => unknown) => write(require("./prisma.service").default) });
 		stub("./message-presentation.service", { fromStored: (message: Row) => message });
 		for (const provider of ["gupshup", "remote", "waba", "wwebjs"])
 			stub(`../whatsapp-client/${provider}-whatsapp-client`, class {});
@@ -140,7 +141,10 @@ async function withWorld(f: World, run: (s: Services) => Promise<void>) {
 		stub("../middlewares/multer.middleware", { single: () => (_req: unknown, _res: unknown, next: () => void) => next() });
 		for (const middleware of ["only-local.middleware", "public-bi-rate-limit.middleware", "public-bi-auth.middleware"])
 			stub(`../middlewares/${middleware}`, (_req: unknown, _res: unknown, next: () => void) => next());
-		fresh("./parameters.service");
+		const parameters = fresh("./parameters.service");
+		parameters.getSessionParams = async () => Object.fromEntries(f.parameters.filter(p => p["scope"] === "INSTANCE").map(p => [p["key"], p["value"]]));
+		replace("./operator-pause-admission.runtime", { admitHumanSend: async () => {} });
+		stub("./wallets.service", { assertChatMember: async () => {} });
 		fresh("./contacts.service");
 		const authorization = fresh("./manual-chat-authorization.service");
 		const whatsapp = fresh("./whatsapp.service");
@@ -317,7 +321,7 @@ for (const overrides of [{ instance: "tenant-b" }, { isFinished: true }]) test(`
 test("own chat transfer validates target and conditionally updates the original owner", async (f, s) => {
 	f.chats.push(chat()); await s.chats.transferAttendance("fixture-token", session, 100, 55);
 	assert.equal(f.chats[0]!["userId"], 55); assert.ok(f.effects.includes("transfer-history"));
-	assert.deepEqual(f.transferChecks, [{ id: 100, instance: "tenant-a", isFinished: false, userId: 12 }]);
+	assert.deepEqual(f.transferChecks.map(({ id, instance, isFinished, userId }) => ({ id, instance, isFinished, userId })), [{ id: 100, instance: "tenant-a", isFinished: false, userId: 12 }]);
 });
 test("ADMIN may transfer another operator's active chat", async (f, s) => {
 	f.chats.push(chat({ userId: 99 })); await s.chats.transferAttendance("fixture-token", { ...session, role: "ADMIN" }, 100, 55);
@@ -326,13 +330,13 @@ test("ADMIN may transfer another operator's active chat", async (f, s) => {
 test("Supervisor (ADMIN) retains the original transfer path without new flag/CRM prerequisites", async (f, s) => {
 	f.flagError = new Error("Flag lookup forbidden for supervisors"); f.crmError = new Error("CRM unavailable"); f.chats.push(chat({ userId: 99 }));
 	await s.chats.transferAttendance("fixture-token", { ...session, role: "ADMIN" }, 100, 55);
-	assert.equal(f.chats[0]!["userId"], 55); assert.equal(f.flagReads.length, 0); assert.equal(f.transferChecks.length, 0);
+	assert.equal(f.chats[0]!["userId"], 55); assert.equal(f.flagReads.length, 0); assert.equal(f.transferChecks.length, 1);
 });
 for (const target of [0, -1, 1.5, 999]) test(`transfer rejects invalid/missing target ${target}`, async (f, s) => {
 	f.chats.push(chat()); await assert.rejects(s.chats.transferAttendance("fixture-token", session, 100, target), BadRequestError); assertNoEffects(f);
 });
 test("transfer fails closed on CRM destination lookup error", async (f, s) => {
-	f.chats.push(chat()); f.crmError = new Error("CRM unavailable");
+	f.chats.push(chat()); f.destinationError = new Error("CRM unavailable");
 	await assert.rejects(s.chats.transferAttendance("fixture-token", session, 100, 55), /CRM unavailable/); assertNoEffects(f);
 });
 test("transfer compare-and-swap rejects an owner changed concurrently", async (f, s) => {
@@ -342,7 +346,7 @@ test("transfer compare-and-swap rejects an owner changed concurrently", async (f
 });
 test("disabled flag preserves the existing transfer path without CRM target lookup", async (f, s) => {
 	f.parameters = []; f.chats.push(chat()); f.crmError = new Error("No CRM expected");
-	await s.chats.transferAttendance("fixture-token", session, 100, 55); assert.equal(f.transferChecks.length, 0); assert.ok(f.effects.includes("update-chat"));
+	await s.chats.transferAttendance("fixture-token", session, 100, 55); assert.equal(f.transferChecks.length, 1); assert.ok(f.effects.includes("update-chat"));
 });
 
 function policy(f: World, blockOther: boolean, blockPublic: boolean) {
@@ -394,7 +398,7 @@ test("public-only flag prevents taking another chat via transfer before the own-
 });
 test("public-only flag uses conditional transfer for the legitimate current owner", async (f, s) => {
 	policy(f, false, true); f.chats.push(chat()); await s.chats.transferAttendance("fixture-token", session, 100, 55);
-	assert.deepEqual(f.transferChecks, [{ id: 100, instance: "tenant-a", isFinished: false, userId: 12 }]);
+	assert.deepEqual(f.transferChecks.map(({ id, instance, isFinished, userId }) => ({ id, instance, isFinished, userId })), [{ id: 100, instance: "tenant-a", isFinished: false, userId: 12 }]);
 	assert.equal(f.chats[0]!["userId"], 55);
 });
 test("Supervisor bypasses both enabled flags before parameter or CRM availability", async (f, s) => {

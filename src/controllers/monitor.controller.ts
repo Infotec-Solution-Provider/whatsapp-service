@@ -32,6 +32,12 @@ class MonitorController {
 			isAdmin,
 			protectedRead("monitor.messages", this.getMonitorMessages)
 		);
+		this.router.get(
+			"/api/whatsapp/monitor/internal-chats/:id/messages",
+			isAuthenticated,
+			isAdmin,
+			protectedRead("monitor.legacy.internal.messages", req => this.getMonitorMessages(req, "internal"))
+		);
 	}
 
 	private async getMonitorData(req: Request) {
@@ -63,10 +69,10 @@ class MonitorController {
 		return { data: await monitorService.getMonitorChannels(req.session, { page: req.query["page"], search: req.query["search"] }) };
 	}
 
-	private async getMonitorMessages(req: Request) {
+	private async getMonitorMessages(req: Request, type = req.params["type"]) {
 		return {
 			data: await monitorService.getMonitorMessages(req.session, {
-				type: req.params["type"],
+				type,
 				id: req.params["id"],
 				limit: req.query["limit"],
 				beforeId: req.query["beforeId"]

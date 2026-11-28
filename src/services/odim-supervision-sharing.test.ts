@@ -39,7 +39,8 @@ async function run() {
 	const db: Row = {
 		wppChat: {
 			findMany: async ({ where }: Row) => chats.filter((row) => matches(row, where)).map((row) => ({ ...row })),
-			findFirst: async ({ where }: Row) => chats.find((row) => matches(row, where)) ?? null,
+			findFirst: async ({ where }: Row) => { const row = chats.find(c => matches(c, where)); return row ? { ...row } : null; },
+			updateMany: async ({ where, data }: Row) => { const row = chats.find(c => matches(c, where)); if (row) Object.assign(row, data); return { count: row ? 1 : 0 }; },
 			findUnique: async ({ where }: Row) => { const row = chats.find((row) => matches(row, where)); return row ? { ...row } : null; },
 			update: async ({ where, data }: Row) => { const row = chats.find((row) => matches(row, where))!; Object.assign(row, data); return { ...row }; },
 		},
@@ -52,11 +53,13 @@ async function run() {
 	};
 	class SilentLogger { log() {} success() {} failed() {} }
 	let distribution: Row;
-	const distributionProxy = { addSystemMessage: async () => undefined };
+	const distributionProxy = { notifyAssignedOperator: () => undefined, addSystemMessage: async () => undefined };
 	try {
 		isolate("@in.pulse-crm/utils", { Logger: { info() {}, error() {}, debug() {} }, sanitizeErrorMessage: String });
 		stub("../utils/processing-logger", SilentLogger);
 		stub("./prisma.service", db);
+		stub("./wallets.service", { getUserWallets: async () => [], effectiveWallets: async () => [], assertChatMember: async () => {} });
+		stub("./manual-chat-authorization.service", { isEnabled: async () => false });
 		stub("./instances.service", { executeQuery: async (instance: string, query: string, values: number[]) => {
 			assert.equal(instance, "odim"); assert.equal(query, "SELECT CODIGO, NIVEL, ATIVO, SETOR FROM operadores WHERE CODIGO = ? LIMIT 1");
 			observerReads.push({ values }); if (observerError) throw Error("offline"); return [{ CODIGO: values[0], ...observer }];
@@ -70,6 +73,7 @@ async function run() {
 		for (const path of ["./whatsapp.service", "./contacts.service", "./public-report-fields.service", "../bots/exatron-satisfaction.bot"])
 			stub(path, {});
 		const preferenceService = fresh("./chat-user-preferences.service").default;
+		preferenceService.withUnreadAssignment = (write: (tx: Row) => unknown) => write(db);
 		const chatService = fresh("./chats.service").default;
 		chatService.syncChatToLocal = async () => undefined;
 		const { previousChatAccess, SessionChangeRepository } = fresh("./session-changes/session-change.repository");

@@ -476,6 +476,9 @@ async function run() {
 		await assert.rejects(readMonitorMessages(execute, session, true, { type: "wpp", id: 1, limit: 101 }));
 		assert.ok(calls.every((call) => call.sql.startsWith("SELECT")));
 		const internal = await readMonitorMessages(execute, session, true, { type: "internal", id: 1 });
+		const outsider = await readMonitorMessages(execute, { ...session, userId: 987654 }, false, { type: "internal", id: 1 });
+		assert.deepEqual(outsider.messages.map(row => row["id"]), internal.messages.map(row => row["id"]));
+		await assert.rejects(readMonitorMessages(execute, { ...session, instance: "foreign-tenant" }, false, { type: "internal", id: 1 }));
 		assert.equal(internal.messages[0]?.["internalChatId"], 1);
 		assert.equal(calls.at(-1)?.local, false);
 	});
